@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Starlight Skater</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#050514; color:#fff; font-family:'Segoe UI', system-ui, sans-serif; display:flex; justify-content:center; align-items:center; min-height:100vh; overflow:hidden; }
+  #wrap { position:relative; width:960px; max-width:100vw; }
+  canvas { display:block; width:100%; height:540px; background:#0a0a2e; border:3px solid #7b5cff; border-radius:16px; box-shadow:0 0 40px rgba(123,92,255,.6); }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:rgba(5,5,25,.82); border-radius:16px; padding:24px; }
+  .hidden { display:none !important; }
+  h1 { font-size:52px; letter-spacing:2px; color:#ffe066; text-shadow:0 0 18px #ff9f43, 0 0 42px #7b5cff; margin-bottom:6px; }
+  h2 { font-size:38px; color:#ffe066; margin-bottom:10px; text-shadow:0 0 16px #ff9f43; }
+  .sub { color:#b8c0ff; font-size:18px; margin-bottom:14px; }
+  .howto { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.22); border-radius:12px; padding:14px 18px; max-width:620px; line-height:1.6; font-size:15px; text-align:left; }
+  .howto b { color:#ffe066; }
+  button { margin-top:18px; font-size:22px; font-weight:800; padding:14px 34px; border:0; border-radius:999px; background:linear-gradient(90deg,#ff9f43,#ff5e78); color:#fff; cursor:pointer; box-shadow:0 6px 0 #a63a4d, 0 0 24px rgba(255,94,120,.7); }
+  button:hover { transform:translateY(-2px); filter:brightness(1.1); }
+  button:active { transform:translateY(3px); box-shadow:0 2px 0 #a63a4d; }
+  #hud { position:absolute; top:12px; left:14px; right:14px; display:flex; justify-content:space-between; font-weight:800; font-size:17px; text-shadow:1px 1px 3px #000; pointer-events:none; }
+  #hud span { background:rgba(0,0,0,.45); padding:6px 12px; border-radius:999px; }
+  #msg { position:absolute; top:64px; left:0; right:0; text-align:center; font-size:20px; font-weight:800; color:#ffe066; text-shadow:2px 2px 4px #000; pointer-events:none; min-height:28px; }
+  #scorePop { color:#7CFFB2; }
+  p.small { color:#cdd3ff; margin-top:12px; font-size:14px; }
+  @media (max-width:640px){ h1{font-size:36px} canvas{height:440px} .howto{font-size:13px} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="hud" class="hidden"><span id="score">Score: 0 / 800</span><span id="lives">Lives: &#10084;&#10084;&#10084;</span><span id="status">Ready</span></div>
+  <div id="msg"></div>
+
+  <div id="titleScreen" class="overlay">
+    <h1>&#11088; STARLIGHT SKATER &#11088;</h1>
+    <p class="sub">Glide across a cosmic rink under falling stars. Dodge the comets. Shine bright.</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      &#8592; / &#8594; or A / D &mdash; skate left and right<br>
+      <b>Up / W to jump</b> over cracks &nbsp;|&nbsp; <b>Click or tap to jump</b><br>
+      <b>Space</b> &mdash; spin trick in mid-air for +50 bonus points<br>
+      &#11088; Collect stars (+25) &nbsp;|&nbsp; &#9732; Avoid comets and cracks &mdash; each hit costs 1 life<br>
+      <b>Win at 800 points</b> with 3 lives. Game over at 0 lives. Press <b>R</b> to restart anytime.
+    </div>
+    <button id="startBtn">START SKATING</button>
+    <p class="small">Tip: chain a spin right after jumping for the biggest trick bonus. Landing on a star feels great.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p class="sub" id="endText"></p>
+    <p class="sub" id="finalScore"></p>
+    <button id="restartBtn">RESTART (R)</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 960, H = 540;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var hud = document.getElementById('hud');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, lives = 3, distance = 0;
+  var player, stars, comets, cracks, sparkles, bgStars, popups, keys;
+  var audioCtx = null, muted = false;
+
+  function initAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol, slide){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function sfxJump(){ beep(300, 0.18, 'sine', 0.14, 620); }
+  function sfxStar(){ beep(880, 0.12, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.16, 'sine', 0.12); }, 70); }
+  function sfxSpin(){ beep(500, 0.3, 'triangle', 0.12, 1100); }
+  function sfxHit(){ beep(180, 0.3, 'sawtooth', 0.16, 60); }
+  function sfxWin(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f,0.28,'triangle',0.14); }, i*130); }); }
+
+  function reset(){
+    score = 0; lives = 3; distance = 0;
+    player = { x: 120, y: 400, w: 42, h: 58, vy: 0, grounded: true, angle: 0, spinning: false, spinAngle: 0, spinDone: false, invuln: 0, trail: [] };
+    stars = []; comets = []; cracks = []; sparkles = []; popups = [];
+    bgStars = [];
+    for (var i=0;i<110;i++) bgStars.push({x:Math.random()*W, y:Math.random()*H*0.7, r:Math.random()*2+0.5, tw:Math.random()*Math.PI*2});
+    keys = {};
+    for (var s=0;s<5;s++) spawnStar(300 + s*150);
+    for (var c=0;c<3;c++) spawnCrack(500 + c*280);
+    updateHUD('Skating!');
+  }
+
+  function spawnStar(x){
+    stars.push({x: x || W + 40, y: 120 + Math.random()*260, r: 16, rot: 0, taken: false});
+  }
+  function spawnCrack(x){
+    cracks.push({x: x || W + 40, w: 52 + Math.random()*30, passed: false});
+  }
+  function spawnComet(){
+    comets.push({x: W + 40, y: 60 + Math.random()*200, vx: -(4.5 + Math.random()*2.5 + distance*0.001), vy: 2 + Math.random()*1.5, r: 20, rot: 0});
+  }
+  function popup(x, y, text, color){
+    popups.push({x:x, y:y, text:text, color:color||'#ffe066', life: 60});
+  }
+  function burst(x, y, color, n){
+    for (var i=0;i<(n||14);i++) sparkles.push({x:x, y:y, vx:(Math.random()-0.5)*7, vy:(Math.random()-0.5)*7, life: 30+Math.random()*20, color:color});
+  }
+  function flashMsg(text){
+    msgEl.textContent = text;
+    setTimeout(function(){ if (msgEl.textContent === text) msgEl.textContent = ''; }, 1600);
+  }
+  function updateHUD(status){
+    scoreEl.textContent = 'Score: ' + score + ' / 800';
+    livesEl.textContent = 'Lives: ' + '\u2764'.repeat(Math.max(0,lives)) + '\u2661'.repeat(Math.max(0,3-lives));
+    if (status) statusEl.textContent = status;
+  }
+
+  function doJump(){
+    if (state !== 'playing') return;
+    if (player.grounded) {
+      player.vy = -15; player.grounded = false; player.spinDone = false;
+      sfxJump(); burst(player.x+21, player.y+58, '#7b5cff', 8);
+    }
+  }
+  function doSpin(){
+    if (state !== 'playing' || player.grounded || player.spinDone) return;
+    player.spinning = true; player.spinDone = true;
+    score += 50; popup(player.x+21, player.y-10, '+50 TRICK!', '#7CFFB2');
+    burst(player.x+21, player.y+20, '#ffe066', 16); sfxSpin();
+    updateHUD();
+    checkWin();
+  }
+  function loseLife(reason){
+    if (player.invuln > 0 || state !== 'playing') return;
+    lives--; player.invuln = 90; sfxHit(); burst(player.x+21, player.y+25, '#ff5e78', 22);
+    flashMsg(reason + '  -1 life!');
+    updateHUD('Ouch!');
+    if (lives <= 0) endGame(false);
+  }
+  function checkWin(){
+    if (score >= 800 && state === 'playing') endGame(true);
+  }
+  function endGame(won){
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '\u2B50 YOU WIN! \u2B50' : 'Game Over';
+    endText.textContent = won ? 'You lit up the whole rink with starlight!' : 'The comets got the better of you this time. Shine again!';
+    finalScore.textContent = 'Final Score: ' + score + '  |  Distance: ' + Math.floor(distance) + 'm';
+    if (won) sfxWin();
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'You Win!' : 'Game Over');
+  }
+  function startGame(){
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    hud.classList.remove('hidden');
+    flashMsg('Skate! Collect stars, jump cracks!');
+  }
+
+  // Input: keyboard
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === 'r' && (state === 'win' || state === 'over')) { startGame(); return; }
+    if (state !== 'playing') return;
+    if (k === 'arrowup' || k === 'w') { e.preventDefault(); doJump(); }
+    if (k === ' ') { e.preventDefault(); doSpin(); }
+    if (k === 'm') muted = !muted;
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+  // Input: mouse (click = jump; click on buttons handled by buttons, canvas click jumps)
+  canvas.addEventListener('mousedown', function(e){ e.preventDefault(); if (state === 'playing') doJump(); });
+  canvas.addEventListener('click', function(){ if (state === 'title') startGame(); });
+  // Input: touch (tap = jump)
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); if (state === 'playing') doJump(); }, {passive:false});
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  function update(){
+    if (state !== 'playing') return;
+    distance += 0.6;
+    // Horizontal movement
+    if (keys['arrowleft'] || keys['a']) player.x -= 5.5;
+    if (keys['arrowright'] || keys['d']) player.x += 5.5;
+    player.x = Math.max(10, Math.min(W - player.w - 10, player.x));
+    // Gravity
+    player.vy += 0.8;
+    player.y += player.vy;
+    var groundY = 400;
+    if (player.y >= groundY) {
+      player.y = groundY; player.vy = 0;
+      if (!player.grounded) burst(player.x+21, player.y+58, '#b8c0ff', 6);
+      player.grounded = true; player.spinning = false; player.spinAngle = 0;
+    }
+    if (player.spinning) player.spinAngle += 0.35;
+    if (player.invuln > 0) player.invuln--;
+    player.trail.push({x:player.x+21, y:player.y+50}); if (player.trail.length > 12) player.trail.shift();
+
+    // World scroll
+    var speed = 3.2 + distance * 0.0012;
+    stars.forEach(function(s){ s.x -= speed; s.rot += 0.05; });
+    cracks.forEach(function(c){ c.x -= speed; });
+    comets.forEach(function(c){ c.x += c.vx; c.y += c.vy; c.rot += 0.08; if (c.y > 420) c.vy *= -1; });
+    stars = stars.filter(function(s){ return s.x > -40 && !s.taken; });
+    cracks = cracks.filter(function(c){ return c.x + c.w > -20; });
+    comets = comets.filter(function(c){ return c.x > -60; });
+    if (Math.random() < 0.012) spawnStar();
+    if (Math.random() < 0.006) spawnCrack();
+    if (Math.random() < 0.008 + distance*0.000002) spawnComet();
+
+    // Star pickup
+    stars.forEach(function(s){
+      var dx = (player.x+21) - s.x, dy = (player.y+28) - s.y;
+      if (Math.abs(dx) < 42 && Math.abs(dy) < 48) {
+        s.taken = true; score += 25; popup(s.x, s.y-20, '+25', '#ffe066');
+        burst(s.x, s.y, '#ffe066', 14); sfxStar(); updateHUD('Star collected!');
+      }
+    });
+    // Crack collision (only when grounded and overlapping)
+    cracks.forEach(function(c){
+      if (player.grounded && player.x + player.w > c.x + 6 && player.x < c.x + c.w - 6) {
+        loseLife('Crack!');
+        // nudge player out so one crack does not drain all lives instantly
+        player.x = c.x + c.w + 4;
+      }
+    });
+    // Comet collision
+    comets.forEach(function(c){
+      var dx = (player.x+21) - c.x, dy = (player.y+28) - c.y;
+      if (Math.sqrt(dx*dx + dy*dy) < c.r + 26) {
+        loseLife('Comet hit!');
+        c.x = -100; // remove after hit
+      }
+    });
+    // Particles & popups
+    sparkles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; });
+    sparkles = sparkles.filter(function(p){ return p.life > 0; });
+    popups.forEach(function(p){ p.y -= 1; p.life--; });
+    popups = popups.filter(function(p){ return p.life > 0; });
+    bgStars.forEach(function(s){ s.tw += 0.03; });
+
+    updateHUD();
+    checkWin();
+  }
+
+  function drawStar(x, y, r, rot, color){
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.fillStyle = color;
+    ctx.shadowColor = color; ctx.shadowBlur = 14; ctx.beginPath();
+    for (var i=0;i<10;i++){
+      var rad = (i % 2 === 0) ? r : r*0.45;
+      var a = -Math.PI/2 + i * Math.PI/5;
+      var px = Math.cos(a)*rad, py = Math.sin(a)*rad;
+      if (i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  function draw(){
+    // Sky
+    var g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#050514'); g.addColorStop(0.55,'#1a1a4e'); g.addColorStop(1,'#0a0a2e');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    // Moon
+    ctx.fillStyle = '#fff8dc'; ctx.shadowColor = '#ffe066'; ctx.shadowBlur = 30;
+    ctx.beginPath(); ctx.arc(850, 70, 34, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(200,200,220,0.5)';
+    ctx.beginPath(); ctx.arc(840, 62, 8, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(862, 80, 6, 0, Math.PI*2); ctx.fill();
+    // Background stars
+    bgStars.forEach(function(s){
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(s.tw));
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Milky way band
+    ctx.fillStyle = 'rgba(123,92,255,0.12)';
+    ctx.beginPath(); ctx.ellipse(480, 130, 480, 60, -0.2, 0, Math.PI*2); ctx.fill();
+    // Rink
+    ctx.fillStyle = '#8ecbff'; ctx.fillRect(0, 458, W, 82);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillRect(0, 458, W, 6);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+    for (var lx=0; lx<W; lx+=80){ ctx.beginPath(); ctx.moveTo(lx, 480); ctx.lineTo(lx+40, 520); ctx.stroke(); }
+    // Cracks
+    cracks.forEach(function(c){
+      ctx.fillStyle = '#050514'; ctx.beginPath(); ctx.ellipse(c.x + c.w/2, 470, c.w/2, 12, 0, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#ff5e78'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(c.x+8, 468); ctx.lineTo(c.x+c.w/2, 476); ctx.lineTo(c.x+c.w-8, 466); ctx.stroke();
+    });
+    // Stars
+    stars.forEach(function(s){ drawStar(s.x, s.y, s.r, s.rot, '#ffe066'); });
+    // Comets
+    comets.forEach(function(c){
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rot);
+      var tg = ctx.createLinearGradient(0,0,-70,0);
+      tg.addColorStop(0,'rgba(255,94,120,0.9)'); tg.addColorStop(1,'rgba(255,94,120,0)');
+      ctx.fillStyle = tg; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-70,-10); ctx.lineTo(-70,10); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ff5e78'; ctx.shadowColor = '#ff5e78'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(0,0,c.r,0,Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(4,-4,7,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
+    // Player trail
+    player.trail.forEach(function(t, i){
+      ctx.globalAlpha = i / player.trail.length * 0.5;
+      ctx.fillStyle = '#7b5cff'; ctx.beginPath(); ctx.arc(t.x, t.y, 5, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Player (blinking while invulnerable)
+    if (!(player.invuln > 0 && Math.floor(player.invuln/6) % 2 === 0)) {
+      ctx.save(); ctx.translate(player.x + 21, player.y + 29); ctx.rotate(player.spinAngle);
+      // Skater body
+      ctx.fillStyle = '#ff5e78'; ctx.fillRect(-12, -18, 24, 34); // jacket
+      ctx.fillStyle = '#1a1a4e'; ctx.fillRect(-11, 16, 22, 14); // legs
+      ctx.fillStyle = '#ffe6c7'; ctx.beginPath(); ctx.arc(0, -26, 12, 0, Math.PI*2); ctx.fill(); // head
+      ctx.fillStyle = '#7b5cff'; ctx.beginPath(); ctx.arc(0, -32, 11, Math.PI, 0); ctx.fill(); // helmet
+      ctx.fillStyle = '#222'; ctx.fillRect(-14, 30, 28, 4); // skate board
+      ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(0, -18, 4, 0, Math.PI*2); ctx.fill(); // badge
+      ctx.restore();
+    }
+    // Sparkles
+    sparkles.forEach(function(p){
+      ctx.globalAlpha = Math.max(0, p.life/40);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Popups
+    popups.forEach(function(p){
+      ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = p.color;
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.strokeText(p.text, p.x, p.y); ctx.fillText(p.text, p.x, p.y);
+    });
+    // Title/idle animation behind overlay is fine; playing HUD drawn in DOM
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Press START and skate under the stars', W/2, 510);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  reset();
+  loop();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mirror Maze — Laser Reflection Puzzle</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #070b1a; color: #eaf2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 14px 10px 30px; }
+  h1 { font-size: 30px; letter-spacing: 1px; text-align: center; color: #7df9ff; text-shadow: 0 0 18px rgba(125,249,255,.55); }
+  .sub { text-align: center; color: #a9b8d8; font-size: 14px; margin: 4px 0 12px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 620px; width: 100%; margin-bottom: 10px; }
+  .pill { background: #131c38; border: 1px solid #2a3f73; border-radius: 999px; padding: 7px 12px; font-size: 14px; font-weight: 700; }
+  .pill b { color: #ffd166; }
+  #status { text-align: center; min-height: 24px; font-weight: 700; color: #ffd166; margin-bottom: 8px; }
+  #wrap { position: relative; width: min(92vw, 560px); }
+  canvas { width: 100%; height: auto; display: block; background: #0b1230; border: 2px solid #2a3f73; border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.55); touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(4,8,22,.88); border-radius: 14px; padding: 22px; text-align: center; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #7df9ff; }
+  .overlay p { color: #c6d2ee; line-height: 1.55; font-size: 15px; max-width: 430px; }
+  .howto { background: #131c38; border: 1px solid #2a3f73; border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 14px; line-height: 1.6; color: #dbe6ff; }
+  .howto b { color: #ffd166; }
+  button { cursor: pointer; border: 0; border-radius: 999px; padding: 13px 26px; font-size: 17px; font-weight: 800; color: #071022; background: #ffd166; box-shadow: 0 4px 0 #b98a12; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b98a12; }
+  button.secondary { background: #7df9ff; box-shadow: 0 4px 0 #2a9aa3; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+  .row button { padding: 10px 18px; font-size: 14px; }
+  .hint { text-align: center; color: #8fa1c6; font-size: 13px; margin-top: 10px; line-height: 1.5; max-width: 560px; }
+  .big { font-size: 22px; font-weight: 800; }
+</style>
+</head>
+<body>
+<h1>&#129412; MIRROR MAZE</h1>
+<p class="sub">Rotate the mirrors. Guide the laser to every target.</p>
+
+<div id="hud">
+  <div class="pill">Level: <b id="level">1 / 8</b></div>
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Lives: <b id="lives">3</b></div>
+  <div class="pill">Rotations left: <b id="moves">0</b></div>
+  <div class="pill">Targets: <b id="targets">0 / 0</b></div>
+</div>
+<div id="status">Press Start to begin.</div>
+
+<div id="wrap">
+  <canvas id="game" width="560" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>MIRROR MAZE</h2>
+    <p>Guide a single laser beam through every glowing target by rotating mirrors on the grid. One wrong turn can send the beam off the board.</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      &#8226; <b>Click / tap a mirror</b> to rotate it 90&deg; (it flips between / and \). Each rotation costs 1 move.<br>
+      &#8226; <b>Arrow keys / WASD</b> move the yellow selection box. <b>Space / Enter</b> rotates the selected mirror.<br>
+      &#8226; Light <b>all targets</b> on a level to advance. Targets glow green when the beam touches them.<br>
+      &#8226; Run out of rotations and you lose a life and retry the level. Lose all 3 lives and it is Game Over.<br>
+      &#8226; Complete all 8 levels to win. Walls block the beam. The beam stops at the board edge.
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Tip: trace the path backwards from a target to find the mirror that must feed it.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p class="big">Final Score: <span id="finalScore">0</span></p>
+    <button id="restartBtn">↻ Restart (R)</button>
+  </div>
+</div>
+
+<div class="row">
+  <button class="secondary" id="restartLevelBtn">Restart Level</button>
+  <button class="secondary" id="muteBtn">Sound: On</button>
+</div>
+<p class="hint">Controls: mouse / touch to rotate &bull; Arrow keys or WASD to select &bull; Space / Enter to rotate &bull; R to restart &bull; M to mute.<br>Every level is solvable by flipping the mirrors shown — no guessing, just geometry.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var statusEl = document.getElementById('status');
+
+  // Directions: 0=right, 1=down, 2=left, 3=up
+  var DX = [1, 0, -1, 0];
+  var DY = [0, 1, 0, -1];
+  var DIRS = { R: 0, D: 1, L: 2, U: 3 };
+
+  // Mirrors are stored in their starting (scrambled) state. Flipping a mirror
+  // toggles it between '/' and '\'. The beam rules below are the classic ones.
+  function reflect(type, dir) {
+    if (type === '/') { return [3, 2, 1, 0][dir]; } // R->U, D->L, L->D, U->R
+    return [1, 0, 3, 2][dir]; // '\': R->D, D->R, L->U, U->L
+  }
+
+  var LEVELS = [
+    { name: 'First Light', maxMoves: 4,
+      emitter: { x: 0, y: 2, dir: DIRS.R },
+      mirrors: [{ x: 4, y: 2, type: '/' }],
+      targets: [{ x: 4, y: 5 }], walls: [] },
+    { name: 'Two Turns', maxMoves: 6,
+      emitter: { x: 0, y: 1, dir: DIRS.R },
+      mirrors: [{ x: 3, y: 1, type: '/' }, { x: 3, y: 4, type: '/' }],
+      targets: [{ x: 6, y: 4 }], walls: [] },
+    { name: 'Pass Through', maxMoves: 6,
+      emitter: { x: 0, y: 2, dir: DIRS.R },
+      mirrors: [{ x: 3, y: 2, type: '/' }, { x: 3, y: 6, type: '\\' }],
+      targets: [{ x: 3, y: 4 }, { x: 1, y: 6 }], walls: [{ x: 6, y: 6 }] },
+    { name: 'The Snake', maxMoves: 9,
+      emitter: { x: 0, y: 1, dir: DIRS.R },
+      mirrors: [{ x: 5, y: 1, type: '/' }, { x: 5, y: 5, type: '\\' }, { x: 1, y: 5, type: '/' }],
+      targets: [{ x: 2, y: 1 }, { x: 5, y: 3 }, { x: 1, y: 2 }], walls: [{ x: 7, y: 7 }] },
+    { name: 'Double Back', maxMoves: 10,
+      emitter: { x: 0, y: 6, dir: DIRS.R },
+      mirrors: [{ x: 2, y: 6, type: '\\' }, { x: 2, y: 2, type: '\\' }, { x: 5, y: 2, type: '/' }, { x: 5, y: 6, type: '\\' }],
+      targets: [{ x: 2, y: 4 }, { x: 5, y: 4 }, { x: 3, y: 6 }], walls: [{ x: 0, y: 0 }, { x: 7, y: 0 }] },
+    { name: 'Top Down', maxMoves: 9,
+      emitter: { x: 3, y: 0, dir: DIRS.D },
+      mirrors: [{ x: 3, y: 3, type: '/' }, { x: 6, y: 3, type: '/' }, { x: 6, y: 7, type: '\\' }],
+      targets: [{ x: 4, y: 3 }, { x: 6, y: 5 }, { x: 4, y: 7 }], walls: [{ x: 0, y: 7 }] },
+    { name: 'Four Corners', maxMoves: 12,
+      emitter: { x: 0, y: 2, dir: DIRS.R },
+      mirrors: [{ x: 3, y: 2, type: '/' }, { x: 3, y: 6, type: '\\' }, { x: 1, y: 6, type: '/' }, { x: 1, y: 1, type: '/' }],
+      targets: [{ x: 2, y: 2 }, { x: 3, y: 4 }, { x: 2, y: 6 }, { x: 1, y: 3 }], walls: [{ x: 7, y: 0 }] },
+    { name: 'Grand Finale', maxMoves: 12,
+      emitter: { x: 7, y: 3, dir: DIRS.L },
+      mirrors: [{ x: 4, y: 3, type: '\\' }, { x: 4, y: 7, type: '/' }, { x: 6, y: 7, type: '\\' }, { x: 6, y: 1, type: '/' }],
+      targets: [{ x: 5, y: 3 }, { x: 4, y: 5 }, { x: 6, y: 4 }, { x: 3, y: 1 }], walls: [{ x: 2, y: 2 }, { x: 5, y: 5 }] }
+  ];
+
+  var COLS = 8, ROWS = 8;
+  var BOARD = 64, OX = 24, OY = 24; // 8 * 64 = 512 + margins = 560
+  var state = 'title'; // title | playing | won | over
+  var levelIndex = 0, score = 0, lives = 3, movesLeft = 0;
+  var mirrors = [], sel = { x: 0, y: 0 };
+  var beamPath = [], litTargets = [];
+  var muted = false, audioCtx = null, pulse = 0;
+
+  function cloneLevel(i) {
+    var L = LEVELS[i];
+    mirrors = L.mirrors.map(function (m) { return { x: m.x, y: m.y, type: m.type }; });
+    movesLeft = L.maxMoves;
+    sel = { x: L.emitter.x, y: L.emitter.y };
+  }
+
+  function mirrorAt(x, y) {
+    for (var i = 0; i < mirrors.length; i++) if (mirrors[i].x === x && mirrors[i].y === y) return mirrors[i];
+    return null;
+  }
+  function isWall(x, y) {
+    var L = LEVELS[levelIndex];
+    for (var i = 0; i < L.walls.length; i++) if (L.walls[i].x === x && L.walls[i].y === y) return true;
+    return false;
+  }
+  function isTarget(x, y) {
+    var L = LEVELS[levelIndex];
+    for (var i = 0; i < L.targets.length; i++) if (L.targets[i].x === x && L.targets[i].y === y) return true;
+    return false;
+  }
+
+  // Trace the beam. Returns path segments and which targets it touches.
+  // Targets do NOT stop the beam; walls, the board edge and loops do.
+  function traceBeam() {
+    var L = LEVELS[levelIndex];
+    var path = [];
+    var lit = {};
+    var x = L.emitter.x, y = L.emitter.y, dir = L.emitter.dir;
+    var seen = {};
+    var guard = 0;
+    // Start just inside the emitter cell, travelling in its direction.
+    while (guard++ < 200) {
+      var key = x + ',' + y + ',' + dir;
+      if (seen[key]) break;
+      seen[key] = true;
+      var nx = x + DX[dir], ny = y + DY[dir];
+      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) { path.push({ x: x, y: y, dir: dir, end: true }); break; }
+      if (isWall(nx, ny)) { path.push({ x: x, y: y, dir: dir, end: true, wall: true }); break; }
+      path.push({ x: x, y: y, dir: dir });
+      x = nx; y = ny;
+      if (isTarget(x, y)) lit[x + ',' + y] = true;
+      var m = mirrorAt(x, y);
+      if (m) dir = reflect(m.type, dir);
+    }
+    beamPath = path;
+    litTargets = L.targets.filter(function (t) { return lit[t.x + ',' + t.y]; });
+    return litTargets.length === L.targets.length;
+  }
+
+  function updateHUD() {
+    var L = LEVELS[levelIndex];
+    document.getElementById('level').textContent = (levelIndex + 1) + ' / 8 — ' + L.name;
+    document.getElementById('score').textContent = score;
+    document.getElementById('lives').textContent = lives;
+    document.getElementById('moves').textContent = movesLeft;
+    document.getElementById('targets').textContent = litTargets.length + ' / ' + L.targets.length;
+  }
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+
+  function beep(freq, dur, type, vol) {
+    if (muted || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is optional */ }
+  }
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function startGame() {
+    ensureAudio();
+    levelIndex = 0; score = 0; lives = 3;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    cloneLevel(0);
+    traceBeam();
+    updateHUD();
+    setStatus('Level 1 — First Light: rotate the mirror to send the beam down to the target.');
+    beep(520, 0.15, 'triangle', 0.15);
+  }
+
+  function nextLevel() {
+    var bonus = 200 + movesLeft * 25;
+    score += bonus;
+    beep(660, 0.12, 'sine', 0.15);
+    setTimeout(function () { beep(880, 0.2, 'sine', 0.15); }, 120);
+    if (levelIndex >= LEVELS.length - 1) {
+      state = 'won';
+      endTitle.textContent = 'You Win!';
+      endText.textContent = 'You guided the laser through all 8 mirror mazes. Brilliant geometry!';
+      document.getElementById('finalScore').textContent = score;
+      endScreen.classList.remove('hidden');
+      setStatus('Victory! Final score ' + score + '. Press R or Restart to play again.');
+      updateHUD();
+      return;
+    }
+    levelIndex++;
+    cloneLevel(levelIndex);
+    traceBeam();
+    updateHUD();
+    setStatus('Level ' + (levelIndex + 1) + ' — ' + LEVELS[levelIndex].name + ': light all targets.');
+  }
+
+  function failLevel() {
+    lives--;
+    beep(180, 0.3, 'sawtooth', 0.1);
+    updateHUD();
+    if (lives <= 0) {
+      state = 'over';
+      endTitle.textContent = 'Game Over';
+      endText.textContent = 'Out of lives on level ' + (levelIndex + 1) + ' (' + LEVELS[levelIndex].name + '). The mirrors reset — try a different route.';
+      document.getElementById('finalScore').textContent = score;
+      endScreen.classList.remove('hidden');
+      setStatus('Game Over. Press R or Restart to try again.');
+      return;
+    }
+    setStatus('Out of rotations! You lose a life (' + lives + ' left) — level reset. Study the beam first.');
+    cloneLevel(levelIndex);
+    traceBeam();
+    updateHUD();
+  }
+
+  function rotateAt(x, y) {
+    if (state !== 'playing') return;
+    var m = mirrorAt(x, y);
+    if (!m) { sel = { x: x, y: y }; setStatus('That cell has no mirror — select a mirror cell ( / or \\ ) to rotate it.'); return; }
+    if (movesLeft <= 0) return;
+    m.type = (m.type === '/') ? '\\' : '/';
+    movesLeft--;
+    sel = { x: x, y: y };
+    beep(440, 0.08, 'square', 0.08);
+    var allLit = traceBeam();
+    updateHUD();
+    if (allLit) {
+      setStatus('All targets lit! Level complete.');
+      setTimeout(nextLevel, 650);
+    } else if (movesLeft <= 0) {
+      setStatus('Out of rotations…');
+      setTimeout(failLevel, 650);
+    } else {
+      setStatus(litTargets.length + ' / ' + LEVELS[levelIndex].targets.length + ' targets lit. ' + movesLeft + ' rotations left.');
+    }
+  }
+
+  function cellFromEvent(e) {
+    var r = canvas.getBoundingClientRect();
+    var px = (e.clientX - r.left) * (canvas.width / r.width);
+    var py = (e.clientY - r.top) * (canvas.height / r.height);
+    var x = Math.floor((px - OX) / BOARD), y = Math.floor((py - OY) / BOARD);
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return null;
+    return { x: x, y: y };
+  }
+
+  canvas.addEventListener('click', function (e) {
+    if (state !== 'playing') return;
+    var c = cellFromEvent(e);
+    if (c) rotateAt(c.x, c.y);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    if (state !== 'playing') return;
+    e.preventDefault();
+    var t = e.changedTouches[0];
+    var c = cellFromEvent(t);
+    if (c) rotateAt(c.x, c.y);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    var k = e.key;
+    if (k === 'm' || k === 'M') { toggleMute(); return; }
+    if (k === 'r' || k === 'R') { if (state === 'won' || state === 'over') startGame(); else if (state === 'playing') { cloneLevel(levelIndex); traceBeam(); updateHUD(); setStatus('Level restarted.'); } return; }
+    if (state !== 'playing') return;
+    if (k === 'ArrowLeft' || k === 'a' || k === 'A') { sel.x = Math.max(0, sel.x - 1); e.preventDefault(); }
+    else if (k === 'ArrowRight' || k === 'd' || k === 'D') { sel.x = Math.min(COLS - 1, sel.x + 1); e.preventDefault(); }
+    else if (k === 'ArrowUp' || k === 'w' || k === 'W') { sel.y = Math.max(0, sel.y - 1); e.preventDefault(); }
+    else if (k === 'ArrowDown' || k === 's' || k === 'S') { sel.y = Math.min(ROWS - 1, sel.y + 1); e.preventDefault(); }
+    else if (k === ' ' || k === 'Enter') { e.preventDefault(); rotateAt(sel.x, sel.y); }
+  });
+
+  function toggleMute() {
+    muted = !muted;
+    document.getElementById('muteBtn').textContent = muted ? 'Sound: Off' : 'Sound: On';
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('muteBtn').addEventListener('click', toggleMute);
+  document.getElementById('restartLevelBtn').addEventListener('click', function () {
+    if (state !== 'playing') return;
+    cloneLevel(levelIndex); traceBeam(); updateHUD(); setStatus('Level restarted — rotations restored.');
+  });
+
+  // ---------- Rendering ----------
+  function cellCenter(x, y) { return { cx: OX + x * BOARD + BOARD / 2, cy: OY + y * BOARD + BOARD / 2 }; }
+  function drawMirror(m) {
+    var c = cellCenter(m.x, m.y);
+    ctx.strokeStyle = '#eaf2ff'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (m.type === '/') { ctx.moveTo(c.cx - 22, c.cy + 22); ctx.lineTo(c.cx + 22, c.cy - 22); }
+    else { ctx.moveTo(c.cx - 22, c.cy - 22); ctx.lineTo(c.cx + 22, c.cy + 22); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(125,249,255,.35)'; ctx.lineWidth = 11;
+    ctx.beginPath();
+    if (m.type === '/') { ctx.moveTo(c.cx - 22, c.cy + 22); ctx.lineTo(c.cx + 22, c.cy - 22); }
+    else { ctx.moveTo(c.cx - 22, c.cy - 22); ctx.lineTo(c.cx + 22, c.cy + 22); }
+    ctx.stroke();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Grid
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        ctx.fillStyle = ((x + y) % 2 === 0) ? '#0e1736' : '#0c1430';
+        ctx.fillRect(OX + x * BOARD, OY + y * BOARD, BOARD, BOARD);
+        ctx.strokeStyle = 'rgba(90,120,190,.25)'; ctx.lineWidth = 1;
+        ctx.strokeRect(OX + x * BOARD + 0.5, OY + y * BOARD + 0.5, BOARD, BOARD);
+      }
+    }
+    var L = LEVELS[levelIndex];
+    // Walls
+    L.walls.forEach(function (w) {
+      var c = cellCenter(w.x, w.y);
+      ctx.fillStyle = '#3a4668';
+      ctx.fillRect(OX + w.x * BOARD + 4, OY + w.y * BOARD + 4, BOARD - 8, BOARD - 8);
+      ctx.fillStyle = '#232d4d';
+      ctx.fillRect(OX + w.x * BOARD + 12, OY + w.y * BOARD + 12, BOARD - 24, BOARD - 24);
+    });
+    // Targets
+    L.targets.forEach(function (t) {
+      var c = cellCenter(t.x, t.y);
+      var lit = litTargets.some(function (lt) { return lt.x === t.x && lt.y === t.y; });
+      ctx.beginPath(); ctx.arc(c.cx, c.cy, lit ? 22 + Math.sin(pulse) * 3 : 19, 0, Math.PI * 2);
+      ctx.fillStyle = lit ? 'rgba(74,222,128,.35)' : 'rgba(255,209,102,.18)';
+      ctx.fill();
+      ctx.beginPath(); ctx.arc(c.cx, c.cy, 13, 0, Math.PI * 2);
+      ctx.fillStyle = lit ? '#4ade80' : '#ffd166';
+      ctx.fill();
+      ctx.fillStyle = '#071022'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(lit ? '✓' : '◎', c.cx, c.cy + 1);
+    });
+    // Beam
+    if (state !== 'title' && beamPath.length) {
+      var e = L.emitter, ec = cellCenter(e.x, e.y);
+      ctx.strokeStyle = 'rgba(255,80,80,.9)'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.shadowColor = '#ff5050'; ctx.shadowBlur = 12;
+      ctx.beginPath(); ctx.moveTo(ec.cx, ec.cy);
+      beamPath.forEach(function (seg) {
+        var c = cellCenter(seg.x, seg.y);
+        var ex = c.cx + DX[seg.dir] * BOARD / 2, ey = c.cy + DY[seg.dir] * BOARD / 2;
+        ctx.lineTo(ex, ey);
+      });
+      ctx.stroke(); ctx.shadowBlur = 0;
+    }
+    // Emitter
+    var ec2 = cellCenter(L.emitter.x, L.emitter.y);
+    ctx.beginPath(); ctx.arc(ec2.cx, ec2.cy, 18, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff5050'; ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('◉', ec2.cx, ec2.cy);
+    // Mirrors
+    mirrors.forEach(drawMirror);
+    // Selection
+    if (state === 'playing') {
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+      ctx.setLineDash([8, 5]);
+      ctx.strokeRect(OX + sel.x * BOARD + 3, OY + sel.y * BOARD + 3, BOARD - 6, BOARD - 6);
+      ctx.setLineDash([]);
+    }
+  }
+
+  function loop(t) {
+    pulse = t / 300;
+    draw();
+    requestAnimationFrame(loop);
+  }
+  cloneLevel(0); traceBeam(); updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

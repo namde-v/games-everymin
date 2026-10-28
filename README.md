@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 310
-- **Latest game:** 0310 — Storm Shepherd
+- **Total games:** 320
+- **Latest game:** 0320 — Fossil Finder
 - **Current volume:** 004 (Games 0301 to 0400)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -16,7 +16,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
-| 004 | 0301–0400 (10 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
+| 004 | 0301–0400 (20 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -30,21 +30,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 031
+## Latest batch — Batch 032
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0301 | Coral Courier | Arcade / Underwater Delivery | [Play](./games/game-0301.html) |
-| 0302 | Hex Harvest | Puzzle / Hex Tile Matching | [Play](./games/game-0302.html) |
-| 0303 | Glacier Governor | Strategy / Ice Colony Management | [Play](./games/game-0303.html) |
-| 0304 | Tempo Tinkerer | Rhythm / Beat Crafting | [Play](./games/game-0304.html) |
-| 0305 | Comet Catcher | Precision / Orbital Catch | [Play](./games/game-0305.html) |
-| 0306 | Vine Vault | Puzzle / Vine Untangling | [Play](./games/game-0306.html) |
-| 0307 | Bazaar Baron | Strategy / Market Trading | [Play](./games/game-0307.html) |
-| 0308 | Echo Explorer | Arcade / Sonar Exploration | [Play](./games/game-0308.html) |
-| 0309 | Orbit Organizer | Puzzle / Satellite Sorting | [Play](./games/game-0309.html) |
-| 0310 | Storm Shepherd | Precision / Wind Herding | [Play](./games/game-0310.html) |
-
+| 0311 | Ember Escape | Arcade / Flame Runner | [Play](./games/game-0311.html) |
+| 0312 | Mirror Maze | Puzzle / Laser Reflection | [Play](./games/game-0312.html) |
+| 0313 | Sandstone Sovereign | Strategy / Desert Kingdom | [Play](./games/game-0313.html) |
+| 0314 | Drum Grove | Rhythm / Percussion Garden | [Play](./games/game-0314.html) |
+| 0315 | Anchor Ace | Precision / Docking Timing | [Play](./games/game-0315.html) |
+| 0316 | Rune Riddle | Puzzle / Rune Decoding | [Play](./games/game-0316.html) |
+| 0317 | Lighthouse Keeper | Strategy / Coastal Management | [Play](./games/game-0317.html) |
+| 0318 | Starlight Skater | Arcade / Cosmic Skating | [Play](./games/game-0318.html) |
+| 0319 | Pendulum Pilot | Precision / Swing Physics | [Play](./games/game-0319.html) |
+| 0320 | Fossil Finder | Puzzle / Archaeology Dig | [Play](./games/game-0320.html) |
 
 ## Quality standard
 

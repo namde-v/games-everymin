@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Drum Grove — Rhythm Percussion Garden</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0e1f14; font-family: "Trebuchet MS", Verdana, sans-serif; color: #f2ffe8; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; gap: 8px; }
+  h1 { font-size: 34px; letter-spacing: 2px; text-shadow: 0 3px 0 #2e6b34, 0 6px 18px rgba(0,0,0,.6); }
+  h1 span { color: #a8e063; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: min(680px, 96vw); }
+  .pill { background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill b { color: #ffe066; }
+  #healthWrap { width: min(680px, 96vw); height: 16px; background: #243b28; border: 1px solid #6fae72; border-radius: 999px; overflow: hidden; }
+  #healthBar { height: 100%; width: 100%; background: linear-gradient(90deg,#7ed957,#ffe066); transition: width .25s; }
+  #progressWrap { width: min(680px, 96vw); height: 10px; background: #243b28; border-radius: 999px; overflow: hidden; }
+  #progressBar { height: 100%; width: 0%; background: #a8e063; transition: width .25s; }
+  #stage { position: relative; width: min(680px, 96vw); }
+  canvas { display: block; width: 100%; height: 460px; background: linear-gradient(#173d22, #0f2a18 55%, #1d4a26); border: 3px solid #8fce7a; border-radius: 16px; box-shadow: 0 12px 30px rgba(0,0,0,.5); touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 22px; background: rgba(6,20,10,.86); border-radius: 13px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { line-height: 1.55; max-width: 520px; font-size: 15px; }
+  .keys { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .key { background: #ffe066; color: #22331a; border-radius: 8px; padding: 6px 10px; font-weight: bold; border-bottom: 4px solid #b8932a; }
+  button { cursor: pointer; font-size: 19px; font-weight: bold; color: #122b16; background: #a8e063; border: none; border-radius: 999px; padding: 13px 30px; box-shadow: 0 5px 0 #5a8f3e; }
+  button:active { transform: translateY(3px); box-shadow: 0 2px 0 #5a8f3e; }
+  button.secondary { background: #ffe066; box-shadow: 0 5px 0 #b8932a; }
+  #feedback { height: 26px; font-size: 22px; font-weight: bold; color: #ffe066; text-shadow: 0 2px 6px #000; }
+  #hint { font-size: 13px; opacity: .85; text-align: center; }
+  @media (max-height: 700px) { canvas { height: 380px; } h1 { font-size: 26px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🌳 <span>DRUM</span> GROVE 🌿</h1>
+  <div id="hud">
+    <div class="pill">Score: <b id="score">0</b> / 1000</div>
+    <div class="pill">Combo: <b id="combo">0</b></div>
+    <div class="pill">Perfect: <b id="perfect">0</b></div>
+    <div class="pill">Good: <b id="good">0</b></div>
+    <div class="pill">Missed: <b id="missed">0</b></div>
+    <div class="pill">Status: <b id="status">Ready</b></div>
+  </div>
+  <div id="healthWrap"><div id="healthBar"></div></div>
+  <div id="progressWrap"><div id="progressBar"></div></div>
+  <div id="stage">
+    <canvas id="game" width="680" height="460"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>🌱 Drum Grove 🌱</h2>
+      <p><b>How to Play:</b> Musical notes fall down four garden lanes. Hit each note exactly as it lands on the glowing beat line to make plants sprout and bloom. Perfect hits grow tall flowers, Good hits grow sprouts, misses wilt your grove.</p>
+      <div class="keys"><span class="key">D</span><span class="key">F</span><span class="key">J</span><span class="key">K</span></div>
+      <p>Keyboard: D / F / J / K &nbsp;•&nbsp; Mouse: click the four pads &nbsp;•&nbsp; Touch: tap the pads.<br>Reach <b>1000 points</b> to win. If your health bar empties, the grove wilts — game over.</p>
+      <button id="startBtn">▶ Start Growing</button>
+      <p style="font-size:13px;opacity:.8">Tip: chain hits without missing to raise your combo multiplier. Longer combos score more per note.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">↻ Play Again</button>
+      <p style="font-size:13px">Press R to restart instantly.</p>
+    </div>
+  </div>
+  <div id="feedback"></div>
+  <div id="hint">Hit notes on the beat line • Perfect = +50 • Good = +25 • Combo bonus every 10 hits</div>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var perfectEl = document.getElementById('perfect');
+  var goodEl = document.getElementById('good');
+  var missedEl = document.getElementById('missed');
+  var statusEl = document.getElementById('status');
+  var healthBar = document.getElementById('healthBar');
+  var progressBar = document.getElementById('progressBar');
+  var feedbackEl = document.getElementById('feedback');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var LANES = [
+    { key: 'd', label: 'D', color: '#ff6b6b', drum: 90,  plant: 0 },
+    { key: 'f', label: 'F', color: '#ffd93d', drum: 130, plant: 0 },
+    { key: 'j', label: 'J', color: '#6bcbff', drum: 170, plant: 0 },
+    { key: 'k', label: 'K', color: '#c084fc', drum: 220, plant: 0 }
+  ];
+  var laneW = W / 4;
+  var hitY = 388;
+  var state = 'title'; // title | playing | over
+  var score = 0, combo = 0, bestCombo = 0, perfect = 0, good = 0, missed = 0, health = 100;
+  var notes = [], particles = [], blooms = [];
+  var spawnTimer = 0, lastTime = 0, elapsed = 0, flashLane = -1, flashTime = 0;
+  var audioCtx = null, masterGain = null;
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.35;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function playDrum(freq, kind) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    osc.type = kind || 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30, freq * 0.5), t + 0.18);
+    g.gain.setValueAtTime(0.9, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    osc.connect(g); g.connect(masterGain);
+    osc.start(t); osc.stop(t + 0.25);
+  }
+  function playChime() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    [523, 659, 784].forEach(function(f, i) {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'triangle'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.25, t + i * 0.08);
+      g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.08 + 0.4);
+      o.connect(g); g.connect(masterGain); o.start(t + i * 0.08); o.stop(t + i * 0.08 + 0.45);
+    });
+  }
+  function playThud() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'sawtooth'; o.frequency.setValueAtTime(160, t);
+    o.frequency.exponentialRampToValueAtTime(60, t + 0.2);
+    g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    o.connect(g); g.connect(masterGain); o.start(t); o.stop(t + 0.25);
+  }
+
+  function resetGame() {
+    score = 0; combo = 0; bestCombo = 0; perfect = 0; good = 0; missed = 0; health = 100;
+    notes = []; particles = []; blooms = []; elapsed = 0; spawnTimer = 0.6; flashLane = -1;
+    LANES.forEach(function(l) { l.plant = 0; });
+    feedbackEl.textContent = '';
+    updateHUD();
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    comboEl.textContent = combo;
+    perfectEl.textContent = perfect;
+    goodEl.textContent = good;
+    missedEl.textContent = missed;
+    healthBar.style.width = Math.max(0, health) + '%';
+    progressBar.style.width = Math.min(100, score / 10) + '%';
+    statusEl.textContent = state === 'playing' ? (combo >= 10 ? 'On Fire!' : 'Growing') : (state === 'over' ? 'Finished' : 'Ready');
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 260, vy: -Math.random() * 220 - 40, life: 0.7, color: color, size: 3 + Math.random() * 5 });
+    }
+  }
+  function growPlant(lane) {
+    var l = LANES[lane];
+    l.plant = Math.min(5, l.plant + 1);
+    blooms.push({ lane: lane, stage: l.plant, born: elapsed });
+  }
+  function spawnNote() {
+    // Weighted pattern: sometimes pairs, mostly singles, keeps rhythm readable.
+    var lane = Math.floor(Math.random() * 4);
+    notes.push({ lane: lane, y: -30, speed: 165 + Math.min(120, elapsed * 2.2), hit: false });
+    if (Math.random() < 0.22) {
+      var lane2 = (lane + 1 + Math.floor(Math.random() * 3)) % 4;
+      notes.push({ lane: lane2, y: -70, speed: 165 + Math.min(120, elapsed * 2.2), hit: false });
+    }
+  }
+  function hitLane(lane) {
+    if (state !== 'playing') return;
+    flashLane = lane; flashTime = 0.15;
+    var best = null, bestDist = 9999;
+    for (var i = 0; i < notes.length; i++) {
+      var d = Math.abs(notes[i].y - hitY);
+      if (notes[i].lane === lane && d < bestDist) { bestDist = d; best = notes[i]; }
+    }
+    playDrum(LANES[lane].drum, lane % 2 === 0 ? 'sine' : 'triangle');
+    if (best && bestDist <= 70) {
+      var cx = lane * laneW + laneW / 2;
+      if (bestDist <= 28) {
+        perfect++; score += 50 + Math.floor(combo / 10) * 10;
+        feedbackEl.textContent = 'PERFECT! +50';
+        burst(cx, hitY, '#ffe066', 18); growPlant(lane);
+      } else {
+        good++; score += 25 + Math.floor(combo / 10) * 5;
+        feedbackEl.textContent = 'Good! +25';
+        burst(cx, hitY, '#a8e063', 10); growPlant(lane);
+      }
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      notes.splice(notes.indexOf(best), 1);
+    } else {
+      combo = 0; missed++; health -= 8;
+      feedbackEl.textContent = 'Miss — the beat slipped by';
+      playThud();
+    }
+    checkEnd(); updateHUD();
+  }
+  function checkEnd() {
+    if (score >= 1000) { endGame(true); return; }
+    if (health <= 0) { health = 0; endGame(false); }
+  }
+  function endGame(won) {
+    state = 'over';
+    endTitle.textContent = won ? '🌸 Grove in Full Bloom! You Win! 🌸' : '🥀 The Grove Wilted — Game Over 🥀';
+    endText.textContent = 'Final score: ' + score + ' • Best combo: ' + bestCombo + ' • Perfect: ' + perfect + ' • Good: ' + good + ' • Missed: ' + missed + '. ' + (won ? 'Your garden is magnificent!' : 'Try again and keep the beat alive!');
+    if (won) playChime();
+    endScreen.classList.remove('hidden');
+    updateHUD();
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    updateHUD();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function(e) {
+    var k = e.key.toLowerCase();
+    if (k === 'r' && (state === 'over' || state === 'title')) { startGame(); return; }
+    if (state !== 'playing') return;
+    for (var i = 0; i < LANES.length; i++) {
+      if (LANES[i].key === k) { hitLane(i); e.preventDefault(); return; }
+    }
+  });
+  function laneFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (W / rect.width);
+    if (x < 0 || x > W) return -1;
+    return Math.min(3, Math.floor(x / laneW));
+  }
+  canvas.addEventListener('mousedown', function(e) {
+    if (state !== 'playing') return;
+    var lane = laneFromEvent(e);
+    if (lane >= 0) hitLane(lane);
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (state !== 'playing') return;
+    var t = e.changedTouches[0];
+    var lane = laneFromEvent(t);
+    if (lane >= 0) hitLane(lane);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+
+  function drawPlant(x, groundY, stage, color) {
+    ctx.strokeStyle = '#2e7d32'; ctx.lineWidth = 4; ctx.beginPath();
+    ctx.moveTo(x, groundY); ctx.lineTo(x, groundY - stage * 14); ctx.stroke();
+    if (stage >= 2) {
+      ctx.fillStyle = '#4caf50';
+      ctx.beginPath(); ctx.ellipse(x - 12, groundY - stage * 8, 12, 6, -0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x + 12, groundY - stage * 10, 12, 6, 0.5, 0, Math.PI * 2); ctx.fill();
+    }
+    if (stage >= 3) {
+      ctx.fillStyle = color;
+      for (var i = 0; i < 5; i++) {
+        var a = (i / 5) * Math.PI * 2;
+        ctx.beginPath(); ctx.arc(x + Math.cos(a) * 9, groundY - stage * 14 + Math.sin(a) * 9, 6, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = '#ffe066';
+      ctx.beginPath(); ctx.arc(x, groundY - stage * 14, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    if (stage >= 5) {
+      ctx.fillStyle = '#fff59d'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('✿', x, groundY - stage * 14 - 18);
+    }
+  }
+  function draw(now) {
+    ctx.clearRect(0, 0, W, H);
+    // Lanes
+    for (var i = 0; i < 4; i++) {
+      var x = i * laneW;
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.12)';
+      ctx.fillRect(x, 0, laneW, H);
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      ctx.fillStyle = LANES[i].color; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(LANES[i].label, x + laneW / 2, 24);
+    }
+    // Beat line
+    ctx.strokeStyle = flashLane >= 0 ? '#ffffff' : '#ffe066'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0, hitY); ctx.lineTo(W, hitY); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,224,102,0.15)'; ctx.fillRect(0, hitY - 34, W, 68);
+    // Notes
+    notes.forEach(function(n) {
+      var cx = n.lane * laneW + laneW / 2;
+      ctx.fillStyle = LANES[n.lane].color;
+      ctx.beginPath(); ctx.arc(cx, n.y, 24, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#10231a'; ctx.font = 'bold 22px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('♪', cx, n.y + 8);
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, n.y, 24, 0, Math.PI * 2); ctx.stroke();
+    });
+    // Pads
+    for (var j = 0; j < 4; j++) {
+      var px = j * laneW + 12, py = H - 62;
+      ctx.fillStyle = flashLane === j ? '#ffffff' : LANES[j].color;
+      ctx.globalAlpha = flashLane === j ? 1 : 0.92;
+      ctx.beginPath(); ctx.roundRect(px, py, laneW - 24, 50, 12); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#10231a'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(LANES[j].label, j * laneW + laneW / 2, py + 33);
+      drawPlant(j * laneW + laneW / 2, py - 6, LANES[j].plant, LANES[j].color);
+    }
+    // Particles
+    particles.forEach(function(p) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and grow your garden to the beat!', W / 2, H - 80);
+    }
+  }
+  function loop(now) {
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    if (state === 'playing') {
+      elapsed += dt;
+      if (flashTime > 0) { flashTime -= dt; if (flashTime <= 0) flashLane = -1; }
+      spawnTimer -= dt;
+      if (spawnTimer <= 0) { spawnNote(); spawnTimer = Math.max(0.55, 1.05 - elapsed * 0.008); }
+      for (var i = notes.length - 1; i >= 0; i--) {
+        notes[i].y += notes[i].speed * dt;
+        if (notes[i].y > hitY + 70) {
+          notes.splice(i, 1); combo = 0; missed++; health -= 10;
+          feedbackEl.textContent = 'Missed a note — grove wilts a little';
+          playThud(); checkEnd(); updateHUD();
+          if (state !== 'playing') break;
+        }
+      }
+      particles.forEach(function(p) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; });
+      particles = particles.filter(function(p) { return p.life > 0; });
+    }
+    draw(now);
+    requestAnimationFrame(loop);
+  }
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

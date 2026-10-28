@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ember Escape — Arcade Flame Runner</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:#140a08; overflow:hidden; font-family:'Segoe UI', Arial, sans-serif; }
+  #wrap { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:10px; }
+  h1 { color:#ffb347; font-size:clamp(24px,5vw,40px); letter-spacing:2px; text-shadow:0 0 18px rgba(255,120,0,.8); margin-bottom:4px; }
+  p.tag { color:#ffd9a0; font-size:14px; margin-bottom:10px; }
+  #hud { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; color:#fff; font-weight:bold; font-size:16px; margin-bottom:8px; }
+  #hud span { background:#2a1208; border:2px solid #ff7b1c; border-radius:10px; padding:5px 12px; }
+  #hud .lives { color:#ff6b6b; }
+  #hud .win { color:#7dff9b; }
+  canvas { background:linear-gradient(#1a0b06,#3a1204 55%,#120402); border:3px solid #ff7b1c; border-radius:14px; box-shadow:0 0 30px rgba(255,110,0,.45); max-width:96vw; max-height:70vh; touch-action:none; display:block; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:rgba(10,3,1,.78); color:#fff; text-align:center; padding:24px; border-radius:14px; }
+  #stage { position:relative; }
+  .overlay h2 { font-size:34px; color:#ffb347; }
+  .overlay p { max-width:520px; line-height:1.6; font-size:16px; color:#ffe8cc; }
+  .overlay .keys { font-size:14px; color:#ffd9a0; background:#2a1208; padding:10px 14px; border-radius:10px; border:1px solid #ff7b1c; }
+  button { background:#ff7b1c; color:#fff; border:none; border-radius:12px; padding:14px 30px; font-size:19px; font-weight:bold; cursor:pointer; box-shadow:0 5px 0 #b34a00; }
+  button:hover { background:#ffa041; }
+  button:active { transform:translateY(3px); box-shadow:0 2px 0 #b34a00; }
+  .small { font-size:13px; color:#ccc; }
+  #msg { color:#7dff9b; font-weight:bold; min-height:20px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🔥 EMBER ESCAPE 🔥</h1>
+  <p class="tag">Outrun the volcano. Dodge embers, leap the lava, drink the rain.</p>
+  <div id="hud">
+    <span>Score: <b id="score">0</b> / 500</span>
+    <span class="lives">Lives: <b id="lives">♥♥♥</b></span>
+    <span>Speed: <b id="speed">1.0x</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="720" height="480"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>EMBER ESCAPE</h2>
+      <p><strong>How to Play:</strong> You are a brave runner fleeing a erupting volcano. Dodge falling embers and jump over lava gaps. Catch blue water drops for <b>+25 points</b>. Surviving embers earns points over time. Win at <b>500 points</b> — lose all 3 lives and the volcano wins.</p>
+      <div class="keys">⌨️ Arrow keys / WASD to move &nbsp;•&nbsp; SPACE to dash &nbsp;•&nbsp; 🖱️ Move mouse to steer &nbsp;•&nbsp; 👆 Drag on touch screen &nbsp;•&nbsp; R to restart</div>
+      <button id="startBtn">▶ START RUN</button>
+      <p class="small">Dash gives a brief burst of speed and brief invulnerability. Lava gaps on the ground hurt — jump or dash over them!</p>
+    </div>
+    <div class="overlay" id="endScreen" style="display:none">
+      <h2 id="endTitle">GAME OVER</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">↻ PLAY AGAIN</button>
+      <p class="small">Press R or click Play Again for an instant restart.</p>
+    </div>
+  </div>
+  <p id="msg"></p>
+</div>
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const speedEl = document.getElementById('speed');
+  const statusEl = document.getElementById('status');
+  const msgEl = document.getElementById('msg');
+  const titleScreen = document.getElementById('titleScreen');
+  const endScreen = document.getElementById('endScreen');
+  const endTitle = document.getElementById('endTitle');
+  const endText = document.getElementById('endText');
+
+  let running = false, over = false, raf = 0, lastTime = 0;
+  let score = 0, lives = 3, speedMul = 1, elapsed = 0, dashTime = 0, dashCooldown = 0, invuln = 0;
+  let spawnEmber = 0, spawnDrop = 0, spawnLava = 0, lavaTimer = 0;
+  let embers = [], drops = [], lavas = [], particles = [], stars = [];
+  let keys = {};
+  const GROUND = H - 58;
+
+  const player = { x: W/2, y: GROUND, w: 34, h: 44, vy: 0, jumping: false, dashing: false };
+
+  // Audio: procedural only, created on user gesture
+  let actx = null;
+  function audio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (actx && actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function beep(freq, dur, type, vol) {
+    const a = audio(); if (!a) return;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + dur);
+    o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (kind === 'drop') { beep(880, 0.18, 'sine', 0.15); setTimeout(function(){ beep(1320, 0.15, 'sine', 0.12); }, 60); }
+    else if (kind === 'hit') { beep(160, 0.3, 'sawtooth', 0.18); }
+    else if (kind === 'dash') { beep(500, 0.15, 'triangle', 0.12); }
+    else if (kind === 'win') { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f,0.3,'triangle',0.15); }, i*130); }); }
+    else if (kind === 'lose') { [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ beep(f,0.25,'sawtooth',0.12); }, i*140); }); }
+  }
+
+  for (let i = 0; i < 40; i++) stars.push({ x: Math.random()*W, y: Math.random()*H*0.5, r: Math.random()*1.8+0.5 });
+
+  function reset() {
+    score = 0; lives = 3; speedMul = 1; elapsed = 0; dashTime = 0; dashCooldown = 0; invuln = 0;
+    embers = []; drops = []; lavas = []; particles = [];
+    player.x = W/2; player.y = GROUND; player.vy = 0; player.jumping = false;
+    updateHUD('Running');
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = Math.floor(score);
+    livesEl.textContent = '♥'.repeat(Math.max(0,lives)) || '—';
+    speedEl.textContent = speedMul.toFixed(1) + 'x';
+    if (status) statusEl.textContent = status;
+  }
+  function burst(x, y, color, n) {
+    for (let i = 0; i < (n||12); i++) particles.push({ x:x, y:y, vx:(Math.random()-0.5)*5, vy:(Math.random()-0.5)*5, life:30+Math.random()*20, color:color });
+  }
+  function hit() {
+    if (invuln > 0 || dashTime > 0) return;
+    lives--; invuln = 90; sfx('hit'); burst(player.x, player.y, '#ff5533', 20);
+    msgEl.textContent = 'Ouch! An ember hit you.';
+    if (lives <= 0) endGame(false);
+    updateHUD();
+  }
+  function endGame(win) {
+    running = false; over = true; cancelAnimationFrame(raf);
+    endScreen.style.display = 'flex';
+    endTitle.textContent = win ? '🏆 YOU ESCAPED!' : '🌋 GAME OVER';
+    endText.textContent = win
+      ? 'You reached 500 points and escaped the volcano! Final score: ' + Math.floor(score) + '. Amazing running!'
+      : 'The volcano caught you. Final score: ' + Math.floor(score) + '. Try again — the mountain is waiting.';
+    statusEl.textContent = win ? 'Winner!' : 'Game Over';
+    if (win) sfx('win'); else sfx('lose');
+  }
+  function start() {
+    audio(); reset(); running = true; over = false;
+    titleScreen.style.display = 'none'; endScreen.style.display = 'none';
+    msgEl.textContent = 'Run! Collect water, dodge embers!';
+    lastTime = performance.now();
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(loop);
+  }
+
+  function spawnEmberFn() {
+    embers.push({ x: Math.random()*(W-30)+15, y: -20, vy: (2.2 + Math.random()*2 + speedMul*0.8), r: 9+Math.random()*7, drift: (Math.random()-0.5)*1.2 });
+  }
+  function spawnDropFn() { drops.push({ x: Math.random()*(W-40)+20, y: -20, vy: 2.5, r: 11 }); }
+  function spawnLavaFn() {
+    const w = 70 + Math.random()*70;
+    lavas.push({ x: W, w: w, y: GROUND + 18, speed: 3.2 * speedMul });
+  }
+
+  function loop(now) {
+    if (!running) return;
+    const dt = Math.min(32, now - lastTime) / 16.67; lastTime = now;
+    elapsed += dt; speedMul = 1 + Math.min(2.2, elapsed / 1800);
+    if (dashCooldown > 0) dashCooldown -= dt;
+    if (dashTime > 0) dashTime -= dt;
+    if (invuln > 0) invuln -= dt;
+
+    const sp = (keys.ArrowLeft || keys.a || keys.A) ? -1 : (keys.ArrowRight || keys.d || keys.D) ? 1 : 0;
+    const dashSpeed = dashTime > 0 ? 2.2 : 1;
+    player.x += sp * 5.5 * dashSpeed * dt;
+    player.x = Math.max(20, Math.min(W-20, player.x));
+
+    // Gravity / jumping: up arrow or W
+    if ((keys.ArrowUp || keys.w || keys.W) && !player.jumping) { player.vy = -13; player.jumping = true; }
+    if (player.jumping) {
+      player.y += player.vy * dt; player.vy += 0.65 * dt;
+      if (player.y >= GROUND) { player.y = GROUND; player.vy = 0; player.jumping = false; }
+    }
+
+    // Spawning
+    spawnEmber -= dt; if (spawnEmber <= 0) { spawnEmberFn(); spawnEmber = Math.max(18, 52 - speedMul*10); }
+    spawnDrop -= dt; if (spawnDrop <= 0) { spawnDropFn(); spawnDrop = 160 + Math.random()*120; }
+    lavaTimer -= dt; if (lavaTimer <= 0) { spawnLavaFn(); lavaTimer = 240 + Math.random()*160; }
+
+    // Embers
+    for (let i = embers.length-1; i >= 0; i--) {
+      const e = embers[i]; e.y += e.vy * dt; e.x += e.drift * dt;
+      if (e.y > H + 20) { embers.splice(i,1); score += 2; continue; }
+      const dx = e.x - player.x, dy = e.y - player.y;
+      if (Math.abs(dx) < 26 && Math.abs(dy) < 30) { embers.splice(i,1); hit(); }
+    }
+    // Drops
+    for (let i = drops.length-1; i >= 0; i--) {
+      const d = drops[i]; d.y += d.vy * dt;
+      if (d.y > H + 20) { drops.splice(i,1); continue; }
+      if (Math.abs(d.x - player.x) < 30 && Math.abs(d.y - player.y) < 32) {
+        drops.splice(i,1); score += 25; sfx('drop'); burst(d.x, d.y, '#33ccff', 14); msgEl.textContent = '+25! Water drop collected.';
+      }
+    }
+    // Lava gaps move left; touching while grounded hurts
+    for (let i = lavas.length-1; i >= 0; i--) {
+      const l = lavas[i]; l.x -= l.speed * dt;
+      if (l.x + l.w < 0) { lavas.splice(i,1); score += 5; continue; }
+      if (!player.jumping && dashTime <= 0 && player.x > l.x - 10 && player.x < l.x + l.w + 10) hit();
+    }
+    if (elapsed % 60 < dt) score += 1;
+    if (score >= 500) { score = 500; updateHUD('Winner!'); endGame(true); return; }
+    updateHUD();
+
+    // Draw
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = '#fff';
+    stars.forEach(function(s){ ctx.globalAlpha = 0.7; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    // Volcano
+    ctx.fillStyle = '#4a1603';
+    ctx.beginPath(); ctx.moveTo(W-260, 130); ctx.lineTo(W-120, 20); ctx.lineTo(W+20, 130); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff7b1c'; ctx.beginPath(); ctx.ellipse(W-120, 28, 30, 10, 0, 0, Math.PI*2); ctx.fill();
+    // Ground
+    ctx.fillStyle = '#2b1408'; ctx.fillRect(0, GROUND+38, W, H-GROUND-38);
+    ctx.fillStyle = '#ff5533'; ctx.fillRect(0, GROUND+38, W, 4);
+    // Lava gaps
+    lavas.forEach(function(l){
+      ctx.fillStyle = '#ff2200'; ctx.fillRect(l.x, l.y, l.w, 22);
+      ctx.fillStyle = '#ffcc00'; ctx.fillRect(l.x+6, l.y+4, l.w-12, 6);
+    });
+    // Drops
+    drops.forEach(function(d){
+      ctx.fillStyle = '#33ccff'; ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(d.x-3, d.y-3, 3, 0, Math.PI*2); ctx.fill();
+    });
+    // Embers
+    embers.forEach(function(e){
+      ctx.fillStyle = '#ff7b1c'; ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ffff66'; ctx.beginPath(); ctx.arc(e.x, e.y, e.r*0.45, 0, Math.PI*2); ctx.fill();
+    });
+    // Particles
+    for (let i = particles.length-1; i >= 0; i--) {
+      const p = particles[i]; p.x += p.vx; p.y += p.vy; p.life--;
+      if (p.life <= 0) { particles.splice(i,1); continue; }
+      ctx.fillStyle = p.color; ctx.globalAlpha = p.life/40; ctx.fillRect(p.x, p.y, 4, 4);
+    }
+    ctx.globalAlpha = 1;
+    // Player
+    if (!(invuln > 0 && Math.floor(elapsed/6) % 2 === 0)) {
+      ctx.fillStyle = dashTime > 0 ? '#ffe066' : '#7dff9b';
+      ctx.fillRect(player.x-17, player.y-22, 34, 44);
+      ctx.fillStyle = '#123'; ctx.fillRect(player.x-10, player.y-16, 20, 10);
+      ctx.fillStyle = '#fff'; ctx.fillRect(player.x-6, player.y-14, 4, 4); ctx.fillRect(player.x+2, player.y-14, 4, 4);
+      ctx.fillStyle = '#ff5533'; ctx.fillRect(player.x-17, player.y-26, 34, 6);
+    }
+    // Dash indicator
+    ctx.fillStyle = dashCooldown <= 0 ? '#7dff9b' : '#888';
+    ctx.font = 'bold 14px Arial'; ctx.fillText(dashCooldown <= 0 ? 'DASH READY (Space)' : 'Dash recharging...', 14, 24);
+
+    raf = requestAnimationFrame(loop);
+  }
+
+  function doDash() {
+    if (!running || dashCooldown > 0) return;
+    dashTime = 22; dashCooldown = 90; sfx('dash'); burst(player.x, player.y, '#ffe066', 10);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', start);
+  document.getElementById('restartBtn').addEventListener('click', start);
+
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); doDash(); }
+    if ((e.key === 'r' || e.key === 'R') && over) start();
+    if (e.key === 'Enter' && !running && !over) start();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key] = false; });
+
+  canvas.addEventListener('mousemove', function(e){
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (W / r.width);
+    if (running) player.x = Math.max(20, Math.min(W-20, x));
+  });
+  canvas.addEventListener('mousedown', function(e){
+    if (!running && !over) start();
+    else if (running) doDash();
+  });
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    if (!running && !over) start();
+    else { const t = e.touches[0]; const r = canvas.getBoundingClientRect(); player.x = Math.max(20, Math.min(W-20, (t.clientX - r.left) * (W / r.width))); }
+  }, { passive:false });
+  canvas.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    if (running) { const t = e.touches[0]; const r = canvas.getBoundingClientRect(); player.x = Math.max(20, Math.min(W-20, (t.clientX - r.left) * (W / r.width))); }
+  }, { passive:false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); });
+
+  updateHUD('Ready');
+})();
+</script>
+</body>
+</html>
