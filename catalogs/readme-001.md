@@ -77,6 +77,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0069 | Echo Chamber | Rhythm / Memory Echo | Click/tap tiles, 1-4 keys, mouse/touch | [Play](./../games/game-0069.html) |
 | 0070 | Lantern Labyrinth | Puzzle / Mirror Light Maze | Click/tap place and flip mirrors, R rotate | [Play](./../games/game-0070.html) |
 
+| 0071 | Tempest Trawler | Arcade / Storm Fishing | Arrow Keys / WASD steer, mouse/touch drag | [Play](./../games/game-0071.html) |
+| 0072 | Mosaic Mason | Puzzle / Mosaic Tile Logic | Click/tap place, R rotate, D discard, Arrow Keys | [Play](./../games/game-0072.html) |
+| 0073 | Portside Planner | Strategy / Dock Scheduler | Click/tap ships and docks, Arrow Keys, Space | [Play](./../games/game-0073.html) |
+| 0074 | Drumline Dunes | Rhythm / Desert Beat Timing | D/F/J/K, mouse click, touch tap lanes | [Play](./../games/game-0074.html) |
+| 0075 | Cinder Sprint | Arcade / Lava Lane Runner | Arrow Keys / WASD switch lanes, Space jump, mouse/touch | [Play](./../games/game-0075.html) |
+| 0076 | Knot Garden | Puzzle / Rope Untangle Logic | Mouse/touch drag knots, Arrow Keys, R restart | [Play](./../games/game-0076.html) |
+| 0077 | Junkyard Tycoon | Strategy / Scrap Recycling Sim | Click/tap bins, 1-4 sort, B buy, S sell, N next day | [Play](./../games/game-0077.html) |
+| 0078 | Pulse Paddler | Precision / Timed River Paddle | Arrow Keys / A/D steer, Space stroke, mouse/touch drag | [Play](./../games/game-0078.html) |
+| 0079 | Starlight Sniper | Precision / Constellation Aim | Mouse/touch aim and shoot, Arrow Keys | [Play](./../games/game-0079.html) |
+| 0080 | Glacier Gardener | Strategy / Ice Farm Sim | Click/tap plots, Arrow Keys, Space harvest | [Play](./../games/game-0080.html) |
+
 ## Batch notes
 
 - Batch 001: 10 games, produced in one cycle.
@@ -86,5 +97,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 005: 10 games, produced in one cycle.
 - Batch 006: 10 games, produced in one cycle.
 - Batch 007: 10 games, produced in one cycle.
+- Batch 008: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 - Next volume starts at game 0101 in `catalogs/readme-002.md`, after this volume reaches 100 entries.
