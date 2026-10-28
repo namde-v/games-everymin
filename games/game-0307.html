@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bazaar Baron — Market Trading</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#1a120b;color:#fff2d9;font-family:Georgia,serif;text-align:center;overflow-x:hidden}
+h1{font-size:34px;color:#ffd166;text-shadow:2px 2px 0 #7a3b00;margin:10px 0 2px}
+p{line-height:1.45}
+#wrap{max-width:900px;margin:0 auto;padding:10px}
+#hud{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:8px 0}
+.pill{background:#3a2410;border:2px solid #c98a2e;border-radius:20px;padding:7px 14px;font-weight:bold}
+.pill b{color:#ffd166}
+#canvasBox{position:relative;width:100%;max-width:860px;margin:0 auto}
+canvas{width:100%;height:430px;background:#f7c873;border:4px solid #7a3b00;border-radius:14px;display:block;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(20,10,0,.88);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:12px}
+.overlay.hidden{display:none}
+.overlay h2{font-size:40px;color:#ffd166}
+.how{max-width:560px;background:#2b1a08;border:1px solid #c98a2e;border-radius:10px;padding:12px;text-align:left;font-size:15px}
+button{background:#e67e22;color:#fff;border:3px solid #ffd166;border-radius:12px;padding:12px 22px;font-size:18px;font-weight:bold;cursor:pointer}
+button:hover{background:#f39c12;transform:scale(1.03)}
+button.small{padding:9px 14px;font-size:15px}
+#btns{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:12px 0}
+#inv{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.invcard{background:#fff2d9;color:#2b1a08;border-radius:10px;padding:8px 12px;min-width:130px;border:3px solid transparent}
+.invcard.sel{border-color:#e67e22;transform:scale(1.05)}
+.invcard b{font-size:18px}
+#msg{min-height:26px;color:#ffd166;font-weight:bold;margin:6px 0}
+#log{font-size:14px;color:#e8d5a8;min-height:20px}
+.keys{font-size:13px;color:#d9b98a;margin-top:8px}
+</style>
+</head>
+<body>
+<div id="wrap">
+<h1>🏺 Bazaar Baron 🏺</h1>
+<p>Buy low, sell high, and become a legend of the market!</p>
+<div id="hud">
+<div class="pill">💰 Gold: <b id="gold">120</b></div>
+<div class="pill">📅 Day: <b id="day">1 / 12</b></div>
+<div class="pill">🎯 Target: <b>600 gold</b></div>
+<div class="pill">💎 Fortune: <b id="fortune">120</b></div>
+</div>
+<div id="canvasBox">
+<canvas id="game" width="860" height="430"></canvas>
+<div id="titleScreen" class="overlay">
+<h2>Bazaar Baron</h2>
+<div class="how"><b>How to Play:</b><br>
+• You start with 120 gold and 12 market days to reach a fortune of 600.<br>
+• Four stalls sell Spice, Silk, Pottery and Gems. Prices move every day with supply, demand and surprise events.<br>
+• Buy when a price is low, hold it, then sell when it spikes. Your fortune = gold + value of goods you hold.<br>
+• Click a stall or use Arrow Keys to select it. Buy and Sell buttons trade one unit. Press <b>N</b> to open the next market day.<br>
+• Reach 600 before day 12 ends to win. Run out of days below target and the bazaar closes on you!</div>
+<button id="startBtn">▶ Start Trading</button>
+<p class="keys">Mouse / Touch: click stalls &amp; buttons &nbsp;|&nbsp; Arrows: select &nbsp;|&nbsp; Space: Buy &nbsp;|&nbsp; Enter: Sell &nbsp;|&nbsp; N: Next Day &nbsp;|&nbsp; R: Restart</p>
+</div>
+<div id="endScreen" class="overlay hidden">
+<h2 id="endTitle">You Win!</h2>
+<p id="endText"></p>
+<button id="restartBtn">↻ Play Again (R)</button>
+</div>
+</div>
+<div id="msg">Welcome, trader! Pick a bargain to begin.</div>
+<div id="btns">
+<button class="small" id="buyBtn">🛒 Buy 1</button>
+<button class="small" id="sellBtn">💰 Sell 1</button>
+<button class="small" id="buyMaxBtn">🛒 Buy Max</button>
+<button class="small" id="sellAllBtn">💰 Sell All</button>
+<button class="small" id="nextBtn">🌅 Next Day (N)</button>
+<button class="small" id="restartBtn2">↻ Restart (R)</button>
+</div>
+<div id="inv"></div>
+<div id="log"></div>
+<p class="keys">Tip: Gems swing wildly — big risk, big reward. Spice is steadier. Watch the event news each morning!</p>
+</div>
+<script>
+const cv=document.getElementById('game'),ctx=cv.getContext('2d');
+const items=[
+{name:'Spice',icon:'🌶️',base:18,color:'#e74c3c',price:18,inv:0,hist:[18],vol:0.18},
+{name:'Silk',icon:'🧵',base:42,color:'#9b59b6',price:42,inv:0,hist:[42],vol:0.28},
+{name:'Pottery',icon:'🏺',base:28,color:'#3498db',price:28,inv:0,hist:[28],vol:0.22},
+{name:'Gems',icon:'💎',base:85,color:'#1abc9c',price:85,inv:0,hist:[85],vol:0.45}
+];
+let gold=120,day=1,maxDays=12,target=600,sel=0,state='title',t=0,eventMsg='The bazaar opens. Traders are eager.',flash='';
+let audioCtx=null;
+function audio(){if(!audioCtx){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}return audioCtx;}
+function beep(f,d,type){const a=audio();if(!a)return;const o=a.createOscillator(),g=a.createGain();o.type=type||'sine';o.frequency.value=f;g.gain.setValueAtTime(0.12,a.currentTime);g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d);o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+d);}
+function snd(kind){if(state==='title')return;if(kind==='buy'){beep(520,0.12);setTimeout(()=>beep(760,0.14),70);}else if(kind==='sell'){beep(880,0.12);setTimeout(()=>beep(660,0.14),70);}else if(kind==='bad'){beep(160,0.25,'sawtooth');}else if(kind==='win'){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,0.25),i*130));}else if(kind==='day'){beep(440,0.15);setTimeout(()=>beep(587,0.15),90);}}
+function fortune(){return gold+items.reduce((s,it)=>s+it.inv*it.price,0);}
+function updateHUD(){
+document.getElementById('gold').textContent=gold;
+document.getElementById('day').textContent=day+' / '+maxDays;
+document.getElementById('fortune').textContent=fortune();
+const inv=document.getElementById('inv');
+inv.innerHTML=items.map((it,i)=>`<div class="invcard ${i===sel?'sel':''}" data-i="${i}"><div>${it.icon} <b>${it.name}</b></div><div>Price: ${it.price}g</div><div>Held: ${it.inv} &nbsp; Value: ${it.inv*it.price}g</div></div>`).join('');
+inv.querySelectorAll('.invcard').forEach(c=>c.addEventListener('click',()=>{sel=+c.dataset.i;setMsg('Selected '+items[sel].name+' at '+items[sel].price+' gold.');}));
+}
+function setMsg(m){document.getElementById('msg').textContent=m;}
+function setLog(m){document.getElementById('log').textContent=m;}
+function buy(n){
+const it=items[sel];let count=0;
+if(n==='max')n=Math.floor(gold/it.price);
+for(let k=0;k<n;k++){if(gold>=it.price){gold-=it.price;it.inv++;count++;}else break;}
+if(count>0){snd('buy');setMsg('Bought '+count+' '+it.name+' for '+(count*it.price)+' gold.');setLog('Bargain hunting! '+it.name+' may rise tomorrow.');}
+else{snd('bad');setMsg('Not enough gold to buy '+it.name+' ('+it.price+'g).');}
+checkEnd();updateHUD();
+}
+function sell(n){
+const it=items[sel];let count=0;
+if(n==='all')n=it.inv;
+for(let k=0;k<n;k++){if(it.inv>0){gold+=it.price;it.inv--;count++;}else break;}
+if(count>0){snd('sell');setMsg('Sold '+count+' '+it.name+' for '+(count*it.price)+' gold. Nice trade!');setLog('Profit banked. Fortune now '+fortune()+' gold.');}
+else{snd('bad');setMsg('You hold no '+it.name+' to sell. Buy some first!');}
+checkEnd();updateHUD();
+}
+const events=[
+['Spice caravan arrives! Spice prices tumble.','Spice',-0.35],
+['Royal wedding! Silk demand soars.','Silk',0.45],
+['A kiln cracks — Pottery becomes scarce.','Pottery',0.40],
+['A new gem mine opens. Gems get cheaper.','Gems',-0.30],
+['Festival week! Everyone buys Spice and Pottery.','Spice',0.25],
+['Foreign merchants crave Gems. Prices jump!','Gems',0.50],
+['Rain spoils the spice harvest. Spice rises.','Spice',0.38],
+['Silk road delays — Silk supply tightens.','Silk',0.30]
+];
+function nextDay(){
+if(state!=='playing')return;
+day++;snd('day');
+items.forEach(it=>{
+let ch=(Math.random()*2-1)*it.vol;
+it.price=Math.max(5,Math.round(it.price*(1+ch)));
+it.hist.push(it.price);if(it.hist.length>12)it.hist.shift();
+});
+let ev=null;
+if(Math.random()<0.75){ev=events[Math.floor(Math.random()*events.length)];
+const it=items.find(x=>x.name===ev[1]);
+it.price=Math.max(5,Math.round(it.price*(1+ev[2])));it.hist[it.hist.length-1]=it.price;
+eventMsg=ev[0];
+}else{eventMsg='A calm day in the bazaar. Prices drift gently.';}
+setMsg('☀️ Day '+Math.min(day,maxDays)+' — '+eventMsg);
+setLog('New prices are in. Hunt for bargains!');
+flash='NEW DAY';
+checkEnd();updateHUD();
+}
+function checkEnd(){
+if(state!=='playing')return;
+if(fortune()>=target){endGame(true);}
+else if(day>maxDays){endGame(false);}
+else if(day===maxDays){setLog('Last day! Sell everything or reach '+target+' to win.');}
+}
+function endGame(win){
+state=win?'win':'over';
+document.getElementById('endTitle').textContent=win?'👑 You Win, Bazaar Baron!':'😞 Market Closed — Game Over';
+document.getElementById('endText').textContent=win?('Magnificent! Your fortune reached '+fortune()+' gold in '+Math.min(day,maxDays)+' days.') : ('Your fortune ended at '+fortune()+' gold, short of the '+target+' target. The stalls pack up for the season.');
+document.getElementById('endScreen').classList.remove('hidden');
+if(win)snd('win');else snd('bad');
+updateHUD();
+}
+function startGame(){
+audio();state='playing';
+document.getElementById('titleScreen').classList.add('hidden');
+document.getElementById('endScreen').classList.add('hidden');
+setMsg('Day 1 — Buy low, sell high!');snd('day');updateHUD();
+}
+function restart(){
+gold=120;day=1;sel=0;eventMsg='The bazaar opens. Traders are eager.';
+items.forEach(it=>{it.price=it.base;it.inv=0;it.hist=[it.base];});
+document.getElementById('endScreen').classList.add('hidden');
+document.getElementById('titleScreen').classList.add('hidden');
+state='playing';setMsg('Fresh start! 120 gold, 12 days, target 600.');setLog('');snd('day');updateHUD();
+}
+function draw(){
+t+=0.016;ctx.clearRect(0,0,860,430);
+ctx.fillStyle='#f7c873';ctx.fillRect(0,0,860,430);
+ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(800,50+Math.sin(t)*4,26,0,Math.PI*2);ctx.fill();
+ctx.fillStyle='#8d5a1e';ctx.fillRect(0,340,860,90);
+ctx.fillStyle='#5b3a12';ctx.font='bold 15px Georgia';ctx.fillText('📰 '+eventMsg,20,365);
+ctx.fillStyle='#fff2d9';ctx.font='bold 16px Georgia';
+ctx.fillText('Fortune progress to '+target+': '+fortune()+'g',20,392);
+ctx.fillStyle='#3a2410';ctx.fillRect(20,400,560,16);
+ctx.fillStyle='#2ecc71';ctx.fillRect(20,400,560*Math.min(1,fortune()/target),16);
+items.forEach((it,i)=>{
+const x=20+i*210,y=20,w=190,h=300;
+ctx.fillStyle=it.color;ctx.fillRect(x,y,w,h);
+ctx.fillStyle='rgba(0,0,0,0.18)';ctx.fillRect(x,y,w,34);
+ctx.fillStyle='#fff';ctx.font='bold 20px Georgia';ctx.textAlign='center';
+ctx.fillText(it.icon+' '+it.name,x+w/2,y+25);ctx.textAlign='left';
+ctx.fillStyle='#fff';ctx.font='bold 30px Georgia';ctx.textAlign='center';
+ctx.fillText(it.price+'g',x+w/2,y+95);
+ctx.font='16px Georgia';ctx.fillText('Held: '+it.inv,x+w/2,y+125);
+const prev=it.hist.length>1?it.hist[it.hist.length-2]:it.base;
+const arrow=it.price>prev?'▲ UP':it.price<prev?'▼ DOWN':'● STEADY';
+ctx.fillText(arrow,x+w/2,y+152);ctx.textAlign='left';
+ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();
+it.hist.forEach((p,j)=>{const px=x+15+j*(160/Math.max(1,it.hist.length-1));const py=y+275-(p-5)*1.1;if(j===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);});
+ctx.stroke();
+ctx.fillStyle='rgba(255,255,255,0.9)';ctx.font='13px Georgia';ctx.textAlign='center';
+ctx.fillText('Click to select',x+w/2,y+295);ctx.textAlign='left';
+if(i===sel){ctx.strokeStyle='#ffd166';ctx.lineWidth=6;ctx.strokeRect(x-3,y-3,w+6,h+6);}
+});
+if(flash){ctx.fillStyle='rgba(0,0,0,0.65)';ctx.fillRect(250,150,360,60);ctx.fillStyle='#ffd166';ctx.font='bold 30px Georgia';ctx.textAlign='center';ctx.fillText(flash,430,190);ctx.textAlign='left';}
+requestAnimationFrame(draw);
+}
+document.getElementById('startBtn').addEventListener('click',startGame);
+document.getElementById('restartBtn').addEventListener('click',restart);
+document.getElementById('restartBtn2').addEventListener('click',restart);
+document.getElementById('buyBtn').addEventListener('click',()=>{if(state==='playing')buy(1);});
+document.getElementById('sellBtn').addEventListener('click',()=>{if(state==='playing')sell(1);});
+document.getElementById('buyMaxBtn').addEventListener('click',()=>{if(state==='playing')buy('max');});
+document.getElementById('sellAllBtn').addEventListener('click',()=>{if(state==='playing')sell('all');});
+document.getElementById('nextBtn').addEventListener('click',nextDay);
+document.addEventListener('keydown',e=>{
+if(e.key==='ArrowLeft'){sel=(sel+3)%4;updateHUD();}
+else if(e.key==='ArrowRight'){sel=(sel+1)%4;updateHUD();}
+else if(e.key==='ArrowUp'){sel=(sel+3)%4;updateHUD();}
+else if(e.key==='ArrowDown'){sel=(sel+1)%4;updateHUD();}
+else if(e.key===' '){e.preventDefault();if(state==='title')startGame();else if(state==='playing')buy(1);}
+else if(e.key==='Enter'){if(state==='title')startGame();else if(state==='playing')sell(1);else if(state==='win'||state==='over')restart();}
+else if(e.key==='n'||e.key==='N'){if(state==='playing')nextDay();}
+else if(e.key==='r'||e.key==='R'){if(state!=='title')restart();}
+});
+cv.addEventListener('click',e=>{
+const r=cv.getBoundingClientRect();const x=(e.clientX-r.left)*(860/r.width);
+const i=Math.floor((x-20)/210);
+if(i>=0&&i<4){sel=i;updateHUD();setMsg('Selected '+items[sel].name+' at '+items[sel].price+' gold.');}
+});
+cv.addEventListener('touchstart',e=>{
+e.preventDefault();const touch=e.touches[0];const r=cv.getBoundingClientRect();const x=(touch.clientX-r.left)*(860/r.width);
+const i=Math.floor((x-20)/210);
+if(i>=0&&i<4){sel=i;updateHUD();setMsg('Selected '+items[sel].name+' at '+items[sel].price+' gold.');}
+},{passive:false});
+updateHUD();requestAnimationFrame(draw);
+setTimeout(()=>{flash='';},2200);
+</script>
+</body>
+</html>

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Echo Explorer — Sonar Cave Adventure</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #05070d; color: #d7f6ff; font-family: Arial, Helvetica, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 14px; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #7fe7ff; text-shadow: 0 0 14px #1899c2; margin: 6px 0 4px; text-align: center; }
+  .tag { color: #9fb6c9; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #hud { width: 680px; max-width: 96vw; display: flex; justify-content: space-between; gap: 8px; background: #0d1a26; border: 1px solid #24506b; border-radius: 10px; padding: 9px 12px; font-size: 15px; font-weight: bold; }
+  #hud span { white-space: nowrap; }
+  #wrap { position: relative; width: 680px; max-width: 96vw; margin-top: 10px; }
+  canvas { width: 100%; height: auto; display: block; background: #020409; border: 2px solid #2b6f8e; border-radius: 12px; touch-action: none; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(2, 6, 14, 0.92); border-radius: 12px; padding: 22px; }
+  .screen h2 { font-size: 34px; color: #7fe7ff; margin-bottom: 10px; }
+  .screen p { color: #cfe6f2; line-height: 1.55; font-size: 15px; max-width: 520px; margin: 4px 0; }
+  .screen .big { font-size: 18px; color: #ffe27a; font-weight: bold; }
+  button { margin-top: 16px; padding: 13px 26px; font-size: 18px; font-weight: bold; color: #04121c; background: #59d7ff; border: none; border-radius: 10px; cursor: pointer; box-shadow: 0 0 18px rgba(89, 215, 255, 0.55); }
+  button:hover { background: #a5ecff; }
+  button:active { transform: scale(0.97); }
+  .keys { font-size: 13px; color: #9fc3d6; margin-top: 12px; line-height: 1.6; }
+  .hidden { display: none !important; }
+  #pingNote { margin-top: 8px; color: #8fd8ef; font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>ECHO EXPLORER</h1>
+<div class="tag">Arcade / Sonar Exploration &bull; Ping the dark. Find the crystals. Escape the cave.</div>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Crystals: <b id="crystals">0 / 6</b></span>
+  <span>Lives: <b id="lives">3</b></span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="680" height="460"></canvas>
+  <div id="titleScreen" class="screen">
+    <h2>ECHO EXPLORER</h2>
+    <p class="big">The cave is pitch black. Your sonar is your only light.</p>
+    <p><b>How to Play:</b> Move through the dark cave, ping to briefly reveal walls, crystals, creatures and the exit. Collect all 6 glowing crystals to unlock the golden exit, then reach it. Touching a cave creature costs a life. Pings recharge quickly — use them often!</p>
+    <p>Arrow Keys / WASD to move &bull; Space, mouse click or touch tap to ping &bull; R to restart</p>
+    <button id="startBtn" type="button">Start Expedition</button>
+    <div class="keys">Tip: ping toward a new direction before you walk into it. Creatures patrol back and forth — watch their revealed glow and time your moves.</div>
+  </div>
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">You Escaped!</h2>
+    <p id="endText">You found the way out.</p>
+    <p id="endScore"></p>
+    <button id="restartBtn" type="button">Play Again</button>
+    <div class="keys">Press R or click Play Again for an instant restart.</div>
+  </div>
+</div>
+<div id="pingNote">Click or tap anywhere to send a sonar ping in that direction. Space also pings.</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var crystalsEl = document.getElementById('crystals');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) { o.frequency.exponentialRampToValueAtTime(Math.max(40, slide), audioCtx.currentTime + dur); }
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundPing() { beep(880, 0.45, 'sine', 0.14, 120); }
+  function soundPickup() { beep(660, 0.12, 'triangle', 0.16); setTimeout(function(){ beep(990, 0.16, 'triangle', 0.16); }, 90); }
+  function soundHit() { beep(180, 0.35, 'sawtooth', 0.16, 60); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.28, 'triangle', 0.15); }, i * 130); }); }
+  function soundLose() { [330, 262, 196, 131].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, 'sawtooth', 0.12); }, i * 140); }); }
+
+  // Cave layout: solid rock blocks, crystals, patrolling creatures, exit.
+  var walls = [
+    {x: 0, y: 0, w: 680, h: 18}, {x: 0, y: 442, w: 680, h: 18},
+    {x: 0, y: 0, w: 18, h: 460}, {x: 662, y: 0, w: 18, h: 460},
+    {x: 110, y: 90, w: 150, h: 22}, {x: 400, y: 70, w: 22, h: 140},
+    {x: 90, y: 250, w: 22, h: 150}, {x: 230, y: 300, w: 180, h: 22},
+    {x: 470, y: 240, w: 130, h: 22}, {x: 330, y: 150, w: 160, h: 22},
+    {x: 540, y: 330, w: 22, h: 90}, {x: 180, y: 160, w: 22, h: 90},
+    {x: 430, y: 380, w: 160, h: 22}
+  ];
+  var crystalSpots = [
+    {x: 70, y: 70}, {x: 600, y: 70}, {x: 300, y: 110},
+    {x: 620, y: 200}, {x: 70, y: 390}, {x: 300, y: 410}
+  ];
+  var creatureDefs = [
+    {x: 180, y: 210, min: 40, max: 300, axis: 'x', speed: 1.15},
+    {x: 480, y: 120, min: 50, max: 350, axis: 'y', speed: 1.0},
+    {x: 350, y: 360, min: 240, max: 620, axis: 'x', speed: 1.3},
+    {x: 120, y: 380, min: 250, max: 410, axis: 'y', speed: 0.9}
+  ];
+
+  var player, crystals, creatures, pings, keys, state, score, lives, pingCooldown, invuln, time;
+  var darkCanvas = document.createElement('canvas');
+  darkCanvas.width = W; darkCanvas.height = H;
+  var darkCtx = darkCanvas.getContext('2d');
+
+  function resetGame() {
+    player = { x: 42, y: 42, r: 12, speed: 2.6 };
+    crystals = crystalSpots.map(function (c) { return { x: c.x, y: c.y, taken: false, pulse: Math.random() * 6 }; });
+    creatures = creatureDefs.map(function (d) {
+      return { x: d.x, y: d.y, min: d.min, max: d.max, axis: d.axis, speed: d.speed, dir: 1, r: 14 };
+    });
+    pings = []; keys = {}; score = 0; lives = 3; pingCooldown = 0; invuln = 0; time = 0;
+    state = 'title';
+    updateHud('Ready');
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+  }
+  function updateHud(status) {
+    var got = crystals ? crystals.filter(function (c) { return c.taken; }).length : 0;
+    scoreEl.textContent = score;
+    crystalsEl.textContent = got + ' / 6';
+    livesEl.textContent = lives;
+    if (status) statusEl.textContent = status;
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHud('Exploring — ping often!');
+    beep(520, 0.18, 'triangle', 0.14);
+  }
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? 'You Escaped!' : 'Game Over';
+    endText.textContent = win
+      ? 'Brilliant echo work! You collected every crystal and found the golden exit.'
+      : 'The cave creatures caught you. The dark wins this time — try again!';
+    endScore.textContent = 'Final Score: ' + score + '  •  Crystals: ' + crystals.filter(function (c) { return c.taken; }).length + ' / 6';
+    endScreen.classList.remove('hidden');
+    if (win) soundWin(); else soundLose();
+    updateHud(win ? 'Escaped!' : 'Game Over');
+  }
+  function doPing(dirX, dirY) {
+    if (state !== 'playing' || pingCooldown > 0) return;
+    var ox = player.x, oy = player.y;
+    if (dirX !== undefined && dirY !== undefined) {
+      var len = Math.sqrt(dirX * dirX + dirY * dirY) || 1;
+      ox = player.x + (dirX / len) * 26;
+      oy = player.y + (dirY / len) * 26;
+    }
+    pings.push({ x: ox, y: oy, r: 12, max: 210, alpha: 1 });
+    pingCooldown = 22;
+    soundPing();
+    updateHud('Ping!');
+  }
+  function hitWall(x, y, r) {
+    for (var i = 0; i < walls.length; i++) {
+      var w = walls[i];
+      var nx = Math.max(w.x, Math.min(x, w.x + w.w));
+      var ny = Math.max(w.y, Math.min(y, w.y + w.h));
+      var dx = x - nx, dy = y - ny;
+      if (dx * dx + dy * dy < r * r) return true;
+    }
+    return false;
+  }
+  function update() {
+    if (state !== 'playing') return;
+    time += 1;
+    if (pingCooldown > 0) pingCooldown--;
+    if (invuln > 0) invuln--;
+    var dx = 0, dy = 0;
+    if (keys['arrowleft'] || keys['a']) dx -= 1;
+    if (keys['arrowright'] || keys['d']) dx += 1;
+    if (keys['arrowup'] || keys['w']) dy -= 1;
+    if (keys['arrowdown'] || keys['s']) dy += 1;
+    if (dx !== 0 || dy !== 0) {
+      var len = Math.sqrt(dx * dx + dy * dy);
+      var nx = player.x + (dx / len) * player.speed;
+      var ny = player.y + (dy / len) * player.speed;
+      if (!hitWall(nx, player.y, player.r)) player.x = nx;
+      if (!hitWall(player.x, ny, player.r)) player.y = ny;
+      player.x = Math.max(30, Math.min(W - 30, player.x));
+      player.y = Math.max(30, Math.min(H - 30, player.y));
+    }
+    for (var i = 0; i < pings.length; i++) {
+      pings[i].r += 6.5;
+      pings[i].alpha = Math.max(0, 1 - pings[i].r / pings[i].max);
+      if (pings[i].r >= pings[i].max) { pings.splice(i, 1); i--; }
+    }
+    creatures.forEach(function (c) {
+      if (c.axis === 'x') {
+        c.x += c.speed * c.dir;
+        if (c.x < c.min || c.x > c.max) c.dir *= -1;
+      } else {
+        c.y += c.speed * c.dir;
+        if (c.y < c.min || c.y > c.max) c.dir *= -1;
+      }
+    });
+    crystals.forEach(function (c) {
+      c.pulse += 0.08;
+      if (!c.taken) {
+        var ddx = player.x - c.x, ddy = player.y - c.y;
+        if (ddx * ddx + ddy * ddy < 26 * 26) {
+          c.taken = true; score += 100; soundPickup();
+          updateHud('Crystal found!');
+        }
+      }
+    });
+    var got = crystals.filter(function (c) { return c.taken; }).length;
+    var exitX = 632, exitY = 410;
+    if (got >= 6) {
+      var edx = player.x - exitX, edy = player.y - exitY;
+      if (edx * edx + edy * edy < 30 * 30) {
+        score += 500;
+        endGame(true);
+        return;
+      }
+    }
+    if (invuln === 0) {
+      for (var j = 0; j < creatures.length; j++) {
+        var cc = creatures[j];
+        var cdx = player.x - cc.x, cdy = player.y - cc.y;
+        if (cdx * cdx + cdy * cdy < 26 * 26) {
+          lives--; invuln = 90; soundHit();
+          player.x = 42; player.y = 42;
+          updateHud(lives > 0 ? 'Ouch! Creature hit — 1 life lost' : 'Game Over');
+          if (lives <= 0) { endGame(false); return; }
+          break;
+        }
+      }
+    }
+    updateHud();
+  }
+  function draw() {
+    ctx.fillStyle = '#0a1420';
+    ctx.fillRect(0, 0, W, H);
+    // Rock texture dots.
+    ctx.fillStyle = '#122333';
+    for (var i = 0; i < 70; i++) {
+      var px = (i * 97) % W, py = (i * 61) % H;
+      ctx.fillRect(px, py, 3, 3);
+    }
+    // Walls.
+    ctx.fillStyle = '#3a4b5e';
+    walls.forEach(function (w) {
+      ctx.fillRect(w.x, w.y, w.w, w.h);
+      ctx.fillStyle = '#5a7089';
+      ctx.fillRect(w.x, w.y, w.w, 3);
+      ctx.fillStyle = '#3a4b5e';
+    });
+    // Crystals.
+    crystals.forEach(function (c) {
+      if (c.taken) return;
+      var glow = 8 + Math.sin(c.pulse) * 3;
+      ctx.fillStyle = '#7df9ff';
+      ctx.beginPath(); ctx.arc(c.x, c.y, glow, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(c.x, c.y, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#c8fbff';
+      ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('◆', c.x, c.y + 5);
+    });
+    // Exit.
+    var got = crystals ? crystals.filter(function (c) { return c.taken; }).length : 0;
+    var open = got >= 6;
+    ctx.fillStyle = open ? '#ffd94d' : '#4a3b12';
+    ctx.fillRect(612, 382, 40, 56);
+    ctx.fillStyle = open ? '#fff3b0' : '#7a6420';
+    ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(open ? 'EXIT' : 'LOCKED', 632, 415);
+    if (open) { ctx.fillText('★', 632, 435); }
+    // Creatures.
+    creatures.forEach(function (c) {
+      ctx.fillStyle = '#ff4d6d';
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#1a050a';
+      ctx.beginPath(); ctx.arc(c.x - 5, c.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(c.x + 5, c.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px Arial'; ctx.fillText('◉', c.x, c.y + 5);
+    });
+    // Player.
+    ctx.fillStyle = invuln > 0 && Math.floor(time / 6) % 2 === 0 ? '#8fb8cc' : '#59d7ff';
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#04121c';
+    ctx.beginPath(); ctx.arc(player.x, player.y, 5, 0, Math.PI * 2); ctx.fill();
+    // Sonar rings.
+    ctx.strokeStyle = 'rgba(127, 231, 255, 0.85)';
+    pings.forEach(function (p) {
+      ctx.globalAlpha = p.alpha;
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(4, p.r - 18), 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+    // Darkness: only the player's glow and recent pings let light through.
+    darkCtx.clearRect(0, 0, W, H);
+    darkCtx.fillStyle = 'rgba(1, 3, 8, 0.96)';
+    darkCtx.fillRect(0, 0, W, H);
+    darkCtx.globalCompositeOperation = 'destination-out';
+    var pg = darkCtx.createRadialGradient(player.x, player.y, 4, player.x, player.y, 78);
+    pg.addColorStop(0, 'rgba(0,0,0,1)'); pg.addColorStop(1, 'rgba(0,0,0,0)');
+    darkCtx.fillStyle = pg;
+    darkCtx.beginPath(); darkCtx.arc(player.x, player.y, 78, 0, Math.PI * 2); darkCtx.fill();
+    pings.forEach(function (p) {
+      var g = darkCtx.createRadialGradient(p.x, p.y, Math.max(2, p.r - 34), p.x, p.y, p.r + 26);
+      g.addColorStop(0, 'rgba(0,0,0,' + (0.85 * p.alpha + 0.15) + ')');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      darkCtx.fillStyle = g;
+      darkCtx.beginPath(); darkCtx.arc(p.x, p.y, p.r + 26, 0, Math.PI * 2); darkCtx.fill();
+    });
+    darkCtx.globalCompositeOperation = 'source-over';
+    if (state === 'playing') { ctx.drawImage(darkCanvas, 0, 0); }
+    if (state === 'playing') {
+      ctx.fillStyle = '#d7f6ff'; ctx.font = '13px Arial'; ctx.textAlign = 'left';
+      ctx.fillText(got >= 6 ? 'Exit unlocked! Head to the gold door, bottom right.' : 'Find 6 crystals to unlock the exit.', 24, 28);
+    }
+  }
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', function () { ensureAudio(); startGame(); });
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].indexOf(k) !== -1) { e.preventDefault(); }
+    if (k === 'r') { if (state !== 'title') { ensureAudio(); startGame(); } }
+    if (k === ' ' && state === 'playing') { doPing(); }
+    if (k === 'enter' && state === 'title') { startGame(); }
+    if (k === 'enter' && (state === 'win' || state === 'over')) { startGame(); }
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+  canvas.addEventListener('click', function (e) {
+    ensureAudio();
+    if (state !== 'playing') return;
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX - r.left) * (W / r.width);
+    var cy = (e.clientY - r.top) * (H / r.height);
+    doPing(cx - player.x, cy - player.y);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio();
+    if (state !== 'playing') return;
+    e.preventDefault();
+    var t = e.touches[0];
+    var r = canvas.getBoundingClientRect();
+    var cx = (t.clientX - r.left) * (W / r.width);
+    var cy = (t.clientY - r.top) * (H / r.height);
+    doPing(cx - player.x, cy - player.y);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

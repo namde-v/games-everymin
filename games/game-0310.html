@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Storm Shepherd</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { width:100%; height:100%; background:#0b1020; overflow:hidden; }
+  body { font-family: Verdana, Geneva, sans-serif; color:#eaf2ff; display:flex; align-items:center; justify-content:center; }
+  #wrap { position:relative; width:840px; max-width:98vw; }
+  canvas { display:block; width:100%; height:auto; background:linear-gradient(180deg,#1b2a4a 0%,#243b63 45%,#3a5a84 100%); border:3px solid #8fb8ff; border-radius:14px; touch-action:none; }
+  #hud { display:flex; justify-content:space-between; gap:8px; padding:8px 4px 10px; font-weight:bold; font-size:15px; flex-wrap:wrap; }
+  #hud span { background:#16233f; border:1px solid #3d5a8f; border-radius:8px; padding:6px 10px; }
+  #hud .warn { color:#ff8a7a; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:rgba(5,10,25,0.82); border-radius:14px; padding:24px; z-index:5; }
+  .overlay.hidden { display:none; }
+  h1 { font-size:44px; letter-spacing:2px; color:#ffe066; text-shadow:0 3px 0 #1a4d7a, 0 0 24px rgba(255,224,102,.5); margin-bottom:6px; }
+  h2 { font-size:36px; margin-bottom:10px; }
+  .sub { color:#bcd6ff; font-size:17px; margin-bottom:14px; }
+  .howto { background:#12203c; border:1px solid #3d5a8f; border-radius:10px; padding:14px 18px; max-width:560px; font-size:14.5px; line-height:1.65; text-align:left; margin-bottom:18px; }
+  .howto b { color:#ffe066; }
+  button { font-family:inherit; font-size:20px; font-weight:bold; color:#0b1020; background:#ffe066; border:0; border-radius:12px; padding:14px 30px; cursor:pointer; box-shadow:0 4px 0 #b8932a; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b8932a; }
+  button:hover { background:#ffd94d; }
+  .tip { margin-top:14px; font-size:13px; color:#9db8dd; }
+  #msg { min-height:24px; font-weight:bold; color:#ffe066; padding-top:8px; }
+  @media (max-width:600px){ h1{font-size:32px;} .howto{font-size:13px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span id="hudScore">Score: 0</span>
+    <span id="hudBarrels">Barrels: 0 / 5</span>
+    <span id="hudTown">Town Health: &#10084;&#10084;&#10084;</span>
+    <span id="hudClouds">Clouds Home: 0</span>
+  </div>
+  <canvas id="game" width="840" height="600"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h1>STORM SHEPHERD</h1>
+    <p class="sub">Precision / Wind Herding &mdash; guide the storm home before it hits town!</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      &bull; Storm clouds drift in from the west, heading for the town on the right.<br>
+      &bull; Steer your wind source (the glowing fan) with <b>Arrow Keys / WASD</b>.<br>
+      &bull; <b>Mouse move / drag</b> or <b>touch drag</b> to aim and blow gusts that push clouds.<br>
+      &bull; Hold <b>Space</b> (or hold the mouse / finger down) for a strong gust blast.<br>
+      &bull; Herd each cloud down into a <b>rain barrel</b> along the bottom to fill it.<br>
+      &bull; A cloud that reaches the town costs 1 town health. Fill <b>5 barrels</b> to win; <b>3 town strikes</b> ends the game.<br>
+      &bull; Press <b>R</b> at any time to restart.
+    </div>
+    <button id="startBtn" type="button">Start Game</button>
+    <p class="tip">Tip: push clouds from behind and slightly above &mdash; gusts shove them away from your fan. Gentle nudges beat wild blasts.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p class="sub" id="endText"></p>
+    <button id="restartBtn" type="button">Restart</button>
+    <p class="tip">Press R or tap Restart to play again.</p>
+  </div>
+  <div id="msg"></div>
+</div>
+<script>
+(function(){
+"use strict";
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+var W = canvas.width, H = canvas.height;
+var hudScore = document.getElementById('hudScore');
+var hudBarrels = document.getElementById('hudBarrels');
+var hudTown = document.getElementById('hudTown');
+var hudClouds = document.getElementById('hudClouds');
+var titleScreen = document.getElementById('titleScreen');
+var endScreen = document.getElementById('endScreen');
+var endTitle = document.getElementById('endTitle');
+var endText = document.getElementById('endText');
+var msgEl = document.getElementById('msg');
+
+var state = 'title'; // title | playing | win | over
+var score = 0, barrelsFilled = 0, townHealth = 3, cloudsHome = 0;
+var spawnTimer = 0, elapsed = 0, gustPulse = 0;
+var clouds = [], particles = [], splashes = [], strikes = [];
+var keys = {};
+
+var fan = { x: 300, y: 300, r: 26, angle: 0, gusting: false, px: 300, py: 300 };
+var pointer = { active: false, x: 300, y: 300, down: false };
+
+// Five barrels along the bottom
+var barrels = [];
+for (var i = 0; i < 5; i++) {
+  barrels.push({ x: 110 + i * 155, y: 552, w: 62, h: 52, filled: false, glow: 0 });
+}
+
+// ---------- Audio (procedural, created only after interaction) ----------
+var audioCtx = null;
+function ensureAudio() {
+  if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+}
+function tone(freq, dur, type, vol, slideTo) {
+  if (!audioCtx) return;
+  var t = audioCtx.currentTime;
+  var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  g.gain.setValueAtTime(vol || 0.15, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function whoosh() {
+  if (!audioCtx) return;
+  var t = audioCtx.currentTime, len = audioCtx.sampleRate * 0.35;
+  var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  var d = buf.getChannelData(0);
+  for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  var src = audioCtx.createBufferSource(); src.buffer = buf;
+  var f = audioCtx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8;
+  var g = audioCtx.createGain(); g.gain.setValueAtTime(0.22, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  src.connect(f); f.connect(g); g.connect(audioCtx.destination); src.start(t);
+}
+function playChime() { tone(523, 0.18, 'sine', 0.18); setTimeout(function(){ tone(659, 0.18, 'sine', 0.18); }, 90); setTimeout(function(){ tone(784, 0.3, 'sine', 0.2); }, 180); }
+function playThud() { tone(90, 0.4, 'triangle', 0.3, 45); tone(55, 0.4, 'sine', 0.25, 35); }
+function playWin() { [523,659,784,1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.35, 'triangle', 0.2); }, i * 130); }); }
+function playLose() { [392,330,262,196].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.35, 'sawtooth', 0.12); }, i * 150); }); }
+
+// ---------- Game setup ----------
+function resetGame() {
+  score = 0; barrelsFilled = 0; townHealth = 3; cloudsHome = 0;
+  spawnTimer = 0.6; elapsed = 0; gustPulse = 0;
+  clouds = []; particles = []; splashes = []; strikes = [];
+  fan.x = 300; fan.y = 300; fan.gusting = false;
+  barrels.forEach(function(b){ b.filled = false; b.glow = 0; });
+  updateHUD(); msgEl.textContent = '';
+}
+function spawnCloud() {
+  var speed = 26 + Math.min(38, elapsed * 0.9) + Math.random() * 18;
+  clouds.push({
+    x: -40, y: 40 + Math.random() * 330,
+    vx: speed, vy: (Math.random() - 0.5) * 14,
+    r: 26 + Math.random() * 12, wob: Math.random() * Math.PI * 2,
+    hue: 200 + Math.random() * 30
+  });
+}
+function updateHUD() {
+  hudScore.textContent = 'Score: ' + score;
+  hudBarrels.textContent = 'Barrels: ' + barrelsFilled + ' / 5';
+  var hearts = '';
+  for (var i = 0; i < 3; i++) hearts += (i < townHealth) ? '\u2764' : '\u2661';
+  hudTown.textContent = 'Town Health: ' + hearts;
+  hudTown.className = townHealth <= 1 ? 'warn' : '';
+  hudClouds.textContent = 'Clouds Home: ' + cloudsHome;
+}
+function burst(x, y, color, n, speed) {
+  for (var i = 0; i < n; i++) {
+    var a = Math.random() * Math.PI * 2, s = (0.4 + Math.random() * 0.6) * speed;
+    particles.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.7 + Math.random() * 0.5, max: 1.2, color: color, size: 2 + Math.random() * 4 });
+  }
+}
+function endGame(win) {
+  state = win ? 'win' : 'over';
+  endTitle.textContent = win ? 'You Win! The Storm Is Home!' : 'Game Over! The Town Got Soaked!';
+  endText.textContent = win
+    ? 'All 5 barrels filled! Final score: ' + score + ' with ' + cloudsHome + ' clouds herded home.'
+    : 'The town took 3 strikes. Final score: ' + score + ' with ' + barrelsFilled + ' barrel(s) filled.';
+  endScreen.classList.remove('hidden');
+  if (win) playWin(); else playLose();
+}
+function startGame() {
+  ensureAudio();
+  resetGame();
+  state = 'playing';
+  titleScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+  spawnCloud(); spawnCloud();
+}
+function restartGame() { startGame(); }
+
+// ---------- Input ----------
+function canvasPos(evt) {
+  var rect = canvas.getBoundingClientRect();
+  var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0);
+  var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0);
+  return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+}
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', restartGame);
+
+document.addEventListener('keydown', function(e) {
+  var k = e.key.toLowerCase();
+  keys[k] = true;
+  if (k === ' ' || k === 'enter') {
+    if (state === 'title') startGame();
+    else if (state === 'win' || state === 'over') restartGame();
+    if (k === ' ') e.preventDefault();
+  }
+  if (k === 'r' && state !== 'title') restartGame();
+});
+document.addEventListener('keyup', function(e) { keys[e.key.toLowerCase()] = false; });
+
+canvas.addEventListener('mousemove', function(e) {
+  var p = canvasPos(e); fan.x = p.x; fan.y = p.y; pointer.x = p.x; pointer.y = p.y;
+  if (e.buttons > 0) fan.gusting = true;
+});
+canvas.addEventListener('mousedown', function(e) {
+  var p = canvasPos(e); fan.x = p.x; fan.y = p.y; fan.gusting = true; pointer.down = true;
+  if (state === 'playing') whoosh();
+});
+document.addEventListener('mouseup', function() { fan.gusting = false; pointer.down = false; });
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  var p = canvasPos(e); fan.x = p.x; fan.y = p.y; fan.gusting = true; pointer.active = true;
+  if (state === 'playing') whoosh();
+}, { passive: false });
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  var p = canvasPos(e); fan.x = p.x; fan.y = p.y; fan.gusting = true;
+}, { passive: false });
+canvas.addEventListener('touchend', function(e) { e.preventDefault(); fan.gusting = false; pointer.active = false; }, { passive: false });
+
+// ---------- Update ----------
+function update(dt) {
+  if (state !== 'playing') return;
+  elapsed += dt;
+  var spd = 260;
+  if (keys['arrowleft'] || keys['a']) fan.x -= spd * dt;
+  if (keys['arrowright'] || keys['d']) fan.x += spd * dt;
+  if (keys['arrowup'] || keys['w']) fan.y -= spd * dt;
+  if (keys['arrowdown'] || keys['s']) fan.y += spd * dt;
+  fan.x = Math.max(20, Math.min(W - 20, fan.x));
+  fan.y = Math.max(20, Math.min(H - 20, fan.y));
+  if (keys[' ']) fan.gusting = true;
+  fan.angle += dt * (fan.gusting ? 14 : 4);
+  if (fan.gusting) { gustPulse += dt; if (gustPulse > 0.28) { gustPulse = 0; whoosh(); } }
+
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) { spawnCloud(); spawnTimer = Math.max(1.1, 2.6 - elapsed * 0.02) * (0.8 + Math.random() * 0.5); }
+
+  var gustR = fan.gusting ? 150 : 85;
+  for (var i = clouds.length - 1; i >= 0; i--) {
+    var c = clouds[i];
+    c.wob += dt * 2;
+    // Base drift toward town (east) plus gentle bob
+    c.vx += (28 - c.vx) * 0.02 * dt * 10 * 0.1;
+    c.vy += Math.sin(c.wob) * 6 * dt;
+    // Gust push: away from the fan, stronger when gusting
+    var dx = c.x - fan.x, dy = c.y - fan.y;
+    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    if (dist < gustR + c.r) {
+      var strength = fan.gusting ? 900 : 260;
+      var fall = 1 - dist / (gustR + c.r);
+      c.vx += (dx / dist) * strength * fall * dt * 3;
+      c.vy += (dy / dist) * strength * fall * dt * 3;
+      if (fan.gusting && Math.random() < 0.35) particles.push({ x: fan.x + dx * 0.4, y: fan.y + dy * 0.4, vx: dx / dist * 60, vy: dy / dist * 60, life: 0.4, max: 0.4, color: '#bfe3ff', size: 2 });
+    }
+    // Drag + clamp
+    c.vx *= (1 - 0.6 * dt); c.vy *= (1 - 0.6 * dt);
+    c.x += c.vx * dt; c.y += c.vy * dt;
+    c.y = Math.max(30, Math.min(H - 90, c.y));
+
+    // Barrel catch?
+    var caught = false;
+    for (var b = 0; b < barrels.length; b++) {
+      var bar = barrels[b];
+      if (!bar.filled && Math.abs(c.x - bar.x) < 46 && c.y > bar.y - 30 && c.y < bar.y + 40) {
+        bar.filled = true; bar.glow = 1; barrelsFilled++; cloudsHome++;
+        score += 100 + Math.max(0, townHealth * 10);
+        burst(bar.x, bar.y - 10, '#7ec8ff', 26, 140);
+        splashes.push({ x: bar.x, y: bar.y - 8, life: 1 });
+        msgEl.textContent = 'Barrel filled! ' + barrelsFilled + ' / 5';
+        playChime(); caught = true; break;
+      }
+    }
+    if (caught) { clouds.splice(i, 1); continue; }
+
+    // Town strike? Town occupies the right edge strip.
+    if (c.x > W - 62) {
+      townHealth--; score = Math.max(0, score - 25);
+      strikes.push({ x: c.x, y: c.y, life: 1 });
+      burst(c.x, c.y, '#ff9a7a', 24, 160);
+      msgEl.textContent = 'Town strike! Health: ' + townHealth + ' / 3';
+      playThud(); updateHUD();
+      clouds.splice(i, 1);
+      if (townHealth <= 0) { endGame(false); return; }
+      continue;
+    }
+    if (c.x < -70) clouds.splice(i, 1);
+  }
+
+  barrels.forEach(function(b){ if (b.glow > 0) b.glow -= dt * 0.8; });
+  for (var p = particles.length - 1; p >= 0; p--) {
+    var pt = particles[p]; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+    if (pt.life <= 0) particles.splice(p, 1);
+  }
+  for (var s = splashes.length - 1; s >= 0; s--) { splashes[s].life -= dt; if (splashes[s].life <= 0) splashes.splice(s, 1); }
+  for (var st = strikes.length - 1; st >= 0; st--) { strikes[st].life -= dt; if (strikes[st].life <= 0) strikes.splice(st, 1); }
+
+  if (barrelsFilled >= 5) { updateHUD(); endGame(true); return; }
+  updateHUD();
+}
+
+// ---------- Draw ----------
+function drawCloud(x, y, r, shade) {
+  ctx.fillStyle = shade;
+  ctx.beginPath();
+  ctx.arc(x - r * 0.55, y + 4, r * 0.55, 0, Math.PI * 2);
+  ctx.arc(x, y - r * 0.3, r * 0.75, 0, Math.PI * 2);
+  ctx.arc(x + r * 0.6, y + 4, r * 0.6, 0, Math.PI * 2);
+  ctx.arc(x + r * 0.1, y + 10, r * 0.7, 0, Math.PI * 2);
+  ctx.fill();
+}
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  // Sky gradient bands + distant hills
+  var g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#1b2a4a'); g.addColorStop(0.5, '#243b63'); g.addColorStop(1, '#3a5a84');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#16233f';
+  ctx.beginPath(); ctx.moveTo(0, 500);
+  for (var hx = 0; hx <= W; hx += 60) ctx.lineTo(hx, 492 + Math.sin(hx * 0.02) * 10);
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+
+  // Town (right strip)
+  ctx.fillStyle = '#2a1f3d'; ctx.fillRect(W - 60, 0, 60, H);
+  var houseCols = ['#ffb347', '#ff7a6b', '#ffd166', '#9be15d'];
+  for (var hi = 0; hi < 5; hi++) {
+    var hy = 40 + hi * 108;
+    ctx.fillStyle = houseCols[hi % 4];
+    ctx.fillRect(W - 52, hy, 40, 66);
+    ctx.fillStyle = '#5b2a4a';
+    ctx.beginPath(); ctx.moveTo(W - 56, hy); ctx.lineTo(W - 32, hy - 18); ctx.lineTo(W - 8, hy); ctx.fill();
+    ctx.fillStyle = '#ffe9a8'; ctx.fillRect(W - 38, hy + 24, 12, 14);
+  }
+  ctx.fillStyle = '#ffe066'; ctx.font = 'bold 13px Verdana'; ctx.textAlign = 'center';
+  ctx.fillText('TOWN', W - 30, 20);
+  strikes.forEach(function(s){
+    ctx.strokeStyle = 'rgba(255,220,80,' + s.life + ')'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(s.x, s.y - 30); ctx.lineTo(s.x + 8, s.y - 5); ctx.lineTo(s.x - 4, s.y + 12); ctx.lineTo(s.x + 6, s.y + 34); ctx.stroke();
+  });
+
+  // Barrels
+  barrels.forEach(function(b){
+    ctx.fillStyle = b.filled ? '#3f7fc4' : '#7a5230';
+    ctx.beginPath(); ctx.roundRect(b.x - b.w / 2, b.y - b.h / 2, b.w, b.h, 8); ctx.fill();
+    ctx.strokeStyle = '#2c1e12'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(b.x - b.w / 2, b.y - b.h / 2 + 8, b.w, 6);
+    if (b.filled) {
+      ctx.fillStyle = 'rgba(126,200,255,' + (0.55 + b.glow * 0.45) + ')';
+      ctx.beginPath(); ctx.ellipse(b.x, b.y - b.h / 2 + 2, b.w / 2 - 4, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#eaf2ff'; ctx.font = 'bold 16px Verdana'; ctx.fillText('\u2713', b.x, b.y + 6);
+    } else {
+      ctx.fillStyle = '#ffe066'; ctx.font = 'bold 12px Verdana'; ctx.fillText('BARREL', b.x, b.y + 6);
+    }
+  });
+  splashes.forEach(function(s){
+    ctx.strokeStyle = 'rgba(126,200,255,' + s.life + ')'; ctx.lineWidth = 2;
+    for (var k = 0; k < 5; k++) { ctx.beginPath(); ctx.arc(s.x - 16 + k * 8, s.y, 5 + (1 - s.life) * 10, 0, Math.PI); ctx.stroke(); }
+  });
+
+  // Clouds
+  clouds.forEach(function(c){
+    drawCloud(c.x, c.y, c.r, '#5d7396');
+    drawCloud(c.x, c.y - 4, c.r * 0.92, '#dbe9ff');
+    ctx.fillStyle = '#3a4a6b'; ctx.font = 'bold 12px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('\u2601', c.x, c.y - c.r * 0.5);
+  });
+
+  // Fan (wind source)
+  if (state === 'playing') {
+    if (fan.gusting) {
+      ctx.strokeStyle = 'rgba(191,227,255,0.35)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(fan.x, fan.y, 150, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(191,227,255,0.18)';
+      ctx.beginPath(); ctx.arc(fan.x, fan.y, 110, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.save(); ctx.translate(fan.x, fan.y); ctx.rotate(fan.angle);
+    ctx.fillStyle = '#ffe066';
+    for (var bl = 0; bl < 3; bl++) {
+      ctx.rotate(Math.PI * 2 / 3);
+      ctx.beginPath(); ctx.ellipse(0, -16, 8, 18, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    ctx.fillStyle = '#0b1020'; ctx.beginPath(); ctx.arc(fan.x, fan.y, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#eaf2ff'; ctx.font = 'bold 12px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('WIND', fan.x, fan.y + 40);
+  }
+
+  // Particles
+  particles.forEach(function(pt){
+    ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+    ctx.fillStyle = pt.color;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+}
+
+// ---------- Loop ----------
+var last = performance.now();
+function loop(now) {
+  var dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+updateHUD();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

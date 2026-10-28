@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Coral Courier — Underwater Delivery</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#03283a;color:#eafcff;font-family:Arial,Helvetica,sans-serif;overflow:hidden;display:flex;justify-content:center;align-items:center;min-height:100vh}
+#wrap{position:relative;width:960px;max-width:98vw}
+canvas{display:block;width:100%;height:600px;background:linear-gradient(#0a5a7d,#063a52 55%,#042a3d);border:4px solid #2dd4bf;border-radius:16px;touch-action:none}
+#hud{position:absolute;top:12px;left:14px;right:14px;display:flex;justify-content:space-between;font-weight:bold;font-size:17px;text-shadow:1px 1px 2px #000;pointer-events:none}
+#hud span{background:rgba(0,30,45,.55);padding:6px 10px;border-radius:10px}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:rgba(2,30,45,.72);border-radius:12px;padding:20px}
+.overlay h1{font-size:52px;color:#ffd166;margin-bottom:8px;text-shadow:2px 2px 0 #0a4a63}
+.overlay h2{font-size:42px;color:#ffd166;margin-bottom:10px}
+.overlay p{max-width:620px;line-height:1.55;margin:8px 0;font-size:17px}
+button{margin-top:16px;padding:14px 30px;font-size:20px;font-weight:bold;border:0;border-radius:12px;background:#ffd166;color:#083344;cursor:pointer}
+button:hover{background:#fff176}
+.hidden{display:none!important}
+.badge{display:inline-block;background:#2dd4bf;color:#03283a;padding:4px 10px;border-radius:20px;font-weight:bold;font-size:14px}
+.small{font-size:14px;color:#bfeeff}
+@media(max-width:600px){.overlay h1{font-size:36px}canvas{height:480px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+<div id="hud"><span>Score: <b id="score">0</b></span><span>Lives: <b id="lives">♥♥♥</b></span><span>Deliveries: <b id="deliv">0 / 5</b></span><span id="status">Find a parcel!</span></div>
+<canvas id="game" width="960" height="600"></canvas>
+<div id="title" class="overlay">
+<h1>🐠 Coral Courier</h1>
+<span class="badge">ARCADE • UNDERWATER DELIVERY</span>
+<p><b>How to Play:</b> You are a courier fish in a coral reef. Swim to a glowing parcel, pick it up, then deliver it to the sparkling checkpoint shell. Complete <b>5 deliveries</b> to win!</p>
+<p>Watch out: jellyfish drift and sharks patrol. You have <b>3 lives</b> — a hit costs one life and drops your parcel. Dash through tight spots, but dashing has a short cooldown.</p>
+<p><b>Controls:</b> Arrow Keys / WASD to swim • Mouse move to steer • Touch drag to steer • <b>Space</b> to dash • <b>R</b> to restart</p>
+<button id="startBtn">▶ Start Delivery Run</button>
+<p class="small">Tip: parcels glow gold, checkpoints glow green. Stay near coral for cover, but never stop moving when a shark is near!</p>
+</div>
+<div id="end" class="overlay hidden">
+<h2 id="endTitle">You Win!</h2>
+<p id="endText"></p>
+<p>Final Score: <b id="finalScore">0</b> • Deliveries: <b id="finalDeliv">0 / 5</b></p>
+<button id="restartBtn">↻ Restart</button>
+</div>
+</div>
+<script>
+const cv=document.getElementById('game'),ctx=cv.getContext('2d');
+const W=960,H=600;
+const $=id=>document.getElementById(id);
+let running=false,over=false,won=false,score=0,lives=3,deliveries=0,time=0,last=0;
+let keys={},mouse={x:null,y:null,active:false},touch={x:null,y:null,active:false};
+let dashCd=0,dashTime=0,invuln=0,flash=0;
+const player={x:120,y:300,vx:0,vy:0,r:18,angle:0};
+let parcel=null,checkpoint=null,jellies=[],sharks=[],bubbles=[],particles=[],corals=[];
+let audioCtx=null;
+function beep(f,d,type,vol){try{if(!audioCtx)return;const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type||'sine';o.frequency.value=f;g.gain.setValueAtTime(vol||0.12,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);}catch(e){}}
+function initAudio(){if(!audioCtx){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();}
+function rand(a,b){return a+Math.random()*(b-a);}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+function makeCorals(){corals=[];for(let i=0;i<26;i++){corals.push({x:rand(20,W-20),y:H-20-rand(0,40),w:rand(18,52),h:rand(30,95),c:['#ff6b9d','#ff9f43','#2dd4bf','#a78bfa'][i%4]});}}
+function spawnParcel(){parcel={x:rand(120,W-120),y:rand(90,H-120),bob:0};beep(520,0.15,'triangle',0.08);}
+function spawnCheckpoint(){checkpoint={x:rand(120,W-120),y:rand(90,H-120),pulse:0};if(parcel&&dist(checkpoint,parcel)<180){checkpoint.x=W-120;checkpoint.y=120;}}
+function spawnHazards(){jellies=[];sharks=[];for(let i=0;i<5;i++)jellies.push({x:rand(200,W-100),y:rand(80,H-80),vx:rand(-0.6,0.6),vy:rand(-0.4,0.4),r:20,ph:rand(0,6)});for(let i=0;i<3;i++)sharks.push({x:rand(300,W-100),y:rand(80,H-80),vx:rand(-1.1,-0.6),r:30,ph:rand(0,6)});}
+function reset(){score=0;lives=3;deliveries=0;dashCd=0;dashTime=0;invuln=0;over=false;won=false;player.x=120;player.y=300;player.vx=0;player.vy=0;makeCorals();spawnHazards();spawnParcel();spawnCheckpoint();bubbles=[];particles=[];updateHUD('Find the gold parcel!');}
+function updateHUD(msg){$('score').textContent=score;$('lives').textContent='♥'.repeat(Math.max(0,lives))||'—';$('deliv').textContent=deliveries+' / 5';if(msg)$('status').textContent=msg;}
+function burst(x,y,color,n){for(let i=0;i<(n||14);i++)particles.push({x,y,vx:rand(-2.5,2.5),vy:rand(-2.5,2.5),life:30,color});}
+function hit(){if(invuln>0||over)return;lives--;invuln=120;flash=18;beep(140,0.35,'sawtooth',0.15);burst(player.x,player.y,'#ff5a5a',20);if(parcel&&player.carrying){player.carrying=false;spawnParcel();}updateHUD(lives>0?'Ouch! Parcel dropped — grab another!':'');if(lives<=0)endGame(false);}
+function endGame(win){over=true;running=false;won=win;$('end').classList.remove('hidden');$('endTitle').textContent=win?'🏆 You Win!':'💥 Game Over';$('endText').textContent=win?'All 5 deliveries completed! The reef celebrates its fastest courier!':'The reef got the better of you this run. Try again, courier!';$('finalScore').textContent=score;$('finalDeliv').textContent=deliveries+' / 5';beep(win?880:220,0.5,win?'triangle':'sawtooth',0.15);}
+function start(){initAudio();reset();$('title').classList.add('hidden');$('end').classList.add('hidden');running=true;last=performance.now();requestAnimationFrame(loop);beep(660,0.2,'triangle',0.12);}
+function loop(now){if(!running)return;const dt=Math.min(32,now-last);last=now;time+=dt;update(dt);draw();if(running)requestAnimationFrame(loop);}
+function update(dt){
+ const sp=(dashTime>0?5.2:2.6);
+ let ax=0,ay=0;
+ if(keys['arrowleft']||keys['a'])ax-=1; if(keys['arrowright']||keys['d'])ax+=1;
+ if(keys['arrowup']||keys['w'])ay-=1; if(keys['arrowdown']||keys['s'])ay+=1;
+ const target=mouse.active?mouse:touch.active?touch:null;
+ if(target&&target.x!==null){const rect=cv.getBoundingClientRect();const tx=(target.x-rect.left)*(W/rect.width),ty=(target.y-rect.top)*(H/rect.height);const dx=tx-player.x,dy=ty-player.y,d=Math.hypot(dx,dy);if(d>12){ax=dx/d;ay=dy/d;}}
+ if(ax||ay){const m=Math.hypot(ax,ay);player.vx+=ax/m*0.22*sp;player.vy+=ay/m*0.22*sp;player.angle=Math.atan2(player.vy,player.vx);}
+ player.vx*=0.94;player.vy*=0.94;
+ player.x=Math.max(24,Math.min(W-24,player.x+player.vx));player.y=Math.max(50,Math.min(H-24,player.y+player.vy));
+ if(dashCd>0)dashCd-=dt/16; if(dashTime>0)dashTime-=dt/16; if(invuln>0)invuln-=dt/16; if(flash>0)flash--;
+ // current drift
+ player.x+=Math.sin(time/900)*0.25;
+ jellies.forEach(j=>{j.x+=j.vx+Math.sin(time/500+j.ph)*0.3;j.y+=j.vy+Math.cos(time/600+j.ph)*0.3;if(j.x<30||j.x>W-30)j.vx*=-1;if(j.y<60||j.y>H-30)j.vy*=-1;if(invuln<=0&&dist(j,player)<j.r+player.r)hit();});
+ sharks.forEach(s=>{s.x+=s.vx;if(s.x<40){s.x=40;s.vx=Math.abs(s.vx);}if(s.x>W-40){s.x=W-40;s.vx=-Math.abs(s.vx);}s.y+=Math.sin(time/700+s.ph)*0.6;if(invuln<=0&&dist(s,player)<s.r+player.r-6)hit();});
+ if(parcel){parcel.bob=Math.sin(time/300)*6;if(dist(parcel,player)<44&&!player.carrying){player.carrying=true;beep(780,0.2,'triangle',0.12);burst(parcel.x,parcel.y,'#ffd166',16);updateHUD('Parcel collected! Deliver to the green shell!');}}
+ if(checkpoint){checkpoint.pulse=Math.sin(time/250)*5;if(player.carrying&&dist(checkpoint,player)<52){deliveries++;score+=100+Math.max(0,50-lives*0);player.carrying=false;beep(990,0.3,'triangle',0.14);burst(checkpoint.x,checkpoint.y,'#2dd4bf',24);if(deliveries>=5){updateHUD('All deliveries done!');endGame(true);return;}spawnParcel();spawnCheckpoint();updateHUD('Delivered! '+deliveries+' / 5 — find the next parcel!');}}
+ if(Math.random()<0.08)bubbles.push({x:player.x+rand(-8,8),y:player.y-10,vy:rand(-1.5,-0.7),r:rand(2,5)});
+ bubbles.forEach(b=>b.y+=b.vy);bubbles=bubbles.filter(b=>b.y>40);
+ particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;});particles=particles.filter(p=>p.life>0);
+ updateHUD();
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ // sun rays + sand
+ ctx.fillStyle='#f7e8a0';ctx.fillRect(0,H-14,W,14);
+ corals.forEach(c=>{ctx.fillStyle=c.c;ctx.beginPath();ctx.ellipse(c.x,c.y,c.w/2,c.h/2,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(255,255,255,.25)';ctx.beginPath();ctx.arc(c.x-6,c.y-12,5,0,Math.PI*2);ctx.fill();});
+ bubbles.forEach(b=>{ctx.strokeStyle='rgba(255,255,255,.6)';ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.stroke();});
+ particles.forEach(p=>{ctx.fillStyle=p.color;ctx.globalAlpha=p.life/30;ctx.beginPath();ctx.arc(p.x,p.y,4,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;});
+ if(parcel){ctx.save();ctx.translate(parcel.x,parcel.y+parcel.bob);ctx.fillStyle='#ffd166';ctx.fillRect(-18,-14,36,28);ctx.fillStyle='#b45309';ctx.fillRect(-18,-2,36,4);ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.textAlign='center';ctx.fillText('📦',0,6);ctx.restore();}
+ if(checkpoint){ctx.save();ctx.translate(checkpoint.x,checkpoint.y);ctx.fillStyle='#2dd4bf';ctx.globalAlpha=0.35;ctx.beginPath();ctx.arc(0,0,42+checkpoint.pulse,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.font='34px Arial';ctx.textAlign='center';ctx.fillText('🐚',0,12);ctx.restore();}
+ jellies.forEach(j=>{ctx.fillStyle='rgba(255,150,220,.85)';ctx.beginPath();ctx.arc(j.x,j.y,j.r,Math.PI,0);ctx.fill();ctx.strokeStyle='#ff9de2';for(let i=0;i<4;i++){ctx.beginPath();ctx.moveTo(j.x-12+i*8,j.y);ctx.quadraticCurveTo(j.x-12+i*8+Math.sin(time/200+j.ph+i)*5,j.y+18,j.x-12+i*8,j.y+30);ctx.stroke();}});
+ sharks.forEach(s=>{ctx.save();ctx.translate(s.x,s.y);ctx.scale(s.vx>0?1:-1,1);ctx.fillStyle='#94a3b8';ctx.beginPath();ctx.ellipse(0,0,34,16,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.moveTo(30,0);ctx.lineTo(48,-12);ctx.lineTo(48,12);ctx.closePath();ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(16,-4,3,0,Math.PI*2);ctx.fill();ctx.fillStyle='#000';ctx.beginPath();ctx.arc(17,-4,1.5,0,Math.PI*2);ctx.fill();ctx.restore();});
+ // player fish
+ ctx.save();ctx.translate(player.x,player.y);if(invuln>0&&Math.floor(time/100)%2===0)ctx.globalAlpha=0.4;ctx.rotate(player.angle);ctx.fillStyle='#fb923c';ctx.beginPath();ctx.ellipse(0,0,24,14,0,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(-36,-12);ctx.lineTo(-36,12);ctx.closePath();ctx.fillStyle='#f97316';ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(12,-4,5,0,Math.PI*2);ctx.fill();ctx.fillStyle='#000';ctx.beginPath();ctx.arc(14,-4,2.5,0,Math.PI*2);ctx.fill();ctx.restore();
+ if(player.carrying){ctx.fillStyle='#ffd166';ctx.fillRect(player.x-10,player.y-30,20,14);ctx.fillStyle='#083344';ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText('PKG',player.x,player.y-19);}
+ if(dashTime>0){ctx.strokeStyle='#fef08a';ctx.lineWidth=3;ctx.beginPath();ctx.arc(player.x,player.y,30,0,Math.PI*2);ctx.stroke();}
+ if(flash>0){ctx.fillStyle='rgba(255,60,60,'+(flash/60)+')';ctx.fillRect(0,0,W,H);}
+ if(!running&&!over){ctx.fillStyle='rgba(2,30,45,.25)';ctx.fillRect(0,0,W,H);}
+}
+document.addEventListener('keydown',e=>{const k=e.key.toLowerCase();keys[k]=true;if(k===' '){e.preventDefault();if(running&&dashCd<=0){dashTime=10;dashCd=90;player.vx*=2.2;player.vy*=2.2;beep(440,0.15,'square',0.1);}}if(k==='r'){if(over||!running)start();else reset();}if((k==='enter'||k===' ')&&!running&&!over)initAudio();});
+document.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+cv.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY;mouse.active=true;});
+cv.addEventListener('mouseleave',()=>{mouse.active=false;});
+cv.addEventListener('touchstart',e=>{e.preventDefault();const t=e.touches[0];touch.x=t.clientX;touch.y=t.clientY;touch.active=true;initAudio();},{passive:false});
+cv.addEventListener('touchmove',e=>{e.preventDefault();const t=e.touches[0];touch.x=t.clientX;touch.y=t.clientY;touch.active=true;},{passive:false});
+cv.addEventListener('touchend',()=>{touch.active=false;});
+$('startBtn').addEventListener('click',start);
+$('restartBtn').addEventListener('click',start);
+reset();draw();
+</script>
+</body>
+</html>

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comet Catcher</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050514; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 34px; letter-spacing: 2px; color: #ffd76a; text-shadow: 0 0 18px #ff9d2e; margin: 6px 0 2px; }
+  p.tag { color: #9fb8e8; margin-bottom: 10px; }
+  #wrap { position: relative; width: 720px; max-width: 96vw; }
+  canvas { width: 100%; height: auto; display: block; background: #070726;
+    border: 3px solid #2a3f7a; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0; font-weight: bold; }
+  #hud div { background: #16224d; border: 1px solid #314a8a; border-radius: 8px;
+    padding: 8px 12px; flex: 1; text-align: center; font-size: 15px; }
+  #hud span { color: #ffd76a; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(3,3,20,0.88); border-radius: 14px; padding: 24px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 38px; color: #ffd76a; margin-bottom: 10px; }
+  .overlay p { max-width: 520px; line-height: 1.55; color: #d7e2ff; margin: 6px 0; }
+  .overlay .big { font-size: 20px; color: #ffffff; }
+  button { margin-top: 16px; padding: 13px 30px; font-size: 19px; font-weight: bold;
+    color: #101020; background: #ffd76a; border: none; border-radius: 10px; cursor: pointer; }
+  button:hover { background: #ffe79a; }
+  .keys { font-size: 14px; color: #aebfff; margin-top: 12px; line-height: 1.6; }
+  #msg { height: 22px; color: #7dffb0; font-weight: bold; text-align: center; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>COMET CATCHER</h1>
+<p class="tag">Precision / Orbital Catch &mdash; ride the ring, time the net, catch 20 comets!</p>
+<div id="wrap">
+  <canvas id="game" width="720" height="720"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>COMET CATCHER</h2>
+    <p class="big">Catch 20 comets before you miss 3!</p>
+    <p><b>How to Play:</b> Your catcher rides the glowing orbit ring around the star.
+    Comets streak across the sky on curved paths. Steer the catcher onto a comet's path,
+    then press Space (or click / tap) to fire a catch pulse just as the comet passes.
+    A well-timed pulse catches from farther away. Catch in a row to build a streak bonus.
+    Let a comet fly off screen and you lose a life &mdash; 3 misses ends the run.</p>
+    <button id="startBtn">Start Game</button>
+    <p class="keys">Move: Arrow Keys / WASD &nbsp;|&nbsp; Aim: Mouse Move / Touch Drag<br>
+    Catch Pulse: Space / Click / Quick Tap &nbsp;|&nbsp; Restart: R</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText" class="big"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">Restart</button>
+    <p class="keys">Or press R to play again instantly.</p>
+  </div>
+</div>
+<div id="hud">
+  <div>Score: <span id="score">0</span></div>
+  <div>Caught: <span id="caught">0</span> / 20</div>
+  <div>Streak: <span id="streak">0</span></div>
+  <div>Misses: <span id="misses">0</span> / 3</div>
+</div>
+<div id="msg"></div>
+<p class="keys">Tip: watch the comet trail &mdash; it curves! Lead your catcher slightly ahead of fast comets.</p>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 720, H = 720, CX = 360, CY = 360, RING = 185;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+  var scoreEl = document.getElementById('score');
+  var caughtEl = document.getElementById('caught');
+  var streakEl = document.getElementById('streak');
+  var missesEl = document.getElementById('misses');
+  var msgEl = document.getElementById('msg');
+
+  var state = 'title'; // title | playing | win | over
+  var angle = -Math.PI / 2, angleVel = 0;
+  var score = 0, caught = 0, streak = 0, misses = 0, bestStreak = 0;
+  var comets = [], particles = [], stars = [], spawnTimer = 0, time = 0;
+  var pulse = 0, pulseCooldown = 0, msgTimer = 0;
+  var keys = {};
+
+  for (var i = 0; i < 90; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H,
+      r: Math.random() * 1.8 + 0.4, tw: Math.random() * Math.PI * 2 });
+  }
+
+  // ---- Procedural audio, created only after user interaction ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) { o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur); }
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is decorative */ }
+  }
+  function soundCatch() { beep(620, 0.14, 'sine', 0.18, 980); setTimeout(function(){ beep(1240, 0.12, 'triangle', 0.12); }, 60); }
+  function soundMiss() { beep(220, 0.3, 'sawtooth', 0.12, 110); }
+  function soundPulse() { beep(440, 0.08, 'triangle', 0.10, 660); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function(f, k){ setTimeout(function(){ beep(f, 0.22, 'triangle', 0.16); }, k * 130); }); }
+  function soundOver() { [392, 330, 262, 196].forEach(function(f, k){ setTimeout(function(){ beep(f, 0.25, 'sawtooth', 0.10); }, k * 150); }); }
+
+  function showMsg(text) { msgEl.textContent = text; msgTimer = 1.6; }
+  function updateHud() {
+    scoreEl.textContent = score; caughtEl.textContent = caught;
+    streakEl.textContent = streak; missesEl.textContent = misses;
+  }
+
+  function spawnComet() {
+    var side = Math.floor(Math.random() * 4), x, y;
+    if (side === 0) { x = -20; y = Math.random() * H; }
+    else if (side === 1) { x = W + 20; y = Math.random() * H; }
+    else if (side === 2) { x = Math.random() * W; y = -20; }
+    else { x = Math.random() * W; y = H + 20; }
+    // Aim roughly across the arena with a curve drift
+    var dx = CX - x, dy = CY - y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+    var speed = 95 + Math.random() * 70 + Math.min(caught * 4, 70);
+    var perp = Math.random() < 0.5 ? -1 : 1;
+    comets.push({
+      x: x, y: y, px: x, py: y,
+      vx: (dx / d) * speed + (-dy / d) * perp * (20 + Math.random() * 45),
+      vy: (dy / d) * speed + (dx / d) * perp * (20 + Math.random() * 45),
+      curve: (Math.random() * 0.9 + 0.3) * perp,
+      r: 9 + Math.random() * 5, hue: Math.random() < 0.5 ? '255,180,90' : '140,220,255',
+      trail: [], t: 0
+    });
+  }
+
+  function catcherPos() {
+    return { x: CX + Math.cos(angle) * RING, y: CY + Math.sin(angle) * RING };
+  }
+
+  function firePulse() {
+    if (state !== 'playing' || pulseCooldown > 0) return;
+    pulse = 1; pulseCooldown = 0.45; soundPulse();
+  }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? 'YOU WIN!' : 'GAME OVER';
+    endText.textContent = won ? 'You caught all 20 comets! The sky is safe.' : 'Three comets slipped past your net.';
+    endScore.textContent = 'Final score: ' + score + '  |  Caught: ' + caught + '  |  Best streak: ' + bestStreak;
+    endScreen.classList.remove('hidden');
+    if (won) { soundWin(); } else { soundOver(); }
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; caught = 0; streak = 0; misses = 0; bestStreak = 0;
+    comets = []; particles = []; angle = -Math.PI / 2;
+    pulse = 0; pulseCooldown = 0; spawnTimer = 0.4;
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHud(); showMsg('Catch the comets!');
+  }
+
+  function update(dt) {
+    time += dt;
+    if (pulseCooldown > 0) pulseCooldown -= dt;
+    if (pulse > 0) pulse -= dt * 3.2;
+    if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) msgEl.textContent = ''; }
+
+    // Steering: left/right (or up/down) moves along the ring
+    var dir = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) dir -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) dir += 1;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) dir -= 1;
+    if (keys['ArrowDown'] || keys['s'] || keys['S']) dir += 1;
+    if (dir !== 0) { angle += dir * 2.6 * dt; }
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnComet();
+      spawnTimer = Math.max(0.55, 1.35 - caught * 0.03);
+      if (comets.length < 2 && Math.random() < 0.5) spawnComet();
+    }
+
+    var cp = catcherPos();
+    var catchR = pulse > 0 ? 62 : 34;
+
+    for (var i = comets.length - 1; i >= 0; i--) {
+      var c = comets[i];
+      c.t += dt;
+      // Curved flight: slowly rotate velocity
+      var rot = c.curve * dt * 0.55;
+      var cos = Math.cos(rot), sin = Math.sin(rot);
+      var nvx = c.vx * cos - c.vy * sin, nvy = c.vx * sin + c.vy * cos;
+      c.vx = nvx; c.vy = nvy;
+      c.px = c.x; c.py = c.y;
+      c.x += c.vx * dt; c.y += c.vy * dt;
+      c.trail.push({ x: c.x, y: c.y });
+      if (c.trail.length > 16) c.trail.shift();
+
+      var dx = c.x - cp.x, dy = c.y - cp.y;
+      if (dx * dx + dy * dy < (catchR + c.r) * (catchR + c.r)) {
+        comets.splice(i, 1);
+        streak++; if (streak > bestStreak) bestStreak = streak;
+        var gain = 100 + (streak - 1) * 25;
+        score += gain; caught++;
+        for (var p = 0; p < 18; p++) {
+          particles.push({ x: c.x, y: c.y, vx: (Math.random() - 0.5) * 260,
+            vy: (Math.random() - 0.5) * 260, life: 0.6, hue: c.hue });
+        }
+        soundCatch();
+        if (streak >= 3) showMsg('Streak x' + streak + '! +' + gain);
+        else showMsg('Caught! +' + gain);
+        updateHud();
+        if (caught >= 20) { endGame(true); return; }
+        continue;
+      }
+      if (c.x < -40 || c.x > W + 40 || c.y < -40 || c.y > H + 40) {
+        comets.splice(i, 1);
+        misses++; streak = 0; soundMiss(); showMsg('Missed one! ' + (3 - misses) + ' lives left');
+        updateHud();
+        if (misses >= 3) { endGame(false); return; }
+      }
+    }
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var pt = particles[j];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(j, 1);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Starfield
+    for (var s = 0; s < stars.length; s++) {
+      var st = stars[s], a = 0.4 + 0.6 * Math.abs(Math.sin(time * 1.5 + st.tw));
+      ctx.fillStyle = 'rgba(255,255,255,' + a.toFixed(2) + ')';
+      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2); ctx.fill();
+    }
+    // Orbit ring
+    ctx.strokeStyle = '#2f4d9e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(CX, CY, RING, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(90,130,220,0.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(CX, CY, RING + 26, 0, Math.PI * 2); ctx.stroke();
+    // Central star
+    var grad = ctx.createRadialGradient(CX, CY, 4, CX, CY, 62);
+    grad.addColorStop(0, '#fff3c4'); grad.addColorStop(0.4, '#ffd76a'); grad.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(CX, CY, 62, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(CX, CY, 26, 0, Math.PI * 2); ctx.fill();
+    // Comet trails and heads
+    for (var i = 0; i < comets.length; i++) {
+      var c = comets[i];
+      for (var t = 0; t < c.trail.length; t++) {
+        var tp = c.trail[t], alpha = (t + 1) / c.trail.length * 0.55;
+        ctx.fillStyle = 'rgba(' + c.hue + ',' + alpha.toFixed(2) + ')';
+        ctx.beginPath(); ctx.arc(tp.x, tp.y, 3 + t * 0.25, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = 'rgb(' + c.hue + ')';
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(c.x - 3, c.y - 3, c.r * 0.35, 0, Math.PI * 2); ctx.fill();
+    }
+    // Catch particles
+    for (var j = 0; j < particles.length; j++) {
+      var pt = particles[j];
+      ctx.fillStyle = 'rgba(' + pt.hue + ',' + Math.max(pt.life, 0).toFixed(2) + ')';
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    // Catcher net on the ring
+    var cp = catcherPos();
+    if (pulse > 0) {
+      ctx.strokeStyle = 'rgba(125,255,176,' + (pulse * 0.8).toFixed(2) + ')';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cp.x, cp.y, 34 + (1 - pulse) * 30, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.strokeStyle = '#7dffb0'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(cp.x, cp.y, 22, angle - 1.1, angle + 1.1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cp.x, cp.y);
+    ctx.lineTo(CX + Math.cos(angle) * (RING - 26), CY + Math.sin(angle) * (RING - 26)); ctx.stroke();
+    ctx.fillStyle = '#7dffb0';
+    ctx.beginPath(); ctx.arc(cp.x, cp.y, 7, 0, Math.PI * 2); ctx.fill();
+    // Direction hint
+    ctx.fillStyle = '#cfe0ff'; ctx.font = '15px Arial';
+    ctx.fillText('Goal: 20 comets  |  Misses: ' + misses + '/3', 18, 28);
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    if (state === 'playing') update(dt);
+    else if (state === 'title' || state === 'win' || state === 'over') { time += dt; }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function aimFromEvent(clientX, clientY) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    var y = (clientY - rect.top) * (H / rect.height);
+    angle = Math.atan2(y - CY, x - CX);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      if (state === 'title' || state === 'win' || state === 'over') startGame();
+      else firePulse();
+    }
+    if (e.key === 'r' || e.key === 'R') {
+      if (state !== 'title') startGame();
+    }
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === ' ') && state === 'playing') {
+      e.preventDefault();
+    }
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  document.addEventListener('mousemove', function (e) {
+    if (state === 'playing') aimFromEvent(e.clientX, e.clientY);
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    if (state === 'playing') { aimFromEvent(e.clientX, e.clientY); firePulse(); }
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state === 'playing' && e.touches.length > 0) {
+      aimFromEvent(e.touches[0].clientX, e.touches[0].clientY);
+      canvas.dataset.touchStart = String(Date.now());
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    if (state === 'playing' && e.touches.length > 0) {
+      aimFromEvent(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) {
+    e.preventDefault();
+    var started = parseInt(canvas.dataset.touchStart || '0', 10);
+    if (state === 'playing' && Date.now() - started < 300) firePulse();
+  }, { passive: false });
+
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

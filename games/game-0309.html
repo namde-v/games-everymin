@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Orbit Organizer — Satellite Sorting Puzzle</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #070b1a; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; min-height: 100vh; padding: 12px; }
+  .wrap { width: min(680px, 100%); text-align: center; }
+  h1 { margin: 8px 0 2px; font-size: 32px; letter-spacing: 1px; color: #ffd166; text-shadow: 0 0 18px rgba(255,209,102,.45); }
+  .sub { color: #9fb3d9; margin-bottom: 10px; font-size: 14px; }
+  #hud { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 10px 0; }
+  .pill { background: #141f3d; border: 1px solid #2b3f73; border-radius: 999px; padding: 7px 13px; font-weight: bold; font-size: 14px; }
+  .pill.warn { color: #ff8080; border-color: #ff8080; }
+  #stage { position: relative; width: min(640px, 100%); aspect-ratio: 1 / 1; margin: 0 auto; background: radial-gradient(circle at 50% 50%, #101a38 0%, #070b1a 62%, #04060f 100%); border: 2px solid #2b3f73; border-radius: 18px; overflow: hidden; }
+  canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 22px; background: rgba(4,7,18,.88); }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0; font-size: 30px; color: #ffd166; }
+  .overlay p { margin: 4px 0; line-height: 1.55; color: #c8d6f2; max-width: 480px; }
+  .howto { background: #101a38; border: 1px solid #2b3f73; border-radius: 12px; padding: 12px 16px; text-align: left; font-size: 14px; }
+  .howto b { color: #fff; }
+  button { background: #ffd166; color: #1a1200; border: 0; border-radius: 999px; padding: 13px 26px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #26365f; color: #fff; padding: 10px 18px; font-size: 14px; }
+  .legend { display: flex; gap: 14px; justify-content: center; margin-top: 8px; font-size: 13px; color: #9fb3d9; }
+  .dot { display: inline-block; width: 13px; height: 13px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+  .controls { font-size: 13px; color: #9fb3d9; margin-top: 10px; line-height: 1.5; }
+  .big { font-size: 20px; font-weight: bold; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛰️ ORBIT ORGANIZER</h1>
+  <div class="sub">Puzzle / Satellite Sorting — sort every orbit to one colour before time runs out</div>
+  <div id="hud">
+    <div class="pill">Score: <span id="score">0</span></div>
+    <div class="pill">Orbits Sorted: <span id="sorted">0</span> / 3</div>
+    <div class="pill">Swaps: <span id="swaps">0</span></div>
+    <div class="pill" id="timePill">Time: <span id="time">150</span>s</div>
+    <div class="pill">Status: <span id="status">Ready</span></div>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="640" height="640"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>ORBIT ORGANIZER</h2>
+      <p class="big">Can you untangle the orbits?</p>
+      <div class="howto">
+        <b>How to Play:</b><br>
+        • 18 satellites drift on 3 orbits, in 3 colours.<br>
+        • Click / tap one satellite, then another, to swap them — even across orbits.<br>
+        • Sort each orbit so all of its satellites share one colour.<br>
+        • You have 150 seconds. Sorting an orbit earns 200 points; every swap earns 10.<br>
+        • Arrow Keys move the selection, Space / Enter selects, R restarts.
+      </div>
+      <button id="startBtn">▶ Start Mission</button>
+      <p>Tip: start with the orbit that already has the most of one colour.</p>
+    </div>
+    <div class="overlay hidden" id="endScreen">
+      <h2 id="endTitle">MISSION COMPLETE</h2>
+      <p id="endText"></p>
+      <p id="endScore" class="big"></p>
+      <button id="restartBtn">↻ Play Again</button>
+      <button class="secondary" id="menuBtn">Back to Title</button>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#ff5a5a"></span>Red</span>
+    <span><span class="dot" style="background:#4dd0e1"></span>Cyan</span>
+    <span><span class="dot" style="background:#f4d35e"></span>Yellow</span>
+  </div>
+  <div class="controls">Mouse / Touch: click two satellites to swap &nbsp;•&nbsp; Arrow Keys: move selection &nbsp;•&nbsp; Space / Enter: select &nbsp;•&nbsp; R: restart</div>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLORS = ['#ff5a5a', '#4dd0e1', '#f4d35e'];
+  var COLOR_NAMES = ['Red', 'Cyan', 'Yellow'];
+  var RADII = [95, 165, 235];
+  var SLOTS = 6, ORBITS = 3, TIME_LIMIT = 150;
+  var CX = 320, CY = 320;
+  var state = 'title'; // title | playing | won | lost
+  var sats = [], selected = -1, firstPick = -1;
+  var score = 0, swaps = 0, timeLeft = TIME_LIMIT, lastTick = 0, elapsed = 0;
+  var angles = [0, 0, 0], speeds = [0.12, -0.09, 0.06];
+  var audioCtx = null, sortedFlags = [false, false, false];
+
+  function el(id){ return document.getElementById(id); }
+  function beep(freq, dur, type){
+    if(!audioCtx || state === 'title') return;
+    try{
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    }catch(e){}
+  }
+  function initAudio(){
+    try{ if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if(audioCtx.state === 'suspended') audioCtx.resume(); }catch(e){}
+  }
+  function shuffledDeck(){
+    var deck = [];
+    for(var c = 0; c < 3; c++) for(var i = 0; i < 6; i++) deck.push(c);
+    for(var i = deck.length - 1; i > 0; i--){
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = deck[i]; deck[i] = deck[j]; deck[j] = t;
+    }
+    return deck;
+  }
+  function newGame(){
+    var deck = shuffledDeck();
+    sats = [];
+    for(var o = 0; o < ORBITS; o++) for(var s = 0; s < SLOTS; s++){
+      sats.push({ orbit: o, slot: s, color: deck[o * SLOTS + s] });
+    }
+    // Avoid starting already solved (extremely unlikely, but guarantee a puzzle).
+    if(countSorted() === ORBITS){ var a = sats[0], b = sats[6]; var t = a.color; a.color = b.color; b.color = t; }
+    selected = 0; firstPick = -1; score = 0; swaps = 0; timeLeft = TIME_LIMIT; elapsed = 0;
+    sortedFlags = [false, false, false];
+    el('status').textContent = 'Playing';
+    el('endScreen').classList.add('hidden');
+    updateHUD();
+  }
+  function startGame(){
+    initAudio(); newGame(); state = 'playing';
+    el('titleScreen').classList.add('hidden');
+    el('endScreen').classList.add('hidden');
+    el('status').textContent = 'Playing';
+    beep(660, 0.15, 'triangle'); setTimeout(function(){ beep(880, 0.2, 'triangle'); }, 130);
+  }
+  function countSorted(){
+    var n = 0;
+    for(var o = 0; o < ORBITS; o++){
+      var first = sats[o * SLOTS].color, ok = true;
+      for(var s = 1; s < SLOTS; s++) if(sats[o * SLOTS + s].color !== first) ok = false;
+      if(ok) n++;
+    }
+    return n;
+  }
+  function updateHUD(){
+    el('score').textContent = score;
+    el('sorted').textContent = countSorted();
+    el('swaps').textContent = swaps;
+    el('time').textContent = Math.max(0, Math.ceil(timeLeft));
+    var pill = el('timePill');
+    if(timeLeft <= 20 && state === 'playing') pill.classList.add('warn'); else pill.classList.remove('warn');
+  }
+  function posOf(sat){
+    var ang = angles[sat.orbit] + sat.slot * (Math.PI * 2 / SLOTS);
+    return { x: CX + Math.cos(ang) * RADII[sat.orbit], y: CY + Math.sin(ang) * RADII[sat.orbit] };
+  }
+  function trySwap(a, b){
+    if(a === b) return;
+    var t = sats[a].color; sats[a].color = sats[b].color; sats[b].color = t;
+    swaps++; score += 10;
+    var sorted = countSorted();
+    for(var o = 0; o < ORBITS; o++){
+      var first = sats[o * SLOTS].color, ok = true;
+      for(var s = 1; s < SLOTS; s++) if(sats[o * SLOTS + s].color !== first) ok = false;
+      if(ok && !sortedFlags[o]){ sortedFlags[o] = true; score += 200; beep(1046, 0.25, 'triangle'); }
+      if(!ok) sortedFlags[o] = false;
+    }
+    beep(520, 0.08, 'sine');
+    updateHUD();
+    if(sorted === ORBITS) endGame(true);
+  }
+  function pick(index){
+    if(state !== 'playing' || index < 0 || index >= sats.length) return;
+    selected = index;
+    if(firstPick === -1){ firstPick = index; beep(440, 0.08, 'sine'); }
+    else { var a = firstPick; firstPick = -1; trySwap(a, index); }
+  }
+  function endGame(won){
+    state = won ? 'won' : 'lost';
+    el('endTitle').textContent = won ? '🏆 MISSION COMPLETE!' : '⏰ TIME EXPIRED';
+    if(won) score += Math.ceil(timeLeft) * 5;
+    el('endText').textContent = won
+      ? 'Every orbit now shines in a single colour. Brilliant sorting, Commander!'
+      : 'The orbits are still mixed. Try a new arrangement and beat the clock.';
+    el('endScore').textContent = 'Final Score: ' + score + '  •  Swaps: ' + swaps + '  •  Orbits Sorted: ' + countSorted() + ' / 3';
+    el('status').textContent = won ? 'You Win!' : 'Game Over';
+    el('endScreen').classList.remove('hidden');
+    updateHUD();
+    if(won){ beep(523, 0.15, 'triangle'); setTimeout(function(){ beep(659, 0.15, 'triangle'); }, 150); setTimeout(function(){ beep(784, 0.3, 'triangle'); }, 300); }
+    else beep(180, 0.4, 'sawtooth');
+  }
+  function drawStars(){
+    ctx.fillStyle = '#ffffff';
+    for(var i = 0; i < 70; i++){
+      var x = (i * 97) % 640, y = (i * 61) % 640;
+      ctx.globalAlpha = 0.25 + ((i * 13) % 50) / 100;
+      ctx.fillRect(x, y, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+  function draw(){
+    ctx.clearRect(0, 0, 640, 640);
+    drawStars();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(CX, CY, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a1200'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('EARTH', CX, CY);
+    for(var o = 0; o < ORBITS; o++){
+      ctx.strokeStyle = o === 0 ? '#3a4f85' : o === 1 ? '#2f6f8f' : '#8a7a3a';
+      ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(CX, CY, RADII[o], 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#9fb3d9'; ctx.font = '12px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Orbit ' + (o + 1), CX + 4, CY - RADII[o] - 6);
+    }
+    sats.forEach(function(sat, idx){
+      var p = posOf(sat);
+      if(idx === firstPick){
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(p.x, p.y, 26, 0, Math.PI * 2); ctx.stroke();
+      }
+      if(idx === selected && state === 'playing'){
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3; ctx.setLineDash([6, 5]);
+        ctx.beginPath(); ctx.arc(p.x, p.y, 23, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      }
+      ctx.fillStyle = COLORS[sat.color];
+      ctx.beginPath(); ctx.arc(p.x, p.y, 17, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.9)';
+      ctx.beginPath(); ctx.arc(p.x - 5, p.y - 5, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#0b1020'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(COLOR_NAMES[sat.color].charAt(0), p.x, p.y + 1);
+    });
+    if(state === 'playing'){
+      ctx.fillStyle = '#eaf2ff'; ctx.font = '14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(firstPick === -1 ? 'Select a satellite to swap' : 'Now select a second satellite to swap with it', CX, 618);
+    }
+  }
+  function loop(ts){
+    requestAnimationFrame(loop);
+    if(state === 'playing'){
+      var dt = lastTick ? (ts - lastTick) / 1000 : 0;
+      lastTick = ts; elapsed += dt;
+      for(var o = 0; o < ORBITS; o++) angles[o] += speeds[o] * dt;
+      timeLeft = TIME_LIMIT - elapsed;
+      if(Math.ceil(timeLeft) !== Math.ceil(timeLeft + dt)) updateHUD();
+      if(timeLeft <= 0){ timeLeft = 0; updateHUD(); endGame(false); }
+    } else lastTick = ts;
+    draw();
+  }
+  function indexAt(clientX, clientY){
+    var r = canvas.getBoundingClientRect();
+    var x = (clientX - r.left) * (640 / r.width), y = (clientY - r.top) * (640 / r.height);
+    var best = -1, bestD = 1e9;
+    sats.forEach(function(sat, idx){
+      var p = posOf(sat), d = Math.hypot(p.x - x, p.y - y);
+      if(d < bestD){ bestD = d; best = idx; }
+    });
+    return bestD <= 34 ? best : -1;
+  }
+  canvas.addEventListener('click', function(e){ initAudio(); var i = indexAt(e.clientX, e.clientY); if(i >= 0) pick(i); });
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault(); initAudio();
+    if(e.touches && e.touches.length){ var i = indexAt(e.touches[0].clientX, e.touches[0].clientY); if(i >= 0) pick(i); }
+  }, { passive: false });
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'r' || e.key === 'R'){ if(state !== 'title'){ initAudio(); newGame(); state = 'playing'; el('endScreen').classList.add('hidden'); el('status').textContent = 'Playing'; } return; }
+    if(state === 'title' && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); startGame(); return; }
+    if(state !== 'playing') return;
+    if(e.key === 'ArrowRight'){ selected = (selected + 1) % sats.length; e.preventDefault(); }
+    else if(e.key === 'ArrowLeft'){ selected = (selected + sats.length - 1) % sats.length; e.preventDefault(); }
+    else if(e.key === 'ArrowDown'){ selected = (selected + SLOTS) % sats.length; e.preventDefault(); }
+    else if(e.key === 'ArrowUp'){ selected = (selected - SLOTS + sats.length) % sats.length; e.preventDefault(); }
+    else if(e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); initAudio(); pick(selected); }
+  });
+  el('startBtn').addEventListener('click', startGame);
+  el('restartBtn').addEventListener('click', startGame);
+  el('menuBtn').addEventListener('click', function(){
+    state = 'title'; el('endScreen').classList.add('hidden'); el('titleScreen').classList.remove('hidden');
+    el('status').textContent = 'Ready'; newGame();
+  });
+  newGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
