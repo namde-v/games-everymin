@@ -57,6 +57,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0249 | Accordion Alley | Rhythm / Accordion Beat | Left/A and Right/D, tap on-screen buttons | [Play](./../games/game-0249.html) |
 | 0250 | Bowling Blitz | Precision / Bowling | Mouse/touch aim, Arrow Keys aim, A/D hook, Space throw | [Play](./../games/game-0250.html) |
 
+| 0251 | Corgi Canyon | Arcade / Corgi Canyon Runner | Arrow Keys / WASD jump and slide, Space jump, mouse/touch tap upper/lower half | [Play](./../games/game-0251.html) |
+| 0252 | Hex Hive | Puzzle / Hex Tile Logic | Mouse/touch click tiles to rotate, Arrow Keys move selection, Space rotate, R reset | [Play](./../games/game-0252.html) |
+| 0253 | Cactus Kingdom | Strategy / Desert Garden Management | Mouse/touch click plots and buttons, 1/2/3/4 seeds, W water, H harvest, N next day, B buy water | [Play](./../games/game-0253.html) |
+| 0254 | Salsa Steps | Rhythm / Dance Step Timing | Arrow Keys step pads, mouse click pads, touch tap pads | [Play](./../games/game-0254.html) |
+| 0255 | Javelin Journey | Precision / Javelin Throw | Mouse/touch drag aim and release, Arrow Keys aim/power, Space throw | [Play](./../games/game-0255.html) |
+| 0256 | Mole Miner | Arcade / Underground Gem Digging | Arrow Keys / WASD move and dig, mouse move steer, touch drag | [Play](./../games/game-0256.html) |
+| 0257 | Lockpick Logic | Puzzle / Lock Mechanism Logic | Mouse/touch click tumblers to rotate, Arrow Keys move selection, Space rotate, Enter turn key | [Play](./../games/game-0257.html) |
+| 0258 | Airship Admiral | Strategy / Airship Fleet Management | Mouse/touch click buttons and routes, 1/2/3/4 choose route, Enter/Space launch, B fuel, C crew, R restart | [Play](./../games/game-0258.html) |
+| 0259 | Beat Boxer | Rhythm / Beat Boxing | A/Left punch left, D/Right punch right, mouse click pads, touch tap pads | [Play](./../games/game-0259.html) |
+| 0260 | Archery Ace | Precision / Archery | Mouse/touch drag aim and release, Arrow Keys aim/power, Space shoot | [Play](./../games/game-0260.html) |
+
 ## Batch notes
 
 - Batch 021: 10 games, produced in one cycle. Volume 003 opened at game 0201.
@@ -64,4 +75,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 023: 10 games, produced in one cycle.
 - Batch 024: 10 games, produced in one cycle.
 - Batch 025: 10 games, produced in one cycle.
+- Batch 026: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Airship Admiral</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1e33; font-family: Verdana, Geneva, Tahoma, sans-serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; height: 100vh; padding: 8px; gap: 8px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; width: min(920px, 98vw); background: #122a4a; color: #ffe9a8; border: 2px solid #d9a441; border-radius: 12px; padding: 8px 12px; font-size: 14px; font-weight: bold; }
+  #hud span { white-space: nowrap; }
+  #hud .good { color: #7dff9a; }
+  #hud .warn { color: #ff9d5c; }
+  #hud .bad { color: #ff6b6b; }
+  #canvasBox { position: relative; width: min(920px, 98vw); height: min(560px, 68vh); }
+  canvas { width: 100%; height: 100%; display: block; background: linear-gradient(#7ec8f7, #cdeffb 55%, #f7e7b8); border: 3px solid #d9a441; border-radius: 14px; touch-action: none; cursor: pointer; }
+  #hint { color: #cfe6ff; font-size: 13px; text-align: center; max-width: 920px; line-height: 1.5; }
+  #hint b { color: #ffe9a8; }
+  button { font-family: inherit; }
+  @media (max-width: 600px) {
+    #hud { font-size: 12px; }
+    #canvasBox { height: 62vh; }
+    #hint { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud" aria-label="Game status">
+    <span>🪙 Coins: <span id="hCoins">0</span> / 800</span>
+    <span>✈️ Voyage: <span id="hVoyage">1</span> / 6</span>
+    <span>⛽ Fuel: <span id="hFuel">100</span></span>
+    <span>👥 Crew: <span id="hCrew">24</span></span>
+    <span>🚢 Ships: <span id="hShips">4</span></span>
+    <span>💥 Lost: <span id="hLost">0</span> / 3</span>
+    <span>Status: <span id="hStatus">Ready</span></span>
+  </div>
+  <div id="canvasBox"><canvas id="game" width="920" height="560"></canvas></div>
+  <div id="hint">Click / tap buttons on screen &bull; Keys: <b>1-4</b> choose route &bull; <b>Enter / Space</b> Start / Launch &bull; <b>B</b> buy fuel &bull; <b>C</b> hire crew &bull; <b>R</b> restart &bull; <b>M</b> mute</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  // ---------- Audio: procedural only, starts after user interaction ----------
+  var audioCtx = null, muted = false;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur + 0.02);
+    } catch (e) {}
+  }
+  function sfxClick() { tone(660, 0.08, 'triangle', 0.10); }
+  function sfxCoin() { tone(880, 0.10, 'sine', 0.14); setTimeout(function(){ tone(1320, 0.18, 'sine', 0.12); }, 70); }
+  function sfxBad() { tone(220, 0.25, 'sawtooth', 0.10, 110); }
+  function sfxWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.28, 'triangle', 0.14); }, i * 130); }); }
+  function sfxStorm() { tone(180, 0.4, 'sawtooth', 0.08, 90); tone(90, 0.5, 'square', 0.05, 60); }
+  function sfxLaunch() { tone(300, 0.35, 'sine', 0.12, 720); }
+
+  // ---------- Game state ----------
+  var state = 'title'; // title, plan, flying, port, win, over
+  var coins = 0, voyage = 1, fuel = 100, crew = 24, ships = 4, lost = 0;
+  var selectedRoute = 0, message = 'Welcome, Admiral! Choose a route and launch your fleet.';
+  var statusText = 'Ready';
+  var flyT = 0, flyDur = 1, eventLog = [], voyageReward = 0, voyageEvents = [];
+  var clouds = [], birds = [], particles = [];
+  for (var i = 0; i < 10; i++) clouds.push({ x: Math.random() * W, y: 30 + Math.random() * 180, s: 0.6 + Math.random() * 0.9, v: 8 + Math.random() * 18 });
+  for (var j = 0; j < 6; j++) birds.push({ x: Math.random() * W, y: 60 + Math.random() * 140, p: Math.random() * 6.28 });
+
+  var ROUTES = [
+    { name: 'Calm Trade Lane', desc: 'Safe, steady trade', risk: 'Low risk', fuelCost: 12, base: 110, crewCost: 0, color: '#2e9e5b', danger: 0.12 },
+    { name: 'Merchant Express', desc: 'Fast, rich cargo', risk: 'Medium risk', fuelCost: 18, base: 160, crewCost: 1, color: '#d98a1f', danger: 0.28 },
+    { name: 'Storm Frontier', desc: 'Dangerous, huge payoff', risk: 'High risk', fuelCost: 24, base: 230, crewCost: 2, color: '#c0392b', danger: 0.48 },
+    { name: 'Sky Salvage Run', desc: 'Wrecks, wild luck', risk: 'Wild risk', fuelCost: 16, base: 145, crewCost: 1, color: '#6a4fb3', danger: 0.36 }
+  ];
+  var SHIP_NAMES = ['Dawn Sovereign', 'Cloud Runner', 'Iron Gull', 'Starling'];
+  var PORTS = ['Port Aurea', 'Skyhold', 'Ember Reach', 'Stormgate', 'Copper Haven', 'Final Anchorage'];
+
+  function resetGame() {
+    coins = 0; voyage = 1; fuel = 100; crew = 24; ships = 4; lost = 0;
+    selectedRoute = 0; state = 'plan'; flyT = 0; eventLog = []; voyageReward = 0; voyageEvents = [];
+    message = 'Voyage 1: choose a route for your fleet.';
+    statusText = 'Planning Voyage 1';
+    updateHUD();
+  }
+  function updateHUD() {
+    document.getElementById('hCoins').textContent = coins;
+    document.getElementById('hVoyage').textContent = Math.min(voyage, 6);
+    document.getElementById('hFuel').textContent = fuel;
+    document.getElementById('hCrew').textContent = crew;
+    document.getElementById('hShips').textContent = ships;
+    document.getElementById('hLost').textContent = lost;
+    document.getElementById('hStatus').textContent = statusText;
+    var fc = document.getElementById('hFuel');
+    fc.className = fuel <= 25 ? 'bad' : (fuel <= 50 ? 'warn' : 'good');
+  }
+  function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  // Buttons are hit-tested in canvas coordinates (920x560 space)
+  function rectsForState() {
+    var r = {};
+    if (state === 'title') {
+      r.start = { x: 360, y: 380, w: 200, h: 56 };
+      r.how = { x: 360, y: 448, w: 200, h: 40 };
+    } else if (state === 'plan') {
+      ROUTES.forEach(function(rt, idx) {
+        r['route' + idx] = { x: 60 + idx * 210, y: 300, w: 190, h: 110 };
+      });
+      r.launch = { x: 330, y: 435, w: 260, h: 52 };
+      r.fuelBtn = { x: 60, y: 500, w: 260, h: 40 };
+      r.crewBtn = { x: 600, y: 500, w: 260, h: 40 };
+    } else if (state === 'port') {
+      r.next = { x: 330, y: 450, w: 260, h: 52 };
+      r.fuelBtn = { x: 60, y: 510, w: 260, h: 40 };
+      r.crewBtn = { x: 600, y: 510, w: 260, h: 40 };
+    } else if (state === 'win' || state === 'over') {
+      r.restart = { x: 330, y: 420, w: 260, h: 56 };
+    }
+    return r;
+  }
+  function inside(px, py, b) { return b && px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h; }
+  function toCanvas(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX - rect.left) * (W / rect.width);
+    var cy = (evt.clientY - rect.top) * (H / rect.height);
+    return { x: cx, y: cy };
+  }
+
+  function buyFuel() {
+    if (state !== 'plan' && state !== 'port') return;
+    if (coins >= 20) { coins -= 20; fuel += 30; message = 'Bought 30 fuel for 20 coins. Fleet refuelled.'; sfxCoin(); }
+    else { message = 'Not enough coins for fuel (need 20). Earn coins on a voyage first.'; sfxBad(); }
+    statusText = 'Supplies updated'; updateHUD();
+  }
+  function hireCrew() {
+    if (state !== 'plan' && state !== 'port') return;
+    if (coins >= 15) { coins -= 15; crew += 5; message = 'Hired 5 crew for 15 coins. Morale is up!'; sfxCoin(); }
+    else { message = 'Not enough coins to hire crew (need 15).'; sfxBad(); }
+    statusText = 'Supplies updated'; updateHUD();
+  }
+
+  function launchVoyage() {
+    var rt = ROUTES[selectedRoute];
+    if (fuel < rt.fuelCost) { message = 'Not enough fuel for ' + rt.name + ' (need ' + rt.fuelCost + '). Buy fuel below.'; sfxBad(); updateHUD(); return; }
+    if (crew < rt.crewCost + 2) { message = 'Not enough crew to sail safely. Hire crew below.'; sfxBad(); updateHUD(); return; }
+    if (ships <= 0) { endGameOver('Your fleet is gone.'); return; }
+    fuel -= rt.fuelCost; crew -= rt.crewCost;
+    state = 'flying'; flyT = 0; flyDur = 1; voyageEvents = []; particles = [];
+    statusText = 'Flying: ' + rt.name; message = 'Fleet launched on ' + rt.name + '! Hold steady, Admiral.';
+    sfxLaunch(); updateHUD();
+    // Pre-roll events so the flight story is coherent
+    var danger = rt.danger;
+    var roll = Math.random();
+    if (roll < danger * 0.55) voyageEvents.push('storm');
+    else if (roll < danger) voyageEvents.push('pirates');
+    else if (roll < danger + 0.25) voyageEvents.push('tailwind');
+    else voyageEvents.push('trade');
+    if (Math.random() < 0.35) voyageEvents.push(pick(['salvage', 'festival', 'calm']));
+  }
+
+  function resolveVoyage() {
+    var rt = ROUTES[selectedRoute];
+    var reward = rt.base + rand(-20, 45) + ships * 8;
+    var notes = [];
+    voyageEvents.forEach(function(ev) {
+      if (ev === 'storm') {
+        var fLoss = rand(8, 18), cLoss = rand(1, 3);
+        fuel = Math.max(0, fuel - fLoss); crew = Math.max(0, crew - cLoss); reward -= 20;
+        notes.push('Storm! Lost ' + fLoss + ' fuel and ' + cLoss + ' crew.');
+        if (Math.random() < 0.30 && ships > 0) { ships--; lost++; notes.push('A ship was lost in the storm!'); }
+      } else if (ev === 'pirates') {
+        var stolen = rand(15, 40); reward = Math.max(10, reward - stolen);
+        if (Math.random() < 0.28 && ships > 0) { ships--; lost++; notes.push('Pirates sank a ship! Lost ' + stolen + ' coins of cargo.'); }
+        else { crew = Math.max(0, crew - 1); notes.push('Pirates raided the cargo (-' + stolen + ' coins).'); }
+      } else if (ev === 'tailwind') {
+        fuel += 10; reward += 25; notes.push('Strong tailwind! +10 fuel, +25 coins.');
+      } else if (ev === 'salvage') {
+        var sal = rand(20, 60); reward += sal; notes.push('Salvaged a wreck: +' + sal + ' coins.');
+      } else if (ev === 'festival') {
+        var fes = rand(15, 40); reward += fes; crew += 2; notes.push('Sky festival! +' + fes + ' coins, +2 crew joined.');
+      } else {
+        reward += 10; notes.push('Smooth sailing and fair trade (+10 coins).');
+      }
+    });
+    if (reward < 10) reward = 10;
+    coins += reward; voyageReward = reward; eventLog = notes;
+    // Check endings in order: ships lost, resources exhausted, win, voyage limit
+    if (lost >= 3 || ships <= 0) { endGameOver('You lost ' + lost + ' ships. The fleet cannot continue.'); return; }
+    if (fuel <= 0 && crew <= 0) { endGameOver('Out of fuel and crew. The fleet is stranded.'); return; }
+    if (coins >= 800) { endWin(); return; }
+    if (voyage >= 6) { endGameOver('Six voyages complete with ' + coins + ' coins — short of the 800-coin goal.'); return; }
+    // Small automatic resupply between voyages so the game stays playable
+    fuel += 8; crew += 1;
+    state = 'port'; statusText = 'In port: ' + PORTS[voyage - 1];
+    message = 'Voyage ' + voyage + ' complete! Earned ' + reward + ' coins.';
+    sfxCoin(); updateHUD();
+  }
+  function nextVoyage() {
+    voyage++;
+    if (voyage > 6) { endGameOver('Six voyages complete with ' + coins + ' coins.'); return; }
+    state = 'plan'; statusText = 'Planning Voyage ' + voyage;
+    message = 'Voyage ' + voyage + ' of 6: choose a route. Target: 800 coins.';
+    updateHUD();
+  }
+  function endWin() {
+    state = 'win'; statusText = 'VICTORY'; message = 'Victory! ' + coins + ' coins earned.'; sfxWin(); updateHUD();
+  }
+  function endGameOver(reason) {
+    state = 'over'; statusText = 'GAME OVER'; message = reason; sfxBad(); updateHUD();
+  }
+
+  // ---------- Input ----------
+  function handleTap(x, y) {
+    ensureAudio();
+    var rects = rectsForState();
+    if (state === 'title') {
+      if (inside(x, y, rects.start)) { sfxClick(); resetGame(); return; }
+      if (inside(x, y, rects.how)) { sfxClick(); message = 'HOW TO PLAY: Pick a route, launch, survive events, and reach 800 coins in 6 voyages. Buy fuel and crew in port. Losing 3 ships ends the run.'; return; }
+    } else if (state === 'plan') {
+      for (var i = 0; i < 4; i++) if (inside(x, y, rects['route' + i])) { selectedRoute = i; sfxClick(); message = 'Selected: ' + ROUTES[i].name + ' — ' + ROUTES[i].desc + '. Fuel ' + ROUTES[i].fuelCost + ', reward about ' + ROUTES[i].base + '.'; updateHUD(); return; }
+      if (inside(x, y, rects.launch)) { launchVoyage(); return; }
+      if (inside(x, y, rects.fuelBtn)) { buyFuel(); return; }
+      if (inside(x, y, rects.crewBtn)) { hireCrew(); return; }
+    } else if (state === 'port') {
+      if (inside(x, y, rects.next)) { sfxClick(); nextVoyage(); return; }
+      if (inside(x, y, rects.fuelBtn)) { buyFuel(); return; }
+      if (inside(x, y, rects.crewBtn)) { hireCrew(); return; }
+    } else if (state === 'win' || state === 'over') {
+      if (inside(x, y, rects.restart)) { sfxClick(); coins = 0; voyage = 1; fuel = 100; crew = 24; ships = 4; lost = 0; selectedRoute = 0; state = 'plan'; message = 'New campaign started. Good luck, Admiral!'; statusText = 'Planning Voyage 1'; updateHUD(); return; }
+    }
+  }
+  canvas.addEventListener('click', function(e) { var p = toCanvas(e); handleTap(p.x, p.y); });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var t = e.changedTouches[0];
+    var p = toCanvas(t); handleTap(p.x, p.y);
+  }, { passive: false });
+  canvas.addEventListener('mousemove', function(e) {
+    var p = toCanvas(e); mouseX = p.x; mouseY = p.y;
+  });
+  var mouseX = 0, mouseY = 0;
+
+  document.addEventListener('keydown', function(e) {
+    ensureAudio();
+    var k = e.key.toLowerCase();
+    if (k === 'm') { muted = !muted; message = muted ? 'Sound muted.' : 'Sound on.'; return; }
+    if (k === 'r') { if (state === 'win' || state === 'over' || state === 'plan' || state === 'port') { resetGame(); sfxClick(); } return; }
+    if (state === 'title' && (k === 'enter' || k === ' ')) { resetGame(); sfxClick(); return; }
+    if (state === 'plan') {
+      if (k >= '1' && k <= '4') { selectedRoute = parseInt(k, 10) - 1; sfxClick(); message = 'Selected: ' + ROUTES[selectedRoute].name; }
+      else if (k === 'enter' || k === ' ') launchVoyage();
+      else if (k === 'b') buyFuel();
+      else if (k === 'c') hireCrew();
+    } else if (state === 'port') {
+      if (k === 'enter' || k === ' ') nextVoyage();
+      else if (k === 'b') buyFuel();
+      else if (k === 'c') hireCrew();
+    } else if ((state === 'win' || state === 'over') && (k === 'enter' || k === ' ')) { resetGame(); }
+  });
+
+  // ---------- Drawing ----------
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function drawAirship(x, y, scale, color, name) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
+    // Balloon
+    ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(0, -18, 52, 26, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.ellipse(-14, -28, 20, 9, -0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-30, 2); ctx.lineTo(-18, 14); ctx.moveTo(30, 2); ctx.lineTo(18, 14); ctx.stroke();
+    // Gondola
+    ctx.fillStyle = '#6b3f1d'; roundRect(-26, 12, 52, 18, 5); ctx.fill();
+    ctx.fillStyle = '#ffe9a8'; ctx.fillRect(-20, 16, 10, 8); ctx.fillRect(8, 16, 10, 8);
+    // Fin + propeller
+    ctx.fillStyle = '#d9a441'; ctx.beginPath(); ctx.moveTo(48, -18); ctx.lineTo(64, -30); ctx.lineTo(64, -6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(-58, -10, 4, 14, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#123'; ctx.font = 'bold 12px Verdana'; ctx.textAlign = 'center';
+    if (name) ctx.fillText(name, x, y + 48);
+  }
+  function drawButton(b, label, fill, textColor) {
+    if (!b) return;
+    ctx.fillStyle = fill; roundRect(b.x, b.y, b.w, b.h, 10); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = textColor || '#fff'; ctx.font = 'bold 17px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, b.x + b.w / 2, b.y + b.h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+  }
+  function drawSky(t) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#6fbdf2'); g.addColorStop(0.55, '#cdeffb'); g.addColorStop(1, '#f7e7b8');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // Sun
+    ctx.fillStyle = '#ffdf6b'; ctx.beginPath(); ctx.arc(830, 70, 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,223,107,0.25)'; ctx.beginPath(); ctx.arc(830, 70, 62, 0, Math.PI * 2); ctx.fill();
+    // Clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    clouds.forEach(function(c) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 26 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 26 * c.s, c.y - 8, 22 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 52 * c.s, c.y, 20 * c.s, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // Birds
+    ctx.strokeStyle = '#234'; ctx.lineWidth = 2;
+    birds.forEach(function(b) {
+      var flap = Math.sin(t * 4 + b.p) * 5;
+      ctx.beginPath(); ctx.moveTo(b.x - 10, b.y + flap); ctx.quadraticCurveTo(b.x, b.y - 4, b.x + 10, b.y + flap); ctx.stroke();
+    });
+    // Sea / distant islands
+    ctx.fillStyle = '#2f7fb8'; ctx.fillRect(0, 480, W, 80);
+    ctx.fillStyle = '#3fa3d1'; ctx.fillRect(0, 480, W, 8);
+    ctx.fillStyle = '#2e7d4f'; ctx.beginPath(); ctx.ellipse(140, 482, 90, 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2e7d4f'; ctx.beginPath(); ctx.ellipse(770, 482, 110, 20, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawMessageBox(y) {
+    ctx.fillStyle = 'rgba(10,30,55,0.88)'; roundRect(50, y, 820, 62, 12); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = '14px Verdana'; ctx.textAlign = 'center';
+    var text = message.length > 118 ? message.slice(0, 115) + '...' : message;
+    ctx.fillText(text, 460, y + 36);
+  }
+  function drawTitle() {
+    ctx.fillStyle = 'rgba(10,30,55,0.72)'; roundRect(130, 60, 660, 210, 16); ctx.fill();
+    ctx.fillStyle = '#ffe9a8'; ctx.font = 'bold 52px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('AIRSHIP ADMIRAL', 460, 140);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Verdana';
+    ctx.fillText('Command a fleet over 6 voyages. Earn 800 coins to win!', 460, 180);
+    ctx.font = '14px Verdana';
+    ctx.fillText('Assign routes, manage fuel and crew, survive storms and pirates.', 460, 210);
+    ctx.fillText('Lose 3 ships, or run out of fuel and crew, and the campaign ends.', 460, 234);
+    var rects = rectsForState();
+    drawButton(rects.start, '▶  START', '#2e9e5b');
+    drawButton(rects.how, 'How to Play', '#d98a1f');
+    drawAirship(180, 350, 1.0, '#c0392b', '');
+    drawAirship(740, 350, 1.0, '#2e7d4f', '');
+    drawMessageBox(500);
+  }
+  function drawPlan() {
+    ctx.fillStyle = '#123'; ctx.font = 'bold 26px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('Voyage ' + voyage + ' of 6  —  Choose a Route', 460, 52);
+    ctx.font = '14px Verdana'; ctx.fillStyle = '#334';
+    ctx.fillText('Destination: ' + PORTS[voyage - 1] + '  •  Goal: 800 coins  •  Fleet: ' + ships + ' ships', 460, 78);
+    var rects = rectsForState();
+    ROUTES.forEach(function(rt, idx) {
+      var b = rects['route' + idx];
+      var sel = idx === selectedRoute;
+      ctx.fillStyle = sel ? '#fff8d6' : '#ffffff';
+      roundRect(b.x, b.y, b.w, b.h, 12); ctx.fill();
+      ctx.strokeStyle = sel ? rt.color : '#999'; ctx.lineWidth = sel ? 4 : 2; ctx.stroke();
+      ctx.fillStyle = rt.color; ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(rt.name, b.x + b.w / 2, b.y + 26);
+      ctx.fillStyle = '#222'; ctx.font = '12px Verdana';
+      ctx.fillText(rt.desc, b.x + b.w / 2, b.y + 48);
+      ctx.fillText(rt.risk, b.x + b.w / 2, b.y + 66);
+      ctx.fillText('Fuel ' + rt.fuelCost + '  •  ~' + rt.base + ' coins', b.x + b.w / 2, b.y + 88);
+      if (sel) { ctx.fillStyle = '#2e9e5b'; ctx.font = 'bold 13px Verdana'; ctx.fillText('★ SELECTED', b.x + b.w / 2, b.y + 104); }
+    });
+    drawButton(rects.launch, '🚀 LAUNCH FLEET (Enter)', '#2e9e5b');
+    drawButton(rects.fuelBtn, '⛽ Buy Fuel: 20 coins → +30', '#d98a1f');
+    drawButton(rects.crewBtn, '👥 Hire Crew: 15 coins → +5', '#6a4fb3');
+    drawAirship(120, 240, 0.8, '#c0392b', SHIP_NAMES[0]);
+    drawAirship(800, 240, 0.8, '#2e7d4f', SHIP_NAMES[1]);
+    drawMessageBox(200);
+    // Small fleet status strip
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; roundRect(280, 140, 360, 36, 10); ctx.fill();
+    ctx.fillStyle = '#123'; ctx.font = 'bold 13px Verdana';
+    ctx.fillText('Coins ' + coins + '  •  Fuel ' + fuel + '  •  Crew ' + crew + '  •  Lost ' + lost + '/3', 460, 163);
+  }
+  function drawFlying(t) {
+    var p = Math.min(1, flyT / flyDur);
+    var x = 90 + p * 740;
+    var y = 200 + Math.sin(p * Math.PI * 2) * 18 - p * 40;
+    ctx.fillStyle = '#123'; ctx.font = 'bold 24px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('Flying to ' + PORTS[voyage - 1] + '...', 460, 52);
+    // Route line
+    ctx.strokeStyle = 'rgba(20,40,70,0.55)'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
+    ctx.beginPath(); ctx.moveTo(90, 220); ctx.lineTo(830, 180); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#123'; ctx.font = 'bold 13px Verdana';
+    ctx.fillText('◀ Departure', 130, 250); ctx.fillText('Destination ▶', 790, 160);
+    if (voyageEvents.indexOf('storm') >= 0) {
+      ctx.fillStyle = 'rgba(60,60,80,0.35)'; ctx.fillRect(300, 60, 320, 240);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Verdana'; ctx.fillText('⚡ STORM AHEAD ⚡', 460, 120);
+    }
+    if (voyageEvents.indexOf('pirates') >= 0) {
+      ctx.fillStyle = '#222'; ctx.font = 'bold 18px Verdana'; ctx.fillText('🏴‍☠️ PIRATES SPOTTED!', 460, 150);
+    }
+    for (var s = 0; s < ships; s++) {
+      drawAirship(x - s * 18, y + s * 52, 0.85, ['#c0392b', '#2e7d4f', '#d98a1f', '#6a4fb3'][s % 4], s === 0 ? SHIP_NAMES[0] : '');
+    }
+    // Progress bar
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; roundRect(160, 430, 600, 26, 13); ctx.fill();
+    ctx.fillStyle = '#2e9e5b'; roundRect(160, 430, 600 * p, 26, 13); ctx.fill();
+    ctx.fillStyle = '#123'; ctx.font = 'bold 14px Verdana'; ctx.fillText(Math.floor(p * 100) + '%', 460, 449);
+    drawMessageBox(470);
+  }
+  function drawPort() {
+    ctx.fillStyle = '#123'; ctx.font = 'bold 30px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('⚓ Arrived: ' + PORTS[voyage - 1], 460, 70);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Verdana';
+    ctx.fillText('Voyage ' + voyage + ' reward: +' + voyageReward + ' coins  •  Total: ' + coins + ' / 800', 460, 110);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)'; roundRect(120, 140, 680, 210, 14); ctx.fill();
+    ctx.fillStyle = '#123'; ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'left';
+    ctx.fillText('Captain\'s log:', 150, 170);
+    ctx.font = '14px Verdana';
+    eventLog.forEach(function(line, idx) {
+      ctx.fillText('• ' + line, 150, 198 + idx * 26);
+    });
+    if (eventLog.length === 0) ctx.fillText('• Uneventful, profitable voyage.', 150, 198);
+    ctx.textAlign = 'center'; ctx.font = '13px Verdana'; ctx.fillStyle = '#334';
+    ctx.fillText('Restock now, or sail on. You need ' + Math.max(0, 800 - coins) + ' more coins in ' + (6 - voyage) + ' voyages.', 460, 375);
+    ctx.fillText('Fuel ' + fuel + '  •  Crew ' + crew + '  •  Ships ' + ships + '  •  Lost ' + lost + '/3', 460, 400);
+    var rects = rectsForState();
+    drawButton(rects.next, '➡ Next Voyage (Enter)', '#2e9e5b');
+    drawButton(rects.fuelBtn, '⛽ Buy Fuel: 20 coins → +30', '#d98a1f');
+    drawButton(rects.crewBtn, '👥 Hire Crew: 15 coins → +5', '#6a4fb3');
+    drawAirship(120, 430, 0.8, '#c0392b', '');
+    drawAirship(800, 430, 0.8, '#2e7d4f', '');
+    drawMessageBox(300);
+  }
+  function drawEnd(win) {
+    ctx.fillStyle = win ? 'rgba(20,90,40,0.85)' : 'rgba(90,20,20,0.85)';
+    roundRect(110, 70, 700, 330, 18); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.font = 'bold 44px Verdana';
+    ctx.fillText(win ? '🏆 VICTORY! 🏆' : '💥 GAME OVER 💥', 460, 150);
+    ctx.font = 'bold 18px Verdana';
+    ctx.fillText(win ? 'You earned ' + coins + ' coins and ruled the skies!' : message, 460, 195);
+    ctx.font = '15px Verdana';
+    if (win) {
+      ctx.fillText('Fleet intact: ' + ships + ' ships  •  Voyages used: ' + voyage + ' of 6', 460, 230);
+      ctx.fillText('Fuel left: ' + fuel + '  •  Crew left: ' + crew, 460, 258);
+    } else {
+      ctx.fillText('Coins: ' + coins + ' / 800  •  Voyage: ' + voyage + ' / 6  •  Ships lost: ' + lost + ' / 3', 460, 230);
+      ctx.fillText('Fuel: ' + fuel + '  •  Crew: ' + crew + '  •  Ships left: ' + ships, 460, 258);
+    }
+    ctx.fillText('Press R or click Restart to play again.', 460, 300);
+    ctx.fillText('Tip: Storm Frontier pays most, but risks ships. Balance risk and supplies.', 460, 330);
+    ctx.fillText('Tip: Buy fuel early — a stranded fleet cannot earn.', 460, 355);
+    var rects = rectsForState();
+    drawButton(rects.restart, '↻ RESTART (R)', win ? '#ffe9a8' : '#ff6b6b', win ? '#123' : '#fff');
+    drawMessageBox(480);
+  }
+
+  // ---------- Main loop ----------
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    clouds.forEach(function(c) { c.x += c.v * dt; if (c.x > W + 80) c.x = -80; });
+    birds.forEach(function(b) { b.x += 22 * dt; if (b.x > W + 20) b.x = -20; });
+    if (state === 'flying') {
+      flyT += dt * 0.55;
+      if (Math.random() < 0.25) particles.push({ x: 90 + Math.random() * 700, y: 150 + Math.random() * 100, v: 20 });
+      if (flyT >= flyDur) {
+        if (voyageEvents.indexOf('storm') >= 0) sfxStorm();
+        resolveVoyage();
+      }
+    }
+    drawSky(now / 1000);
+    if (state === 'title') drawTitle();
+    else if (state === 'plan') drawPlan();
+    else if (state === 'flying') drawFlying(now / 1000);
+    else if (state === 'port') drawPort();
+    else if (state === 'win') drawEnd(true);
+    else if (state === 'over') drawEnd(false);
+    requestAnimationFrame(loop);
+  }
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

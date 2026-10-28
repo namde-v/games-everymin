@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Hex Hive</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #1a1207;
+    color: #fff8e1;
+    font-family: "Trebuchet MS", Verdana, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px;
+    user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  }
+  h1 { color: #ffca28; font-size: 34px; letter-spacing: 2px; text-shadow: 2px 2px 0 #5d4037; margin: 6px 0 2px; }
+  .tagline { color: #ffe082; font-size: 14px; margin-bottom: 10px; }
+  #hud {
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    width: 100%; max-width: 760px; margin-bottom: 10px;
+  }
+  .stat {
+    background: #3e2723; border: 2px solid #ffca28; border-radius: 10px;
+    padding: 6px 12px; font-size: 15px; font-weight: bold; min-width: 110px; text-align: center;
+  }
+  .stat span { color: #ffca28; }
+  #status { color: #a5d6a7; font-weight: bold; }
+  #wrap { position: relative; width: 100%; max-width: 760px; }
+  canvas {
+    display: block; width: 100%; height: auto; background: #2e4a1e;
+    border: 3px solid #ffca28; border-radius: 14px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(20, 14, 4, 0.92); border-radius: 14px; padding: 24px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffca28; font-size: 32px; margin-bottom: 12px; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 16px; margin-bottom: 10px; color: #fff8e1; }
+  .overlay .small { font-size: 14px; color: #ffe082; }
+  .overlay ul { text-align: left; max-width: 520px; line-height: 1.6; font-size: 15px; margin: 0 0 16px 18px; }
+  button {
+    background: #ffb300; color: #3e2723; border: none; border-radius: 12px;
+    font-size: 20px; font-weight: bold; padding: 14px 34px; cursor: pointer;
+    box-shadow: 0 4px 0 #ff8f00; margin-top: 8px;
+  }
+  button:hover { background: #ffca28; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #ff8f00; }
+  .legend { margin-top: 10px; font-size: 13px; color: #d7ccc8; text-align: center; line-height: 1.5; }
+  .legend b { color: #ffca28; }
+</style>
+</head>
+<body>
+<h1>HEX HIVE</h1>
+<div class="tagline">Rotate the hex tiles. Guide the bee home to the flower.</div>
+
+<div id="hud">
+  <div class="stat">Score: <span id="score">0</span></div>
+  <div class="stat">Level: <span id="level">1 / 5</span></div>
+  <div class="stat">Moves: <span id="moves">0</span></div>
+  <div class="stat">Attempts: <span id="attempts">3</span></div>
+  <div class="stat">Status: <span id="status">Title</span></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>HEX HIVE</h2>
+    <p>Welcome to the hive! The bee's path to the flower is broken. Every hex tile holds a piece of golden honey-path, but the tiles have been spun out of place.</p>
+    <ul>
+      <li><b>Goal:</b> Rotate tiles so one unbroken honey-path runs from the <b>HIVE</b> (left) to the <b>FLOWER</b> (right).</li>
+      <li><b>Tap / click</b> a tile to rotate it 60 degrees. Each rotation costs 1 move.</li>
+      <li><b>Keyboard:</b> Arrow keys move the glowing cursor, <b>Space</b> or <b>R</b> rotates, <b>Enter</b> starts / restarts.</li>
+      <li><b>Touch:</b> Tap a tile to rotate it. No swiping needed.</li>
+      <li>Finish a level before your moves run out. You have <b>3 attempts</b> for the whole game. Complete all <b>5 levels</b> to win!</li>
+      <li>Paths light up gold when they connect. Watch the hive glow when the route is complete.</li>
+    </ul>
+    <p class="small">How to Play: click a tile to spin it. A path segment only counts when both neighbouring tiles point at each other. Plan ahead — moves are limited!</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p class="small" id="endScore"></p>
+    <button id="restartBtn">Play Again</button>
+  </div>
+</div>
+
+<div class="legend">
+  <b>Mouse:</b> click a tile to rotate &nbsp;|&nbsp; <b>Touch:</b> tap a tile &nbsp;|&nbsp; <b>Keyboard:</b> arrows + Space / R &nbsp;|&nbsp; <b>Enter:</b> start / restart<br>
+  Golden lines = connected path &nbsp;|&nbsp; Amber lines = unconnected segment &nbsp;|&nbsp; Green glow = solved route
+</div>
+
+<script>
+"use strict";
+// ============================================================
+// HEX HIVE — a hex-tile rotation puzzle.
+// Flat-top hexes on axial coordinates (q, r). Each tile carries
+// a bitmask of 6 edge connections. Directions and neighbours:
+//   dir: 0=E  1=SE  2=SW  3=W  4=NW  5=NE  (edge-midpoint angles
+//   30, 330, 270, 210, 150, 90 degrees, matching flat-top layout)
+// Neighbour offsets in axial coords, in the same dir order:
+//   (1,0) (1,-1) (0,-1) (-1,0) (-1,1) (0,1)
+// Opposite direction of d is (d + 3) % 6.
+// Rotating a tile by one step shifts its bitmask by one position.
+// ============================================================
+
+var canvas = document.getElementById("game");
+var ctx = canvas.getContext("2d");
+var scoreEl = document.getElementById("score");
+var levelEl = document.getElementById("level");
+var movesEl = document.getElementById("moves");
+var attemptsEl = document.getElementById("attempts");
+var statusEl = document.getElementById("status");
+var titleScreen = document.getElementById("titleScreen");
+var endScreen = document.getElementById("endScreen");
+var endTitle = document.getElementById("endTitle");
+var endText = document.getElementById("endText");
+var endScore = document.getElementById("endScore");
+
+var DIRS = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+var EDGE_ANGLE = [30, 330, 270, 210, 150, 90]; // degrees, edge midpoints
+var SQRT3 = Math.sqrt(3);
+
+// Level layouts: wider and taller grids, tighter move budgets.
+var LEVELS = [
+  { cols: 4, rows: 3, moves: 26, label: "Meadow" },
+  { cols: 5, rows: 3, moves: 32, label: "Clover Field" },
+  { cols: 5, rows: 4, moves: 38, label: "Sunflower Row" },
+  { cols: 6, rows: 4, moves: 44, label: "Orchard Maze" },
+  { cols: 6, rows: 5, moves: 50, label: "Royal Garden" }
+];
+
+var screen = "title"; // title | playing | over
+var levelIndex = 0;
+var score = 0;
+var attemptsLeft = 3;
+var movesLeft = 0;
+var tiles = {};       // key "q,r" -> { q, r, mask, decoy }
+var tileList = [];
+var startKey = "", goalKey = "";
+var cursor = { q: 0, r: 0 };
+var solvedFlash = 0;
+var message = "";
+var messageTimer = 0;
+var hexSize = 52;
+
+// ---------------- Procedural Web Audio (starts only after interaction) ----------------
+var audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+  }
+  if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+}
+function beep(freq, dur, type, vol, slideTo) {
+  if (!audioCtx) return;
+  try {
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type || "sine";
+    osc.frequency.setValueAtTime(freq, t);
+    if (slideTo) { osc.frequency.exponentialRampToValueAtTime(slideTo, t + dur); }
+    gain.gain.setValueAtTime(vol || 0.12, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  } catch (e) { /* audio is decorative; never break the game */ }
+}
+function soundRotate() { beep(520, 0.08, "triangle", 0.10, 760); }
+function soundBad() { beep(180, 0.18, "sawtooth", 0.08, 120); }
+function soundWin() {
+  [523, 659, 784, 1047].forEach(function (f, i) {
+    setTimeout(function () { beep(f, 0.22, "sine", 0.12); }, i * 130);
+  });
+}
+function soundLose() {
+  [392, 330, 262, 196].forEach(function (f, i) {
+    setTimeout(function () { beep(f, 0.25, "triangle", 0.10); }, i * 150);
+  });
+}
+
+// ---------------- Puzzle generation ----------------
+function key(q, r) { return q + "," + r; }
+function inGrid(q, r, cfg) { return q >= 0 && q < cfg.cols && r >= 0 && r < cfg.rows; }
+function rotateMask(mask, steps) {
+  var out = 0, d;
+  for (d = 0; d < 6; d++) {
+    if (mask & (1 << d)) { out |= (1 << ((d + steps) % 6)); }
+  }
+  return out;
+}
+function randomPath(cfg) {
+  // Random self-avoiding walk from the left edge to the right edge.
+  var startQ = 0, startR = Math.floor(cfg.rows / 2);
+  var goalQ = cfg.cols - 1, goalR = Math.floor(cfg.rows / 2);
+  var tries = 0;
+  while (tries < 400) {
+    tries++;
+    var visited = {};
+    var path = [[startQ, startR]];
+    visited[key(startQ, startR)] = true;
+    var cur = [startQ, startR];
+    var stuck = false;
+    while (!(cur[0] === goalQ && cur[1] === goalR)) {
+      var options = [];
+      for (var d = 0; d < 6; d++) {
+        var nq = cur[0] + DIRS[d][0], nr = cur[1] + DIRS[d][1];
+        if (inGrid(nq, nr, cfg) && !visited[key(nq, nr)]) { options.push([nq, nr, d]); }
+      }
+      if (options.length === 0) { stuck = true; break; }
+      // Bias the walk toward the goal so paths stay interesting, not tiny.
+      options.sort(function () { return Math.random() - 0.5; });
+      var pick = options[0];
+      cur = [pick[0], pick[1]];
+      visited[key(cur[0], cur[1])] = true;
+      path.push(cur);
+    }
+    if (!stuck && path.length >= cfg.cols) { return path; }
+  }
+  // Fallback: a straight-ish guaranteed path across the middle row.
+  var fallback = [];
+  for (var q = 0; q < cfg.cols; q++) { fallback.push([q, Math.floor(cfg.rows / 2)]); }
+  return fallback;
+}
+function buildLevel(idx) {
+  var cfg = LEVELS[idx];
+  tiles = {}; tileList = [];
+  var path = randomPath(cfg);
+  var pathSet = {};
+  path.forEach(function (p) { pathSet[key(p[0], p[1])] = true; });
+  // Solved masks along the path.
+  var solved = {};
+  for (var i = 0; i < path.length; i++) {
+    var m = 0;
+    if (i > 0) {
+      var prev = path[i - 1], curP = path[i];
+      for (var d = 0; d < 6; d++) {
+        if (curP[0] + DIRS[d][0] === prev[0] && curP[1] + DIRS[d][1] === prev[1]) { m |= (1 << d); }
+      }
+    }
+    if (i < path.length - 1) {
+      var nxt = path[i + 1], curQ = path[i];
+      for (var e = 0; e < 6; e++) {
+        if (curQ[0] + DIRS[e][0] === nxt[0] && curQ[1] + DIRS[e][1] === nxt[1]) { m |= (1 << e); }
+      }
+    }
+    solved[key(path[i][0], path[i][1])] = m;
+  }
+  // Create every tile: path tiles get scrambled solved masks, others are decoys.
+  for (var q = 0; q < cfg.cols; q++) {
+    for (var r = 0; r < cfg.rows; r++) {
+      var k = key(q, r);
+      var tile;
+      if (pathSet[k]) {
+        var orig = solved[k];
+        var scrambled = orig, spin = 0;
+        // Spin until the tile genuinely changes (straight tiles repeat after 3).
+        while (scrambled === orig && spin < 20) {
+          spin++;
+          scrambled = rotateMask(orig, 1 + Math.floor(Math.random() * 5));
+        }
+        tile = { q: q, r: r, mask: scrambled, decoy: false };
+      } else {
+        // Decoy: 1 or 2 random segments, never a full straight-line giveaway.
+        var dm = 0, count = 1 + Math.floor(Math.random() * 2);
+        while (count > 0) {
+          var dd = Math.floor(Math.random() * 6);
+          if (!(dm & (1 << dd))) { dm |= (1 << dd); count--; }
+        }
+        tile = { q: q, r: r, mask: dm, decoy: true };
+      }
+      tiles[k] = tile; tileList.push(tile);
+    }
+  }
+  startKey = key(path[0][0], path[0][1]);
+  goalKey = key(path[path.length - 1][0], path[path.length - 1][1]);
+  movesLeft = cfg.moves;
+  cursor = { q: path[0][0], r: path[0][1] };
+  solvedFlash = 0;
+  message = "Level " + (idx + 1) + ": " + cfg.label + " — connect HIVE to FLOWER!";
+  messageTimer = 240;
+  updateHud();
+}
+function startGame() {
+  ensureAudio();
+  levelIndex = 0; score = 0; attemptsLeft = 3; screen = "playing";
+  titleScreen.classList.add("hidden");
+  endScreen.classList.add("hidden");
+  buildLevel(0);
+  beep(660, 0.15, "sine", 0.12, 880);
+  statusEl.textContent = "Playing";
+}
+function showEnd(won) {
+  screen = "over";
+  endScreen.classList.remove("hidden");
+  if (won) {
+    endTitle.textContent = "YOU WIN! All 5 Levels Complete!";
+    endText.textContent = "The bee followed your golden path through every garden. The hive is buzzing with joy!";
+    soundWin();
+  } else {
+    endTitle.textContent = "GAME OVER";
+    endText.textContent = "Out of attempts. The bee is still waiting — spin the tiles and try again!";
+    soundLose();
+  }
+  endScore.textContent = "Final Score: " + score;
+  statusEl.textContent = won ? "Winner!" : "Game Over";
+  updateHud();
+}
+function failLevel() {
+  attemptsLeft--;
+  updateHud();
+  if (attemptsLeft <= 0) {
+    showEnd(false);
+  } else {
+    message = "Out of moves! Attempt lost — " + attemptsLeft + " left. Level restarts.";
+    messageTimer = 300;
+    soundBad();
+    buildLevel(levelIndex);
+  }
+}
+function completeLevel() {
+  var bonus = 500 + movesLeft * 20;
+  score += bonus;
+  solvedFlash = 60;
+  soundWin();
+  if (levelIndex >= LEVELS.length - 1) {
+    setTimeout(function () { if (screen === "playing") showEnd(true); }, 900);
+  } else {
+    message = "Level complete! +" + bonus + " points. Next garden loading...";
+    messageTimer = 240;
+    setTimeout(function () {
+      if (screen === "playing") { levelIndex++; buildLevel(levelIndex); }
+    }, 1100);
+  }
+  updateHud();
+}
+function isSolved() {
+  // Breadth-first walk along mutually-pointing segments, start to goal.
+  var seen = {}; var queue = [startKey]; seen[startKey] = true;
+  while (queue.length > 0) {
+    var curK = queue.shift();
+    if (curK === goalKey) return true;
+    var tile = tiles[curK];
+    for (var d = 0; d < 6; d++) {
+      if (!(tile.mask & (1 << d))) continue;
+      var nq = tile.q + DIRS[d][0], nr = tile.r + DIRS[d][1];
+      var nk = key(nq, nr);
+      var nb = tiles[nk];
+      if (!nb) continue;
+      if (!(nb.mask & (1 << ((d + 3) % 6)))) continue;
+      if (!seen[nk]) { seen[nk] = true; queue.push(nk); }
+    }
+  }
+  return false;
+}
+function connectedSet() {
+  var seen = {}; var queue = [startKey]; seen[startKey] = true;
+  while (queue.length > 0) {
+    var curK = queue.shift();
+    var tile = tiles[curK];
+    for (var d = 0; d < 6; d++) {
+      if (!(tile.mask & (1 << d))) continue;
+      var nq = tile.q + DIRS[d][0], nr = tile.r + DIRS[d][1];
+      var nk = key(nq, nr);
+      var nb = tiles[nk];
+      if (!nb) continue;
+      if (!(nb.mask & (1 << ((d + 3) % 6)))) continue;
+      if (!seen[nk]) { seen[nk] = true; queue.push(nk); }
+    }
+  }
+  return seen;
+}
+function rotateTile(tile) {
+  if (screen !== "playing") return;
+  tile.mask = rotateMask(tile.mask, 1);
+  movesLeft--;
+  soundRotate();
+  if (isSolved()) { completeLevel(); return; }
+  if (movesLeft <= 0) { failLevel(); return; }
+  updateHud();
+}
+function updateHud() {
+  scoreEl.textContent = score;
+  levelEl.textContent = (levelIndex + 1) + " / " + LEVELS.length;
+  movesEl.textContent = movesLeft;
+  attemptsEl.textContent = attemptsLeft;
+}
+
+// ---------------- Drawing ----------------
+function hexCenter(q, r) {
+  var cfg = LEVELS[levelIndex];
+  var margin = 70;
+  var availW = canvas.width - margin * 2;
+  var availH = canvas.height - 110;
+  var sizeByW = availW / (1.5 * cfg.cols + 0.5);
+  var sizeByH = availH / (SQRT3 * (cfg.rows + 0.5));
+  hexSize = Math.max(28, Math.min(sizeByW, sizeByH, 62));
+  var gridW = 1.5 * hexSize * (cfg.cols - 1) + 2 * hexSize;
+  var gridH = SQRT3 * hexSize * (cfg.rows - 1) + 2 * hexSize;
+  var ox = (canvas.width - gridW) / 2;
+  var oy = 60 + (canvas.height - 60 - gridH) / 2;
+  return {
+    x: ox + hexSize * 1.5 * q + hexSize,
+    y: oy + SQRT3 * hexSize * (r + q / 2) - SQRT3 * hexSize * (cfg.cols - 1) / 4 + hexSize
+  };
+}
+function hexCorners(cx, cy, size) {
+  var pts = [];
+  for (var i = 0; i < 6; i++) {
+    var a = Math.PI / 180 * (60 * i);
+    pts.push([cx + size * Math.cos(a), cy + size * Math.sin(a)]);
+  }
+  return pts;
+}
+function drawTile(tile) {
+  var c = hexCenter(tile.q, tile.r);
+  var size = hexSize;
+  var pts = hexCorners(c.x, c.y, size);
+  var connected = connectedSet();
+  var onPath = !!connected[key(tile.q, tile.r)];
+  ctx.beginPath();
+  pts.forEach(function (p, i) { if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]); });
+  ctx.closePath();
+  ctx.fillStyle = onPath ? "#558b2f" : "#6d4c41";
+  if (solvedFlash > 0 && onPath) ctx.fillStyle = "#7cb342";
+  ctx.fill();
+  ctx.lineWidth = (cursor.q === tile.q && cursor.r === tile.r) ? 4 : 2;
+  ctx.strokeStyle = (cursor.q === tile.q && cursor.r === tile.r) ? "#ffea00" : "#ffca28";
+  ctx.stroke();
+  // Path segments: centre to each connected edge midpoint.
+  for (var d = 0; d < 6; d++) {
+    if (!(tile.mask & (1 << d))) continue;
+    var ang = Math.PI / 180 * EDGE_ANGLE[d];
+    var ex = c.x + (size * 0.92) * Math.cos(ang);
+    var ey = c.y + (size * 0.92) * Math.sin(ang);
+    var nb = tiles[key(tile.q + DIRS[d][0], tile.r + DIRS[d][1])];
+    var linked = nb && (nb.mask & (1 << ((d + 3) % 6)));
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.lineTo(ex, ey);
+    ctx.lineWidth = 6;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = linked ? "#ffea00" : "#ffb300";
+    ctx.stroke();
+    if (linked) {
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(ex, ey);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = "#fffde7";
+      ctx.stroke();
+    }
+  }
+  // Centre dot.
+  ctx.beginPath(); ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = onPath ? "#ffea00" : "#ffe0b2"; ctx.fill();
+  // Start / goal markers.
+  var k = key(tile.q, tile.r);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  if (k === startKey) {
+    ctx.font = "bold " + Math.max(11, size * 0.30) + "px Verdana";
+    ctx.fillStyle = "#1a1207";
+    ctx.fillText("HIVE", c.x, c.y - size * 0.62);
+    ctx.font = Math.max(16, size * 0.55) + "px serif";
+    ctx.fillText("B", c.x, c.y + size * 0.55);
+  } else if (k === goalKey) {
+    ctx.font = "bold " + Math.max(11, size * 0.30) + "px Verdana";
+    ctx.fillStyle = "#1a1207";
+    ctx.fillText("FLOWER", c.x, c.y - size * 0.62);
+    ctx.font = Math.max(16, size * 0.55) + "px serif";
+    ctx.fillText("F", c.x, c.y + size * 0.55);
+  }
+}
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Meadow backdrop.
+  var grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, "#33691e"); grad.addColorStop(1, "#1b5e20");
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#ffca28"; ctx.font = "bold 20px Verdana"; ctx.textAlign = "center";
+  if (screen === "playing" || screen === "over") {
+    ctx.fillText("Level " + (levelIndex + 1) + " — " + LEVELS[levelIndex].label, canvas.width / 2, 30);
+  } else {
+    ctx.fillText("Hex Hive — press Start to play", canvas.width / 2, 30);
+  }
+  if (screen !== "title" && tileList.length > 0) {
+    tileList.forEach(drawTile);
+  } else {
+    // Decorative preview hexes behind the title overlay.
+    ctx.fillStyle = "#558b2f"; ctx.font = "16px Verdana";
+    ctx.fillText("Rotate tiles. Connect HIVE to FLOWER. Beat 5 levels!", canvas.width / 2, canvas.height / 2);
+  }
+  if (messageTimer > 0 && message) {
+    messageTimer--;
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(60, canvas.height - 46, canvas.width - 120, 32);
+    ctx.fillStyle = "#ffea00"; ctx.font = "bold 15px Verdana";
+    ctx.fillText(message, canvas.width / 2, canvas.height - 25);
+  }
+  if (solvedFlash > 0) solvedFlash--;
+  requestAnimationFrame(draw);
+}
+
+// ---------------- Input: mouse, touch, keyboard ----------------
+function canvasPos(evt) {
+  var rect = canvas.getBoundingClientRect();
+  var cx = (evt.clientX - rect.left) * (canvas.width / rect.width);
+  var cy = (evt.clientY - rect.top) * (canvas.height / rect.height);
+  return { x: cx, y: cy };
+}
+function pickTile(px, py) {
+  var best = null, bestDist = 1e9;
+  tileList.forEach(function (t) {
+    var c = hexCenter(t.q, t.r);
+    var dx = px - c.x, dy = py - c.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < bestDist) { bestDist = dist; best = t; }
+  });
+  return (best && bestDist <= hexSize * 1.05) ? best : null;
+}
+canvas.addEventListener("click", function (evt) {
+  ensureAudio();
+  if (screen !== "playing") return;
+  var p = canvasPos(evt);
+  var t = pickTile(p.x, p.y);
+  if (t) { cursor = { q: t.q, r: t.r }; rotateTile(t); }
+});
+canvas.addEventListener("touchstart", function (evt) {
+  ensureAudio();
+  evt.preventDefault();
+  if (screen !== "playing") return;
+  var touch = evt.changedTouches[0];
+  var p = canvasPos(touch);
+  var t = pickTile(p.x, p.y);
+  if (t) { cursor = { q: t.q, r: t.r }; rotateTile(t); }
+}, { passive: false });
+canvas.addEventListener("mousemove", function (evt) {
+  if (screen !== "playing") return;
+  var p = canvasPos(evt);
+  var t = pickTile(p.x, p.y);
+  if (t) { cursor = { q: t.q, r: t.r }; }
+});
+document.addEventListener("keydown", function (evt) {
+  if (evt.key === "Enter") {
+    if (screen === "title") { startGame(); return; }
+    if (screen === "over") { startGame(); return; }
+  }
+  if (screen !== "playing") return;
+  var cfg = LEVELS[levelIndex];
+  var moved = true;
+  if (evt.key === "ArrowLeft") cursor.q = Math.max(0, cursor.q - 1);
+  else if (evt.key === "ArrowRight") cursor.q = Math.min(cfg.cols - 1, cursor.q + 1);
+  else if (evt.key === "ArrowUp") cursor.r = Math.max(0, cursor.r - 1);
+  else if (evt.key === "ArrowDown") cursor.r = Math.min(cfg.rows - 1, cursor.r + 1);
+  else if (evt.key === " " || evt.key === "r" || evt.key === "R") {
+    evt.preventDefault();
+    ensureAudio();
+    var tile = tiles[key(cursor.q, cursor.r)];
+    if (tile) rotateTile(tile);
+    return;
+  } else { moved = false; }
+  if (moved) { evt.preventDefault(); ensureAudio(); beep(440, 0.05, "sine", 0.05); }
+});
+document.getElementById("startBtn").addEventListener("click", startGame);
+document.getElementById("restartBtn").addEventListener("click", startGame);
+
+updateHud();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
