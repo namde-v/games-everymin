@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Canyon Crasher — River Raft Dodger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #1a120b; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; color: #fff; overflow: hidden; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin: 10px 0 4px; color: #ffd166; text-shadow: 2px 2px 0 #7a3b00; }
+  p.sub { font-size: 13px; color: #d8c9a8; margin-bottom: 8px; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: 640px; max-height: 78vh; background: #2a7db5; border: 4px solid #8b5a2b; border-radius: 12px; touch-action: none; }
+  #hud { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; font-weight: bold; font-size: 14px; text-shadow: 1px 1px 2px #000; pointer-events: none; }
+  #hud span { background: rgba(0,0,0,0.45); padding: 5px 9px; border-radius: 8px; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,25,40,0.82); border-radius: 12px; padding: 22px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffd166; margin-bottom: 10px; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #eef6ff; max-width: 380px; margin: 6px 0; }
+  .overlay .small { font-size: 13px; color: #cfe3ff; }
+  button { margin-top: 16px; padding: 13px 28px; font-size: 18px; font-weight: bold; border: none; border-radius: 10px; background: #ffd166; color: #4a2400; cursor: pointer; box-shadow: 0 4px 0 #b7791f; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b7791f; }
+  button.secondary { background: #e8e8e8; color: #222; box-shadow: 0 4px 0 #888; margin-top: 8px; font-size: 15px; padding: 10px 20px; }
+  #controls { font-size: 12px; color: #d8c9a8; margin-top: 8px; text-align: center; line-height: 1.5; }
+  .lives { color: #ff6b6b; }
+</style>
+</head>
+<body>
+<h1>🛶 CANYON CRASHER</h1>
+<p class="sub">Arcade / River Raft Dodger — Game 0181</p>
+<div id="wrap">
+  <canvas id="game" width="480" height="640"></canvas>
+  <div id="hud">
+    <span id="scoreEl">Score: 0</span>
+    <span id="distEl">Distance: 0 / 3000 m</span>
+    <span id="livesEl">❤❤❤</span>
+    <span id="statusEl">READY</span>
+  </div>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🛶 CANYON CRASHER</h2>
+    <p><strong>Steer your raft down a wild canyon river!</strong> Dodge rocks and churning rapids, grab supply crates, and survive 3000 metres to reach calm water.</p>
+    <p class="small"><strong>How to Play:</strong><br>
+      ← → or A / D — steer left and right<br>
+      ↑ / W — paddle faster &nbsp;•&nbsp; ↓ / S — slow down<br>
+      Mouse / touch — drag to steer the raft<br>
+      Rocks cost 1 life. Rapids slow you and shake the raft.<br>
+      Supply crates: +100 points and restore a little speed.<br>
+      You have 3 lives. Reach 3000 m to WIN!</p>
+    <button id="startBtn" type="button">▶ START RAFTING</button>
+    <button id="howBtn" type="button" class="secondary">How to Play</button>
+    <p id="howText" class="small hidden">Tip: stay near the centre of the channel when the river narrows. Rapids are wider and paler than rocks — steer around them if you can, but a crate is always worth a small detour. Press P to pause.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText">The river got you this time.</p>
+    <p id="finalScore">Score: 0</p>
+    <button id="restartBtn" type="button">↻ RESTART INSTANTLY</button>
+    <button id="menuBtn" type="button" class="secondary">Back to Title</button>
+  </div>
+</div>
+<p id="controls">Keyboard: Arrows / WASD &nbsp;•&nbsp; Mouse: move to steer &nbsp;•&nbsp; Touch: drag &nbsp;•&nbsp; P: Pause &nbsp;•&nbsp; Enter / Space: Start / Restart</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('scoreEl');
+  var distEl = document.getElementById('distEl');
+  var livesEl = document.getElementById('livesEl');
+  var statusEl = document.getElementById('statusEl');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+
+  // ---- Audio: procedural Web Audio only, created after user interaction ----
+  var audioCtx = null, masterGain = null, muted = false;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AC();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0.18;
+        masterGain.connect(audioCtx.destination);
+      } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function splashSound() { beep(220, 0.25, 'sawtooth', 0.6); beep(110, 0.3, 'triangle', 0.5); }
+  function pickupSound() { beep(660, 0.12, 'sine', 0.6); setTimeout(function () { beep(880, 0.15, 'sine', 0.6); }, 70); }
+  function winSound() { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { beep(f, 0.25, 'triangle', 0.6); }, i * 130); }); }
+
+  // ---- Game state ----
+  var state = 'title'; // title | playing | paused | over | win
+  var raft = { x: W / 2, y: H - 110, w: 52, h: 72, vx: 0, targetX: W / 2 };
+  var keys = {};
+  var obstacles = [], crates = [], particles = [], banks = [];
+  var score = 0, distance = 0, lives = 3;
+  var speed = 3.2, baseSpeed = 3.2, spawnTimer = 0, crateTimer = 0;
+  var shake = 0, invincible = 0, frame = 0, lastTime = 0;
+  var GOAL = 3000;
+  var riverLeft = 70, riverRight = W - 70, riverWobble = 0;
+
+  function resetGame() {
+    score = 0; distance = 0; lives = 3;
+    speed = baseSpeed; spawnTimer = 0; crateTimer = 0;
+    shake = 0; invincible = 0; frame = 0;
+    obstacles = []; crates = []; particles = []; banks = [];
+    raft.x = W / 2; raft.targetX = W / 2; raft.vx = 0;
+    for (var i = 0; i < 14; i++) {
+      banks.push({ y: i * 50, side: i % 2 === 0 ? 'left' : 'right', size: 22 + Math.random() * 30 });
+    }
+    updateHUD('RAFTING');
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = 'Score: ' + score;
+    distEl.textContent = 'Distance: ' + Math.floor(distance) + ' / ' + GOAL + ' m';
+    livesEl.textContent = '❤'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    if (status) statusEl.textContent = status;
+  }
+
+  function spawnObstacle() {
+    var kind = Math.random();
+    var type = 'rock';
+    if (kind < 0.22) type = 'rapid';
+    else if (kind < 0.32) type = 'log';
+    var margin = 50;
+    var x = riverLeft + margin + Math.random() * (riverRight - riverLeft - margin * 2);
+    var w = type === 'rapid' ? 90 + Math.random() * 60 : 44 + Math.random() * 30;
+    obstacles.push({ x: x, y: -70, w: w, h: type === 'rapid' ? 55 : 44 + Math.random() * 22, type: type, rot: Math.random() * 6.28, bob: Math.random() * 6.28 });
+  }
+  function spawnCrate() {
+    var margin = 55;
+    var x = riverLeft + margin + Math.random() * (riverRight - riverLeft - margin * 2);
+    crates.push({ x: x, y: -40, w: 36, h: 36, bob: 0 });
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 22 + Math.random() * 18, color: color });
+    }
+  }
+  function hit(a, b) {
+    return Math.abs(a.x - b.x) < (a.w + b.w) / 2 - 6 && Math.abs(a.y - b.y) < (a.h + b.h) / 2 - 6;
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('RAFTING');
+    beep(440, 0.15, 'triangle', 0.5);
+  }
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    endText.textContent = won
+      ? 'You reached calm water after 3000 metres of canyon rapids. Legendary rafting!'
+      : 'Your raft was wrecked in the canyon. The river wins this time — try again!';
+    finalScore.textContent = 'Final Score: ' + score + '  •  Distance: ' + Math.floor(distance) + ' m';
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'WIN!' : 'GAME OVER');
+    if (won) winSound(); else splashSound();
+  }
+  function showTitle() {
+    state = 'title';
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    updateHUD('READY');
+  }
+
+  // ---- Input: keyboard + mouse + touch ----
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === 'Enter' || e.key === ' ') {
+      if (state === 'title' || state === 'over' || state === 'win') { e.preventDefault(); startGame(); }
+    }
+    if ((e.key === 'p' || e.key === 'P') && state === 'playing') { state = 'paused'; updateHUD('PAUSED'); }
+    else if ((e.key === 'p' || e.key === 'P') && state === 'paused') { state = 'playing'; updateHUD('RAFTING'); }
+    if (e.key === 'm' || e.key === 'M') { muted = !muted; }
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  function steerFromClientX(clientX) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    raft.targetX = Math.max(riverLeft + 30, Math.min(riverRight - 30, x));
+  }
+  canvas.addEventListener('mousemove', function (e) { if (state === 'playing') steerFromClientX(e.clientX); });
+  canvas.addEventListener('mousedown', function (e) { ensureAudio(); if (state === 'playing') steerFromClientX(e.clientX); });
+  canvas.addEventListener('touchstart', function (e) { ensureAudio(); e.preventDefault(); if (state === 'playing' && e.touches[0]) steerFromClientX(e.touches[0].clientX); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); if (state === 'playing' && e.touches[0]) steerFromClientX(e.touches[0].clientX); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', showTitle);
+  document.getElementById('howBtn').addEventListener('click', function () {
+    ensureAudio();
+    document.getElementById('howText').classList.toggle('hidden');
+  });
+
+  // ---- Drawing ----
+  function drawBackground() {
+    // Canyon banks
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#a06a35';
+    ctx.fillRect(0, 0, riverLeft - 12, H);
+    ctx.fillRect(riverRight + 12, 0, W - riverRight - 12, H);
+    // River
+    var grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, '#1e6fa3'); grad.addColorStop(0.5, '#3a9ad9'); grad.addColorStop(1, '#1e6fa3');
+    ctx.fillStyle = grad;
+    ctx.fillRect(riverLeft - 12, 0, riverRight - riverLeft + 24, H);
+    // Flowing streaks
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+    for (var i = 0; i < 12; i++) {
+      var sy = ((i * 73 + frame * speed * 2) % (H + 40)) - 20;
+      var sx = riverLeft + 20 + ((i * 37) % (riverRight - riverLeft - 40));
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 8, sy + 26); ctx.stroke();
+    }
+    // Bank rocks
+    ctx.fillStyle = '#6b4423';
+    banks.forEach(function (b) {
+      var bx = b.side === 'left' ? 8 : W - 8 - b.size;
+      ctx.beginPath(); ctx.arc(bx + b.size / 2, b.y, b.size / 2, 0, 6.29); ctx.fill();
+    });
+  }
+  function drawRaft() {
+    ctx.save();
+    ctx.translate(raft.x + (shake ? (Math.random() - 0.5) * shake : 0), raft.y);
+    if (invincible > 0 && Math.floor(frame / 4) % 2 === 0) ctx.globalAlpha = 0.45;
+    // Raft logs
+    ctx.fillStyle = '#c89b5a';
+    for (var i = -1; i <= 1; i++) {
+      ctx.fillStyle = i === 0 ? '#d9ab66' : '#b98548';
+      ctx.beginPath(); ctx.ellipse(i * 15, 0, 9, 34, 0, 0, 6.29); ctx.fill();
+    }
+    ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-26, -18); ctx.lineTo(26, -18); ctx.moveTo(-26, 18); ctx.lineTo(26, 18); ctx.stroke();
+    // Rider
+    ctx.fillStyle = '#ffcc99'; ctx.beginPath(); ctx.arc(0, -4, 10, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#e63946'; ctx.beginPath(); ctx.arc(0, -4, 12, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(-3, 14, 6, 14);
+    ctx.restore();
+  }
+  function drawObstacle(o) {
+    ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.rot * 0.08);
+    if (o.type === 'rapid') {
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.beginPath(); ctx.ellipse(0, 0, o.w / 2, o.h / 2, 0, 0, 6.29); ctx.fill();
+      ctx.fillStyle = '#3a9ad9';
+      for (var i = 0; i < 5; i++) {
+        ctx.beginPath(); ctx.arc(-o.w / 3 + i * o.w / 6, Math.sin(o.bob + i) * 8, 6, 0, 6.29); ctx.fill();
+      }
+    } else if (o.type === 'log') {
+      ctx.fillStyle = '#6b4423'; ctx.fillRect(-o.w / 2, -10, o.w, 20);
+      ctx.fillStyle = '#8b5a2b'; ctx.beginPath(); ctx.arc(-o.w / 2, 0, 10, 0, 6.29); ctx.arc(o.w / 2, 0, 10, 0, 6.29); ctx.fill();
+    } else {
+      ctx.fillStyle = '#5a5a5a'; ctx.beginPath();
+      ctx.moveTo(0, -o.h / 2); ctx.lineTo(o.w / 2, o.h / 3); ctx.lineTo(-o.w / 2, o.h / 2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#8a8a8a'; ctx.beginPath(); ctx.moveTo(0, -o.h / 2); ctx.lineTo(o.w / 4, 0); ctx.lineTo(-o.w / 4, 0); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+  function drawCrate(c) {
+    ctx.save(); ctx.translate(c.x, c.y + Math.sin(c.bob) * 3);
+    ctx.fillStyle = '#b7791f'; ctx.fillRect(-18, -18, 36, 36);
+    ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 3; ctx.strokeRect(-18, -18, 36, 36);
+    ctx.beginPath(); ctx.moveTo(-18, -18); ctx.lineTo(18, 18); ctx.moveTo(18, -18); ctx.lineTo(-18, 18); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText('✚', 0, 6);
+    ctx.restore();
+  }
+
+  // ---- Update + loop ----
+  function update(dt) {
+    frame++;
+    // Steering: keyboard overrides / blends with pointer target
+    var keyDir = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) keyDir -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) keyDir += 1;
+    if (keyDir !== 0) {
+      raft.x += keyDir * 6.2;
+      raft.targetX = raft.x;
+    } else {
+      raft.x += (raft.targetX - raft.x) * 0.22;
+    }
+    raft.x = Math.max(riverLeft + 28, Math.min(riverRight - 28, raft.x));
+
+    var boost = (keys['ArrowUp'] || keys['w'] || keys['W']) ? 1.6 : 0;
+    var slow = (keys['ArrowDown'] || keys['s'] || keys['S']) ? -1.2 : 0;
+    speed = Math.max(2.0, baseSpeed + distance / 900 + boost + slow);
+    distance += speed * dt * 9;
+    score += Math.floor(speed * dt * 2);
+
+    if (invincible > 0) invincible -= dt;
+    if (shake > 0) shake -= dt * 30;
+
+    // River narrows / widens gently as you progress
+    riverWobble = Math.sin(distance / 220) * 14;
+    riverLeft = 70 + riverWobble;
+    riverRight = W - 70 - riverWobble;
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnObstacle(); spawnTimer = Math.max(0.45, 1.05 - distance / 3200); }
+    crateTimer -= dt;
+    if (crateTimer <= 0) { spawnCrate(); crateTimer = 3.5 + Math.random() * 3; }
+
+    var flow = speed * dt * 55;
+    obstacles.forEach(function (o) { o.y += flow; o.bob += 0.08; });
+    crates.forEach(function (c) { c.y += flow; c.bob += 0.08; });
+    banks.forEach(function (b) { b.y += flow * 0.9; if (b.y > H + 40) { b.y = -40; b.side = Math.random() < 0.5 ? 'left' : 'right'; } });
+    obstacles = obstacles.filter(function (o) { return o.y < H + 80; });
+    crates = crates.filter(function (c) { return c.y < H + 60; });
+
+    // Collisions
+    if (invincible <= 0) {
+      for (var i = obstacles.length - 1; i >= 0; i--) {
+        var o = obstacles[i];
+        if (hit(raft, o)) {
+          if (o.type === 'rapid') {
+            speed = Math.max(2.0, speed - 1.2);
+            shake = 12; score = Math.max(0, score - 25);
+            burst(raft.x, raft.y, '#ffffff', 12);
+            beep(140, 0.2, 'sawtooth', 0.4);
+            obstacles.splice(i, 1);
+          } else {
+            lives--; invincible = 1.4; shake = 16;
+            burst(raft.x, raft.y, '#ff6b6b', 20);
+            splashSound();
+            obstacles.splice(i, 1);
+            if (lives <= 0) { updateHUD('GAME OVER'); endGame(false); return; }
+          }
+        }
+      }
+    }
+    for (var j = crates.length - 1; j >= 0; j--) {
+      var c = crates[j];
+      if (hit(raft, c)) {
+        score += 100;
+        burst(c.x, c.y, '#ffd166', 16);
+        pickupSound();
+        crates.splice(j, 1);
+      }
+    }
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+
+    if (distance >= GOAL) { endGame(true); return; }
+    updateHUD('RAFTING');
+  }
+
+  function render() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake * 0.4, (Math.random() - 0.5) * shake * 0.4);
+    drawBackground();
+    crates.forEach(drawCrate);
+    obstacles.forEach(drawObstacle);
+    drawRaft();
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 30);
+      ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 5, 5);
+    });
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    // Progress bar to calm water
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(20, H - 18, W - 40, 10);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(20, H - 18, (W - 40) * Math.min(1, distance / GOAL), 10);
+  }
+
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    var dt = 0.016;
+    if (lastTime) dt = Math.min(0.05, (ts - lastTime) / 1000);
+    lastTime = ts;
+    if (state === 'playing') update(dt);
+    render();
+    if (state === 'title') {
+      // Gentle idle animation behind the title overlay
+      frame++;
+    }
+  }
+  resetGame();
+  state = 'title';
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

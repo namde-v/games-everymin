@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Prism Pathfinder</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #070b1a; color: #eaf2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { margin: 6px 0 2px; font-size: 28px; letter-spacing: 1px; text-align: center; color: #7df9ff; text-shadow: 0 0 18px rgba(125,249,255,.6); }
+  p.sub { margin: 0 0 10px; color: #aab8d8; text-align: center; font-size: 14px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; width: 100%; max-width: 640px; }
+  .pill { background: #121a33; border: 1px solid #2b3a6b; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 700; }
+  .pill b { color: #ffd166; }
+  #wrap { position: relative; width: min(92vw, 560px); aspect-ratio: 1 / 1; }
+  canvas { width: 100%; height: 100%; display: block; background: #0b1230; border: 2px solid #2b3a6b; border-radius: 14px; touch-action: none; cursor: pointer; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .overlay { position: absolute; inset: 0; background: rgba(4,8,22,.92); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0; font-size: 30px; color: #7df9ff; }
+  .overlay p { margin: 0; color: #c6d2ee; line-height: 1.55; font-size: 15px; max-width: 440px; }
+  .overlay .big { font-size: 20px; font-weight: 800; color: #ffd166; }
+  button { background: #ffd166; color: #11182e; border: none; border-radius: 999px; padding: 12px 22px; font-size: 16px; font-weight: 800; cursor: pointer; margin-top: 6px; }
+  button.secondary { background: transparent; color: #eaf2ff; border: 2px solid #4a5ea6; }
+  button:hover { filter: brightness(1.1); }
+  button:active { transform: scale(.97); }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+  #status { margin-top: 10px; min-height: 22px; font-weight: 700; color: #7df9ff; text-align: center; }
+  #help { max-width: 640px; color: #9fb0d4; font-size: 13px; line-height: 1.6; text-align: center; margin-top: 8px; }
+  kbd { background: #1c274d; border: 1px solid #3a4a7d; border-bottom-width: 3px; border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>🔮 Prism Pathfinder</h1>
+<p class="sub">Rotate the prisms. Bend the beam. Light every crystal.</p>
+
+<div id="hud">
+  <div class="pill">Level: <b id="hudLevel">1 / 5</b></div>
+  <div class="pill">Score: <b id="hudScore">0</b></div>
+  <div class="pill">Lives: <b id="hudLives">❤️❤️❤️</b></div>
+  <div class="pill">Rotations left: <b id="hudMoves">10</b></div>
+  <div class="pill">Crystals: <b id="hudTargets">0 / 3</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="560" height="560" aria-label="Prism Pathfinder game board"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🔮 Prism Pathfinder</h2>
+    <p class="big">Route the light. Wake the crystals.</p>
+    <p>A beam of light leaves the glowing source. Tap or click a prism to rotate it 90&deg; in effect — mirrors flip between / and \ — and bend the beam through <b>every crystal</b> on the grid before you run out of rotations.</p>
+    <p><b>How to Play:</b> Click / tap a prism to rotate it. Use arrow keys to move the glowing cursor and <kbd>Space</kbd> to rotate. <kbd>R</kbd> restarts the level. Walls block the beam. Crystals glow when lit. Finish all 5 levels to win!</p>
+    <button id="startBtn" type="button">▶ Start Game</button>
+    <button id="howBtn" class="secondary" type="button">How to Play</button>
+    <p id="howText" style="display:none">Tip: Follow the beam! A dark crystal past a mirror means that mirror is pointing the wrong way. Plan the whole path before you spend rotations — each level has a tight rotation budget. If you run out, you lose a life and the level resets.</p>
+  </div>
+
+  <div id="levelScreen" class="overlay hidden">
+    <h2 id="levelTitle">Level Complete!</h2>
+    <p id="levelText">Brilliant routing!</p>
+    <button id="nextBtn" type="button">Next Level ▶</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText">All crystals shine.</p>
+    <button id="restartBtn" type="button">↻ Play Again</button>
+  </div>
+</div>
+
+<div id="status" role="status">Press Start, then rotate the prisms to light every crystal.</div>
+
+<div id="controls">
+  <button id="restartLevelBtn" class="secondary" type="button">↻ Restart Level</button>
+  <button id="soundBtn" class="secondary" type="button">🔊 Sound: On</button>
+</div>
+<p id="help">Mouse: click a prism to rotate &nbsp;•&nbsp; Touch: tap a prism &nbsp;•&nbsp; Keyboard: Arrows move cursor, Space / Enter rotates, R restarts level</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var hudLevel = document.getElementById('hudLevel');
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudMoves = document.getElementById('hudMoves');
+  var hudTargets = document.getElementById('hudTargets');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var levelScreen = document.getElementById('levelScreen');
+  var endScreen = document.getElementById('endScreen');
+
+  // ---- Audio: procedural only, created after user interaction ----
+  var audioCtx = null, soundOn = true;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.12));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.12));
+    } catch (e) {}
+  }
+  function playRotate() { beep(520, 0.08, 'triangle', 0.10); setTimeout(function(){ beep(760, 0.08, 'triangle', 0.08); }, 50); }
+  function playLit() { beep(880, 0.12, 'sine', 0.12); setTimeout(function(){ beep(1320, 0.15, 'sine', 0.10); }, 80); }
+  function playWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'triangle', 0.12); }, i * 120); }); }
+  function playLose() { [330, 262, 196].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'sawtooth', 0.07); }, i * 130); }); }
+
+  // ---- Levels ----
+  // Directions: N=(0,-1) E=(1,0) S=(0,1) W=(-1,0)
+  // Mirror '/' : E->N, N->E, W->S, S->W   Mirror '\' : E->S, S->E, W->N, N->W
+  // solution = correct orientation; initial orientation is flipped so every prism needs rotating.
+  function L(size, sx, sy, sdx, sdy, mirrors, targets, walls, moves) {
+    return { size: size, source: { x: sx, y: sy, dx: sdx, dy: sdy }, mirrors: mirrors, targets: targets, walls: walls || [], moves: moves };
+  }
+  var LEVELS = [
+    // Level 1: source E -> (3,1)\ S -> target (3,3) -> (3,5)/ W -> target (1,5) -> (0,5)\ N -> target (0,3)
+    L(6, 0, 1, 1, 0,
+      [{x:3,y:1,o:'\\'},{x:3,y:5,o:'/'},{x:0,y:5,o:'\\'}],
+      [{x:3,y:3},{x:1,y:5},{x:0,y:3}],
+      [{x:5,y:3},{x:1,y:0}], 10),
+    // Level 2: (3,2)\ S -> (3,4) -> (3,5)/ W -> (1,5) -> (0,5)\ N -> (0,4)
+    L(7, 0, 2, 1, 0,
+      [{x:3,y:2,o:'\\'},{x:3,y:5,o:'/'},{x:0,y:5,o:'\\'}],
+      [{x:3,y:4},{x:1,y:5},{x:0,y:4}],
+      [{x:5,y:0},{x:6,y:4},{x:1,y:1}], 10),
+    // Level 3: (3,1)\ S -> (3,3) -> (3,5)/ W -> (0,5)\ N -> (0,4) -> (0,2)/ E -> (2,2),(5,2)
+    L(8, 0, 1, 1, 0,
+      [{x:3,y:1,o:'\\'},{x:3,y:5,o:'/'},{x:0,y:5,o:'\\'},{x:0,y:2,o:'/'}],
+      [{x:3,y:3},{x:0,y:4},{x:2,y:2},{x:5,y:2}],
+      [{x:6,y:6},{x:1,y:6},{x:5,y:4}], 13),
+    // Level 4: (2,3)\ S -> (2,4),(2,5) -> (2,7)/ W -> (0,7)\ N -> (0,5) -> (0,4)/ E -> (2,4) -> (4,4)\ S -> (4,6) -> (4,7)\ E -> (6,7)
+    L(8, 0, 3, 1, 0,
+      [{x:2,y:3,o:'\\'},{x:2,y:7,o:'/'},{x:0,y:7,o:'\\'},{x:0,y:4,o:'/'},{x:4,y:4,o:'\\'},{x:4,y:7,o:'\\'}],
+      [{x:2,y:5},{x:0,y:5},{x:2,y:4},{x:4,y:6},{x:6,y:7}],
+      [{x:6,y:1},{x:1,y:0},{x:6,y:3}], 16),
+    // Level 5: from the east: (5,1)/ S -> (5,3) -> (5,5)\ E -> (7,5)\ S -> (7,6) -> (7,7)/ W -> (5,7) -> (3,7)\ N -> (3,5) -> (3,3)/ E -> (6,3)
+    L(8, 7, 1, -1, 0,
+      [{x:5,y:1,o:'/'},{x:5,y:5,o:'\\'},{x:7,y:5,o:'\\'},{x:7,y:7,o:'/'},{x:3,y:7,o:'\\'},{x:3,y:3,o:'/'}],
+      [{x:5,y:3},{x:7,y:6},{x:5,y:7},{x:3,y:5},{x:6,y:3}],
+      [{x:1,y:1},{x:1,y:5},{x:6,y:1}], 16)
+  ];
+
+  var state = 'title'; // title | playing | levelDone | won | over
+  var levelIndex = 0, score = 0, lives = 3, movesUsed = 0;
+  var mirrors = {}; // "x,y" -> '/' or '\'
+  var cursor = { x: 0, y: 0 };
+  var beamPath = [], litSet = {}, beamAnim = 0, lastTime = 0;
+
+  function key(x, y) { return x + ',' + y; }
+  function level() { return LEVELS[levelIndex]; }
+  function flip(o) { return o === '/' ? '\\' : '/'; }
+
+  function setupLevel(idx) {
+    levelIndex = idx;
+    var lv = level();
+    mirrors = {};
+    lv.mirrors.forEach(function(m) { mirrors[key(m.x, m.y)] = flip(m.o); });
+    movesUsed = 0;
+    cursor = { x: lv.source.x, y: lv.source.y };
+    state = 'playing';
+    recomputeBeam();
+    updateHud();
+    statusEl.textContent = 'Level ' + (idx + 1) + ': rotate the prisms to light all ' + lv.targets.length + ' crystals.';
+  }
+
+  function reflect(o, dx, dy) {
+    if (o === '/') return { dx: -dy, dy: -dx };
+    return { dx: dy, dy: dx }; // '\'
+  }
+
+  function recomputeBeam() {
+    var lv = level();
+    var wallSet = {}, targetSet = {};
+    lv.walls.forEach(function(w) { wallSet[key(w.x, w.y)] = true; });
+    lv.targets.forEach(function(t) { targetSet[key(t.x, t.y)] = true; });
+    var path = [], lit = {};
+    var x = lv.source.x, y = lv.source.y, dx = lv.source.dx, dy = lv.source.dy;
+    var seen = {};
+    path.push({ x: x, y: y });
+    for (var steps = 0; steps < 200; steps++) {
+      var nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= lv.size || ny >= lv.size) break;
+      if (wallSet[key(nx, ny)]) break;
+      var stateKey = nx + ',' + ny + ',' + dx + ',' + dy;
+      if (seen[stateKey]) break;
+      seen[stateKey] = true;
+      x = nx; y = ny;
+      path.push({ x: x, y: y });
+      if (targetSet[key(x, y)]) lit[key(x, y)] = true;
+      if (x === lv.source.x && y === lv.source.y) break; // beam returned to source
+      var m = mirrors[key(x, y)];
+      if (m) { var r = reflect(m, dx, dy); dx = r.dx; dy = r.dy; }
+    }
+    beamPath = path; litSet = lit;
+    beamAnim = 0;
+    return lit;
+  }
+
+  function litCount() {
+    var n = 0, lv = level();
+    lv.targets.forEach(function(t) { if (litSet[key(t.x, t.y)]) n++; });
+    return n;
+  }
+
+  function updateHud() {
+    var lv = level();
+    hudLevel.textContent = (levelIndex + 1) + ' / ' + LEVELS.length;
+    hudScore.textContent = score;
+    hudLives.textContent = '❤️'.repeat(Math.max(0, lives)) || '—';
+    hudMoves.textContent = Math.max(0, lv.moves - movesUsed);
+    hudTargets.textContent = litCount() + ' / ' + lv.targets.length;
+  }
+
+  function rotateAt(x, y) {
+    if (state !== 'playing') return;
+    if (movesUsed >= level().moves) { statusEl.textContent = 'Out of rotations! Press Restart Level to try this grid again.'; return; }
+    var k = key(x, y);
+    if (!(k in mirrors)) { statusEl.textContent = 'That cell is not a prism — click a diamond prism to rotate it.'; beep(180, 0.08, 'square', 0.05); return; }
+    mirrors[k] = flip(mirrors[k]);
+    movesUsed++;
+    playRotate();
+    var before = litCount();
+    recomputeBeam();
+    var after = litCount();
+    if (after > before) playLit();
+    updateHud();
+    if (after === level().targets.length) {
+      var bonus = 100 + Math.max(0, level().moves - movesUsed) * 10;
+      score += level().targets.length * 100 + bonus;
+      updateHud();
+      state = 'levelDone';
+      playWin();
+      if (levelIndex + 1 >= LEVELS.length) {
+        document.getElementById('endTitle').textContent = '🏆 You Win!';
+        document.getElementById('endText').textContent = 'All 5 levels solved! Final score: ' + score + '. Every crystal shines.';
+        endScreen.classList.remove('hidden');
+        state = 'won';
+      } else {
+        document.getElementById('levelTitle').textContent = '✨ Level ' + (levelIndex + 1) + ' Complete!';
+        document.getElementById('levelText').textContent = 'All crystals lit! Bonus +' + bonus + '. Score: ' + score + '. Ready for the next grid?';
+        levelScreen.classList.remove('hidden');
+      }
+      return;
+    }
+    if (movesUsed >= level().moves) {
+      lives--;
+      updateHud();
+      if (lives <= 0) {
+        state = 'over'; playLose();
+        document.getElementById('endTitle').textContent = '💔 Game Over';
+        document.getElementById('endText').textContent = 'Out of lives. Final score: ' + score + '. Press Play Again to restart from Level 1.';
+        endScreen.classList.remove('hidden');
+      } else {
+        statusEl.textContent = 'Out of rotations! A life is lost. Press Restart Level to try this grid again.';
+        playLose();
+      }
+    } else {
+      statusEl.textContent = litCount() + ' / ' + level().targets.length + ' crystals lit. Rotations left: ' + (level().moves - movesUsed) + '.';
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; lives = 3;
+    titleScreen.classList.add('hidden');
+    levelScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    setupLevel(0);
+    beep(660, 0.12, 'triangle', 0.10);
+  }
+
+  // ---- Input: mouse, touch, keyboard ----
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    var lv = level();
+    var cell = canvas.width / lv.size;
+    var x = Math.floor((cx - rect.left) / rect.width * lv.size);
+    var y = Math.floor((cy - rect.top) / rect.height * lv.size);
+    x = Math.max(0, Math.min(lv.size - 1, x));
+    y = Math.max(0, Math.min(lv.size - 1, y));
+    return { x: x, y: y };
+  }
+  canvas.addEventListener('click', function(e) {
+    ensureAudio();
+    var c = cellFromEvent(e);
+    cursor = c;
+    rotateAt(c.x, c.y);
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    cursor = cellFromEvent(e);
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    ensureAudio();
+    var c = cellFromEvent(e);
+    cursor = c;
+    rotateAt(c.x, c.y);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    cursor = cellFromEvent(e);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function(e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startGame(); return; }
+    if (state !== 'playing') {
+      if (e.key === 'Enter' && state === 'levelDone') { document.getElementById('nextBtn').click(); }
+      if (e.key === 'Enter' && (state === 'won' || state === 'over')) { startGame(); }
+      return;
+    }
+    var lv = level();
+    if (e.key === 'ArrowUp') { e.preventDefault(); cursor.y = Math.max(0, cursor.y - 1); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); cursor.y = Math.min(lv.size - 1, cursor.y + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); cursor.x = Math.max(0, cursor.x - 1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); cursor.x = Math.min(lv.size - 1, cursor.x + 1); }
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); ensureAudio(); rotateAt(cursor.x, cursor.y); }
+    else if (e.key === 'r' || e.key === 'R') { setupLevel(levelIndex); statusEl.textContent = 'Level restarted.'; }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function() {
+    ensureAudio();
+    var t = document.getElementById('howText');
+    t.style.display = (t.style.display === 'none' ? 'block' : 'none');
+  });
+  document.getElementById('nextBtn').addEventListener('click', function() {
+    ensureAudio();
+    levelScreen.classList.add('hidden');
+    setupLevel(levelIndex + 1);
+  });
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('restartLevelBtn').addEventListener('click', function() {
+    ensureAudio();
+    if (state === 'title') { startGame(); return; }
+    levelScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    setupLevel(levelIndex);
+  });
+  document.getElementById('soundBtn').addEventListener('click', function() {
+    ensureAudio();
+    soundOn = !soundOn;
+    this.textContent = soundOn ? '🔊 Sound: On' : '🔇 Sound: Off';
+  });
+
+  // ---- Rendering (Canvas 2D, requestAnimationFrame) ----
+  function draw(now) {
+    requestAnimationFrame(draw);
+    var lv = level();
+    var cell = canvas.width / lv.size;
+    var dt = lastTime ? (now - lastTime) / 1000 : 0;
+    lastTime = now;
+    beamAnim = Math.min(1, beamAnim + dt * 1.4);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // grid
+    for (var y = 0; y < lv.size; y++) {
+      for (var x = 0; x < lv.size; x++) {
+        ctx.fillStyle = ((x + y) % 2 === 0) ? '#0e1736' : '#0c1430';
+        ctx.fillRect(x * cell, y * cell, cell, cell);
+        ctx.strokeStyle = '#1d2a55';
+        ctx.strokeRect(x * cell + 0.5, y * cell + 0.5, cell - 1, cell - 1);
+      }
+    }
+    // cursor
+    if (state === 'playing') {
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+      ctx.strokeRect(cursor.x * cell + 3, cursor.y * cell + 3, cell - 6, cell - 6);
+      ctx.lineWidth = 1;
+    }
+    // walls
+    lv.walls.forEach(function(w) {
+      ctx.fillStyle = '#3a456e';
+      ctx.fillRect(w.x * cell + 4, w.y * cell + 4, cell - 8, cell - 8);
+      ctx.fillStyle = '#5a6a9e';
+      ctx.font = Math.floor(cell * 0.4) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('▓', w.x * cell + cell / 2, w.y * cell + cell / 2);
+    });
+    // beam (animated along path)
+    if (beamPath.length > 1) {
+      var shown = Math.max(1, Math.floor(beamPath.length * beamAnim));
+      ctx.strokeStyle = 'rgba(125,249,255,0.95)'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.shadowColor = '#7df9ff'; ctx.shadowBlur = 14;
+      ctx.beginPath();
+      beamPath.slice(0, shown + 1).forEach(function(p, i) {
+        var px = p.x * cell + cell / 2, py = p.y * cell + cell / 2;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    // source
+    var s = lv.source;
+    ctx.fillStyle = '#ffe066';
+    ctx.beginPath(); ctx.arc(s.x * cell + cell / 2, s.y * cell + cell / 2, cell * 0.26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#11182e'; ctx.font = 'bold ' + Math.floor(cell * 0.32) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('◉', s.x * cell + cell / 2, s.y * cell + cell / 2 + 1);
+    // targets / crystals
+    var pulse = 0.75 + 0.25 * Math.sin(now / 280);
+    lv.targets.forEach(function(t) {
+      var lit = !!litSet[key(t.x, t.y)];
+      var cx = t.x * cell + cell / 2, cy = t.y * cell + cell / 2, r = cell * (lit ? 0.30 * pulse + 0.08 : 0.24);
+      ctx.fillStyle = lit ? '#ff5ad1' : '#3d2a55';
+      ctx.shadowColor = lit ? '#ff5ad1' : 'transparent'; ctx.shadowBlur = lit ? 18 : 0;
+      ctx.beginPath();
+      for (var i = 0; i < 6; i++) {
+        var a = Math.PI / 3 * i - Math.PI / 6;
+        var px = cx + Math.cos(a) * r, py = cy + Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = lit ? '#ffffff' : '#b9a6d8';
+      ctx.font = Math.floor(cell * 0.28) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('◆', cx, cy);
+    });
+    // prisms / mirrors
+    Object.keys(mirrors).forEach(function(k) {
+      var parts = k.split(','), mx = parseInt(parts[0], 10), my = parseInt(parts[1], 10);
+      var o = mirrors[k];
+      var cx = mx * cell + cell / 2, cy = my * cell + cell / 2, h = cell * 0.34;
+      ctx.fillStyle = '#7df9ff'; ctx.strokeStyle = '#eaf2ff'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - h, cy + h); ctx.lineTo(cx + h, cy - h); ctx.lineTo(cx + h, cy + h); ctx.closePath();
+      ctx.fill(); ctx.stroke(); ctx.lineWidth = 1;
+      ctx.strokeStyle = '#0b1230'; ctx.lineWidth = 3; ctx.beginPath();
+      if (o === '/') { ctx.moveTo(cx - h * 0.7, cy + h * 0.7); ctx.lineTo(cx + h * 0.7, cy - h * 0.7); }
+      else { ctx.moveTo(cx - h * 0.7, cy - h * 0.7); ctx.lineTo(cx + h * 0.7, cy + h * 0.7); }
+      ctx.stroke(); ctx.lineWidth = 1;
+    });
+  }
+  recomputeBeam();
+  updateHud();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

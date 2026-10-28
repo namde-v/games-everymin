@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Penguin Plunge</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0b2233; display:flex; justify-content:center; align-items:center; min-height:100vh; font-family:Arial,Helvetica,sans-serif; overflow:hidden; }
+  #wrap { position:relative; width:100%; max-width:560px; aspect-ratio:9/14; }
+  canvas { display:block; width:100%; height:100%; background:linear-gradient(#bfe9ff,#e8f7ff); border:3px solid #eaf6ff; border-radius:14px; touch-action:none; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; background:rgba(6,30,48,.72); color:#fff; padding:22px; border-radius:12px; }
+  .screen.hidden { display:none; }
+  h1 { font-size:46px; color:#fff; text-shadow:0 4px 0 #1e7fb8; letter-spacing:1px; }
+  h1 span { display:block; font-size:20px; color:#9fe8ff; text-shadow:none; margin-top:8px; }
+  p { font-size:16px; line-height:1.55; margin:12px 0; max-width:420px; }
+  .fish { color:#ffd166; font-weight:bold; }
+  button { background:#ffcc33; color:#102a43; border:none; border-radius:999px; padding:15px 30px; font-size:19px; font-weight:bold; cursor:pointer; box-shadow:0 5px 0 #c99300; margin-top:10px; }
+  button:active { transform:translateY(4px); box-shadow:0 1px 0 #c99300; }
+  button.secondary { background:#fff; box-shadow:0 5px 0 #9fb3c0; }
+  #hud { position:absolute; top:10px; left:10px; right:10px; display:none; justify-content:space-between; gap:6px; color:#102a43; font-weight:bold; font-size:14px; }
+  #hud.show { display:flex; }
+  .pill { background:rgba(255,255,255,.88); padding:8px 10px; border-radius:999px; }
+  #hint { position:absolute; bottom:10px; left:0; right:0; text-align:center; color:#102a43; font-size:13px; font-weight:bold; text-shadow:0 1px #fff; display:none; }
+  #hint.show { display:block; }
+  .keys { background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.35); border-radius:10px; padding:12px; font-size:14px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="540" height="840"></canvas>
+  <div id="hud">
+    <div class="pill">🐟 <span id="fish">0</span> / 12</div>
+    <div class="pill">❤️ <span id="lives">3</span></div>
+    <div class="pill">📏 <span id="dist">0</span>m</div>
+    <div class="pill" id="status">Sliding!</div>
+  </div>
+  <div id="hint">◀ ▶ steer &nbsp;•&nbsp; drag / tap sides &nbsp;•&nbsp; collect fish, dodge cracks &amp; seals</div>
+
+  <div id="titleScreen" class="screen">
+    <h1>🐧 PENGUIN<br>PLUNGE <span>Arcade / Ice Slide Collector</span></h1>
+    <p>Slide down the icy mountain! Your penguin has slippery momentum — steer gently, grab <span class="fish">12 fish</span>, and reach the warm beach at the bottom.</p>
+    <div class="keys">🎮 <b>How to Play</b><br>Arrow keys / A &amp; D to tilt and steer<br>Mouse: move to steer &nbsp;•&nbsp; Touch: drag left / right<br>🐟 Fish = points &nbsp;•&nbsp; 🕳️ Cracks &amp; 🦭 seals cost a life<br>Reach 1200m with 12 fish to WIN!</div>
+    <button id="startBtn">▶ START SLIDE</button>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h1 id="endTitle">🏆 YOU WIN!</h1>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ SLIDE AGAIN</button>
+    <button id="menuBtn" class="secondary">🏠 Title Screen</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var hud = document.getElementById('hud');
+  var hint = document.getElementById('hint');
+  var fishEl = document.getElementById('fish');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var statusEl = document.getElementById('status');
+
+  var state = 'title'; // title | playing | over
+  var player, keys, items, obstacles, particles, scrollY, distance, fish, lives, speed, steer, invuln, audioCtx, lastTime, snowflakes;
+
+  function reset(){
+    player = { x: W/2, y: H-170, vx: 0, tilt: 0, wobble: 0 };
+    keys = {};
+    items = []; obstacles = []; particles = []; snowflakes = [];
+    scrollY = 0; distance = 0; fish = 0; lives = 3; speed = 4.2; steer = 0; invuln = 0; lastTime = 0;
+    for (var i=0;i<60;i++) snowflakes.push({x:Math.random()*W, y:Math.random()*H, s:1+Math.random()*2.5, v:0.5+Math.random()*1.2});
+    // Pre-populate a winding slope: fish in arcs, cracks and seals as hazards.
+    for (var d=0; d<1300; d+=90){
+      var kind = Math.random();
+      var lane = 70 + Math.random()*(W-140);
+      if (kind < 0.48) items.push({ y: d, x: lane, taken:false, bob: Math.random()*6.28 });
+      else if (kind < 0.74) obstacles.push({ y: d, x: lane, type:'crack', w: 70+Math.random()*30 });
+      else obstacles.push({ y: d, x: lane, type:'seal', w: 62, dir: Math.random()<0.5?-1:1 });
+    }
+    updateHUD();
+  }
+
+  function ensureAudio(){
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+
+  function startGame(){
+    ensureAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    hud.classList.add('show');
+    hint.classList.add('show');
+    statusEl.textContent = 'Sliding!';
+    beep(520, 0.18, 'triangle', 0.15); setTimeout(function(){ beep(780, 0.22, 'triangle', 0.15); }, 120);
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(win){
+    state = 'over';
+    hud.classList.remove('show'); hint.classList.remove('show');
+    document.getElementById('endTitle').textContent = win ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    document.getElementById('endText').textContent = win
+      ? 'You reached the beach with ' + fish + ' fish in ' + Math.floor(distance) + 'm! What a smooth slider!'
+      : 'The mountain got you! You collected ' + fish + ' fish and slid ' + Math.floor(distance) + 'm. Try again!';
+    endScreen.classList.remove('hidden');
+    if (win) { beep(523,0.2,'sine',0.15); setTimeout(function(){beep(659,0.2,'sine',0.15);},150); setTimeout(function(){beep(784,0.35,'sine',0.15);},300); }
+    else beep(160, 0.5, 'sawtooth', 0.14);
+  }
+
+  function updateHUD(){
+    fishEl.textContent = fish; livesEl.textContent = lives; distEl.textContent = Math.floor(distance);
+  }
+
+  function spawnBurst(x, y, color, n){
+    for (var i=0;i<n;i++) particles.push({x:x, y:y, vx:(Math.random()-0.5)*5, vy:(Math.random()-0.5)*5, life:28, color:color});
+  }
+
+  function update(dt){
+    // Steering: loose, icy momentum. Input changes acceleration, velocity decays slowly.
+    var target = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) target = -1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) target = 1;
+    if (keys['mouse'] !== undefined) target = keys['mouse'];
+    steer += (target - steer) * 0.12;
+    player.vx += steer * 0.55;
+    player.vx *= 0.985; // ice: very little friction
+    player.x += player.vx;
+    player.tilt = player.vx * 0.06;
+    player.wobble += 0.12;
+    if (player.x < 34) { player.x = 34; player.vx = Math.abs(player.vx)*0.4; }
+    if (player.x > W-34) { player.x = W-34; player.vx = -Math.abs(player.vx)*0.4; }
+
+    speed = Math.min(7.5, 4.2 + distance/350);
+    distance += speed * 0.55;
+    scrollY += speed;
+    if (invuln > 0) invuln--;
+
+    var screenY = function(worldY){ return worldY - scrollY + H - 170; };
+
+    items.forEach(function(it){
+      if (it.taken) return;
+      var sy = screenY(it.y);
+      if (sy > -30 && sy < H+30 && Math.abs(it.x - player.x) < 42 && Math.abs(sy - player.y) < 42){
+        it.taken = true; fish++; spawnBurst(it.x, sy, '#ffd166', 12); beep(880,0.12,'sine',0.14);
+        statusEl.textContent = 'Yum! Fish ' + fish + '/12';
+      }
+    });
+
+    if (invuln === 0){
+      obstacles.forEach(function(ob){
+        var sy = screenY(ob.y);
+        if (ob.type === 'seal'){
+          ob.x += ob.dir * 0.7;
+          if (ob.x < 50 || ob.x > W-50) ob.dir *= -1;
+        }
+        if (sy > -40 && sy < H+40 && Math.abs(ob.x - player.x) < 44 && Math.abs(sy - player.y) < 40){
+          lives--; invuln = 90; spawnBurst(player.x, player.y, '#ff6b6b', 18); beep(140,0.35,'sawtooth',0.16);
+          statusEl.textContent = ob.type === 'seal' ? 'Ouch! A seal bumped you!' : 'Crack! Watch the ice!';
+          if (lives <= 0){ updateHUD(); endGame(false); return; }
+        }
+      });
+    }
+
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    snowflakes.forEach(function(s){ s.y += s.v; if (s.y > H){ s.y = -5; s.x = Math.random()*W; } });
+    updateHUD();
+
+    if (distance >= 1200){
+      if (fish >= 12) endGame(true);
+      else { statusEl.textContent = 'Almost there — need ' + (12-fish) + ' more fish!'; distance = 1150; scrollY -= 50; }
+    }
+  }
+
+  function drawSlope(){
+    // Icy slope with side snow banks and a winding centre trail.
+    ctx.fillStyle = '#cfeeff'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(46,0); ctx.lineTo(30,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W,0); ctx.lineTo(W-46,0); ctx.lineTo(W-30,H); ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (var y=0; y<=H; y+=24){ var cx = W/2 + Math.sin((y+scrollY)/140)*34; if (y===0) ctx.moveTo(cx,y); else ctx.lineTo(cx,y); }
+    ctx.stroke();
+    // Sparkle marks scrolling with the slope
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    for (var i=0;i<14;i++){ var sy = ((i*61 - scrollY) % H + H) % H; ctx.fillRect(60 + ((i*97)% (W-120)), sy, 10, 3); }
+    // Beach finish line near the end
+    if (distance > 1050){
+      var fy = H - 170 - (1200 - distance) * 0.9;
+      if (fy > -20 && fy < H){ ctx.fillStyle = '#ffe9a8'; ctx.fillRect(0, fy, W, 34); ctx.fillStyle = '#102a43'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center'; ctx.fillText('🏖️ FINISH BEACH', W/2, fy+23); }
+    }
+  }
+
+  function draw(){
+    drawSlope();
+    var screenY = function(worldY){ return worldY - scrollY + H - 170; };
+    // Fish
+    items.forEach(function(it){
+      if (it.taken) return;
+      var sy = screenY(it.y); if (sy < -30 || sy > H+30) return;
+      var bob = Math.sin(it.bob + scrollY/40)*4;
+      ctx.save(); ctx.translate(it.x, sy+bob);
+      ctx.fillStyle = '#ff9f43'; ctx.beginPath(); ctx.ellipse(0,0,20,10,0,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-18,0); ctx.lineTo(-30,-10); ctx.lineTo(-30,10); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#102a43'; ctx.beginPath(); ctx.arc(10,-2,2.5,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
+    // Hazards
+    obstacles.forEach(function(ob){
+      var sy = screenY(ob.y); if (sy < -50 || sy > H+50) return;
+      if (ob.type === 'crack'){
+        ctx.strokeStyle = '#2b6d8f'; ctx.lineWidth = 5; ctx.beginPath();
+        ctx.moveTo(ob.x-ob.w/2, sy); ctx.lineTo(ob.x-8, sy+12); ctx.lineTo(ob.x+10, sy-6); ctx.lineTo(ob.x+ob.w/2, sy+8); ctx.stroke();
+        ctx.fillStyle = '#0b3d55'; ctx.beginPath(); ctx.ellipse(ob.x, sy+4, ob.w/2, 9, 0, 0, Math.PI*2); ctx.fill();
+      } else {
+        ctx.save(); ctx.translate(ob.x, sy);
+        ctx.fillStyle = '#7a8a94'; ctx.beginPath(); ctx.ellipse(0,0,30,16,0,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(20,-6,10,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#102a43'; ctx.beginPath(); ctx.arc(23,-8,2,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ffb3c1'; ctx.font = '16px Arial'; ctx.textAlign = 'center'; ctx.fillText('🦭', 0, 6);
+        ctx.restore();
+      }
+    });
+    // Snowflakes
+    ctx.fillStyle = 'rgba(255,255,255,.95)';
+    snowflakes.forEach(function(s){ ctx.beginPath(); ctx.arc(s.x, s.y, s.s, 0, Math.PI*2); ctx.fill(); });
+    // Penguin (belly-sliding, tilted by momentum)
+    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.tilt);
+    if (invuln > 0 && Math.floor(invuln/6)%2===0) ctx.globalAlpha = 0.45;
+    ctx.fillStyle = '#102a43'; ctx.beginPath(); ctx.ellipse(0,0,26,32,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(0,8,17,20,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff9f43'; ctx.beginPath(); ctx.moveTo(-7,-26); ctx.lineTo(0,-18); ctx.lineTo(7,-26); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#102a43';
+    ctx.beginPath(); ctx.arc(-9,-14,3,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(9,-14,3,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff9f43'; ctx.beginPath(); ctx.ellipse(-24,14,12,6,-0.4,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(24,14,12,6,0.4,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    // Particles
+    particles.forEach(function(p){ ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life/28); ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1; });
+    // Distance progress bar
+    ctx.fillStyle = 'rgba(16,42,67,.25)'; ctx.fillRect(20, H-26, W-40, 10);
+    ctx.fillStyle = '#ffcc33'; ctx.fillRect(20, H-26, (W-40)*Math.min(1, distance/1200), 10);
+  }
+
+  function loop(ts){
+    if (state !== 'playing') return;
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(50, ts - lastTime); lastTime = ts;
+    update(dt);
+    if (state === 'playing') draw();
+    if (state === 'playing') requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function(){
+    ensureAudio(); state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+  });
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if ((e.key === 'Enter' || e.key === ' ') && state !== 'playing'){ e.preventDefault(); startGame(); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function(e){
+    var rect = canvas.getBoundingClientRect();
+    var mx = (e.clientX - rect.left) / rect.width * W;
+    keys['mouse'] = mx < player.x - 18 ? -1 : (mx > player.x + 18 ? 1 : 0);
+  });
+  canvas.addEventListener('mouseleave', function(){ keys['mouse'] = undefined; });
+  canvas.addEventListener('mousedown', function(e){ ensureAudio(); var rect = canvas.getBoundingClientRect(); var mx = (e.clientX - rect.left)/rect.width*W; keys['mouse'] = mx < W/2 ? -1 : 1; });
+  canvas.addEventListener('touchstart', function(e){ ensureAudio(); e.preventDefault(); var t = e.touches[0]; var rect = canvas.getBoundingClientRect(); var mx = (t.clientX - rect.left)/rect.width*W; keys['mouse'] = mx < W/2 ? -1 : 1; }, { passive:false });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); var t = e.touches[0]; var rect = canvas.getBoundingClientRect(); var mx = (t.clientX - rect.left)/rect.width*W; keys['mouse'] = mx < player.x - 18 ? -1 : (mx > player.x + 18 ? 1 : 0); }, { passive:false });
+  canvas.addEventListener('touchend', function(){ keys['mouse'] = undefined; });
+
+  reset(); drawSlope();
+  // Draw a static penguin on the title backdrop
+  ctx.save(); ctx.translate(W/2, H-170);
+  ctx.fillStyle = '#102a43'; ctx.beginPath(); ctx.ellipse(0,0,26,32,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(0,8,17,20,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ff9f43'; ctx.beginPath(); ctx.moveTo(-7,-26); ctx.lineTo(0,-18); ctx.lineTo(7,-26); ctx.closePath(); ctx.fill();
+  ctx.restore();
+})();
+</script>
+</body>
+</html>

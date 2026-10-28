@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Folk Fiddle Fest — Rhythm / Fiddle Tune Timing</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#1a120b;color:#fff7e6;font-family:Georgia,serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+  h1{font-size:30px;color:#ffd166;text-shadow:2px 2px 0 #7a3b00;margin:6px 0 2px;text-align:center}
+  .sub{color:#ffcf9e;font-style:italic;margin-bottom:8px;text-align:center}
+  #wrap{position:relative;width:min(860px,96vw)}
+  canvas{display:block;width:100%;height:500px;background:linear-gradient(#2b1a0e,#17100a);border:4px solid #d98e32;border-radius:14px;touch-action:none}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+  .pill{background:#3d2712;border:2px solid #d98e32;border-radius:999px;padding:6px 14px;font-weight:bold}
+  .pill b{color:#ffd166}
+  #btns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:8px}
+  button{background:#e63946;color:#fff;border:3px solid #ffd166;border-radius:12px;padding:12px 22px;font-size:17px;font-weight:bold;cursor:pointer}
+  button.secondary{background:#2a6f4e}
+  button:hover{filter:brightness(1.15)}
+  #how{display:none;max-width:860px;background:#fff7e6;color:#2b1a0e;border-radius:12px;padding:16px;margin-top:10px;line-height:1.55}
+  #how h2{color:#7a3b00;margin-bottom:6px}
+  #how li{margin-left:20px;margin-bottom:4px}
+  .hint{text-align:center;color:#ffcf9e;margin-top:8px;font-size:14px}
+  @media(max-width:600px){canvas{height:420px}h1{font-size:24px}}
+</style>
+</head>
+<body>
+<h1>🎻 Folk Fiddle Fest 🎻</h1>
+<p class="sub">Hold the long notes, tap the quick bows, and win over the village crowd!</p>
+<div id="wrap"><canvas id="game" width="860" height="500"></canvas></div>
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Combo: <b id="combo">x1</b></div>
+  <div class="pill">Crowd: <b id="crowd">50%</b></div>
+  <div class="pill">Lives: <b id="lives">♥♥♥</b></div>
+  <div class="pill">Tune: <b id="prog">0%</b></div>
+  <div class="pill">Status: <b id="status">Title</b></div>
+</div>
+<div id="btns">
+  <button id="startBtn">▶ Start the Tune</button>
+  <button id="howBtn" class="secondary">📖 How to Play</button>
+  <button id="restartBtn" class="secondary">↻ Restart</button>
+</div>
+<div id="how">
+  <h2>How to Play — Folk Fiddle Fest</h2>
+  <ul>
+    <li><b>Goal:</b> Finish the whole folk tune and reach <b>1,500 points</b> to win. Lose all 3 hearts and the crowd walks away.</li>
+    <li><b>TAP notes (yellow circles):</b> Press and release quickly when the note reaches the glowing bow zone on the left.</li>
+    <li><b>HOLD notes (green bars):</b> Press and KEEP HOLDING until the whole bar has passed through the bow zone. Releasing early breaks the note.</li>
+    <li><b>SLIDE notes (purple bars):</b> Hold like a long note — the pitch slides up as you hold. Keep holding to the end for a big bonus.</li>
+    <li><b>Controls:</b> Hold <b>SPACE</b>, <b>Down Arrow</b>, or <b>F</b> — or press and hold the <b>mouse</b> on the canvas — or press and hold with <b>touch</b> on mobile. Release to stop the bow.</li>
+    <li><b>Scoring:</b> Perfect = 100, Good = 60, Hold/Slide completed = +150 bonus. Perfect streaks raise your combo multiplier. Misses cost crowd cheer and, after 3 bad misses in a row, a heart.</li>
+    <li><b>Tip:</b> Watch the note colour in the bow zone: gold = perfect window, orange = good window. Listen — a held note only sings while you hold it in the zone!</li>
+  </ul>
+</div>
+<p class="hint">Keyboard: SPACE / ↓ / F to bow &nbsp;•&nbsp; Mouse: hold click &nbsp;•&nbsp; Touch: hold finger &nbsp;•&nbsp; R = restart, H = how to play</p>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('game'), ctx=cv.getContext('2d');
+var scoreEl=document.getElementById('score'), comboEl=document.getElementById('combo'),
+    crowdEl=document.getElementById('crowd'), livesEl=document.getElementById('lives'),
+    progEl=document.getElementById('prog'), statusEl=document.getElementById('status');
+var state='title'; // title, playing, win, over
+var score=0, combo=0, mult=1, crowd=50, lives=3, missesStreak=0;
+var songTime=0, lastT=0, holding=false, bowGlow=0, feedback='', feedbackT=0, feedbackColor='#ffd166';
+var SONG_LEN=72; // seconds of tune
+var GOAL=1500;
+var notes=[], activeHold=null;
+var audioCtx=null, osc=null, oscGain=null, vibOsc=null, vibGain=null;
+
+// Folk melody pitches (Hz) - a cheerful village tune pattern
+var MELODY=[392,440,494,523,587,523,494,440, 392,440,494,587,659,587,523,494, 440,494,523,587,523,494,440,392, 523,587,659,587,523,494,440,392];
+function buildNotes(){
+  notes=[]; var t=3.0, i=0;
+  while(t<SONG_LEN-2){
+    var kind='tap';
+    var r=(i*37)%100;
+    if(i%7===3) kind='hold';
+    else if(i%7===6) kind='slide';
+    else if(r<28) kind='tap';
+    var dur=0;
+    if(kind==='hold') dur=1.4+((i%3)*0.3);
+    if(kind==='slide') dur=1.8;
+    notes.push({t:t, dur:dur, kind:kind, pitch:MELODY[i%MELODY.length], hit:false, missed:false, scored:false, holdScore:0, completed:false, judged:false});
+    t += (kind==='tap') ? 1.15 : dur+0.9;
+    i++;
+  }
+}
+buildNotes();
+var HIT_X=150, SPEED=170; // px per second, notes move right-to-left
+
+function ensureAudio(){
+  if(!audioCtx){
+    try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+  }
+  if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+}
+function startTone(freq, slide){
+  if(!audioCtx) return;
+  stopTone();
+  osc=audioCtx.createOscillator(); osc.type='sawtooth'; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  if(slide){ osc.frequency.linearRampToValueAtTime(freq*1.5, audioCtx.currentTime+1.6); }
+  vibOsc=audioCtx.createOscillator(); vibOsc.type='sine'; vibOsc.frequency.value=6;
+  vibGain=audioCtx.createGain(); vibGain.gain.value=8;
+  vibOsc.connect(vibGain); vibGain.connect(osc.frequency);
+  oscGain=audioCtx.createGain(); oscGain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+  oscGain.gain.exponentialRampToValueAtTime(0.16, audioCtx.currentTime+0.06);
+  osc.connect(oscGain); oscGain.connect(audioCtx.destination);
+  osc.start(); vibOsc.start();
+}
+function stopTone(){
+  try{
+    if(oscGain) oscGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+0.08);
+    var o=osc, v=vibOsc;
+    setTimeout(function(){ try{ if(o) o.stop(); if(v) v.stop(); }catch(e){} },120);
+  }catch(e){}
+  osc=null; vibOsc=null; oscGain=null; vibGain=null;
+}
+function blip(freq){
+  if(!audioCtx) return;
+  var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.type='triangle'; o.frequency.value=freq;
+  g.gain.setValueAtTime(0.18, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+0.25);
+  o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+0.26);
+}
+function setHolding(v){
+  if(state!=='playing'){ holding=v; return; }
+  if(v && !holding){ ensureAudio(); }
+  holding=v;
+  if(!holding){
+    stopTone();
+    // releasing early on an active hold/slide breaks it
+    if(activeHold && !activeHold.completed){
+      var n=activeHold;
+      if(n.kind!=='tap'){
+        // if most of bar passed, still counts; otherwise broken
+        var passed=songTime-n.t;
+        if(passed < n.dur*0.6){ n.missed=true; n.judged=true; registerMiss('Released too early!'); }
+      }
+      activeHold=null;
+    }
+  }
+}
+function registerMiss(msg){
+  feedback=msg; feedbackT=1.2; feedbackColor='#ff6b6b';
+  combo=0; mult=1; crowd=Math.max(0,crowd-6); missesStreak++;
+  if(missesStreak>=3){ lives--; missesStreak=0; blip(160); if(lives<=0){ endGame(false); } }
+}
+function award(points, label){
+  score+=points*mult; combo++;
+  if(combo>=12) mult=3; else if(combo>=6) mult=2; else mult=1;
+  crowd=Math.min(100,crowd+3); missesStreak=0;
+  feedback=label+' +'+(points*mult); feedbackT=1.1; feedbackColor='#ffd166';
+}
+function update(dt){
+  if(state!=='playing') return;
+  songTime+=dt;
+  if(feedbackT>0) feedbackT-=dt;
+  if(bowGlow>0) bowGlow-=dt;
+  // spawn / judge logic by song time: note x position
+  var active=null;
+  for(var i=0;i<notes.length;i++){
+    var n=notes[i];
+    var headX=HIT_X + (n.t-songTime)*SPEED;
+    var tailX=HIT_X + (n.t+n.dur-songTime)*SPEED;
+    n.x=headX; n.tailX=tailX;
+    if(n.kind==='tap'){
+      if(!n.judged && songTime>n.t+0.45){ n.judged=true; n.missed=true; registerMiss('Missed tap!'); }
+    } else {
+      // hold/slide: entering zone
+      if(!n.judged && songTime>=n.t-0.45 && songTime<=n.t+0.45 && holding && !activeHold){
+        activeHold=n; active=n; bowGlow=0.4;
+        startTone(n.pitch, n.kind==='slide');
+        n.judged=true;
+        award(40,'Nice hold!');
+      }
+      if(activeHold===n){
+        if(holding){ n.holdScore+=dt; }
+        if(songTime>=n.t+n.dur){
+          n.completed=true; activeHold=null; stopTone(); blip(880);
+          award(150, n.kind==='slide' ? 'Slide complete!' : 'Long note held!');
+        }
+      }
+      if(!n.judged && songTime>n.t+0.45){ n.judged=true; n.missed=true; registerMiss('Missed long note!'); }
+      if(!n.completed && n.judged && !n.missed && songTime>n.t+n.dur && activeHold!==n){
+        // was started but released handling already done; nothing
+      }
+    }
+  }
+  // tap hit is handled on press, not here
+  if(songTime>=SONG_LEN){ endGame(score>=GOAL); }
+  updateHUD();
+}
+function pressBow(){
+  if(state==='title'){ startGame(); return; }
+  if(state==='win'||state==='over'){ startGame(); return; }
+  setHolding(true);
+  // tap judgement on press
+  for(var i=0;i<notes.length;i++){
+    var n=notes[i];
+    if(n.kind!=='tap'||n.judged) continue;
+    var diff=Math.abs(songTime-n.t);
+    if(diff<=0.18){ n.judged=true; n.hit=true; bowGlow=0.4; blip(n.pitch); award(100,'PERFECT!'); return; }
+    if(diff<=0.45){ n.judged=true; n.hit=true; bowGlow=0.3; blip(n.pitch*0.9); award(60,'Good!'); return; }
+  }
+  // if pressing on a hold note slightly early, the update loop will catch it; also start a free tone so it feels alive
+  if(state==='playing'){ ensureAudio(); }
+}
+function endGame(won){
+  if(state!=='playing') return;
+  state=won?'win':'over'; stopTone(); setHolding(false);
+  statusEl.textContent=won?'You Won!':'Game Over';
+  updateHUD();
+}
+function startGame(){
+  ensureAudio();
+  score=0; combo=0; mult=1; crowd=50; lives=3; missesStreak=0;
+  songTime=0; holding=false; activeHold=null; feedback=''; bowGlow=0;
+  buildNotes(); state='playing'; statusEl.textContent='Playing — bow away!';
+  updateHUD();
+}
+function updateHUD(){
+  scoreEl.textContent=score; comboEl.textContent='x'+mult+' ('+combo+')';
+  crowdEl.textContent=crowd+'%'; livesEl.textContent='♥'.repeat(Math.max(0,lives))||'—';
+  progEl.textContent=Math.min(100,Math.floor(songTime/SONG_LEN*100))+'%';
+  if(state==='playing') statusEl.textContent='Playing';
+}
+function draw(){
+  ctx.clearRect(0,0,860,500);
+  // stage
+  ctx.fillStyle='#3a2410'; ctx.fillRect(0,330,860,170);
+  ctx.fillStyle='#5a3a1a'; ctx.fillRect(0,330,860,10);
+  // crowd silhouettes
+  for(var c=0;c<14;c++){
+    var cx=30+c*60, bounce=Math.sin(Date.now()/300+c)*3;
+    var cheer=crowd>40;
+    ctx.fillStyle=cheer?['#e63946','#ffd166','#2a9d8f','#f4a261','#8338ec'][c%5]:'#555';
+    ctx.beginPath(); ctx.arc(cx, 452+bounce, 16, 0, Math.PI*2); ctx.fill();
+    ctx.fillRect(cx-12, 468+bounce, 24, 32);
+    if(cheer && c%3===0){ ctx.fillStyle='#ffd166'; ctx.font='18px Georgia'; ctx.fillText('♪', cx-8, 430+bounce); }
+  }
+  // staff lines
+  ctx.strokeStyle='#ffcf9e'; ctx.lineWidth=1;
+  for(var s=0;s<5;s++){ ctx.beginPath(); ctx.moveTo(0,110+s*28); ctx.lineTo(860,110+s*28); ctx.stroke(); }
+  // bow zone
+  ctx.fillStyle='rgba(255,209,102,0.18)'; ctx.fillRect(HIT_X-42,60,84,240);
+  ctx.strokeStyle=bowGlow>0?'#ffe066':'#ffd166'; ctx.lineWidth=4;
+  ctx.strokeRect(HIT_X-42,60,84,240);
+  ctx.fillStyle='#ffd166'; ctx.font='bold 14px Georgia'; ctx.textAlign='center';
+  ctx.fillText('BOW', HIT_X, 52);
+  // fiddle character
+  ctx.font='72px Georgia'; ctx.fillText(holding?'🎻':'🎻', 92, 285);
+  if(holding){ ctx.fillStyle='#ffe066'; ctx.font='20px Georgia'; ctx.fillText('~ ♪ ~', 130, 250); }
+  // notes
+  for(var i=0;i<notes.length;i++){
+    var n=notes[i];
+    var hx=HIT_X + (n.t-songTime)*SPEED;
+    if(hx<-120||hx>900) continue;
+    var y=140+((n.pitch%5)*28);
+    if(n.kind==='tap'){
+      ctx.fillStyle=n.judged?(n.hit?'#7bf1a8':'#666'):'#ffd166';
+      ctx.beginPath(); ctx.arc(hx,y,20,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#2b1a0e'; ctx.font='bold 16px Georgia'; ctx.fillText('♪',hx,y+6);
+    } else {
+      var tx=HIT_X + (n.t+n.dur-songTime)*SPEED;
+      var w=Math.max(20,tx-hx);
+      ctx.fillStyle=n.kind==='slide'?'#c77dff':'#7bf1a8';
+      ctx.globalAlpha=n.completed?0.35:0.9;
+      ctx.fillRect(hx,y-14,w,28);
+      ctx.globalAlpha=1;
+      ctx.fillStyle='#fff'; ctx.font='bold 13px Georgia';
+      ctx.fillText(n.kind==='slide'?'SLIDE':'HOLD', hx+w/2, y+5);
+      ctx.beginPath(); ctx.arc(hx,y,16,0,Math.PI*2); ctx.fillStyle=n.kind==='slide'?'#c77dff':'#7bf1a8'; ctx.fill();
+    }
+  }
+  // progress bar
+  ctx.fillStyle='#222'; ctx.fillRect(40,310,780,14);
+  ctx.fillStyle='#2a9d8f'; ctx.fillRect(40,310,780*Math.min(1,songTime/SONG_LEN),14);
+  ctx.fillStyle='#fff'; ctx.font='13px Georgia'; ctx.textAlign='left';
+  ctx.fillText('Tune progress — goal '+GOAL+' points', 40, 300);
+  ctx.textAlign='right'; ctx.fillText(Math.floor(songTime)+'s / '+SONG_LEN+'s', 820, 300);
+  ctx.textAlign='center';
+  if(feedbackT>0){ ctx.fillStyle=feedbackColor; ctx.font='bold 28px Georgia'; ctx.fillText(feedback, 430, 90); }
+  if(state==='title'){
+    ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(0,0,860,500);
+    ctx.fillStyle='#ffd166'; ctx.font='bold 42px Georgia'; ctx.fillText('Folk Fiddle Fest',430,150);
+    ctx.fillStyle='#fff'; ctx.font='20px Georgia';
+    ctx.fillText('Hold the long notes. Tap the quick bows.',430,195);
+    ctx.fillText('Finish the tune with '+GOAL+' points to win the crowd!',430,225);
+    ctx.fillStyle='#ffcf9e'; ctx.font='17px Georgia';
+    ctx.fillText('Press START, or press SPACE / tap the screen.',430,270);
+    ctx.fillText('SPACE / mouse hold / touch hold = bow',430,300);
+  }
+  if(state==='win'){
+    ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(0,0,860,500);
+    ctx.fillStyle='#7bf1a8'; ctx.font='bold 44px Georgia'; ctx.fillText('🎉 ENCORE! You Won! 🎉',430,190);
+    ctx.fillStyle='#fff'; ctx.font='22px Georgia'; ctx.fillText('Final score: '+score+'  •  Crowd: '+crowd+'%',430,240);
+    ctx.fillText('Press Restart or SPACE to play again.',430,280);
+  }
+  if(state==='over'){
+    ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(0,0,860,500);
+    ctx.fillStyle='#ff6b6b'; ctx.font='bold 44px Georgia'; ctx.fillText('Game Over',430,190);
+    ctx.fillStyle='#fff'; ctx.font='22px Georgia'; ctx.fillText('Final score: '+score+' — the crowd wandered off.',430,240);
+    ctx.fillText('Press Restart or SPACE to try again.',430,280);
+  }
+}
+function loop(ts){
+  if(!lastT) lastT=ts;
+  var dt=Math.min(0.05,(ts-lastT)/1000); lastT=ts;
+  update(dt); draw();
+  requestAnimationFrame(loop);
+}
+document.getElementById('startBtn').addEventListener('click', function(){ startGame(); });
+document.getElementById('restartBtn').addEventListener('click', function(){ startGame(); });
+document.getElementById('howBtn').addEventListener('click', function(){
+  var h=document.getElementById('how');
+  h.style.display=(h.style.display==='block')?'none':'block';
+});
+cv.addEventListener('mousedown', function(e){ e.preventDefault(); pressBow(); });
+cv.addEventListener('mouseup', function(){ setHolding(false); });
+cv.addEventListener('mouseleave', function(){ setHolding(false); });
+cv.addEventListener('touchstart', function(e){ e.preventDefault(); pressBow(); }, {passive:false});
+cv.addEventListener('touchend', function(e){ e.preventDefault(); setHolding(false); }, {passive:false});
+cv.addEventListener('touchcancel', function(){ setHolding(false); });
+document.addEventListener('keydown', function(e){
+  if(e.code==='Space'||e.code==='ArrowDown'||e.code==='KeyF'){
+    e.preventDefault();
+    if(!e.repeat) pressBow();
+  }
+  if(e.code==='KeyR'){ startGame(); }
+  if(e.code==='KeyH'){
+    var h=document.getElementById('how');
+    h.style.display=(h.style.display==='block')?'none':'block';
+  }
+});
+document.addEventListener('keyup', function(e){
+  if(e.code==='Space'||e.code==='ArrowDown'||e.code==='KeyF'){ setHolding(false); }
+});
+updateHUD();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

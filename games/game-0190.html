@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Dartboard Duel</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #14101f; color: #f5f0e6; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 1px; margin: 6px 0 2px; color: #ffd166; text-shadow: 0 2px 0 #000; text-align: center; }
+  .sub { color: #c9b8ff; font-size: 14px; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: min(680px, 96vw); margin-bottom: 8px; }
+  .pill { background: #241d3d; border: 2px solid #4a3f7a; border-radius: 999px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill b { color: #ffd166; }
+  #wrap { position: relative; width: min(680px, 96vw); aspect-ratio: 1 / 1.05; background: radial-gradient(circle at 50% 40%, #2d2447, #171226); border: 3px solid #6b5aa8; border-radius: 18px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(10, 7, 20, .88); padding: 22px; text-align: center; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd166; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #e8e0ff; }
+  .how { background: #241d3d; border: 1px solid #4a3f7a; border-radius: 12px; padding: 12px 14px; text-align: left; font-size: 14px; line-height: 1.6; max-width: 520px; }
+  .how b { color: #ffd166; }
+  button { background: #ffd166; color: #1c1430; border: none; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #8ecae6; box-shadow: 0 4px 0 #2a6f97; }
+  #msg { min-height: 22px; font-weight: bold; color: #ffd166; text-align: center; margin-top: 8px; font-size: 15px; }
+  #log { width: min(680px, 96vw); margin-top: 6px; font-size: 13px; color: #c9b8ff; text-align: center; min-height: 18px; }
+  .controls { margin-top: 10px; font-size: 13px; color: #aaa; text-align: center; line-height: 1.6; }
+  @media (max-width: 520px) { h1 { font-size: 24px; } .overlay h2 { font-size: 28px; } }
+</style>
+</head>
+<body>
+<h1>🎯 Dartboard Duel</h1>
+<div class="sub">Precision / Moving Dartboard Aim &mdash; Outscore your rival before your darts run out!</div>
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Rival: <b id="rival">220</b></div>
+  <div class="pill">Darts: <b id="darts">15</b></div>
+  <div class="pill">Round: <b id="round">1 / 3</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="680" height="714"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>🎯 Dartboard Duel</h2>
+    <p>Your rival scored <b>220 points</b>. You have <b>15 darts</b> across 3 rounds. Beat 220 to win the duel!</p>
+    <div class="how">
+      <b>How to Play</b><br>
+      • Move your mouse, finger, or arrow keys to aim the crosshair.<br>
+      • The board drifts, spins and shrinks &mdash; and your hand sways! Time the sway.<br>
+      • Click, tap, or press <b>Space / Enter</b> to throw a dart.<br>
+      • Bullseye = 50, Inner Bull = 25, Triple ring = 3&times; segment, Double ring = 2&times; segment.<br>
+      • A glowing <b>gold bonus ring</b> sometimes appears: hit it for +40 bonus!<br>
+      • Press <b>R</b> anytime to restart. Beat the rival before darts run out to win.
+    </div>
+    <button id="startBtn">▶ Start Duel</button>
+    <button class="secondary" id="howBtn">How to Play</button>
+    <p id="howExtra" style="display:none;">Tip: throw when the board slows near the centre and the sway crosses the bullseye. Later rounds are faster and smaller &mdash; aim for triples when the board is big, bullseyes when it is small.</p>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endDetail"></p>
+    <button id="restartBtn">↻ Play Again (Instant Restart)</button>
+  </div>
+</div>
+<div id="msg">Aim carefully &mdash; the board never sits still.</div>
+<div id="log">Move to aim. Click, tap, or press Space to throw.</div>
+<div class="controls">Mouse / Touch: aim + throw &nbsp;|&nbsp; Arrow keys / WASD: aim &nbsp;|&nbsp; Space / Enter: throw &nbsp;|&nbsp; R: restart</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var dartsEl = document.getElementById('darts');
+  var roundEl = document.getElementById('round');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var logEl = document.getElementById('log');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+
+  var RIVAL = 220, TOTAL_DARTS = 15, DARTS_PER_ROUND = 5;
+  var state = 'title'; // title, playing, flying, over
+  var score = 0, dartsLeft = TOTAL_DARTS, round = 1;
+  var hits = 0, bullseyes = 0, bonusHits = 0, bestThrow = 0;
+
+  // Board state
+  var board = { x: W/2, y: 330, r: 150, vx: 1.1, vy: 0.7, rot: 0, rotSpeed: 0.006, baseR: 150, wobble: 0 };
+  var aim = { x: W/2, y: 330 };
+  var swayT = 0, swayAmp = 10;
+  var dartAnim = null; // {fromX, fromY, toX, toY, t}
+  var stuckDarts = [];
+  var bonusActive = false, bonusAngle = 0, bonusTimer = 0;
+  var flashText = null, flashT = 0;
+  var lastThrowLabel = '—';
+
+  // Procedural audio, created only after user interaction
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function playThrow() { tone(700, 0.12, 'sawtooth', 0.08, 300); }
+  function playHit(pts) {
+    if (pts >= 50) { tone(880, 0.25, 'sine', 0.2); setTimeout(function(){ tone(1320, 0.3, 'sine', 0.2); }, 80); }
+    else if (pts >= 30) { tone(660, 0.2, 'triangle', 0.18); }
+    else if (pts > 0) { tone(440, 0.15, 'triangle', 0.15); }
+    else { tone(180, 0.2, 'square', 0.08, 120); }
+  }
+  function playWin() { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.35, 'triangle', 0.2); }, i*130); }); }
+  function playLose() { [392,330,262,196].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.3, 'sawtooth', 0.08); }, i*140); }); }
+
+  var SEGMENTS = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    dartsEl.textContent = dartsLeft;
+    roundEl.textContent = round + ' / 3';
+    statusEl.textContent = state === 'playing' ? 'Throw!' : state === 'flying' ? 'Flying…' : state === 'over' ? 'Finished' : 'Ready';
+  }
+
+  function resetGame() {
+    score = 0; dartsLeft = TOTAL_DARTS; round = 1;
+    hits = 0; bullseyes = 0; bonusHits = 0; bestThrow = 0;
+    stuckDarts = []; dartAnim = null; flashText = null;
+    board.x = W/2; board.y = 330; board.rot = 0;
+    aim.x = W/2; aim.y = 330;
+    applyRoundDifficulty();
+    bonusActive = false; bonusTimer = 240;
+    msgEl.textContent = 'Round 1 — the board is calm. Make it count!';
+    logEl.textContent = 'Move to aim. Click, tap, or press Space to throw.';
+    endScreen.classList.add('hidden');
+    updateHud();
+  }
+
+  function applyRoundDifficulty() {
+    board.baseR = round === 1 ? 150 : round === 2 ? 132 : 112;
+    board.r = board.baseR;
+    var sp = round === 1 ? 1.0 : round === 2 ? 1.5 : 2.1;
+    board.vx = sp * (Math.random() < 0.5 ? -1 : 1);
+    board.vy = sp * 0.7 * (Math.random() < 0.5 ? -1 : 1);
+    board.rotSpeed = (round === 1 ? 0.006 : round === 2 ? 0.011 : 0.018) * (Math.random() < 0.5 ? -1 : 1);
+    swayAmp = round === 1 ? 9 : round === 2 ? 14 : 20;
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHud();
+  }
+
+  function endGame(win) {
+    state = 'over';
+    var title = win ? '🏆 YOU WIN THE DUEL!' : '💔 Game Over — Rival Wins';
+    document.getElementById('endTitle').textContent = title;
+    document.getElementById('endText').textContent = win
+      ? 'You scored ' + score + ' and beat the rival\'s ' + RIVAL + '!'
+      : 'You scored ' + score + ' — the rival\'s ' + RIVAL + ' still stands.';
+    document.getElementById('endDetail').textContent = 'Hits: ' + hits + ' • Bullseyes: ' + bullseyes + ' • Bonus rings: ' + bonusHits + ' • Best throw: ' + bestThrow;
+    endScreen.classList.remove('hidden');
+    if (win) playWin(); else playLose();
+    updateHud();
+  }
+
+  function swayOffset() {
+    return { x: Math.sin(swayT * 0.045) * swayAmp, y: Math.cos(swayT * 0.033) * swayAmp * 0.7 };
+  }
+
+  function throwDart() {
+    if (state !== 'playing') return;
+    ensureAudio();
+    playThrow();
+    var sw = swayOffset();
+    var tx = aim.x + sw.x, ty = aim.y + sw.y;
+    dartAnim = { fromX: W/2, fromY: H - 30, toX: tx, toY: ty, t: 0 };
+    state = 'flying';
+    statusEl.textContent = 'Flying…';
+  }
+
+  function scoreThrow(x, y) {
+    var dx = x - board.x, dy = y - board.y;
+    var dist = Math.sqrt(dx*dx + dy*dy);
+    var r = board.r;
+    if (dist > r) return { pts: 0, label: 'MISS — off the board!' };
+    var ang = Math.atan2(dy, dx) + Math.PI/2 - board.rot;
+    while (ang < 0) ang += Math.PI*2;
+    while (ang >= Math.PI*2) ang -= Math.PI*2;
+    var segIdx = Math.floor(ang / (Math.PI*2) * 20) % 20;
+    var segVal = SEGMENTS[segIdx];
+    var frac = dist / r;
+    var pts = 0, label = '';
+    if (frac <= 0.06) { pts = 50; label = '🎯 BULLSEYE! 50'; bullseyes++; }
+    else if (frac <= 0.14) { pts = 25; label = 'Inner Bull! 25'; }
+    else if (frac >= 0.60 && frac <= 0.68) { pts = segVal * 3; label = 'TRIPLE ' + segVal + '! ' + pts; }
+    else if (frac >= 0.92 && frac <= 1.0) { pts = segVal * 2; label = 'DOUBLE ' + segVal + '! ' + pts; }
+    else { pts = segVal; label = 'Single ' + segVal + ' — ' + pts; }
+    // Gold bonus ring: a thin band that sometimes glows
+    if (bonusActive && frac >= 0.42 && frac <= 0.50) { pts += 40; label += ' + GOLD BONUS 40!'; bonusHits++; }
+    if (pts > 0) hits++;
+    if (pts > bestThrow) bestThrow = pts;
+    return { pts: pts, label: label };
+  }
+
+  function resolveThrow() {
+    var res = scoreThrow(dartAnim.toX, dartAnim.toY);
+    stuckDarts.push({ x: dartAnim.toX, y: dartAnim.toY, life: 400 });
+    if (stuckDarts.length > 8) stuckDarts.shift();
+    score += res.pts;
+    lastThrowLabel = res.label;
+    flashText = res.label; flashT = 140;
+    playHit(res.pts);
+    msgEl.textContent = res.label;
+    logEl.textContent = 'Score ' + score + ' vs rival ' + RIVAL + ' — ' + dartsLeft + ' dart(s) left after this throw.';
+    dartsLeft--;
+    // Round advance every 5 darts
+    var used = TOTAL_DARTS - dartsLeft;
+    if (dartsLeft > 0) {
+      var newRound = Math.min(3, Math.floor(used / DARTS_PER_ROUND) + 1);
+      if (newRound !== round) {
+        round = newRound;
+        applyRoundDifficulty();
+        stuckDarts = [];
+        msgEl.textContent = 'Round ' + round + ' begins! Faster, smaller, wilder sway.';
+        tone(520, 0.2, 'triangle', 0.15); setTimeout(function(){ tone(780, 0.25, 'triangle', 0.15); }, 120);
+      }
+      state = 'playing';
+    } else {
+      endGame(score > RIVAL);
+      return;
+    }
+    updateHud();
+  }
+
+  function drawBoard() {
+    // Wall + shadow
+    ctx.fillStyle = '#1d1730';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.arc(board.x + 8, board.y + 10, board.r + 14, 0, Math.PI*2); ctx.fill();
+    // Outer ring
+    ctx.beginPath(); ctx.arc(board.x, board.y, board.r + 10, 0, Math.PI*2);
+    ctx.fillStyle = '#3a2f5e'; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = '#ffd166'; ctx.stroke();
+    // Segments
+    for (var i = 0; i < 20; i++) {
+      var a0 = board.rot - Math.PI/2 + i * Math.PI/10;
+      var a1 = a0 + Math.PI/10;
+      var black = (i % 2 === 0);
+      // Single area
+      ctx.beginPath(); ctx.moveTo(board.x, board.y);
+      ctx.arc(board.x, board.y, board.r * 0.92, a0, a1); ctx.closePath();
+      ctx.fillStyle = black ? '#222' : '#f5f0e6'; ctx.fill();
+      // Triple ring band
+      ctx.beginPath(); ctx.arc(board.x, board.y, board.r * 0.68, a0, a1);
+      ctx.arc(board.x, board.y, board.r * 0.60, a1, a0, true); ctx.closePath();
+      ctx.fillStyle = black ? '#c0392b' : '#27ae60'; ctx.fill();
+      // Double ring band
+      ctx.beginPath(); ctx.arc(board.x, board.y, board.r, a0, a1);
+      ctx.arc(board.x, board.y, board.r * 0.92, a1, a0, true); ctx.closePath();
+      ctx.fillStyle = black ? '#c0392b' : '#27ae60'; ctx.fill();
+      // Number label
+      var mid = (a0 + a1) / 2;
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold ' + Math.max(11, Math.round(board.r * 0.11)) + 'px Arial';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(SEGMENTS[i]), board.x + Math.cos(mid) * board.r * 1.06, board.y + Math.sin(mid) * board.r * 1.06);
+    }
+    // Gold bonus ring band
+    if (bonusActive) {
+      ctx.beginPath(); ctx.arc(board.x, board.y, board.r * 0.50, 0, Math.PI*2);
+      ctx.arc(board.x, board.y, board.r * 0.42, 0, Math.PI*2, true); ctx.closePath();
+      ctx.fillStyle = 'rgba(255, 209, 102, 0.85)'; ctx.fill();
+    }
+    // Inner bull rings
+    ctx.beginPath(); ctx.arc(board.x, board.y, board.r * 0.14, 0, Math.PI*2);
+    ctx.fillStyle = '#27ae60'; ctx.fill();
+    ctx.beginPath(); ctx.arc(board.x, board.y, board.r * 0.06, 0, Math.PI*2);
+    ctx.fillStyle = '#c0392b'; ctx.fill();
+    // Wire lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(board.x, board.y, board.r * 0.92, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(board.x, board.y, board.r * 0.60, 0, Math.PI*2); ctx.stroke();
+    // Stuck darts
+    stuckDarts.forEach(function(d) {
+      ctx.strokeStyle = '#ddd'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(d.x, d.y - 26); ctx.lineTo(d.x, d.y); ctx.stroke();
+      ctx.fillStyle = '#e74c3c';
+      ctx.beginPath(); ctx.moveTo(d.x - 7, d.y - 26); ctx.lineTo(d.x + 7, d.y - 26); ctx.lineTo(d.x, d.y - 14); ctx.closePath(); ctx.fill();
+    });
+  }
+
+  function drawAim() {
+    if (state !== 'playing') return;
+    var sw = swayOffset();
+    var x = aim.x + sw.x, y = aim.y + sw.y;
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(x, y, 18, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - 28, y); ctx.lineTo(x - 8, y); ctx.moveTo(x + 8, y); ctx.lineTo(x + 28, y);
+    ctx.moveTo(x, y - 28); ctx.lineTo(x, y - 8); ctx.moveTo(x, y + 8); ctx.lineTo(x, y + 28); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x - 52, y + 34, 104, 20);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('sway: ' + Math.round(swayAmp) + 'px', x, y + 48);
+  }
+
+  function drawFlyingDart() {
+    if (!dartAnim) return;
+    var t = dartAnim.t;
+    var x = dartAnim.fromX + (dartAnim.toX - dartAnim.fromX) * t;
+    var y = dartAnim.fromY + (dartAnim.toY - dartAnim.fromY) * t - Math.sin(t * Math.PI) * 40;
+    ctx.strokeStyle = '#ddd'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(x, y + 26); ctx.lineTo(x, y); ctx.stroke();
+    ctx.fillStyle = '#e74c3c';
+    ctx.beginPath(); ctx.moveTo(x - 9, y + 26); ctx.lineTo(x + 9, y + 26); ctx.lineTo(x, y + 12); ctx.closePath(); ctx.fill();
+  }
+
+  function draw() {
+    drawBoard();
+    if (state === 'playing') drawAim();
+    if (dartAnim) drawFlyingDart();
+    // Thrower zone
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(0, H - 46, W, 46);
+    ctx.fillStyle = '#c9b8ff'; ctx.font = '13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Last throw: ' + lastThrowLabel + '  •  Bonus ring ' + (bonusActive ? 'ACTIVE — aim for the gold band!' : 'charging…'), W/2, H - 16);
+    if (flashText && flashT > 0) {
+      ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(flashText, W/2 + 2, 62);
+      ctx.fillStyle = '#ffd166'; ctx.fillText(flashText, W/2, 60);
+    }
+  }
+
+  function update() {
+    swayT++;
+    if (flashT > 0) flashT--;
+    if (state === 'playing' || state === 'flying') {
+      board.x += board.vx; board.y += board.vy;
+      board.rot += board.rotSpeed;
+      board.wobble += 0.02;
+      // Shrink-and-grow pulse: board breathes around its round size
+      board.r = board.baseR * (1 + Math.sin(board.wobble) * 0.10);
+      var minX = board.r + 16, maxX = W - board.r - 16;
+      var minY = board.r + 16, maxY = 560;
+      if (board.x < minX || board.x > maxX) board.vx *= -1;
+      if (board.y < minY || board.y > maxY) board.vy *= -1;
+      board.x = Math.max(minX, Math.min(maxX, board.x));
+      board.y = Math.max(minY, Math.min(maxY, board.y));
+      // Bonus ring cycle
+      bonusTimer--;
+      if (bonusTimer <= 0) { bonusActive = !bonusActive; bonusTimer = bonusActive ? 300 : 420; }
+      stuckDarts.forEach(function(d){ d.life--; });
+      stuckDarts = stuckDarts.filter(function(d){ return d.life > 0; });
+    }
+    if (dartAnim) {
+      dartAnim.t += 0.09;
+      if (dartAnim.t >= 1) { var done = dartAnim; dartAnim = null; resolveThrow(); }
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : W/2);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 330);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  canvas.addEventListener('mousemove', function(e) { var p = canvasPos(e); aim.x = p.x; aim.y = p.y; });
+  canvas.addEventListener('mousedown', function(e) { ensureAudio(); var p = canvasPos(e); aim.x = p.x; aim.y = p.y; throwDart(); });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); ensureAudio(); var p = canvasPos(e); aim.x = p.x; aim.y = p.y; throwDart(); }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); var p = canvasPos(e); aim.x = p.x; aim.y = p.y; }, { passive: false });
+  canvas.addEventListener('click', function(e) { if (state === 'title') return; });
+
+  document.addEventListener('keydown', function(e) {
+    var step = e.shiftKey ? 22 : 11;
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') aim.x = Math.max(10, aim.x - step);
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') aim.x = Math.min(W - 10, aim.x + step);
+    else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') aim.y = Math.max(10, aim.y - step);
+    else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') aim.y = Math.min(H - 10, aim.y + step);
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); ensureAudio(); throwDart(); }
+    else if (e.key === 'r' || e.key === 'R') { if (state !== 'title') { startGame(); } }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', function() { startGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function() { startGame(); });
+  document.getElementById('howBtn').addEventListener('click', function() {
+    var el = document.getElementById('howExtra');
+    el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+  });
+
+  resetGame();
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

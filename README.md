@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 180
-- **Latest game:** 0180 — Lasso Roundup
+- **Total games:** 190
+- **Latest game:** 0190 — Dartboard Duel
 - **Current volume:** 002 (Games 0101 to 0200)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -14,7 +14,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | Volume | Games | Catalog |
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
-| 002 | 0101–0200 (80 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
+| 002 | 0101–0200 (90 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -28,20 +28,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 018
+## Latest batch — Batch 019
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0171 | Kite Kraze | Arcade / Storm Kite Dodger | [Play](./games/game-0171.html) |
-| 0172 | Locksmith Labyrinth | Puzzle / Key-and-Lock Maze Logic | [Play](./games/game-0172.html) |
-| 0173 | Oasis Operator | Strategy / Desert Oasis Management | [Play](./games/game-0173.html) |
-| 0174 | Polka Party | Rhythm / Accordion Beat Timing | [Play](./games/game-0174.html) |
-| 0175 | Boulder Bounce | Precision / Boulder Ricochet Aim | [Play](./games/game-0175.html) |
-| 0176 | Skateboard Showdown | Arcade / Street Trick Runner | [Play](./games/game-0176.html) |
-| 0177 | Constellation Connector | Puzzle / Star Pattern Logic | [Play](./games/game-0177.html) |
-| 0178 | Submarine Salvage | Strategy / Deep-Sea Salvage Management | [Play](./games/game-0178.html) |
-| 0179 | Choir Conductor | Rhythm / Choir Cue Conducting | [Play](./games/game-0179.html) |
-| 0180 | Lasso Roundup | Precision / Lasso Targeting | [Play](./games/game-0180.html) |
+| 0181 | Canyon Crasher | Arcade / River Raft Dodger | [Play](./games/game-0181.html) |
+| 0182 | Prism Pathfinder | Puzzle / Prism Refraction Routing | [Play](./games/game-0182.html) |
+| 0183 | Tea House Tycoon | Strategy / Tea House Management | [Play](./games/game-0183.html) |
+| 0184 | Steel Drum Serenade | Rhythm / Steelpan Beat Timing | [Play](./games/game-0184.html) |
+| 0185 | Boomerang Bounty | Precision / Boomerang Throw Aim | [Play](./games/game-0185.html) |
+| 0186 | Penguin Plunge | Arcade / Ice Slide Collector | [Play](./games/game-0186.html) |
+| 0187 | Word Well | Puzzle / Falling Letter Word Builder | [Play](./games/game-0187.html) |
+| 0188 | Terminal Tycoon | Strategy / Airport Terminal Management | [Play](./games/game-0188.html) |
+| 0189 | Folk Fiddle Fest | Rhythm / Fiddle Tune Timing | [Play](./games/game-0189.html) |
+| 0190 | Dartboard Duel | Precision / Moving Dartboard Aim | [Play](./games/game-0190.html) |
 
 
 ## Quality standard

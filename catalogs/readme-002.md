@@ -87,6 +87,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0178 | Submarine Salvage | Strategy / Deep-Sea Salvage Management | Click/tap dive cards and controls, 1-4 select dive, Space surface/dive, Arrow Keys navigate | [Play](./../games/game-0178.html) |
 | 0179 | Choir Conductor | Rhythm / Choir Cue Conducting | 1-4 / A/S/D/F cue sections, click/tap section buttons | [Play](./../games/game-0179.html) |
 | 0180 | Lasso Roundup | Precision / Lasso Targeting | Mouse/touch aim, hold to grow loop, release to throw, Arrow Keys aim, Space throw | [Play](./../games/game-0180.html) |
+| 0181 | Canyon Crasher | Arcade / River Raft Dodger | Arrow Keys / WASD steer, mouse move steer, touch drag steer | [Play](./../games/game-0181.html) |
+| 0182 | Prism Pathfinder | Puzzle / Prism Refraction Routing | Click/tap prism rotate, Arrow Keys select, Space rotate | [Play](./../games/game-0182.html) |
+| 0183 | Tea House Tycoon | Strategy / Tea House Management | Click/tap brew and serve, 1-5 select tea, Space brew | [Play](./../games/game-0183.html) |
+| 0184 | Steel Drum Serenade | Rhythm / Steelpan Beat Timing | D/F/J/K lanes, mouse click lanes, touch tap lanes | [Play](./../games/game-0184.html) |
+| 0185 | Boomerang Bounty | Precision / Boomerang Throw Aim | Mouse/touch drag aim and release, Arrow Keys aim, Space throw | [Play](./../games/game-0185.html) |
+| 0186 | Penguin Plunge | Arcade / Ice Slide Collector | Arrow Keys / A-D steer, mouse move steer, touch drag steer | [Play](./../games/game-0186.html) |
+| 0187 | Word Well | Puzzle / Falling Letter Word Builder | Arrow Keys move/drop, click/tap swap tiles, Space drop | [Play](./../games/game-0187.html) |
+| 0188 | Terminal Tycoon | Strategy / Airport Terminal Management | Click/tap gates and controls, 1-4 assign, Space advance | [Play](./../games/game-0188.html) |
+| 0189 | Folk Fiddle Fest | Rhythm / Fiddle Tune Timing | Space / Down / F hold notes, mouse/touch hold | [Play](./../games/game-0189.html) |
+| 0190 | Dartboard Duel | Precision / Moving Dartboard Aim | Mouse/touch aim and throw, Arrow Keys aim, Space throw | [Play](./../games/game-0190.html) |
 
 ## Batch notes
 
@@ -98,4 +108,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 016: 10 games, produced in one cycle.
 - Batch 017: 10 games, produced in one cycle.
 - Batch 018: 10 games, produced in one cycle.
+- Batch 019: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
