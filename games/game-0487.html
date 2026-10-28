@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Glacier Gardener</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #0b2233; color: #eaf7ff; font-family: system-ui, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { margin: 6px 0 2px; font-size: 30px; letter-spacing: 1px; text-align: center; }
+  p.sub { margin: 0 0 8px; color: #a8d8f0; text-align: center; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; max-width: 760px; margin-bottom: 8px; }
+  .pill { background: #123a52; border: 1px solid #2d7aa8; border-radius: 20px; padding: 6px 12px; font-weight: 700; font-size: 14px; }
+  .pill b { color: #ffd166; }
+  #wrap { position: relative; width: 100%; max-width: 760px; }
+  canvas { width: 100%; height: auto; display: block; background: #bfe6f5; border: 3px solid #eaf7ff; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(6, 28, 44, 0.88); border-radius: 14px; text-align: center; padding: 20px; }
+  .overlay h2 { font-size: 32px; margin: 0 0 10px; }
+  .overlay p { max-width: 560px; line-height: 1.5; color: #d7efff; }
+  button { cursor: pointer; border: 0; border-radius: 12px; padding: 12px 20px; font-size: 17px; font-weight: 800; background: #ffd166; color: #123; margin: 6px; }
+  button.secondary { background: #2d9cdb; color: #fff; }
+  button:active { transform: scale(0.97); }
+  #crops { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 760px; margin-top: 10px; }
+  .crop { background: #123a52; border: 2px solid #2d7aa8; color: #fff; padding: 10px 12px; border-radius: 12px; font-size: 14px; text-align: left; }
+  .crop.sel { border-color: #ffd166; background: #1f5a7a; outline: 3px solid #ffd166; }
+  #msg { min-height: 22px; font-weight: 700; color: #ffd166; margin-top: 8px; text-align: center; }
+  #help { max-width: 760px; color: #a8d8f0; font-size: 14px; line-height: 1.5; text-align: center; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<h1>❄️ Glacier Gardener 🌱</h1>
+<p class="sub">Plant cold-hardy crops on the ice. Beat the frost. Hit the harvest quota.</p>
+
+<div id="hud" aria-label="Game status">
+  <div class="pill">Score: <b id="score">0</b> / 150</div>
+  <div class="pill">❤️ Lives: <b id="lives">3</b></div>
+  <div class="pill">💧 Meltwater: <b id="water">60</b></div>
+  <div class="pill">Season: <b id="season">Spring</b></div>
+  <div class="pill">Day: <b id="day">1</b></div>
+  <div class="pill">Harvested: <b id="harvest">0</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="470"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Glacier Gardener</h2>
+    <p><strong>How to Play:</strong> Pick a crop below, then tap or click an icy plot to plant it. Tap a growing crop to water it with meltwater. Tap a glowing golden crop to harvest it for points. Seasons change every few days: Summer melts extra water, Winter frost damages thirsty crops. Lose 3 crops to frost or drought and the glacier wins. Reach 150 points to win!</p>
+    <p>Keyboard: Arrow keys move the cursor, Space plants / waters / harvests, 1-4 picks a crop, Enter starts.</p>
+    <button id="startBtn">▶ Start Gardening</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <div id="howText" class="hidden"><p>Frostberry (fast, 10 pts) • Ice Lettuce (medium, 15 pts) • Snowroot (slow, 25 pts) • Glacier Melon (slowest, 40 pts). Watered crops grow faster and survive Winter. Unwatered crops wilt in frost storms. Watch the season banner and keep meltwater topped up in Summer.</p></div>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Play Again (Restart)</button>
+  </div>
+</div>
+
+<div id="crops" aria-label="Crop selection">
+  <button class="crop sel" data-crop="0">1 🫐 Frostberry — 10 pts — Fast</button>
+  <button class="crop" data-crop="1">2 🥬 Ice Lettuce — 15 pts — Medium</button>
+  <button class="crop" data-crop="2">3 🥕 Snowroot — 25 pts — Slow</button>
+  <button class="crop" data-crop="3">4 🍈 Glacier Melon — 40 pts — Slowest</button>
+</div>
+<div id="msg">Choose a crop, then plant it on the glacier!</div>
+<p id="help">Mouse: click a plot • Touch: tap a plot • Keyboard: arrows + Space • Water a crop before Winter or a frost storm hits.</p>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 8, ROWS = 5, TILE = 95;
+  var CROPS = [
+    { name: 'Frostberry', emoji: '🫐', color: '#7b5cff', grow: 6, points: 10, waterCost: 4 },
+    { name: 'Ice Lettuce', emoji: '🥬', color: '#2ecc71', grow: 9, points: 15, waterCost: 5 },
+    { name: 'Snowroot', emoji: '🥕', color: '#e67e22', grow: 13, points: 25, waterCost: 6 },
+    { name: 'Glacier Melon', emoji: '🍈', color: '#1abc9c', grow: 17, points: 40, waterCost: 8 }
+  ];
+  var SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
+  var state = null;
+  var selected = 0, cursor = { x: 0, y: 0 };
+  var audioCtx = null, running = false, lastTime = 0, seasonTimer = 0, frostTimer = 0, dayTimer = 0, flash = 0, flashText = '';
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function newGame() {
+    var grid = [];
+    for (var y = 0; y < ROWS; y++) { var row = []; for (var x = 0; x < COLS; x++) row.push(null); grid.push(row); }
+    state = { grid: grid, score: 0, lives: 3, water: 60, season: 0, day: 1, harvested: 0, over: false, won: false };
+    seasonTimer = 0; frostTimer = 9; dayTimer = 0; flash = 0; selected = 0; cursor = { x: 0, y: 0 };
+    syncCropButtons(); updateHUD(); setMsg('New glacier! Plant Frostberries to get started.');
+  }
+  function syncCropButtons() {
+    document.querySelectorAll('.crop').forEach(function (b) { b.classList.toggle('sel', parseInt(b.dataset.crop, 10) === selected); });
+  }
+  function updateHUD() {
+    if (!state) return;
+    document.getElementById('score').textContent = state.score;
+    document.getElementById('lives').textContent = state.lives;
+    document.getElementById('water').textContent = state.water;
+    document.getElementById('season').textContent = SEASONS[state.season];
+    document.getElementById('day').textContent = state.day;
+    document.getElementById('harvest').textContent = state.harvested;
+  }
+  function setMsg(t) { document.getElementById('msg').textContent = t; }
+  function cellAt(clientX, clientY) {
+    var r = canvas.getBoundingClientRect();
+    var x = Math.floor((clientX - r.left) / r.width * COLS);
+    var y = Math.floor((clientY - r.top) / r.height * ROWS);
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return null;
+    return { x: x, y: y };
+  }
+  function actOn(x, y) {
+    if (!state || state.over) return;
+    ensureAudio();
+    var cell = state.grid[y][x];
+    var crop = CROPS[selected];
+    if (!cell) {
+      if (state.water < crop.waterCost) { setMsg('Not enough meltwater! Wait for Summer melt.'); beep(140, 0.2, 'square'); return; }
+      state.water -= crop.waterCost;
+      state.grid[y][x] = { type: selected, growth: 0, watered: true, wilt: 0 };
+      setMsg('Planted ' + crop.name + '! Water it again to keep it frost-proof.');
+      beep(520, 0.15, 'sine');
+    } else if (cell.growth < CROPS[cell.type].grow) {
+      if (state.water < 3) { setMsg('Out of meltwater! Summer will refill it.'); return; }
+      state.water -= 3; cell.watered = true; cell.growth += 1;
+      setMsg(CROPS[cell.type].name + ' watered and boosted!');
+      beep(660, 0.12, 'sine');
+    } else {
+      var pts = CROPS[cell.type].points;
+      state.score += pts; state.harvested += 1; state.grid[y][x] = null;
+      setMsg('Harvested ' + CROPS[cell.type].name + ' for ' + pts + ' points!');
+      beep(880, 0.2, 'triangle'); setTimeout(function () { beep(1100, 0.2, 'triangle'); }, 90);
+      if (state.score >= 150) endGame(true);
+    }
+    updateHUD();
+  }
+  function frostStorm() {
+    if (!state || state.over) return;
+    var lost = 0;
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
+      var c = state.grid[y][x];
+      if (c && !c.watered) { state.grid[y][x] = null; lost++; }
+      if (c) c.watered = false;
+    }
+    if (lost > 0) {
+      state.lives -= 1; flash = 2.5; flashText = '❄️ FROST STORM! ' + lost + ' thirsty crop(s) lost!';
+      setMsg(flashText + ' Water crops before the next storm.');
+      beep(180, 0.4, 'sawtooth');
+      if (state.lives <= 0) endGame(false);
+    } else {
+      flash = 2; flashText = '❄️ Frost storm passed — your watered crops survived!';
+      setMsg(flashText);
+    }
+    updateHUD();
+  }
+  function endGame(won) {
+    state.over = true; state.won = won; running = false;
+    document.getElementById('endTitle').textContent = won ? '🏆 You Win! Glacier Harvest Hero!' : '💔 Game Over — The Glacier Froze Over';
+    document.getElementById('endText').textContent = won
+      ? 'You reached ' + state.score + ' points with ' + state.harvested + ' harvests on Day ' + state.day + '. The glacier blooms thanks to you!'
+      : 'You harvested ' + state.harvested + ' crops and scored ' + state.score + ' points before losing all glacier hearts. Try planting faster crops and watering before Winter!';
+    document.getElementById('endScreen').classList.remove('hidden');
+    if (won) { beep(660, 0.2, 'triangle'); setTimeout(function () { beep(880, 0.2, 'triangle'); }, 150); setTimeout(function () { beep(1320, 0.3, 'triangle'); }, 300); }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#bfe6f5'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
+      var px = x * TILE, py = y * TILE;
+      var isCursor = (cursor.x === x && cursor.y === y && state && !state.over);
+      ctx.fillStyle = (x + y) % 2 ? '#cdeffb' : '#aee2f7';
+      ctx.fillRect(px + 2, py + 2, TILE - 4, TILE - 4);
+      ctx.strokeStyle = isCursor ? '#ffd166' : '#5aa8d6'; ctx.lineWidth = isCursor ? 5 : 2;
+      ctx.strokeRect(px + 2, py + 2, TILE - 4, TILE - 4);
+      var c = state ? state.grid[y][x] : null;
+      if (c) {
+        var def = CROPS[c.type]; var pct = Math.min(1, c.growth / def.grow); var mature = pct >= 1;
+        ctx.font = '44px serif'; ctx.textAlign = 'center';
+        ctx.fillText(def.emoji, px + TILE / 2, py + 52);
+        ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#123';
+        ctx.fillText(def.name, px + TILE / 2, py + 72);
+        ctx.fillStyle = '#e0e0e0'; ctx.fillRect(px + 12, py + 80, TILE - 24, 9);
+        ctx.fillStyle = mature ? '#ffd166' : def.color; ctx.fillRect(px + 12, py + 80, (TILE - 24) * pct, 9);
+        if (mature) { ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#8a5a00'; ctx.fillText('✦ READY ✦', px + TILE / 2, py + 105); }
+        else if (!c.watered) { ctx.font = '13px sans-serif'; ctx.fillStyle = '#c0392b'; ctx.fillText('💧 needs water', px + TILE / 2, py + 105); }
+      } else {
+        ctx.font = '30px serif'; ctx.textAlign = 'center'; ctx.fillText('❄️', px + TILE / 2, py + 55);
+        ctx.font = '12px sans-serif'; ctx.fillStyle = '#3a6b85'; ctx.fillText('empty plot', px + TILE / 2, py + 75);
+      }
+    }
+    ctx.fillStyle = 'rgba(6,28,44,0.85)'; ctx.fillRect(0, 0, canvas.width, 26);
+    ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#fff'; ctx.textAlign = 'left';
+    ctx.fillText('Season: ' + (state ? SEASONS[state.season] : 'Spring') + '  •  Tap a plot to plant / water / harvest', 10, 18);
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(255,209,102,0.95)'; ctx.fillRect(60, 180, canvas.width - 120, 52);
+      ctx.fillStyle = '#123'; ctx.font = 'bold 17px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(flashText, canvas.width / 2, 213);
+    }
+    if (state && state.over) { ctx.fillStyle = 'rgba(6,28,44,0.35)'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+  }
+  function loop(ts) {
+    if (!running) { draw(); return; }
+    var dt = Math.min(0.1, (ts - lastTime) / 1000 || 0); lastTime = ts;
+    if (flash > 0) flash -= dt;
+    dayTimer += dt; seasonTimer += dt; frostTimer -= dt;
+    if (dayTimer >= 5) { dayTimer = 0; state.day += 1; if (state.day % 2 === 0) state.water = Math.min(120, state.water + 4); updateHUD(); }
+    if (seasonTimer >= 20) {
+      seasonTimer = 0; state.season = (state.season + 1) % 4;
+      var s = SEASONS[state.season];
+      if (s === 'Summer') { state.water = Math.min(120, state.water + 25); setMsg('☀️ Summer melt! +25 meltwater. Plant now!'); }
+      if (s === 'Winter') { setMsg('❄️ Winter is here! Water every crop or frost will take it.'); }
+      if (s === 'Spring') setMsg('🌸 Spring growth boost! Crops grow faster.');
+      updateHUD();
+    }
+    if (frostTimer <= 0) { frostTimer = 14 + Math.random() * 8; frostStorm(); }
+    // passive growth, boosted in Spring and by watering
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
+      var c = state.grid[y][x];
+      if (c && c.growth < CROPS[c.type].grow) {
+        var rate = (SEASONS[state.season] === 'Spring' ? 0.22 : 0.13) + (c.watered ? 0.08 : 0);
+        if (SEASONS[state.season] === 'Winter' && !c.watered) rate = 0.02;
+        c.growth += rate * dt * 2;
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  function startGame() {
+    ensureAudio(); newGame();
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    running = true; lastTime = performance.now();
+    requestAnimationFrame(loop);
+    beep(523, 0.15, 'triangle'); setTimeout(function () { beep(659, 0.15, 'triangle'); }, 120);
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function () { document.getElementById('howText').classList.toggle('hidden'); });
+  document.querySelectorAll('.crop').forEach(function (b) {
+    b.addEventListener('click', function () { ensureAudio(); selected = parseInt(b.dataset.crop, 10); syncCropButtons(); });
+  });
+  canvas.addEventListener('click', function (e) { var c = cellAt(e.clientX, e.clientY); if (c) { cursor = c; actOn(c.x, c.y); } });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); var t = e.touches[0]; var c = cellAt(t.clientX, t.clientY); if (c) { cursor = c; actOn(c.x, c.y); } }, { passive: false });
+  canvas.addEventListener('mousemove', function (e) { var c = cellAt(e.clientX, e.clientY); if (c) cursor = c; });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (!state || state.over)) { startGame(); return; }
+    if (!state || state.over) return;
+    if (e.key === 'ArrowLeft') cursor.x = Math.max(0, cursor.x - 1);
+    else if (e.key === 'ArrowRight') cursor.x = Math.min(COLS - 1, cursor.x + 1);
+    else if (e.key === 'ArrowUp') cursor.y = Math.max(0, cursor.y - 1);
+    else if (e.key === 'ArrowDown') cursor.y = Math.min(ROWS - 1, cursor.y + 1);
+    else if (e.key === ' ') { e.preventDefault(); actOn(cursor.x, cursor.y); }
+    else if (e.key >= '1' && e.key <= '4') { selected = parseInt(e.key, 10) - 1; syncCropButtons(); }
+  });
+  newGame(); draw();
+})();
+</script>
+</body>
+</html>

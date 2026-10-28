@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 480
-- **Latest game:** 0480 — Mycelium Mayor
+- **Total games:** 490
+- **Latest game:** 0490 — Jetstream Juggler
 - **Current volume:** 005 (Games 0401 to 0500)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -17,7 +17,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 | 004 | 0301–0400 (100, complete) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
-| 005 | 0401–0500 (80 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
+| 005 | 0401–0500 (90 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -31,20 +31,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 048
+## Latest batch — Batch 049
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0471 | Quarry Quake | Action / Falling-Rock Dodger | [Play](./games/game-0471.html) |
-| 0472 | Riddle Reef | Puzzle / Clue-Chain Deduction | [Play](./games/game-0472.html) |
-| 0473 | Solar Shepherd | Strategy / Orbital Power Management | [Play](./games/game-0473.html) |
-| 0474 | Tempo Tailor | Rhythm / Beat Stitching | [Play](./games/game-0474.html) |
-| 0475 | Wisp Warden | Arcade / Ghost-Light Herding | [Play](./games/game-0475.html) |
-| 0476 | Cipher Canyon | Puzzle / Code-Breaking Trail | [Play](./games/game-0476.html) |
-| 0477 | Tidal Trader | Strategy / Harbor Cargo Trading | [Play](./games/game-0477.html) |
-| 0478 | Pulse Pilot | Rhythm / Heartbeat Lane Runner | [Play](./games/game-0478.html) |
-| 0479 | Boulder Bouncer | Action / Ricochet Physics | [Play](./games/game-0479.html) |
-| 0480 | Mycelium Mayor | Strategy / Fungal City Builder | [Play](./games/game-0480.html) |
+| 0481 | Aurora Alchemist | Puzzle / Potion-Element Mixing | [Play](./games/game-0481.html) |
+| 0482 | Basilisk Bounce | Arcade / Reflective Orb Pong | [Play](./games/game-0482.html) |
+| 0483 | Cadence Courier | Rhythm / Delivery Beat Runner | [Play](./games/game-0483.html) |
+| 0484 | Dune Diplomat | Strategy / Desert Alliance Negotiation | [Play](./games/game-0484.html) |
+| 0485 | Eclipse Engineer | Puzzle / Shadow Alignment Puzzle | [Play](./games/game-0485.html) |
+| 0486 | Falcon Flyer | Action / Aerial Dive Hunter | [Play](./games/game-0486.html) |
+| 0487 | Glacier Gardener | Strategy / Ice Farm Simulation | [Play](./games/game-0487.html) |
+| 0488 | Harmonic Harvester | Rhythm / Melody Crop Timing | [Play](./games/game-0488.html) |
+| 0489 | Inkwell Investigator | Puzzle / Mystery Ink Deduction | [Play](./games/game-0489.html) |
+| 0490 | Jetstream Juggler | Arcade / Wind Balloon Juggling | [Play](./games/game-0490.html) |
 
 ## Quality standard
 

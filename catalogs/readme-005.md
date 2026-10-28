@@ -92,6 +92,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0478 | Pulse Pilot | Rhythm / Heartbeat Lane Runner | Arrow Keys switch lanes, Space dash on downbeat, mouse/touch tap lanes | [Play](./../games/game-0478.html) |
 | 0479 | Boulder Bouncer | Action / Ricochet Physics | Mouse/touch drag aim and release, Arrow Keys adjust angle, Space launch | [Play](./../games/game-0479.html) |
 | 0480 | Mycelium Mayor | Strategy / Fungal City Builder | Mouse/touch click grid tiles, Arrow Keys select, Space place, Enter grow turn | [Play](./../games/game-0480.html) |
+| 0481 | Aurora Alchemist | Puzzle / Potion-Element Mixing | Mouse/touch click ingredients, Arrow Keys select, Space brew | [Play](./../games/game-0481.html) |
+| 0482 | Basilisk Bounce | Arcade / Reflective Orb Pong | Arrow Keys/WASD move paddle, mouse/touch drag, Space launch | [Play](./../games/game-0482.html) |
+| 0483 | Cadence Courier | Rhythm / Delivery Beat Runner | Keys A/S/K/L hit lanes, Arrow Keys + Space, mouse/touch tap lanes | [Play](./../games/game-0483.html) |
+| 0484 | Dune Diplomat | Strategy / Desert Alliance Negotiation | Mouse/touch click dialogue options, Arrow Keys select, Enter confirm | [Play](./../games/game-0484.html) |
+| 0485 | Eclipse Engineer | Puzzle / Shadow Alignment Puzzle | Mouse/touch click rotate lenses, Arrow Keys select, Space rotate | [Play](./../games/game-0485.html) |
+| 0486 | Falcon Flyer | Action / Aerial Dive Hunter | Arrow Keys/WASD fly, Space dive, mouse/touch steer | [Play](./../games/game-0486.html) |
+| 0487 | Glacier Gardener | Strategy / Ice Farm Simulation | Mouse/touch click grid tiles, Arrow Keys select, Space plant, Enter advance season | [Play](./../games/game-0487.html) |
+| 0488 | Harmonic Harvester | Rhythm / Melody Crop Timing | Keys play notes on beat, mouse/touch tap notes, Arrow Keys select | [Play](./../games/game-0488.html) |
+| 0489 | Inkwell Investigator | Puzzle / Mystery Ink Deduction | Mouse/touch click clues and suspects, Arrow Keys select, Enter accuse | [Play](./../games/game-0489.html) |
+| 0490 | Jetstream Juggler | Arcade / Wind Balloon Juggling | Mouse/touch tap balloons, Arrow Keys move, Space gust | [Play](./../games/game-0490.html) |
 
 ## Batch notes
 
@@ -103,3 +113,4 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 046: 10 games, produced in one cycle (0451–0460).
 - Batch 047: 10 games, produced in one cycle (0461–0470).
 - Batch 048: 10 games, produced in one cycle (0471–0480).
+- Batch 049: 10 games, produced in one cycle (0481–0490).
