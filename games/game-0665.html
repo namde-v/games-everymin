@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Harbor Crane Hook Drop</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0b1e2d; color:#eaf6ff; font-family:Arial, Helvetica, sans-serif; display:flex; justify-content:center; align-items:center; min-height:100vh; padding:10px; overflow:hidden; }
+  #wrap { width:100%; max-width:760px; text-align:center; }
+  h1 { font-size:26px; margin:6px 0 2px; letter-spacing:1px; color:#ffd166; }
+  p.tag { font-size:13px; color:#a8d8f0; margin-bottom:8px; }
+  #hud { display:flex; justify-content:space-between; gap:6px; background:#123349; border:2px solid #2d6a8f; border-radius:10px; padding:8px 12px; font-weight:bold; font-size:15px; margin-bottom:8px; }
+  #hud span { color:#ffd166; }
+  #stage { position:relative; width:100%; }
+  canvas { width:100%; height:440px; background:linear-gradient(#7ec8e3,#3a7ca5 55%,#1d4e6b); border:3px solid #ffd166; border-radius:12px; display:block; touch-action:none; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; background:rgba(4,22,36,.88); border-radius:12px; padding:20px; }
+  .screen.hidden { display:none; }
+  .screen h2 { font-size:30px; color:#ffd166; }
+  .screen p { font-size:15px; line-height:1.55; max-width:520px; }
+  .how { background:#123349; border:1px solid #2d6a8f; border-radius:10px; padding:12px 16px; text-align:left; font-size:14px; line-height:1.6; }
+  .how b { color:#ffd166; }
+  button { background:#ffd166; color:#102a3d; border:none; border-radius:10px; padding:13px 28px; font-size:18px; font-weight:bold; cursor:pointer; box-shadow:0 4px 0 #b98a1d; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b98a1d; }
+  button.secondary { background:#5ec8a7; box-shadow:0 4px 0 #2f7d64; }
+  #dropBtn { width:100%; margin-top:8px; padding:14px; font-size:19px; }
+  #msg { min-height:22px; font-weight:bold; color:#ffd166; margin-top:6px; }
+  @media (max-width:520px){ h1{font-size:21px} canvas{height:380px} #hud{font-size:13px} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>⚓ HARBOR CRANE HOOK DROP</h1>
+  <p class="tag">Swing. Time it. Stack it. Don't splash it.</p>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Crates: <span id="crates">0</span>/10</div>
+    <div>Lives: <span id="lives">❤❤❤</span></div>
+    <div>Status: <span id="status">READY</span></div>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="760" height="440"></canvas>
+    <div class="screen" id="titleScreen">
+      <h2>⚓ HARBOR CRANE HOOK DROP</h2>
+      <p>A harbor crane swings over moving cargo ships. Drop the hook at the perfect moment to snatch a crate and stack it neatly on the dock.</p>
+      <div class="how">
+        <b>How to Play</b><br>
+        • Watch the hook swing left and right over the ship.<br>
+        • Press <b>DROP</b>, <b>Space</b>, or <b>tap the crane area</b> to release the hook.<br>
+        • Land on a crate for points. A perfect center grab is worth 100!<br>
+        • Miss the ship or splash into the water and you lose a life.<br>
+        • Stack <b>10 crates</b> to win. Lose all 3 lives and the shift ends.
+      </div>
+      <button id="startBtn">▶ START SHIFT</button>
+    </div>
+    <div class="screen hidden" id="endScreen">
+      <h2 id="endTitle">SHIFT COMPLETE!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn" class="secondary">↻ RESTART</button>
+    </div>
+  </div>
+  <button id="dropBtn">⬇ DROP HOOK (Space / Tap)</button>
+  <div id="msg">Wait for the swing… then drop!</div>
+</div>
+<script>
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+const scoreEl = document.getElementById('score');
+const cratesEl = document.getElementById('crates');
+const livesEl = document.getElementById('lives');
+const statusEl = document.getElementById('status');
+const msgEl = document.getElementById('msg');
+const titleScreen = document.getElementById('titleScreen');
+const endScreen = document.getElementById('endScreen');
+const endTitle = document.getElementById('endTitle');
+const endText = document.getElementById('endText');
+
+let state = 'title'; // title | swinging | dropping | rising | win | over
+let score = 0, stacked = 0, lives = 3;
+let swing = -1.1, swingSpeed = 0.021, swingDir = 1;
+let hookY = 92, hookState = 'swing'; // swing | down | up
+let cableLen = 0, targetCrate = null, carried = false;
+let shipX = 180, shipDir = 1, shipSpeed = 1.1;
+let splashT = 0, splashX = 0, flash = 0, perfectGlow = 0;
+let audioCtx = null;
+
+function initAudio() {
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+function beep(freq, dur, type, vol) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type || 'sine'; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfx(kind) {
+  if (kind === 'drop') beep(220, 0.18, 'triangle', 0.18);
+  if (kind === 'grab') { beep(520, 0.12, 'square', 0.15); setTimeout(()=>beep(780, 0.15, 'square', 0.15), 90); }
+  if (kind === 'perfect') { beep(660, 0.12, 'sine', 0.2); setTimeout(()=>beep(880, 0.12, 'sine', 0.2), 90); setTimeout(()=>beep(1320, 0.2, 'sine', 0.2), 180); }
+  if (kind === 'splash') { beep(140, 0.4, 'sawtooth', 0.18); }
+  if (kind === 'win') { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,0.22,'triangle',0.2), i*140)); }
+  if (kind === 'lose') { [400,300,200,120].forEach((f,i)=>setTimeout(()=>beep(f,0.22,'sawtooth',0.15), i*140)); }
+}
+
+function craneX() { return 380 + Math.sin(swing) * 300; }
+function shipCrates() {
+  // Three crate slots on the deck, moving with the ship.
+  return [-70, 0, 70].map(dx => ({ x: shipX + dx, y: 340, w: 52, h: 40 }));
+}
+function resetGame() {
+  score = 0; stacked = 0; lives = 3;
+  swing = -1.1; swingDir = 1; swingSpeed = 0.021;
+  hookY = 92; hookState = 'swing'; carried = false; targetCrate = null;
+  shipX = 380; shipDir = 1; shipSpeed = 1.1;
+  splashT = 0; flash = 0; perfectGlow = 0;
+  state = 'swinging'; statusEl.textContent = 'SWINGING';
+  msgEl.textContent = 'Watch the swing… then drop!';
+  updateHUD();
+}
+function updateHUD() {
+  scoreEl.textContent = score;
+  cratesEl.textContent = stacked + '/10';
+  livesEl.textContent = '❤'.repeat(Math.max(0, lives)) + (lives <= 0 ? ' —' : '');
+}
+function endGame(win) {
+  state = win ? 'win' : 'over';
+  statusEl.textContent = win ? 'WIN!' : 'GAME OVER';
+  endTitle.textContent = win ? '🏆 SHIFT COMPLETE!' : '💦 SHIFT ENDED';
+  endText.textContent = win
+    ? 'You stacked all 10 crates like a harbor legend! Final score: ' + score + '.'
+    : 'The harbor ran out of patience. You stacked ' + stacked + ' crates for ' + score + ' points.';
+  endScreen.classList.remove('hidden');
+  sfx(win ? 'win' : 'lose');
+}
+function loseLife(reason) {
+  lives--; flash = 14; updateHUD(); sfx('splash');
+  msgEl.textContent = reason;
+  if (lives <= 0) { setTimeout(()=>endGame(false), 500); }
+  else { setTimeout(()=>{ if (state==='swinging'||state==='dropping'||state==='rising'){ hookState='swing'; hookY=92; carried=false; targetCrate=null; state='swinging'; statusEl.textContent='SWINGING'; } }, 600); }
+}
+function dropHook() {
+  if (state !== 'swinging' || hookState !== 'swing') return;
+  initAudio(); sfx('drop');
+  hookState = 'down'; state = 'dropping'; statusEl.textContent = 'DROPPING!';
+  msgEl.textContent = 'Hook away…';
+}
+function drawBackground() {
+  // Sky, sun, clouds, sea, dock
+  ctx.fillStyle = '#f4c542'; ctx.beginPath(); ctx.arc(680, 55, 28, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  [[90,50],[130,42],[560,40]].forEach(c => { ctx.beginPath(); ctx.ellipse(c[0], c[1], 34, 14, 0, 0, Math.PI*2); ctx.fill(); });
+  ctx.fillStyle = '#2a6f9e'; ctx.fillRect(0, 300, 760, 140);
+  ctx.fillStyle = 'rgba(255,255,255,.25)';
+  for (let i = 0; i < 8; i++) { const wx = (i*110 + (Date.now()/40 % 110)); ctx.fillRect(wx % 800 - 20, 312 + (i%3)*28, 46, 3); }
+  // Dock on the right where crates stack
+  ctx.fillStyle = '#7a5230'; ctx.fillRect(600, 368, 160, 72);
+  ctx.fillStyle = '#5d3d22'; ctx.fillRect(600, 368, 160, 8);
+}
+function drawShip() {
+  ctx.fillStyle = '#243b4d'; ctx.beginPath();
+  ctx.moveTo(shipX-110, 330); ctx.lineTo(shipX+110, 330); ctx.lineTo(shipX+88, 372); ctx.lineTo(shipX-88, 372); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#eaf6ff'; ctx.fillRect(shipX+62, 296, 34, 34);
+  ctx.fillStyle = '#ffd166'; ctx.fillRect(shipX+70, 304, 18, 12);
+  shipCrates().forEach((c, i) => {
+    const cols = ['#e67e22','#5ec8a7','#e74c3c'];
+    ctx.fillStyle = cols[i]; ctx.fillRect(c.x-26, c.y-20, 52, 40);
+    ctx.strokeStyle = '#102a3d'; ctx.lineWidth = 2; ctx.strokeRect(c.x-26, c.y-20, 52, 40);
+    ctx.beginPath(); ctx.moveTo(c.x-26, c.y); ctx.lineTo(c.x+26, c.y+20); ctx.moveTo(c.x+26, c.y); ctx.lineTo(c.x-26, c.y+20); ctx.stroke();
+  });
+}
+function drawStack() {
+  for (let i = 0; i < stacked; i++) {
+    const col = i % 5, row = Math.floor(i / 5);
+    const x = 618 + col * 28, y = 366 - row * 30;
+    ctx.fillStyle = ['#ffd166','#5ec8a7','#ff8a5c','#a8d8f0','#c39bd3'][i % 5];
+    ctx.fillRect(x, y, 26, 28); ctx.strokeStyle = '#102a3d'; ctx.strokeRect(x, y, 26, 28);
+  }
+}
+function drawCrane() {
+  const hx = craneX();
+  ctx.strokeStyle = '#1a2f3f'; ctx.lineWidth = 10;
+  ctx.beginPath(); ctx.moveTo(60, 60); ctx.lineTo(700, 60); ctx.stroke();
+  ctx.fillStyle = '#33475b'; ctx.fillRect(28, 60, 34, 300);
+  ctx.fillStyle = '#ffd166'; ctx.fillRect(20, 40, 50, 24);
+  ctx.fillStyle = '#eaf6ff'; ctx.font = 'bold 12px Arial'; ctx.fillText('CRANE 7', 22, 56);
+  // Cable + hook
+  ctx.strokeStyle = '#102a3d'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(hx, 60); ctx.lineTo(hx, hookY); ctx.stroke();
+  ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(hx, hookY+12, 12, 0.2, Math.PI*1.2); ctx.stroke();
+  if (carried && targetCrate) {
+    ctx.fillStyle = '#e67e22'; ctx.fillRect(hx-26, hookY+22, 52, 40);
+    ctx.strokeStyle = '#102a3d'; ctx.strokeRect(hx-26, hookY+22, 52, 40);
+  }
+  if (perfectGlow > 0) { ctx.fillStyle = 'rgba(255,209,102,' + (perfectGlow/20) + ')'; ctx.font = 'bold 22px Arial'; ctx.fillText('PERFECT +100!', hx-70, hookY-14); }
+}
+function drawSplash() {
+  if (splashT > 0) {
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.font = 'bold 18px Arial'; ctx.fillText('💦 SPLASH!', splashX-45, 300);
+    for (let i = 0; i < 10; i++) { ctx.beginPath(); ctx.arc(splashX + Math.sin(i*2.3)*30, 330 + Math.cos(i*1.7)*8, 4, 0, Math.PI*2); ctx.fill(); }
+  }
+}
+function update() {
+  if (state === 'swinging' || state === 'dropping' || state === 'rising') {
+    shipX += shipDir * shipSpeed;
+    if (shipX > 430) shipDir = -1; if (shipX < 150) shipDir = 1;
+    if (hookState === 'swing') {
+      swing += swingSpeed * swingDir;
+      if (swing > 1.1) swingDir = -1; if (swing < -1.1) swingDir = 1;
+    } else if (hookState === 'down') {
+      hookY += 9;
+      const hx = craneX();
+      const hit = shipCrates().find(c => Math.abs(hx - c.x) < 30);
+      if (hit && hookY >= 300) {
+        targetCrate = hit; carried = true; hookState = 'up'; state = 'rising'; statusEl.textContent = 'LIFTING!';
+        const dist = Math.abs(hx - hit.x);
+        const pts = dist < 10 ? 100 : dist < 20 ? 60 : 30;
+        if (pts === 100) { perfectGlow = 20; sfx('perfect'); } else sfx('grab');
+        msgEl.textContent = pts === 100 ? 'PERFECT grab! +100' : 'Crate grabbed! +' + pts;
+        score += pts;
+      } else if (hookY >= 372) {
+        splashT = 30; splashX = hx; hookState = 'up'; state = 'rising'; statusEl.textContent = 'SPLASH!';
+        loseLife('Splash! The hook missed the ship. −1 life.');
+      }
+    } else if (hookState === 'up') {
+      hookY -= 8;
+      if (hookY <= 92) {
+        hookY = 92;
+        if (carried) {
+          stacked++; score += 25; swingSpeed = Math.min(0.034, swingSpeed + 0.0012); shipSpeed = Math.min(2.2, shipSpeed + 0.08);
+          msgEl.textContent = 'Stacked! +25 bonus. Crates: ' + stacked + '/10';
+          carried = false; targetCrate = null; updateHUD();
+          if (stacked >= 10) { updateHUD(); setTimeout(()=>endGame(true), 350); return; }
+        }
+        hookState = 'swing'; state = 'swinging'; statusEl.textContent = 'SWINGING';
+      }
+    }
+  }
+  if (splashT > 0) splashT--;
+  if (flash > 0) flash--;
+  if (perfectGlow > 0) perfectGlow--;
+  updateHUD();
+}
+function draw() {
+  ctx.clearRect(0, 0, 760, 440);
+  drawBackground(); drawShip(); drawStack(); drawCrane(); drawSplash();
+  if (flash > 0) { ctx.fillStyle = 'rgba(231,76,60,' + (flash/28) + ')'; ctx.fillRect(0, 0, 760, 440); }
+  ctx.fillStyle = '#102a3d'; ctx.font = 'bold 13px Arial'; ctx.fillText('DOCK STACK →', 608, 360);
+}
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
+
+document.getElementById('startBtn').addEventListener('click', function() { initAudio(); titleScreen.classList.add('hidden'); resetGame(); });
+document.getElementById('restartBtn').addEventListener('click', function() { initAudio(); endScreen.classList.add('hidden'); resetGame(); });
+document.getElementById('dropBtn').addEventListener('click', dropHook);
+document.getElementById('dropBtn').addEventListener('mousedown', dropHook);
+cv.addEventListener('mousedown', dropHook);
+cv.addEventListener('touchstart', function(e) { e.preventDefault(); dropHook(); }, { passive: false });
+document.addEventListener('keydown', function(e) {
+  if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (state === 'title') { initAudio(); titleScreen.classList.add('hidden'); resetGame(); } else dropHook(); }
+  if (e.code === 'ArrowLeft') swing -= 0.08;
+  if (e.code === 'ArrowRight') swing += 0.08;
+});
+</script>
+</body>
+</html>

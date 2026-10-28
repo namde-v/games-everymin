@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Mangrove Kayak Escape</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #06130f; font-family: Georgia, serif; color: #eafff3; display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow: hidden; }
+  h1 { margin: 10px 0 2px; font-size: 26px; letter-spacing: 1px; color: #7dffb0; text-shadow: 0 0 12px rgba(125,255,176,.5); }
+  p.sub { font-size: 13px; color: #a9d8bf; margin-bottom: 8px; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: 600px; background: #0d3b2e; border: 3px solid #2f7a55; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; padding: 8px 10px; background: #0a2a20; border: 2px solid #2f7a55; border-radius: 8px; margin-bottom: 8px; font-weight: bold; font-size: 15px; }
+  #hud span { color: #ffe66d; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(4, 22, 16, 0.88); border-radius: 12px; text-align: center; padding: 24px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #7dffb0; }
+  .overlay p { font-size: 15px; line-height: 1.5; color: #d6f5e3; max-width: 380px; }
+  .howto { background: rgba(255,255,255,.08); border: 1px solid #2f7a55; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  .howto b { color: #ffe66d; }
+  button { padding: 13px 30px; font-size: 18px; font-weight: bold; border: none; border-radius: 10px; background: #2fd47f; color: #062015; cursor: pointer; box-shadow: 0 4px 0 #1a7a48; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button:hover { background: #5ce89f; }
+  #msg { min-height: 20px; font-size: 14px; color: #ffe66d; text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>🛶 Mangrove Kayak Escape</h1>
+<p class="sub">Paddle 1500 m down the winding river — dodge roots, ride currents, catch fireflies!</p>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Hull: <span id="lives">♥♥♥</span></div>
+    <div>Distance: <span id="dist">0</span> m</div>
+  </div>
+  <canvas id="game" width="480" height="600"></canvas>
+  <div id="title" class="overlay">
+    <h2>🛶 Mangrove Kayak Escape</h2>
+    <p>Night falls over the mangroves. Your kayak must slip downstream before the tide turns. Steer through the winding channel, ride the glowing currents, and gather fireflies for light.</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      ← → or A / D — steer the kayak<br>
+      Mouse move / drag — steer toward pointer<br>
+      Touch &amp; drag — steer with your finger<br>
+      🌿 Mangrove roots &amp; 🪵 logs cost 1 hull point<br>
+      ✨ Fireflies: +50 points &nbsp; 🌊 Current: speed boost<br>
+      Win by paddling 1500 m. Lose all 3 hull points and you sink!
+    </div>
+    <button id="startBtn">▶ Start Paddling</button>
+  </div>
+  <div id="end" class="overlay hidden">
+    <h2 id="endTitle">You Made It!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart</button>
+  </div>
+</div>
+<div id="msg">Press Start, then steer with arrows, mouse, or touch.</div>
+
+<script>
+(function () {
+  var cv = document.getElementById('game');
+  var ctx = cv.getContext('2d');
+  var W = 480, H = 600;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var msgEl = document.getElementById('msg');
+  var titleEl = document.getElementById('title');
+  var endEl = document.getElementById('end');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title | play | over | win
+  var kayak, obstacles, fireflies, currents, particles, keys;
+  var riverCenter, riverPhase, speed, distance, score, hull, invuln, frames;
+  var audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function splash() { beep(180, 0.25, 'sawtooth', 0.12); beep(90, 0.3, 'triangle', 0.12); }
+  function chime() { beep(880, 0.12, 'sine', 0.14); beep(1320, 0.18, 'sine', 0.12); }
+
+  function reset() {
+    kayak = { x: W / 2, y: H - 110, w: 26, h: 52, tilt: 0, vx: 0 };
+    obstacles = []; fireflies = []; currents = []; particles = [];
+    keys = {};
+    riverCenter = W / 2; riverPhase = 0;
+    speed = 3.2; distance = 0; score = 0; hull = 3; invuln = 0; frames = 0;
+    updateHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    livesEl.textContent = '♥'.repeat(Math.max(0, hull)) + '♡'.repeat(Math.max(0, 3 - hull));
+    distEl.textContent = Math.floor(distance);
+  }
+
+  function riverCenterAt(y) {
+    return W / 2 + Math.sin((y + riverPhase) * 0.006) * 95;
+  }
+  function riverHalfWidth() { return 120; }
+
+  function spawn() {
+    // Obstacles: roots and logs inside the channel
+    if (frames % 42 === 0) {
+      var cy = -40;
+      var cx = riverCenterAt(cy) + (Math.random() * 2 - 1) * 70;
+      var kind = Math.random() < 0.55 ? 'root' : 'log';
+      obstacles.push({ x: cx, y: cy, kind: kind, w: kind === 'log' ? 78 : 44, h: 26, rot: Math.random() * 0.6 - 0.3 });
+    }
+    if (frames % 55 === 0) {
+      var fx = riverCenterAt(-30) + (Math.random() * 2 - 1) * 80;
+      fireflies.push({ x: fx, y: -30, r: 9, phase: Math.random() * 6.28, taken: false });
+    }
+    if (frames % 130 === 0) {
+      var gx = riverCenterAt(-60) + (Math.random() * 2 - 1) * 50;
+      currents.push({ x: gx, y: -60, w: 90, h: 90 });
+    }
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() * 2 - 1) * 3, vy: (Math.random() * 2 - 1) * 3, life: 26, color: color });
+    }
+  }
+
+  function hitTest(a, b) {
+    return Math.abs(a.x - b.x) < (a.w / 2 + b.w / 2) && Math.abs(a.y - b.y) < (a.h / 2 + b.h / 2);
+  }
+
+  function update() {
+    if (state !== 'play') return;
+    frames++;
+    riverPhase += speed * 2.2;
+
+    // Steering
+    var targetVx = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) targetVx = -5;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) targetVx = 5;
+    if (typeof kayak.targetX === 'number') {
+      var dx = kayak.targetX - kayak.x;
+      targetVx = Math.max(-5.5, Math.min(5.5, dx * 0.12));
+      if (Math.abs(dx) < 4) kayak.targetX = undefined;
+    }
+    kayak.vx += (targetVx - kayak.vx) * 0.25;
+    kayak.x += kayak.vx;
+    kayak.tilt = kayak.vx * 0.09;
+
+    // Current push: river bends push the kayak sideways
+    var bendPush = Math.cos((kayak.y + riverPhase) * 0.006) * 0.55;
+    kayak.x += bendPush;
+
+    // Keep inside banks (soft wall)
+    var c = riverCenterAt(kayak.y), hw = riverHalfWidth();
+    if (kayak.x < c - hw + 18) { kayak.x = c - hw + 18; kayak.vx = 0; }
+    if (kayak.x > c + hw - 18) { kayak.x = c + hw - 18; kayak.vx = 0; }
+
+    // Speed & distance
+    var inCurrent = false;
+    for (var i = 0; i < currents.length; i++) {
+      if (Math.abs(currents[i].x - kayak.x) < 60 && Math.abs(currents[i].y - kayak.y) < 60) inCurrent = true;
+    }
+    var curSpeed = inCurrent ? speed + 2.2 : speed;
+    distance += curSpeed * 0.55;
+    score += inCurrent ? 1 : 0;
+    if (frames % 300 === 0) speed = Math.min(5.4, speed + 0.2);
+
+    spawn();
+    var list;
+    list = obstacles;
+    for (var j = list.length - 1; j >= 0; j--) {
+      list[j].y += curSpeed;
+      if (list[j].y > H + 60) list.splice(j, 1);
+    }
+    list = fireflies;
+    for (var k = list.length - 1; k >= 0; k--) {
+      list[k].y += curSpeed;
+      list[k].phase += 0.15;
+      if (list[k].y > H + 40) list.splice(k, 1);
+    }
+    list = currents;
+    for (var m = list.length - 1; m >= 0; m--) {
+      list[m].y += curSpeed;
+      if (list[m].y > H + 100) list.splice(m, 1);
+    }
+
+    // Collisions
+    if (invuln > 0) invuln--;
+    for (var n = obstacles.length - 1; n >= 0; n--) {
+      var ob = obstacles[n];
+      if (invuln === 0 && hitTest(kayak, ob)) {
+        hull--;
+        invuln = 70;
+        splash();
+        burst(kayak.x, kayak.y, '#ffdd55', 22);
+        obstacles.splice(n, 1);
+        msgEl.textContent = 'CRASH! A ' + ob.kind + ' scraped the hull — ' + hull + ' hull left.';
+        if (hull <= 0) { endGame(false); return; }
+      }
+    }
+    for (var f = fireflies.length - 1; f >= 0; f--) {
+      var fl = fireflies[f];
+      var ddx = fl.x - kayak.x, ddy = fl.y - kayak.y;
+      if (ddx * ddx + ddy * ddy < 34 * 34) {
+        score += 50;
+        chime();
+        burst(fl.x, fl.y, '#ffe66d', 14);
+        fireflies.splice(f, 1);
+      }
+    }
+
+    // Particles
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+
+    if (distance >= 1500) { endGame(true); return; }
+    updateHud();
+  }
+
+  function drawBank(side) {
+    ctx.fillStyle = '#0a2e1c';
+    var step = 24;
+    ctx.beginPath();
+    if (side < 0) {
+      ctx.moveTo(0, 0);
+      for (var y = 0; y <= H; y += step) ctx.lineTo(riverCenterAt(y) - riverHalfWidth(), y);
+      ctx.lineTo(0, H); ctx.closePath();
+    } else {
+      ctx.moveTo(W, 0);
+      for (var y2 = 0; y2 <= H; y2 += step) ctx.lineTo(riverCenterAt(y2) + riverHalfWidth(), y2);
+      ctx.lineTo(W, H); ctx.closePath();
+    }
+    ctx.fill();
+    // mangrove silhouettes
+    ctx.fillStyle = '#123f28';
+    for (var i = 0; i < 26; i++) {
+      var yy = (i * 47 + frames * 0.6) % (H + 40) - 20;
+      var xx = side < 0 ? riverCenterAt(yy) - riverHalfWidth() - 26 - (i % 3) * 22 : riverCenterAt(yy) + riverHalfWidth() + 14 + (i % 3) * 22;
+      ctx.beginPath(); ctx.arc(xx, yy, 16 + (i % 3) * 5, 0, 6.283); ctx.fill();
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // water
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#155e43'); grad.addColorStop(1, '#0a3d2a');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // ripples
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    for (var r = 0; r < 14; r++) {
+      var ry = (r * 58 + frames * 2) % (H + 20) - 10;
+      var rx = riverCenterAt(ry) + Math.sin(r * 3) * 60;
+      ctx.beginPath(); ctx.ellipse(rx, ry, 26, 6, 0, 0, 6.283); ctx.stroke();
+    }
+    // currents
+    currents.forEach(function (cu) {
+      ctx.fillStyle = 'rgba(125,255,176,0.20)';
+      ctx.beginPath(); ctx.ellipse(cu.x, cu.y, cu.w / 2, cu.h / 2, 0, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = 'rgba(125,255,176,0.6)'; ctx.beginPath(); ctx.ellipse(cu.x, cu.y, 20, 34, 0, 0, 6.283); ctx.stroke();
+    });
+    drawBank(-1); drawBank(1);
+    // obstacles
+    obstacles.forEach(function (ob) {
+      ctx.save(); ctx.translate(ob.x, ob.y); ctx.rotate(ob.rot);
+      if (ob.kind === 'log') {
+        ctx.fillStyle = '#6b4a2a'; ctx.fillRect(-39, -10, 78, 20);
+        ctx.fillStyle = '#8a6136'; ctx.fillRect(-39, -10, 78, 7);
+      } else {
+        ctx.strokeStyle = '#3d2b16'; ctx.lineWidth = 6;
+        for (var s = -1; s <= 1; s++) {
+          ctx.beginPath(); ctx.moveTo(s * 14, -14); ctx.quadraticCurveTo(s * 20, 4, s * 10, 18); ctx.stroke();
+        }
+        ctx.fillStyle = '#2e7a4d'; ctx.beginPath(); ctx.arc(0, -14, 13, 0, 6.283); ctx.fill();
+      }
+      ctx.restore();
+    });
+    // fireflies
+    fireflies.forEach(function (fl) {
+      var glow = 8 + Math.sin(fl.phase) * 4;
+      ctx.fillStyle = 'rgba(255,230,109,0.35)';
+      ctx.beginPath(); ctx.arc(fl.x, fl.y, glow + 6, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#ffe66d';
+      ctx.beginPath(); ctx.arc(fl.x, fl.y, 5, 0, 6.283); ctx.fill();
+    });
+    // kayak
+    if (invuln === 0 || Math.floor(frames / 5) % 2 === 0) {
+      ctx.save(); ctx.translate(kayak.x, kayak.y); ctx.rotate(kayak.tilt);
+      ctx.fillStyle = '#e8412f';
+      ctx.beginPath(); ctx.ellipse(0, 0, 13, 27, 0, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#ffb347'; ctx.fillRect(-4, -22, 8, 14);
+      ctx.fillStyle = '#123524'; ctx.beginPath(); ctx.arc(0, 6, 7, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = '#7a3b12'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-16, -8); ctx.lineTo(-22, 14); ctx.moveTo(16, -8); ctx.lineTo(22, 14); ctx.stroke();
+      ctx.restore();
+    }
+    // wake
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.beginPath(); ctx.moveTo(kayak.x - 10, kayak.y + 28); ctx.lineTo(kayak.x - 20, kayak.y + 48); ctx.moveTo(kayak.x + 10, kayak.y + 28); ctx.lineTo(kayak.x + 20, kayak.y + 48); ctx.stroke();
+    // particles
+    particles.forEach(function (pt) {
+      ctx.fillStyle = pt.color; ctx.globalAlpha = pt.life / 26;
+      ctx.fillRect(pt.x, pt.y, 4, 4); ctx.globalAlpha = 1;
+    });
+    // finish banner
+    if (distance > 1350 && state === 'play') {
+      ctx.fillStyle = '#ffe66d'; ctx.font = 'bold 18px Georgia';
+      ctx.fillText('🏁 The open water is near — ' + Math.max(0, Math.ceil(1500 - distance)) + ' m to go!', 60, 40);
+    }
+  }
+
+  function loop() {
+    update(); draw();
+    requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'play';
+    titleEl.classList.add('hidden');
+    endEl.classList.add('hidden');
+    msgEl.textContent = 'Paddle on! Dodge roots and logs, grab fireflies.';
+    beep(523, 0.15, 'triangle', 0.15); beep(659, 0.15, 'triangle', 0.15);
+  }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 You Escaped the Mangroves!' : '💦 You Sank in the Mangroves!';
+    endText.textContent = won
+      ? 'You paddled 1500 m to open water! Final score: ' + score + '. The fireflies light your way home.'
+      : 'Your hull gave out after ' + Math.floor(distance) + ' m. Final score: ' + score + '. Try the river again!';
+    endEl.classList.remove('hidden');
+    msgEl.textContent = won ? 'Victory! Restart to paddle again.' : 'Game over — hit Restart to try again.';
+    if (won) { chime(); beep(1046, 0.3, 'sine', 0.14); }
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if ((e.key === 'Enter' || e.key === ' ') && state !== 'play') startGame();
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  function pointerSteer(clientX) {
+    if (state !== 'play' || !kayak) return;
+    var rect = cv.getBoundingClientRect();
+    kayak.targetX = (clientX - rect.left) * (W / rect.width);
+  }
+  cv.addEventListener('mousemove', function (e) { pointerSteer(e.clientX); });
+  cv.addEventListener('mousedown', function (e) { initAudio(); pointerSteer(e.clientX); });
+  cv.addEventListener('click', function (e) { pointerSteer(e.clientX); });
+  cv.addEventListener('touchstart', function (e) { initAudio(); e.preventDefault(); pointerSteer(e.touches[0].clientX); }, { passive: false });
+  cv.addEventListener('touchmove', function (e) { e.preventDefault(); pointerSteer(e.touches[0].clientX); }, { passive: false });
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

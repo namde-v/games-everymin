@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tidal Harbor Ferry Dash</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06283d; color: #eaf7ff; font-family: Verdana, Geneva, sans-serif;
+    display: flex; flex-direction: column; align-items: center; padding: 12px; min-height: 100vh; }
+  h1 { font-size: 22px; margin: 6px 0 4px; text-align: center; letter-spacing: 1px; }
+  p.tag { font-size: 13px; color: #9fd8ef; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(680px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; background: #0b5a7d;
+    border: 3px solid #ffd166; border-radius: 10px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap;
+    background: #083a52; border: 2px solid #2f9ec4; border-radius: 8px;
+    padding: 8px 10px; margin-bottom: 8px; font-size: 14px; font-weight: bold; }
+  #hud span { white-space: nowrap; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(3, 32, 48, 0.88); border-radius: 10px; padding: 18px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 26px; margin-bottom: 8px; color: #ffd166; }
+  .overlay p { font-size: 14px; line-height: 1.55; max-width: 480px; margin: 4px 0; }
+  .howto { background: rgba(255,255,255,0.10); border: 1px solid #2f9ec4; border-radius: 8px;
+    padding: 10px 14px; margin: 12px 0; text-align: left; font-size: 13px; line-height: 1.6; }
+  .howto b { color: #ffd166; }
+  button { cursor: pointer; background: #ffd166; color: #06283d; border: none;
+    border-radius: 8px; padding: 12px 26px; font-size: 17px; font-weight: bold; margin-top: 12px; }
+  button:hover { background: #ffdf8e; }
+  button:active { transform: scale(0.97); }
+  #hint { font-size: 12px; color: #9fd8ef; margin-top: 8px; text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🚢 Tidal Harbor Ferry Dash</h1>
+<p class="tag">Top-down harbor navigation &middot; pick up passengers, dodge hazards, deliver on time!</p>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Lives: <span id="lives">♥♥♥</span></span>
+    <span>Delivered: <span id="delivered">0</span> / 10</span>
+    <span>Time: <span id="time">120</span>s</span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <canvas id="game" width="680" height="480"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🚢 Tidal Harbor Ferry Dash</h2>
+    <p>Pilot your ferry across a busy harbor. Collect waiting passengers and deliver them to their destination dock before the clock runs out!</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      🕹️ <b>Steer:</b> Arrow keys / WASD to turn and thrust, or hold mouse / touch and drag — the ferry steers toward your pointer.<br>
+      👥 <b>Pick up:</b> Sail close to a dock with a waiting passenger (yellow dot) to board them.<br>
+      🏁 <b>Deliver:</b> Sail to the flashing destination dock to drop them off (+100 points).<br>
+      ⚠️ <b>Avoid:</b> Rocks, drifting buoys and rolling waves — each crash costs a life. 3 crashes = Game Over.<br>
+      🏆 <b>Win:</b> Deliver 10 passengers within 120 seconds. Run out of time or lives and the harbor closes!
+    </div>
+    <button id="startBtn" type="button">▶ Start Ferry Run</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p>Final Score: <b id="finalScore">0</b> &nbsp;|&nbsp; Delivered: <b id="finalDelivered">0</b>/10</p>
+    <button id="restartBtn" type="button">↻ Restart Instantly</button>
+  </div>
+</div>
+<p id="hint">Keyboard: WASD / Arrows &nbsp;•&nbsp; Mouse: hold &amp; drag to steer &nbsp;•&nbsp; Touch: drag on the water<br>Tip: slow down near docks — a gentle approach docks cleanly and avoids crashes.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var delEl = document.getElementById('delivered');
+  var timeEl = document.getElementById('time');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  // ---- Audio (procedural, created only after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+  function jingle(notes) {
+    notes.forEach(function (n, i) {
+      setTimeout(function () { beep(n, 0.18, 'triangle', 0.14); }, i * 140);
+    });
+  }
+
+  // ---- Game state ----
+  var state = 'title'; // title | playing | over
+  var score, lives, delivered, timeLeft, lastTick;
+  var ferry, keys, pointer, passenger, hazards, waves, particles, dockFlash;
+
+  var DOCKS = [
+    { name: 'North Pier', x: 340, y: 34 },
+    { name: 'East Wharf', x: 646, y: 240 },
+    { name: 'South Marina', x: 340, y: 446 },
+    { name: 'West Quay', x: 34, y: 240 }
+  ];
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function spawnPassenger() {
+    var from = DOCKS[Math.floor(Math.random() * DOCKS.length)];
+    var dests = DOCKS.filter(function (d) { return d !== from; });
+    var to = dests[Math.floor(Math.random() * dests.length)];
+    passenger = { from: from, to: to, aboard: false, bob: 0 };
+  }
+
+  function makeHazards() {
+    hazards = [];
+    var spots = [];
+    for (var i = 0; i < 9; i++) {
+      var p;
+      do { p = { x: rand(110, 570), y: rand(90, 390) }; }
+      while (spots.some(function (s) { return dist(s, p) < 90; }) ||
+             DOCKS.some(function (d) { return dist(d, p) < 80; }));
+      spots.push(p);
+      hazards.push({ x: p.x, y: p.y, r: rand(14, 22), kind: i % 3 === 0 ? 'buoy' : 'rock', vx: rand(-14, 14), vy: rand(-10, 10), ph: rand(0, 6) });
+    }
+    waves = [];
+    for (var j = 0; j < 4; j++) {
+      waves.push({ x: rand(80, 600), y: rand(80, 400), r: rand(26, 36), vx: rand(-26, 26), vy: rand(-18, 18) });
+    }
+  }
+
+  function reset() {
+    score = 0; lives = 3; delivered = 0; timeLeft = 120;
+    ferry = { x: 340, y: 240, angle: -Math.PI / 2, speed: 0, vx: 0, vy: 0, invuln: 0 };
+    keys = {}; pointer = null; particles = []; dockFlash = 0;
+    makeHazards();
+    spawnPassenger();
+    updateHUD('Sailing');
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives > 0 ? '♥'.repeat(lives) : '—';
+    delEl.textContent = delivered;
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+    if (status) statusEl.textContent = status;
+  }
+
+  function crash() {
+    lives--;
+    ferry.invuln = 1.6;
+    ferry.x = 340; ferry.y = 240; ferry.vx = 0; ferry.vy = 0; ferry.speed = 0;
+    beep(110, 0.35, 'sawtooth', 0.16);
+    burst(ferry.x, ferry.y, '#ff6b6b');
+    updateHUD(lives > 0 ? 'Crash! Careful!' : 'Sunk!');
+    if (lives <= 0) endGame(false, 'Your ferry ran out of lives after too many crashes.');
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 16; i++) {
+      particles.push({ x: x, y: y, vx: rand(-90, 90), vy: rand(-90, 90), life: rand(0.3, 0.8), color: color });
+    }
+  }
+
+  function endGame(won, msg) {
+    state = 'over';
+    endTitle.textContent = won ? '🏆 You Win! Harbor Hero!' : '🌊 Game Over';
+    endText.textContent = msg;
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('finalDelivered').textContent = delivered;
+    endScreen.classList.remove('hidden');
+    if (won) jingle([523, 659, 784, 1047]); else jingle([330, 262, 196, 131]);
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    lastTick = performance.now();
+    beep(440, 0.15, 'triangle', 0.14);
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input: keyboard, mouse, touch ----
+  document.addEventListener('keydown', function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].indexOf(e.key.toLowerCase()) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+  function pointerPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX - r.left) * (W / r.width);
+    var cy = (e.clientY - r.top) * (H / r.height);
+    return { x: cx, y: cy };
+  }
+  canvas.addEventListener('mousedown', function (e) { pointer = pointerPos(e); });
+  canvas.addEventListener('mousemove', function (e) { if (pointer) pointer = pointerPos(e); });
+  canvas.addEventListener('mouseup', function () { pointer = null; });
+  canvas.addEventListener('mouseleave', function () { pointer = null; });
+  canvas.addEventListener('click', function (e) { if (state === 'title') { /* Start button handles it */ } });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (e.touches.length) pointer = pointerPos(e.touches[0]);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    if (e.touches.length) pointer = pointerPos(e.touches[0]);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointer = null; });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // ---- Update ----
+  function update(dt) {
+    timeLeft -= dt;
+    if (timeLeft <= 0) {
+      timeLeft = 0; updateHUD();
+      if (delivered >= 10) endGame(true, 'Just in time — every passenger delivered!');
+      else endGame(false, 'Time ran out before all 10 passengers were delivered.');
+      return;
+    }
+    if (ferry.invuln > 0) ferry.invuln -= dt;
+    dockFlash += dt;
+    passenger.bob += dt * 3;
+
+    // Steering: keyboard turning + thrust
+    var turn = 0, thrust = 0;
+    if (keys['arrowleft'] || keys['a']) turn -= 1;
+    if (keys['arrowright'] || keys['d']) turn += 1;
+    if (keys['arrowup'] || keys['w']) thrust += 1;
+    if (keys['arrowdown'] || keys['s']) thrust -= 0.6;
+    ferry.angle += turn * 2.6 * dt;
+    // Pointer steering (mouse / touch): turn toward pointer, thrust when far
+    if (pointer) {
+      var want = Math.atan2(pointer.y - ferry.y, pointer.x - ferry.x);
+      var diff = want - ferry.angle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      ferry.angle += Math.max(-3 * dt, Math.min(3 * dt, diff));
+      if (dist(pointer, ferry) > 30) thrust = Math.max(thrust, 1);
+    }
+    ferry.speed += thrust * 190 * dt;
+    ferry.speed *= Math.pow(0.4, dt); // drag
+    ferry.speed = Math.max(-60, Math.min(210, ferry.speed));
+    ferry.vx = Math.cos(ferry.angle) * ferry.speed;
+    ferry.vy = Math.sin(ferry.angle) * ferry.speed;
+    ferry.x += ferry.vx * dt;
+    ferry.y += ferry.vy * dt;
+    ferry.x = Math.max(24, Math.min(W - 24, ferry.x));
+    ferry.y = Math.max(24, Math.min(H - 24, ferry.y));
+
+    // Hazards drift and bounce
+    hazards.forEach(function (h) {
+      if (h.kind === 'buoy') {
+        h.x += h.vx * dt; h.y += h.vy * dt;
+        if (h.x < 50 || h.x > W - 50) h.vx *= -1;
+        if (h.y < 60 || h.y > H - 60) h.vy *= -1;
+      }
+    });
+    waves.forEach(function (w) {
+      w.x += w.vx * dt; w.y += w.vy * dt;
+      if (w.x < 40 || w.x > W - 40) w.vx *= -1;
+      if (w.y < 50 || w.y > H - 50) w.vy *= -1;
+    });
+
+    // Collisions (skip while briefly invulnerable after a crash)
+    if (ferry.invuln <= 0) {
+      var hit = hazards.some(function (h) { return dist(h, ferry) < h.r + 16; }) ||
+                waves.some(function (w) { return dist(w, ferry) < w.r * 0.55; });
+      if (hit) { crash(); if (state !== 'playing') return; }
+    }
+
+    // Pickup / delivery
+    if (!passenger.aboard && dist(passenger.from, ferry) < 44) {
+      passenger.aboard = true;
+      score += 25;
+      beep(660, 0.15, 'sine', 0.14);
+      burst(ferry.x, ferry.y, '#ffd166');
+      updateHUD('Passenger aboard → ' + passenger.to.name);
+    } else if (passenger.aboard && dist(passenger.to, ferry) < 44) {
+      delivered++;
+      score += 100;
+      beep(880, 0.2, 'triangle', 0.14);
+      setTimeout(function () { beep(1174, 0.2, 'triangle', 0.12); }, 120);
+      burst(ferry.x, ferry.y, '#6bff9e');
+      updateHUD('Delivered! Next passenger waiting');
+      if (delivered >= 10) { endGame(true, 'All 10 passengers delivered — the harbor cheers your perfect run!'); return; }
+      spawnPassenger();
+    }
+
+    // Particles
+    particles = particles.filter(function (p) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; return p.life > 0; });
+    updateHUD();
+  }
+
+  // ---- Draw ----
+  function drawDock(d, highlight, waiting) {
+    ctx.save();
+    ctx.translate(d.x, d.y);
+    ctx.fillStyle = highlight ? (Math.sin(dockFlash * 6) > 0 ? '#ffd166' : '#ff9f1c') : '#8d6e63';
+    ctx.fillRect(-26, -12, 52, 24);
+    ctx.fillStyle = '#5d4037';
+    ctx.fillRect(-30, -4, 60, 8);
+    ctx.fillStyle = '#eaf7ff';
+    ctx.font = 'bold 11px Verdana';
+    ctx.textAlign = 'center';
+    ctx.fillText(d.name, 0, 34);
+    if (waiting) {
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath();
+      ctx.arc(0, -18 + Math.sin(passenger.bob) * 2, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#06283d';
+      ctx.font = 'bold 9px Verdana';
+      ctx.fillText('•', 0, -15 + Math.sin(passenger.bob) * 2);
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    // Water with gentle wave lines
+    ctx.fillStyle = '#0b5a7d';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 2;
+    for (var i = 0; i < 6; i++) {
+      ctx.beginPath();
+      var y0 = 50 + i * 72;
+      for (var x = 0; x <= W; x += 20) {
+        var y = y0 + Math.sin(x / 60 + i + performance.now() / 900) * 5;
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    // Route hint: dashed line to current objective
+    var target = passenger.aboard ? passenger.to : passenger.from;
+    ctx.save();
+    ctx.strokeStyle = passenger.aboard ? '#6bff9e' : '#ffd166';
+    ctx.setLineDash([8, 10]);
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(ferry.x, ferry.y); ctx.lineTo(target.x, target.y); ctx.stroke();
+    ctx.restore();
+
+    DOCKS.forEach(function (d) {
+      var waiting = !passenger.aboard && passenger.from === d;
+      var dest = passenger.aboard && passenger.to === d;
+      drawDock(d, dest, waiting);
+    });
+
+    hazards.forEach(function (h) {
+      ctx.save(); ctx.translate(h.x, h.y);
+      if (h.kind === 'rock') {
+        ctx.fillStyle = '#5b6470';
+        ctx.beginPath();
+        ctx.moveTo(-h.r, 4); ctx.lineTo(-h.r * 0.4, -h.r); ctx.lineTo(h.r, -h.r * 0.4); ctx.lineTo(h.r * 0.6, h.r); ctx.lineTo(-h.r * 0.7, h.r * 0.8);
+        ctx.closePath(); ctx.fill();
+      } else {
+        ctx.fillStyle = '#ff6b6b';
+        ctx.beginPath(); ctx.arc(0, 0, h.r * 0.7, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(0, 0, h.r * 0.3, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    });
+    waves.forEach(function (w) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(w.x, w.y, w.r * (0.7 + 0.15 * Math.sin(performance.now() / 300 + w.x)), 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    });
+
+    // Ferry
+    ctx.save();
+    ctx.translate(ferry.x, ferry.y);
+    ctx.rotate(ferry.angle);
+    if (ferry.invuln > 0 && Math.floor(performance.now() / 120) % 2 === 0) ctx.globalAlpha = 0.4;
+    ctx.fillStyle = '#f4f4f4';
+    ctx.beginPath();
+    ctx.moveTo(24, 0); ctx.lineTo(10, -13); ctx.lineTo(-18, -13); ctx.lineTo(-24, 0); ctx.lineTo(-18, 13); ctx.lineTo(10, 13);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e63946';
+    ctx.fillRect(-4, -8, 14, 16);
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(-2, -5, 6, 10);
+    if (passenger.aboard) {
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(-12, 0, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+
+    // Wake particles
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(0.05, (now - lastTick) / 1000);
+    lastTick = now;
+    update(dt);
+    if (state === 'playing') { draw(); requestAnimationFrame(loop); }
+    else { draw(); }
+  }
+
+  // Idle backdrop behind the title screen
+  reset();
+  draw();
+  updateHUD('Ready');
+})();
+</script>
+</body>
+</html>

@@ -64,3 +64,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0658 | Vineyard Harvest Planner | Strategy / Vineyard Season Management | Mouse/touch manage plots, Keys select grape | [Play](./../games/game-0658.html) |
 | 0659 | Carnival Samba Parade | Rhythm / Samba Parade Timing | Keys tap parade cues on beat, mouse/touch tap cues | [Play](./../games/game-0659.html) |
 | 0660 | Clockmaker Gear Calibration | Precision / Gear Timing Calibration | Space/click/tap stop gears, Arrow Keys select | [Play](./../games/game-0660.html) |
+| 0661 | Tidal Harbor Ferry Dash | Arcade / Harbor Ferry Navigation | Arrow Keys/WASD steer, mouse/touch steer | [Play](./../games/game-0661.html) |
+| 0662 | Lantern Riddle Grid | Puzzle / Light-Up Logic | Mouse/touch toggle lanterns, Arrow Keys select, Enter confirm | [Play](./../games/game-0662.html) |
+| 0663 | Alpine Apiary Manager | Strategy / Beekeeping Management | Mouse/touch manage hives, Keys select task | [Play](./../games/game-0663.html) |
+| 0664 | Festival Drum Clash | Rhythm / Taiko Drum Timing | Keys tap drums on beat, mouse/touch tap drums | [Play](./../games/game-0664.html) |
+| 0665 | Harbor Crane Hook Drop | Precision / Crane Hook Timing | Space/click/tap drop hook, Arrow Keys aim | [Play](./../games/game-0665.html) |
+| 0666 | Mangrove Kayak Escape | Arcade / River Kayak Descent | Arrow Keys/WASD paddle steer, mouse/touch steer | [Play](./../games/game-0666.html) |
+| 0667 | Constellation Connect Logic | Puzzle / Star Connection Logic | Mouse/touch connect stars, Arrow Keys select | [Play](./../games/game-0667.html) |
+| 0668 | Tea House Service Strategy | Strategy / Tea House Customer Management | Mouse/touch serve guests, Keys select | [Play](./../games/game-0668.html) |
+| 0669 | River Reed Flute Melody | Rhythm / Melody Matching | Keys play notes, mouse/touch tap notes | [Play](./../games/game-0669.html) |
+| 0670 | Blacksmith Hammer Strike | Precision / Hammer Timing | Space/click/tap strike, Arrow Keys select | [Play](./../games/game-0670.html) |

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Blacksmith Hammer Strike — Game 0670</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; background: #17100a; color: #ffe9c4; font-family: Georgia, serif; display: flex; align-items: center; justify-content: center; padding: 12px; }
+  .wrap { width: min(720px, 100%); }
+  h1 { text-align: center; margin: 6px 0 2px; font-size: 30px; letter-spacing: 1px; color: #ffb347; text-shadow: 0 2px 0 #000; }
+  .sub { text-align: center; color: #d9b98a; margin: 0 0 10px; font-style: italic; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; background: #2a1a0e; border: 2px solid #7a4a1e; border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; font-weight: bold; }
+  #hud span { white-space: nowrap; }
+  #status { text-align: center; min-height: 24px; font-weight: bold; color: #ffd166; margin-bottom: 8px; }
+  #stage { position: relative; background: #241407; border: 3px solid #7a4a1e; border-radius: 12px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; background: #1e1208; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; text-align: center; background: rgba(10,5,2,0.88); }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0; color: #ffb347; font-size: 28px; }
+  .overlay p { margin: 0; line-height: 1.5; max-width: 520px; }
+  .howto { background: #3a2410; border: 1px solid #8a5a2a; border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 15px; }
+  .howto b { color: #ffd166; }
+  button { cursor: pointer; border: 2px solid #ffd166; background: #c0392b; color: #fff; font-size: 20px; font-weight: bold; padding: 12px 26px; border-radius: 10px; box-shadow: 0 4px 0 #7a1f16; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #2e7d32; box-shadow: 0 4px 0 #1b4d1f; }
+  #strikeBtn { width: 100%; margin-top: 10px; font-size: 22px; padding: 16px; background: #e67e22; border-color: #ffe9c4; box-shadow: 0 5px 0 #8a3c00; }
+  .legend { text-align: center; color: #c9a876; font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>&#9874; Blacksmith Hammer Strike</h1>
+  <p class="sub">Game 0670 &mdash; Precision / Hammer Timing</p>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Lives: <span id="lives">5</span> &#10084;</span>
+    <span>Items Forged: <span id="items">0</span> / 6</span>
+    <span>Item: <span id="progress">0</span> / 3 strikes</span>
+  </div>
+  <div id="status">Press Start, then strike when the glowing zone crosses a target mark.</div>
+  <div id="stage">
+    <canvas id="game" width="680" height="430"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Blacksmith Hammer Strike</h2>
+      <p>Heat the metal, watch the glowing strike zone slide along the bar, and hammer at the perfect moment.</p>
+      <div class="howto">
+        <b>How to Play</b><br>
+        &bull; The glowing orange zone moves back and forth along the metal bar.<br>
+        &bull; Gold target marks show where to strike. Press <b>SPACE</b>, click, or tap <b>STRIKE</b> when the zone overlaps a mark.<br>
+        &bull; Dead centre = <b>PERFECT (+100)</b>, inside the mark = <b>GOOD (+50)</b>, outside = a miss and you lose a life.<br>
+        &bull; Land 3 good strikes to forge one item. Forge <b>6 items</b> to win. Lose all 5 lives and the metal cracks &mdash; game over.
+      </div>
+      <button id="startBtn" type="button">Start Forging</button>
+      <p>Keyboard: SPACE / ENTER to strike &bull; Mouse: click &bull; Touch: tap</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">Forged!</h2>
+      <p id="endText"></p>
+      <p id="endScore"></p>
+      <button id="restartBtn" type="button" class="secondary">Restart Instantly</button>
+    </div>
+  </div>
+  <button id="strikeBtn" type="button">STRIKE &#9874;</button>
+  <p class="legend">Tip: do not rush every pass. Wait for the zone to centre on the gold mark, then strike once. Speed rises with every item.</p>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var itemsEl = document.getElementById('items');
+  var progressEl = document.getElementById('progress');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+  var strikeBtn = document.getElementById('strikeBtn');
+
+  var state = 'title';
+  var score = 0, lives = 5, itemsForged = 0, strikesDone = 0, combo = 0, bestCombo = 0;
+  var barX = 60, barW = 560, barY = 210, zoneX = 90, zoneW = 54, dir = 1, speed = 210;
+  var targetX = 340, targetW = 88;
+  var flash = 0, flashText = '', flashColor = '#ffd166', shake = 0, lastTime = 0;
+  var sparks = [], hammerY = 0, hammerDown = 0, itemNames = ['Iron Sword','Steel Shield','Knight Helm','Dagger','War Axe','Golden Crown'];
+  var audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.18, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function clang(quality) {
+    if (quality === 'perfect') { tone(880, 0.35, 'triangle', 0.25, 220); tone(1320, 0.22, 'sine', 0.15); }
+    else if (quality === 'good') { tone(620, 0.28, 'triangle', 0.22, 180); tone(930, 0.15, 'sine', 0.1); }
+    else { tone(160, 0.35, 'sawtooth', 0.18, 70); }
+  }
+  function newTarget() {
+    var min = barX + 50, max = barX + barW - 50;
+    var next = min + Math.random() * (max - min);
+    if (Math.abs(next - targetX) < 70) next = (next + 130 > max) ? next - 140 : next + 130;
+    targetX = next;
+  }
+  function resetGame() {
+    score = 0; lives = 5; itemsForged = 0; strikesDone = 0; combo = 0; bestCombo = 0;
+    speed = 210; zoneX = barX + 20; dir = 1; flash = 0; flashText = ''; shake = 0;
+    sparks = []; newTarget(); updateHUD();
+    statusEl.textContent = 'Strike when the glowing zone overlaps the gold mark!';
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    itemsEl.textContent = itemsForged;
+    progressEl.textContent = strikesDone;
+  }
+  function spawnSparks(x, y, n, color) {
+    for (var i = 0; i < n; i++) {
+      sparks.push({ x: x, y: y, vx: (Math.random() - 0.5) * 320, vy: -Math.random() * 260 - 40, life: 0.6 + Math.random() * 0.4, color: color });
+    }
+  }
+  function showEnd(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? 'Master Blacksmith!' : 'Metal Cracked!';
+    endText.textContent = win ? 'You forged all 6 legendary items with steady hands and perfect timing.' : 'The metal cracked under too many off-centre strikes. Heat it up and try again.';
+    endScore.textContent = 'Final score: ' + score + '  |  Items forged: ' + itemsForged + '  |  Best combo: ' + bestCombo;
+    endScreen.classList.remove('hidden');
+    tone(win ? 660 : 220, 0.5, 'triangle', 0.2, win ? 990 : 110);
+  }
+  function strike() {
+    if (state !== 'playing') return;
+    ensureAudio();
+    hammerDown = 1; hammerY = 0;
+    var zoneCenter = zoneX + zoneW / 2;
+    var dist = Math.abs(zoneCenter - targetX);
+    var half = targetW / 2;
+    if (dist <= 14) {
+      score += 100; combo++; bestCombo = Math.max(bestCombo, combo); strikesDone++;
+      flashText = 'PERFECT! +100'; flashColor = '#ffe066'; flash = 1;
+      spawnSparks(zoneCenter, barY, 26, '#ffd166'); clang('perfect');
+      statusEl.textContent = 'Perfect strike! The metal sings. Combo x' + combo + '.';
+    } else if (dist <= half) {
+      score += 50; combo++; bestCombo = Math.max(bestCombo, combo); strikesDone++;
+      flashText = 'GOOD! +50'; flashColor = '#7CFC98'; flash = 1;
+      spawnSparks(zoneCenter, barY, 14, '#ffb347'); clang('good');
+      statusEl.textContent = 'Good strike! Keep the rhythm going.';
+    } else {
+      lives--; combo = 0; shake = 10; flashText = 'MISS! Metal weakened'; flashColor = '#ff6b6b'; flash = 1;
+      spawnSparks(zoneCenter, barY, 8, '#888888'); clang('miss');
+      statusEl.textContent = 'Off-centre! You lost a life. Wait for the next pass.';
+    }
+    if (lives <= 0) { updateHUD(); showEnd(false); return; }
+    if (strikesDone >= 3) {
+      var made = itemNames[Math.min(itemsForged, itemNames.length - 1)];
+      itemsForged++; strikesDone = 0; speed += 32;
+      flashText = 'FORGED: ' + made.toUpperCase() + '!'; flashColor = '#ffd166'; flash = 1;
+      statusEl.textContent = 'Forged a ' + made + '! ' + (6 - itemsForged) + ' item(s) to go.';
+      tone(520, 0.25, 'triangle', 0.2, 780);
+      if (itemsForged >= 6) { updateHUD(); showEnd(true); return; }
+    }
+    newTarget(); updateHUD();
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+  function drawBackground() {
+    ctx.fillStyle = '#1e1208'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#3d2410'; ctx.fillRect(0, 300, canvas.width, 130);
+    ctx.fillStyle = '#ff7b00'; ctx.beginPath(); ctx.arc(340, 372, 46, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(340, 372, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#d9b98a'; ctx.font = 'bold 16px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('FORGE  •  ANVIL  •  STRIKE ZONE', 340, 34);
+    ctx.fillStyle = '#8a5a2a'; ctx.fillRect(240, 330, 200, 26);
+    ctx.fillStyle = '#5a3a1a'; ctx.fillRect(240, 356, 200, 18);
+  }
+  function drawBar() {
+    var sx = shake ? (Math.random() - 0.5) * shake : 0;
+    ctx.save(); ctx.translate(sx, 0);
+    ctx.fillStyle = '#444'; ctx.fillRect(barX - 8, barY - 18, barW + 16, 36);
+    ctx.fillStyle = '#c0c0c0'; ctx.fillRect(barX, barY - 12, barW, 24);
+    ctx.fillStyle = '#e8e8e8'; ctx.fillRect(barX, barY - 12, barW, 6);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(targetX - targetW / 2, barY - 20, targetW, 40);
+    ctx.fillStyle = '#7a1f16'; ctx.fillRect(targetX - 3, barY - 20, 6, 40);
+    ctx.fillStyle = '#000'; ctx.font = 'bold 12px Georgia'; ctx.textAlign = 'center'; ctx.fillText('TARGET', targetX, barY - 28);
+    var grad = ctx.createLinearGradient(zoneX, 0, zoneX + zoneW, 0);
+    grad.addColorStop(0, 'rgba(255,123,0,0.25)'); grad.addColorStop(0.5, 'rgba(255,209,102,0.95)'); grad.addColorStop(1, 'rgba(255,123,0,0.25)');
+    ctx.fillStyle = grad; ctx.fillRect(zoneX, barY - 20, zoneW, 40);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(zoneX, barY - 20, zoneW, 40);
+    ctx.restore();
+    for (var i = sparks.length - 1; i >= 0; i--) {
+      var s = sparks[i];
+      ctx.fillStyle = s.color; ctx.fillRect(s.x - 2, s.y - 2, 4, 4);
+    }
+    var hy = 108 - hammerDown * 42;
+    ctx.fillStyle = '#6b3f1d'; ctx.fillRect(318, hy - 58, 14, 72);
+    ctx.fillStyle = '#888'; ctx.fillRect(268, hy - 26, 116, 34);
+    ctx.fillStyle = '#bbb'; ctx.fillRect(268, hy - 26, 116, 10);
+    if (flash > 0) {
+      ctx.globalAlpha = Math.min(1, flash);
+      ctx.fillStyle = flashColor; ctx.font = 'bold 30px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText(flashText, 340, 110); ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = '#ffe9c4'; ctx.font = '16px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('Next item: ' + itemNames[Math.min(itemsForged, itemNames.length - 1)] + '  •  Combo: ' + combo, 340, 285);
+  }
+  function loop(now) {
+    if (state !== 'playing') { drawBackground(); drawBar(); return; }
+    var dt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now;
+    zoneX += dir * speed * dt;
+    if (zoneX <= barX) { zoneX = barX; dir = 1; }
+    if (zoneX + zoneW >= barX + barW) { zoneX = barX + barW - zoneW; dir = -1; }
+    if (flash > 0) flash -= dt * 0.9;
+    if (shake > 0) shake -= dt * 30;
+    if (hammerDown > 0) { hammerDown -= dt * 6; if (hammerDown < 0) hammerDown = 0; }
+    for (var i = sparks.length - 1; i >= 0; i--) {
+      var s = sparks[i]; s.x += s.vx * dt; s.y += s.vy * dt; s.vy += 420 * dt; s.life -= dt;
+      if (s.life <= 0) sparks.splice(i, 1);
+    }
+    drawBackground(); drawBar();
+    requestAnimationFrame(loop);
+  }
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+  strikeBtn.addEventListener('click', strike);
+  strikeBtn.addEventListener('mousedown', function (e) { e.preventDefault(); strike(); });
+  strikeBtn.addEventListener('touchstart', function (e) { e.preventDefault(); strike(); }, { passive: false });
+  canvas.addEventListener('mousedown', strike);
+  canvas.addEventListener('click', function () { if (state === 'playing') strike(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); strike(); }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.code === 'Enter') {
+      e.preventDefault();
+      if (state === 'title' || state === 'win' || state === 'over') startGame(); else strike();
+    }
+  });
+  document.addEventListener('touchstart', function () { ensureAudio(); }, { passive: true });
+  resetGame(); drawBackground(); drawBar();
+})();
+</script>
+</body>
+</html>
