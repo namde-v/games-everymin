@@ -64,3 +64,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0558 | Sonar Salvage | Precision / Sonar Targeting | Mouse/touch click ping and claw, Arrow Keys move, Space ping/claw | [Play](./../games/game-0558.html) |
 | 0559 | Emberline Express | Arcade / Fire Train Track Switcher | Arrow Keys/WASD switch tracks, mouse/touch tap switch | [Play](./../games/game-0559.html) |
 | 0560 | Stardust Stepper | Rhythm / Dance Step Timing | Arrow Keys/A/S/W/D step pads, mouse click, touch tap pads | [Play](./../games/game-0560.html) |
+| 0561 | Lantern Leap | Arcade / Lantern Tower Climber | Arrow Keys/A/D move and jump, mouse/touch drag steer | [Play](./../games/game-0561.html) |
+| 0562 | Quarry Quilt | Puzzle / Gem Pattern Logic | WASD move cursor, Enter/Space apply, mouse/touch place gems | [Play](./../games/game-0562.html) |
+| 0563 | Reef Restoration | Strategy / Coral Reef Management | Mouse/touch click zones to act, Arrow Keys select, Enter confirm | [Play](./../games/game-0563.html) |
+| 0564 | Clockwork Clapper | Rhythm / Gear Beat Timing | D/F/J/K hit lanes, mouse click, touch tap lanes | [Play](./../games/game-0564.html) |
+| 0565 | Paper Plane Pilot | Precision / Wind Glide Aim | Mouse/touch drag aim and steer, Arrow Keys steer, Space launch | [Play](./../games/game-0565.html) |
+| 0566 | Bubble Bazaar | Arcade / Bubble Catcher | Arrow Keys/WASD move basket, mouse/touch drag move | [Play](./../games/game-0566.html) |
+| 0567 | Locksmith's Ladder | Puzzle / Code Lock Logic | Arrow Keys select dials, Up/Down change digits, mouse/touch tap dials | [Play](./../games/game-0567.html) |
+| 0568 | Windmill Village | Strategy / Village Energy Planning | Mouse/touch click grid to build, Arrow Keys select, Enter place | [Play](./../games/game-0568.html) |
+| 0569 | Rainforest Rumble | Rhythm / Call-and-Response Drums | Keys play drums, mouse click, touch tap drums | [Play](./../games/game-0569.html) |
+| 0570 | Magnet Marbles | Precision / Marble Flick Aim | Mouse/touch drag aim and release, Arrow Keys adjust, Space flick | [Play](./../games/game-0570.html) |
