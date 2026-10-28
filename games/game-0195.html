@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Crossbow Clash</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; background: #0d1b12; overflow: hidden; }
+  body { font-family: "Trebuchet MS", Verdana, sans-serif; color: #f5f0dc; display: flex; align-items: center; justify-content: center; }
+  #wrap { position: relative; width: min(96vw, 860px); aspect-ratio: 860 / 560; background: #16281c; border: 3px solid #8a6b2f; border-radius: 14px; box-shadow: 0 0 40px rgba(0,0,0,.7); overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+  #hud { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; gap: 8px; padding: 8px 14px; background: rgba(0,0,0,.45); font-size: 15px; font-weight: bold; letter-spacing: .5px; }
+  #hud span { white-space: nowrap; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; background: rgba(8, 20, 11, .88); padding: 24px; z-index: 5; }
+  .hidden { display: none !important; }
+  h1 { font-size: clamp(30px, 6vw, 52px); color: #ffd75e; text-shadow: 2px 2px 0 #5a3d00, 0 0 24px rgba(255,215,94,.5); letter-spacing: 2px; }
+  h2 { font-size: clamp(26px, 5vw, 40px); color: #ffd75e; }
+  p, li { font-size: 15px; line-height: 1.55; color: #e8e2c8; }
+  ul { text-align: left; max-width: 520px; margin: 0 auto; }
+  button { font-family: inherit; font-size: 20px; font-weight: bold; padding: 13px 34px; border: none; border-radius: 10px; background: #e8a81c; color: #241a00; cursor: pointer; box-shadow: 0 4px 0 #8a5c00; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #8a5c00; }
+  button.secondary { background: #4f7d5a; color: #fff; box-shadow: 0 4px 0 #2c4a31; }
+  #msg { min-height: 22px; font-size: 16px; color: #9fe8a8; font-weight: bold; }
+  #windbar { position: absolute; left: 14px; bottom: 12px; font-size: 14px; font-weight: bold; background: rgba(0,0,0,.45); padding: 5px 10px; border-radius: 8px; }
+  #reloadbar { position: absolute; right: 14px; bottom: 12px; font-size: 14px; font-weight: bold; background: rgba(0,0,0,.45); padding: 5px 10px; border-radius: 8px; color: #ffd75e; }
+  @media (max-width: 600px) { #hud { font-size: 12px; padding: 6px 8px; } p, li { font-size: 13px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="860" height="560"></canvas>
+  <div id="hud">
+    <span id="hudScore">Score: 0</span>
+    <span id="hudRound">Round: 1 / 5</span>
+    <span id="hudBolts">Bolts: 8</span>
+    <span id="hudStatus">Aim!</span>
+  </div>
+  <div id="windbar">Wind: calm</div>
+  <div id="reloadbar">Ready</div>
+
+  <div id="titleScreen" class="screen">
+    <h1>CROSSBOW CLASH</h1>
+    <p>Five rounds. One crossbow. A sky full of moving targets — and a wind that refuses to sit still.</p>
+    <ul>
+      <li><b>How to play:</b> Move the mouse or your finger to aim. Click / tap to shoot.</li>
+      <li><b>Keyboard:</b> Arrow Keys aim, <b>Space</b> shoots, <b>R</b> reloads early.</li>
+      <li><b>Wind drift:</b> Your bolt bends with the wind. Aim slightly upwind on strong gusts.</li>
+      <li><b>Reload timing:</b> Every shot takes 0.9 seconds to reload. A loaded shot is worth more than a rushed one.</li>
+      <li><b>Targets:</b> Balloons 50 pts, Ducks 100 pts, Golden Targets 250 pts, Popping Targets 150 pts. Watch for fast movers!</li>
+      <li><b>Bolts:</b> 8 per round. Score <b>1500 points</b> across 5 rounds to win.</li>
+    </ul>
+    <button id="startBtn">Start Game</button>
+    <p id="msg">Tap Start, then shoot after the bowstring is drawn.</p>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">Play Again</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = 860, H = 560;
+  var hudScore = document.getElementById("hudScore");
+  var hudRound = document.getElementById("hudRound");
+  var hudBolts = document.getElementById("hudBolts");
+  var hudStatus = document.getElementById("hudStatus");
+  var windbar = document.getElementById("windbar");
+  var reloadbar = document.getElementById("reloadbar");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+  var endStats = document.getElementById("endStats");
+
+  var state = "title"; // title | playing | over
+  var score = 0, round = 1, bolts = 8, totalShots = 0, totalHits = 0;
+  var aimX = 430, aimY = 200;
+  var reloadTimer = 0, RELOAD_TIME = 0.9;
+  var wind = 0, windTimer = 0;
+  var targets = [], boltsFlying = [], particles = [], floaters = [];
+  var spawnTimer = 0, roundTime = 0, ROUND_LEN = 40;
+  var bowX = 430, bowY = 505;
+  var keys = {};
+  var audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfxShoot() { beep(180, 0.15, "square", 0.18); beep(900, 0.08, "triangle", 0.10); }
+  function sfxHit() { beep(660, 0.12, "sine", 0.2); beep(990, 0.18, "sine", 0.18); }
+  function sfxGold() { beep(880, 0.12, "sine", 0.2); beep(1100, 0.12, "sine", 0.2); beep(1320, 0.22, "sine", 0.2); }
+  function sfxReload() { beep(300, 0.08, "square", 0.10); setTimeout(function () { beep(420, 0.08, "square", 0.10); }, 120); }
+  function sfxWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.25, "triangle", 0.2); }, i * 150); }); }
+  function sfxLose() { [400, 330, 260, 196].forEach(function (f, i) { setTimeout(function () { beep(f, 0.25, "sawtooth", 0.12); }, i * 160); }); }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function newWind() {
+    wind = Math.round(rand(-3, 3) * 10) / 10;
+    var dir = wind === 0 ? "calm" : (wind > 0 ? "blowing right" : "blowing left");
+    var strength = Math.abs(wind) < 0.8 ? "gentle" : (Math.abs(wind) < 2 ? "steady" : "strong gust");
+    windbar.textContent = "Wind: " + strength + " " + dir + " (" + Math.abs(wind).toFixed(1) + ")";
+  }
+
+  function spawnTarget() {
+    var kind = pick(["balloon", "balloon", "duck", "duck", "popper", "gold"]);
+    var fromLeft = Math.random() < 0.5;
+    var speed = rand(40, 90) * (1 + round * 0.12);
+    if (kind === "gold") speed *= 1.5;
+    if (kind === "popper") speed *= 0.8;
+    var t = {
+      kind: kind,
+      x: fromLeft ? -40 : W + 40,
+      y: rand(60, 300),
+      vx: fromLeft ? speed : -speed,
+      vy: kind === "balloon" ? rand(-12, 12) : rand(-25, 25),
+      r: kind === "gold" ? 26 : (kind === "duck" ? 24 : 20),
+      pts: kind === "balloon" ? 50 : (kind === "duck" ? 100 : (kind === "popper" ? 150 : 250)),
+      bob: rand(0, Math.PI * 2),
+      life: kind === "popper" ? rand(3, 5) : 999,
+      alive: true
+    };
+    targets.push(t);
+  }
+
+  function startGame() {
+    initAudio();
+    score = 0; round = 1; bolts = 8; totalShots = 0; totalHits = 0;
+    targets = []; boltsFlying = []; particles = []; floaters = [];
+    roundTime = 0; reloadTimer = 0; spawnTimer = 0.5;
+    newWind(); windTimer = 0;
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    hudStatus.textContent = "Aim!";
+    updateHUD();
+  }
+
+  function nextRound() {
+    round++;
+    if (round > 5) { endGame(); return; }
+    bolts = 8; roundTime = 0; targets = []; boltsFlying = [];
+    newWind();
+    hudStatus.textContent = "Round " + round + " — aim!";
+    updateHUD();
+  }
+
+  function endGame() {
+    state = "over";
+    var won = score >= 1500;
+    endTitle.textContent = won ? "YOU WIN!" : "GAME OVER";
+    endText.textContent = won
+      ? "The crowd roars! You are the Crossbow Champion with " + score + " points."
+      : "The rounds are over with " + score + " points — you needed 1500. Sharpen those bolts and try again!";
+    var acc = totalShots ? Math.round(totalHits / totalShots * 100) : 0;
+    endStats.textContent = "Final score: " + score + " | Shots: " + totalShots + " | Hits: " + totalHits + " | Accuracy: " + acc + "%";
+    endScreen.classList.remove("hidden");
+    if (won) sfxWin(); else sfxLose();
+  }
+
+  function updateHUD() {
+    hudScore.textContent = "Score: " + score;
+    hudRound.textContent = "Round: " + Math.min(round, 5) + " / 5";
+    hudBolts.textContent = "Bolts: " + bolts;
+    reloadbar.textContent = reloadTimer > 0 ? "Reloading " + (reloadTimer).toFixed(1) + "s" : "Ready";
+  }
+
+  function shoot() {
+    if (state !== "playing") return;
+    if (reloadTimer > 0) { hudStatus.textContent = "Reloading — wait!"; return; }
+    if (bolts <= 0) { hudStatus.textContent = "Out of bolts — press R? No, next round!"; return; }
+    initAudio();
+    bolts--; totalShots++;
+    var ang = Math.atan2(aimY - bowY, aimX - bowX);
+    boltsFlying.push({ x: bowX, y: bowY, vx: Math.cos(ang) * 620, vy: Math.sin(ang) * 620, alive: true });
+    reloadTimer = RELOAD_TIME;
+    sfxShoot(); sfxReload();
+    hudStatus.textContent = "Bolt away!";
+    updateHUD();
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) {
+      particles.push({ x: x, y: y, vx: rand(-160, 160), vy: rand(-160, 60), life: rand(0.3, 0.7), color: color });
+    }
+  }
+
+  function checkHits() {
+    for (var i = boltsFlying.length - 1; i >= 0; i--) {
+      var b = boltsFlying[i];
+      if (!b.alive) continue;
+      for (var j = targets.length - 1; j >= 0; j--) {
+        var t = targets[j];
+        if (!t.alive) continue;
+        var dx = b.x - t.x, dy = b.y - t.y;
+        if (dx * dx + dy * dy < (t.r + 6) * (t.r + 6)) {
+          t.alive = false; b.alive = false; totalHits++;
+          var bonus = reloadTimer <= 0 ? 0 : 0;
+          score += t.pts;
+          floaters.push({ x: t.x, y: t.y - 10, text: "+" + t.pts, life: 1.1, color: t.kind === "gold" ? "#ffd75e" : "#ffffff" });
+          burst(t.x, t.y, t.kind === "gold" ? "#ffd75e" : (t.kind === "duck" ? "#8fd18f" : "#ff7a7a"));
+          if (t.kind === "gold") sfxGold(); else sfxHit();
+          hudStatus.textContent = t.kind === "gold" ? "Golden hit! +" + t.pts : "Hit! +" + t.pts;
+          targets.splice(j, 1);
+          break;
+        }
+      }
+    }
+    boltsFlying = boltsFlying.filter(function (b) { return b.alive; });
+  }
+
+  function update(dt) {
+    if (state !== "playing") return;
+    roundTime += dt;
+    windTimer += dt;
+    if (windTimer > 6) { windTimer = 0; newWind(); }
+    if (reloadTimer > 0) reloadTimer -= dt;
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnTarget(); spawnTimer = rand(0.9, 1.8) / (1 + round * 0.08); }
+    for (var i = targets.length - 1; i >= 0; i--) {
+      var t = targets[i];
+      t.bob += dt * 3;
+      t.x += t.vx * dt;
+      t.y += t.vy * dt + Math.sin(t.bob) * 14 * dt;
+      if (t.kind === "popper") { t.life -= dt; if (t.life <= 0) { burst(t.x, t.y, "#c9a7ff"); targets.splice(i, 1); continue; } }
+      if (t.x < -60 || t.x > W + 60 || t.y < -40 || t.y > H) targets.splice(i, 1);
+    }
+    for (var k = boltsFlying.length - 1; k >= 0; k--) {
+      var bb = boltsFlying[k];
+      bb.vx += wind * 22 * dt; // wind drift bends the bolt
+      bb.x += bb.vx * dt;
+      bb.y += bb.vy * dt;
+      bb.vy += 60 * dt; // slight gravity drop
+      if (bb.x < -20 || bb.x > W + 20 || bb.y < -20 || bb.y > H + 20) boltsFlying.splice(k, 1);
+    }
+    checkHits();
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 200 * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    for (var f = floaters.length - 1; f >= 0; f--) {
+      floaters[f].y -= 40 * dt; floaters[f].life -= dt;
+      if (floaters[f].life <= 0) floaters.splice(f, 1);
+    }
+    // Keyboard aiming
+    var spd = 260 * dt;
+    if (keys["ArrowLeft"]) aimX -= spd;
+    if (keys["ArrowRight"]) aimX += spd;
+    if (keys["ArrowUp"]) aimY -= spd;
+    if (keys["ArrowDown"]) aimY += spd;
+    aimX = Math.max(10, Math.min(W - 10, aimX));
+    aimY = Math.max(30, Math.min(H - 90, aimY));
+    // Round ends when time is up or bolts are spent and none flying
+    if (roundTime >= ROUND_LEN || (bolts <= 0 && boltsFlying.length === 0)) {
+      if (round < 5) nextRound(); else endGame();
+    }
+    updateHUD();
+  }
+
+  function drawBackground() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#7ec8f7"); g.addColorStop(0.55, "#a8d8a0"); g.addColorStop(1, "#3d7a3a");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath(); ctx.arc(120, 80, 34, 0, Math.PI * 2); ctx.arc(155, 70, 26, 0, Math.PI * 2); ctx.arc(90, 70, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(700, 60, 30, 0, Math.PI * 2); ctx.arc(730, 52, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2c5a2c";
+    ctx.fillRect(0, 470, W, 90);
+    ctx.fillStyle = "#6b4a1e";
+    ctx.fillRect(0, 470, W, 10);
+    // distant hills
+    ctx.fillStyle = "#4a8a4a";
+    ctx.beginPath(); ctx.moveTo(0, 470); ctx.quadraticCurveTo(200, 400, 430, 470); ctx.quadraticCurveTo(620, 410, 860, 470); ctx.closePath(); ctx.fill();
+  }
+
+  function drawTarget(t) {
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    if (t.kind === "balloon") {
+      ctx.fillStyle = pick ? "#e74c3c" : "#e74c3c";
+      ctx.beginPath(); ctx.ellipse(0, 0, 16, 20, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#7a1f1f"; ctx.beginPath(); ctx.moveTo(0, 20); ctx.lineTo(0, 34); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.beginPath(); ctx.arc(-5, -7, 5, 0, Math.PI * 2); ctx.fill();
+    } else if (t.kind === "duck") {
+      ctx.fillStyle = "#f2c14e";
+      ctx.beginPath(); ctx.ellipse(0, 0, 20, 13, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(16, -6, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#e67e22"; ctx.beginPath(); ctx.moveTo(23, -6); ctx.lineTo(33, -3); ctx.lineTo(23, -1); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#222"; ctx.beginPath(); ctx.arc(18, -8, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#2ecc71"; ctx.beginPath(); ctx.ellipse(-4, -12, 12, 4, -0.4, 0, Math.PI * 2); ctx.fill();
+    } else if (t.kind === "gold") {
+      ctx.fillStyle = "#ffd75e"; ctx.strokeStyle = "#8a6b00"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "#8a6b00"; ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
+    } else {
+      // popper: flashing ring target, shrinks as it nears popping
+      var pulse = 1 + Math.sin(t.bob * 2) * 0.15;
+      ctx.scale(pulse, pulse);
+      ctx.fillStyle = "#c9a7ff"; ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#8e44ad"; ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#333"; ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(Math.ceil(t.life) + "s", 0, 32);
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    drawBackground();
+    targets.forEach(drawTarget);
+    // bolts in flight
+    boltsFlying.forEach(function (b) {
+      var ang = Math.atan2(b.vy, b.vx);
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(ang);
+      ctx.strokeStyle = "#5a3d00"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(10, 0); ctx.stroke();
+      ctx.fillStyle = "#ddd"; ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(2, -4); ctx.lineTo(2, 4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#e74c3c"; ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-20, -4); ctx.lineTo(-20, 4); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+    // crossbow at bottom center
+    ctx.save(); ctx.translate(bowX, bowY);
+    var ang = Math.atan2(aimY - bowY, aimX - bowX);
+    ctx.rotate(ang);
+    ctx.strokeStyle = "#6b4a1e"; ctx.lineWidth = 7; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(52, 0); ctx.stroke();
+    ctx.strokeStyle = "#8a6b2f"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0, 0, 34, -1.1, 1.1); ctx.stroke();
+    ctx.strokeStyle = "#eee"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(Math.cos(-1.1) * 34, Math.sin(-1.1) * 34); ctx.lineTo(46, 0); ctx.lineTo(Math.cos(1.1) * 34, Math.sin(1.1) * 34); ctx.stroke();
+    ctx.restore();
+    // crosshair at aim point
+    if (state === "playing") {
+      ctx.strokeStyle = wind !== 0 ? "#ffd75e" : "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(aimX, aimY, 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(aimX - 22, aimY); ctx.lineTo(aimX - 8, aimY); ctx.moveTo(aimX + 8, aimY); ctx.lineTo(aimX + 22, aimY);
+      ctx.moveTo(aimX, aimY - 22); ctx.lineTo(aimX, aimY - 8); ctx.moveTo(aimX, aimY + 8); ctx.lineTo(aimX, aimY + 22); ctx.stroke();
+      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("wind " + (wind > 0 ? ">>" : (wind < 0 ? "<<" : "--")), aimX, aimY + 34);
+    }
+    // particles and floaters
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    floaters.forEach(function (f) {
+      ctx.globalAlpha = Math.max(0, f.life);
+      ctx.fillStyle = f.color; ctx.font = "bold 20px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.globalAlpha = 1;
+    });
+    // round timer bar
+    if (state === "playing") {
+      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(20, H - 26, W - 40, 10);
+      ctx.fillStyle = "#ffd75e"; ctx.fillRect(20, H - 26, (W - 40) * (1 - roundTime / ROUND_LEN), 10);
+    }
+  }
+
+  var last = 0;
+  function loop(ts) {
+    if (!last) last = ts;
+    var dt = Math.min(0.05, (ts - last) / 1000);
+    last = ts;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function setAimFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : aimX);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : aimY);
+    aimX = (cx - rect.left) * (W / rect.width);
+    aimY = (cy - rect.top) * (H / rect.height);
+    aimX = Math.max(10, Math.min(W - 10, aimX));
+    aimY = Math.max(30, Math.min(H - 90, aimY));
+  }
+
+  canvas.addEventListener("mousemove", function (e) { setAimFromEvent(e); });
+  canvas.addEventListener("mousedown", function (e) { initAudio(); setAimFromEvent(e); shoot(); });
+  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); initAudio(); setAimFromEvent(e); shoot(); }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); setAimFromEvent(e); }, { passive: false });
+  document.addEventListener("keydown", function (e) {
+    keys[e.key] = true;
+    if (e.key === " ") { e.preventDefault(); initAudio(); shoot(); }
+    if (e.key === "r" || e.key === "R") { if (state === "playing" && reloadTimer > 0) { reloadTimer = 0; hudStatus.textContent = "Reloaded early!"; updateHUD(); } }
+    if (e.key === "Enter" && state === "title") startGame();
+    if (e.key === "Enter" && state === "over") startGame();
+  });
+  document.addEventListener("keyup", function (e) { keys[e.key] = false; });
+  document.getElementById("startBtn").addEventListener("click", function () { startGame(); });
+  document.getElementById("restartBtn").addEventListener("click", function () { startGame(); });
+  document.getElementById("menuBtn").addEventListener("click", function () {
+    state = "title";
+    endScreen.classList.add("hidden");
+    titleScreen.classList.remove("hidden");
+  });
+
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Catapult Castle</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#1a2b4a;color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;padding:10px;min-height:100vh}
+  h1{font-size:28px;margin:6px 0 2px;text-shadow:2px 2px 0 #000}
+  p.sub{color:#ffd166;font-size:14px;margin-bottom:8px}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:6px 0;width:100%;max-width:860px}
+  .pill{background:#0f1e33;border:2px solid #ffd166;border-radius:20px;padding:6px 12px;font-weight:bold;font-size:14px}
+  .pill span{color:#ffd166}
+  #wrap{position:relative;width:100%;max-width:860px}
+  canvas{display:block;width:100%;height:auto;background:linear-gradient(#87ceeb,#cfeeff 55%,#7ec850 55%,#5aa83a);border:4px solid #3b2a1a;border-radius:12px;touch-action:none}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.78);border-radius:8px;text-align:center;padding:20px;z-index:5}
+  .overlay h2{font-size:34px;color:#ffd166;margin-bottom:10px}
+  .overlay p{max-width:560px;line-height:1.55;font-size:15px;margin:6px 0}
+  .overlay ul{text-align:left;max-width:560px;line-height:1.6;font-size:14px;margin:10px auto}
+  button{background:#ff9f1c;color:#1a1a1a;border:3px solid #fff;border-radius:12px;padding:12px 26px;font-size:18px;font-weight:bold;cursor:pointer;margin-top:14px}
+  button:hover{background:#ffd166}
+  button:active{transform:scale(.97)}
+  #msg{margin-top:8px;font-weight:bold;min-height:22px;color:#ffd166;text-align:center}
+  #aimbar{width:100%;max-width:860px;height:14px;background:#222;border-radius:8px;overflow:hidden;margin-top:6px;border:1px solid #fff}
+  #aimfill{height:100%;width:40%;background:linear-gradient(90deg,#2ecc71,#f1c40f,#e74c3c)}
+  .hint{font-size:13px;color:#dbeafe;margin-top:6px;text-align:center;max-width:860px;line-height:1.5}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<h1>🏰 Catapult Castle</h1>
+<p class="sub">Precision / Catapult Siege Aim — Knock down every castle target!</p>
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Rocks: <span id="rocks">8</span></div>
+  <div class="pill">Level: <span id="level">1</span> / 8</div>
+  <div class="pill">Targets: <span id="targets">0</span></div>
+  <div class="pill">Wind: <span id="wind">0</span></div>
+  <div class="pill">Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🏰 Catapult Castle</h2>
+    <p><strong>How to Play:</strong> You are the siege commander. Smash the castle before you run out of rocks!</p>
+    <ul>
+      <li><strong>Mouse / Touch:</strong> Press near the catapult, drag back to aim, release to launch. Longer drag = more power.</li>
+      <li><strong>Keyboard:</strong> Up / Down arrows adjust angle, Left / Right adjust power, Space launches.</li>
+      <li>Watch the <strong>wind</strong> — it pushes rocks left or right in flight. Gravity pulls every rock down in an arc.</li>
+      <li>Hit castle blocks to collapse them. Destroy the red-banner <strong>targets</strong> for big bonus points.</li>
+      <li>Clear all targets to advance. Clear Level 8 to WIN. Run out of rocks with targets left and it is Game Over.</li>
+    </ul>
+    <p>Tip: Aim high in strong wind, and knock out the bottom blocks first to bring the whole tower down.</p>
+    <button id="startBtn" type="button">▶ Start Game</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Victory!</h2>
+    <p id="endText">You conquered the castle!</p>
+    <p>Final Score: <strong id="finalScore">0</strong></p>
+    <button id="restartBtn" type="button">↻ Restart Game</button>
+  </div>
+  <div id="levelScreen" class="overlay hidden">
+    <h2 id="levelTitle">Level Clear!</h2>
+    <p id="levelText">Castle destroyed!</p>
+    <button id="nextBtn" type="button">➜ Next Level</button>
+  </div>
+</div>
+<div id="aimbar"><div id="aimfill"></div></div>
+<div id="msg">Drag from the catapult to aim, then release to fire!</div>
+<p class="hint">Controls: Mouse / touch drag &amp; release • Arrow Keys angle &amp; power • Space launch • R restart • M mute sound</p>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var scoreEl=document.getElementById('score'), rocksEl=document.getElementById('rocks'),
+      levelEl=document.getElementById('level'), targetsEl=document.getElementById('targets'),
+      windEl=document.getElementById('wind'), statusEl=document.getElementById('status'),
+      msgEl=document.getElementById('msg'), aimfill=document.getElementById('aimfill');
+  var titleScreen=document.getElementById('titleScreen'), endScreen=document.getElementById('endScreen'),
+      levelScreen=document.getElementById('levelScreen');
+  var score=0, level=1, rocks=8, state='title', angle=-42, power=52, dragging=false, dragX=0, dragY=0;
+  var blocks=[], projectiles=[], particles=[], wind=0, muted=false, audioCtx=null;
+  var catX=110, catY=430, groundY=460;
+  function show(el){ el.classList.remove('hidden'); }
+  function hide(el){ el.classList.add('hidden'); }
+  function setStatus(s){ statusEl.textContent=s; }
+  function ensureAudio(){
+    if(!audioCtx){
+      try{ var AC=window.AudioContext||window.webkitAudioContext; audioCtx=new AC(); }catch(e){}
+    }
+    if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+  }
+  function beep(freq,dur,type,vol){
+    if(muted||!audioCtx) return;
+    try{
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type||'sine'; o.frequency.value=freq;
+      g.gain.setValueAtTime(vol||0.18, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function noiseBurst(){
+    if(muted||!audioCtx) return;
+    try{
+      var len=audioCtx.sampleRate*0.25, buf=audioCtx.createBuffer(1,len,audioCtx.sampleRate), d=buf.getChannelData(0);
+      for(var i=0;i<len;i++){ d[i]=(Math.random()*2-1)*(1-i/len); }
+      var src=audioCtx.createBufferSource(); src.buffer=buf;
+      var g=audioCtx.createGain(); g.gain.value=0.25; src.connect(g); g.connect(audioCtx.destination); src.start();
+    }catch(e){}
+  }
+  function buildLevel(n){
+    blocks=[]; projectiles=[]; particles=[];
+    // Wind grows with level, alternates direction for variety
+    var winds=[0, 0.02, -0.03, 0.04, -0.05, 0.06, -0.04, 0.07];
+    wind=winds[n-1]||0;
+    rocks=7+Math.min(3, Math.floor(n/2));
+    var baseX=600, rows=2+Math.min(3, Math.floor((n+1)/2)), cols=2+Math.min(2, Math.floor(n/3));
+    var bw=52, bh=30;
+    for(var r=0;r<rows;r++){
+      for(var c=0;c<cols;c++){
+        var isTarget=(r===rows-1 && c===Math.floor(cols/2)) || (n>=3 && r===0 && c===0);
+        var isKing=(n>=5 && r===rows-1 && c===cols-1);
+        blocks.push({x:baseX+c*bw, y:groundY-bh*(r+1), w:bw, h:bh, hp:isTarget||isKing?2:1,
+          target:isTarget||isKing, king:isKing, color:isKing?'#e74c3c':(isTarget?'#c0392b':'#b08968'), vy:0, falling:false});
+      }
+    }
+    // Extra side tower on later levels
+    if(n>=4){
+      for(var i=0;i<2;i++){
+        blocks.push({x:baseX+cols*bw+8, y:groundY-bh*(i+1), w:bw, h:bh, hp:1, target:(i===1), king:false, color:(i===1)?'#c0392b':'#95a5a6', vy:0, falling:false});
+      }
+    }
+    updateHUD();
+  }
+  function countTargets(){ var t=0; blocks.forEach(function(b){ if(b.target) t++; }); return t; }
+  function updateHUD(){
+    scoreEl.textContent=score; rocksEl.textContent=rocks; levelEl.textContent=level;
+    targetsEl.textContent=countTargets();
+    windEl.textContent=(wind>0?'+':'')+(wind*100).toFixed(0)+' → '+(wind>0?'East':wind<0?'West':'Calm');
+    aimfill.style.width=Math.max(5, Math.min(100, power))+'%';
+  }
+  function startGame(){
+    ensureAudio(); beep(523,0.15,'triangle',0.2);
+    score=0; level=1; angle=-42; power=52;
+    hide(titleScreen); hide(endScreen); hide(levelScreen);
+    state='playing'; setStatus('Aiming'); msgEl.textContent='Level 1: drag to aim, release to fire!';
+    buildLevel(1);
+  }
+  function restartGame(){ startGame(); }
+  function launch(){
+    if(state!=='playing'||rocks<=0) return;
+    ensureAudio();
+    rocks--;
+    var rad=angle*Math.PI/180;
+    var speed=power*0.32;
+    projectiles.push({x:catX, y:catY-30, vx:Math.cos(rad)*speed, vy:Math.sin(rad)*speed, r:11, alive:true});
+    beep(180,0.25,'square',0.2); noiseBurst();
+    setStatus('Rock flying!'); msgEl.textContent='Rock away! Watch the wind...';
+    updateHUD();
+  }
+  function burst(x,y,color,n){
+    for(var i=0;i<(n||14);i++){
+      particles.push({x:x,y:y,vx:(Math.random()-0.5)*7,vy:(Math.random()-0.7)*7,life:30+Math.random()*20,color:color});
+    }
+  }
+  function applyCollapse(){
+    // Simple collapse: a block with nothing beneath it (and not on ground) starts falling
+    var changed=true;
+    while(changed){
+      changed=false;
+      blocks.forEach(function(b){
+        if(b.y+b.h>=groundY) return;
+        var supported=false;
+        blocks.forEach(function(o){
+          if(o===b) return;
+          if(Math.abs((o.x+o.w/2)-(b.x+b.w/2))<30 && Math.abs((o.y)-(b.y+b.h))<4) supported=true;
+        });
+        if(!supported && !b.falling){ b.falling=true; b.vy=0; changed=true; score+=15; }
+      });
+    }
+  }
+  function checkLevelEnd(){
+    if(state!=='playing') return;
+    if(countTargets()===0 && projectiles.length===0){
+      score+=level*100;
+      if(level>=8){
+        state='win'; setStatus('You Win!');
+        document.getElementById('endTitle').textContent='🏆 Victory! Castle Conquered!';
+        document.getElementById('endText').textContent='You cleared all 8 levels. The kingdom is yours!';
+        document.getElementById('finalScore').textContent=score; show(endScreen);
+        beep(523,0.2,'triangle',0.25); setTimeout(function(){beep(659,0.2,'triangle',0.25);},180); setTimeout(function(){beep(784,0.4,'triangle',0.25);},360);
+      } else {
+        state='levelclear'; setStatus('Level Clear!');
+        document.getElementById('levelTitle').textContent='Level '+level+' Clear!';
+        document.getElementById('levelText').textContent='Bonus +'+(level*100)+' points. The next castle is stronger — and windier!';
+        show(levelScreen); beep(659,0.2,'triangle',0.22);
+      }
+      updateHUD();
+    } else if(rocks<=0 && projectiles.length===0 && countTargets()>0){
+      state='gameover'; setStatus('Game Over');
+      document.getElementById('endTitle').textContent='💥 Game Over';
+      document.getElementById('endText').textContent='Out of rocks with '+countTargets()+' target(s) still standing on Level '+level+'. Try again, commander!';
+      document.getElementById('finalScore').textContent=score; show(endScreen);
+      beep(220,0.4,'sawtooth',0.2);
+    }
+  }
+  function nextLevel(){
+    hide(levelScreen); level++; angle=-42; power=52; state='playing'; setStatus('Aiming');
+    msgEl.textContent='Level '+level+': new castle, new wind. Aim carefully!';
+    buildLevel(level);
+  }
+  function posFromEvent(e){
+    var rect=canvas.getBoundingClientRect();
+    var cx, cy;
+    if(e.touches && e.touches.length){ cx=e.touches[0].clientX; cy=e.touches[0].clientY; }
+    else { cx=e.clientX; cy=e.clientY; }
+    return {x:(cx-rect.left)*(canvas.width/rect.width), y:(cy-rect.top)*(canvas.height/rect.height)};
+  }
+  function onDown(e){
+    ensureAudio();
+    if(state!=='playing') return;
+    var p=posFromEvent(e);
+    dragging=true; dragX=p.x; dragY=p.y;
+    if(e.cancelable) e.preventDefault();
+  }
+  function onMove(e){
+    if(!dragging||state!=='playing') return;
+    var p=posFromEvent(e);
+    var dx=catX-p.x, dy=catY-p.y;
+    if(dx<0) dx=0;
+    var dist=Math.sqrt(dx*dx+dy*dy);
+    angle=Math.atan2(-dy, dx)*180/Math.PI;
+    if(angle>-80 && angle<0){ /* keep */ } else if(angle>=-90){ angle=-80; } else { angle=-10; }
+    power=Math.max(15, Math.min(100, dist*0.55));
+    updateHUD();
+    if(e.cancelable) e.preventDefault();
+  }
+  function onUp(e){
+    if(!dragging) return;
+    dragging=false;
+    if(state==='playing' && power>18){ launch(); }
+  }
+  function drawBackground(){
+    ctx.fillStyle='#87ceeb'; ctx.fillRect(0,0,canvas.width,220);
+    ctx.fillStyle='#cfeeff'; ctx.fillRect(0,220,canvas.width,240);
+    ctx.fillStyle='#5aa83a'; ctx.fillRect(0,groundY,canvas.width,60);
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(120,80,32,0,Math.PI*2); ctx.arc(155,70,26,0,Math.PI*2); ctx.arc(90,70,22,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(620,60,30,0,Math.PI*2); ctx.arc(655,52,22,0,Math.PI*2); ctx.fill();
+    // Wind arrows
+    ctx.fillStyle='#1a2b4a'; ctx.font='bold 18px Arial'; ctx.textAlign='center';
+    ctx.fillText('Wind: '+(wind===0?'Calm':(wind>0?'East →':'← West'))+'  |  Angle: '+Math.round(Math.abs(angle))+'°  Power: '+Math.round(power), 430, 28);
+  }
+  function drawCastle(){
+    blocks.forEach(function(b){
+      ctx.fillStyle=b.color; ctx.fillRect(b.x,b.y,b.w,b.h);
+      ctx.strokeStyle='#3b2a1a'; ctx.lineWidth=2; ctx.strokeRect(b.x,b.y,b.w,b.h);
+      ctx.fillStyle='#fff'; ctx.font='bold 16px Arial'; ctx.textAlign='center';
+      if(b.target){ ctx.fillText(b.king?'👑':'🎯', b.x+b.w/2, b.y+b.h/2+6); }
+      else { ctx.fillText('▓', b.x+b.w/2, b.y+b.h/2+6); }
+    });
+  }
+  function drawCatapult(){
+    // Base and arm
+    ctx.strokeStyle='#5d4037'; ctx.lineWidth=10; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(catX-30,catY); ctx.lineTo(catX+30,catY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(catX-22,catY); ctx.lineTo(catX,catY-42); ctx.lineTo(catX+22,catY); ctx.stroke();
+    ctx.fillStyle='#8d6e63'; ctx.beginPath(); ctx.arc(catX,catY-42,10,0,Math.PI*2); ctx.fill();
+    // Aim line
+    var rad=angle*Math.PI/180, len=power*1.1;
+    ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.setLineDash([8,8]); ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(catX,catY-42);
+    for(var t=0;t<=1;t+=0.08){
+      var px=catX+Math.cos(rad)*len*t, py=(catY-42)+Math.sin(rad)*len*t+0.5*0.32*Math.pow(len*t/ (power*0.32||1),2)*18;
+      if(t===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+    // Rock in bucket
+    if(state==='playing'){
+      ctx.fillStyle='#555'; ctx.beginPath(); ctx.arc(catX,catY-48,11,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#888'; ctx.beginPath(); ctx.arc(catX-3,catY-51,4,0,Math.PI*2); ctx.fill();
+    }
+    if(dragging){
+      ctx.strokeStyle='#ffd166'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(catX,catY-42); ctx.lineTo(dragX,dragY); ctx.stroke();
+    }
+  }
+  function drawProjectiles(){
+    projectiles.forEach(function(p){
+      ctx.fillStyle='#444'; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#777'; ctx.beginPath(); ctx.arc(p.x-3,p.y-3,4,0,Math.PI*2); ctx.fill();
+    });
+    particles.forEach(function(pt){
+      ctx.fillStyle=pt.color; ctx.globalAlpha=Math.max(0,pt.life/40); ctx.fillRect(pt.x-3,pt.y-3,6,6); ctx.globalAlpha=1;
+    });
+  }
+  function update(){
+    // Falling blocks
+    blocks.forEach(function(b){
+      if(b.falling){
+        b.vy+=0.35; b.y+=b.vy;
+        if(b.y+b.h>=groundY){ b.y=groundY-b.h; b.falling=false; burst(b.x+b.w/2,groundY,'#b08968',8); }
+      }
+    });
+    blocks=blocks.filter(function(b){ return !(b.falling && b.y>=groundY && false); });
+    // Projectiles
+    projectiles.forEach(function(p){
+      p.vy+=0.32; p.vx+=wind; p.x+=p.vx; p.y+=p.vy;
+      blocks.forEach(function(b){
+        if(p.x>p.x && false){}
+        if(p.x>b.x-8 && p.x<b.x+b.w+8 && p.y>b.y-8 && p.y<b.y+b.h+8){
+          if(p.alive){
+            p.alive=false; b.hp--;
+            burst(p.x,p.y,'#e67e22',16); noiseBurst();
+            if(b.hp<=0){
+              score+=b.target?150:(b.king?250:40);
+              burst(b.x+b.w/2,b.y+b.h/2,b.color,20);
+              b.target=false; b.hp=0; b.falling=false; b.y=9999;
+              applyCollapse(); beep(330,0.2,'triangle',0.22);
+            } else { score+=20; beep(200,0.12,'square',0.15); }
+          }
+        }
+      });
+      if(p.y>=groundY-4){ p.alive=false; burst(p.x,groundY,'#8d6e63',10); }
+      if(p.x>canvas.width+40||p.x<-40||p.y>canvas.height+40) p.alive=false;
+    });
+    var before=projectiles.length;
+    projectiles=projectiles.filter(function(p){ return p.alive; });
+    blocks=blocks.filter(function(b){ return b.y<900; });
+    particles.forEach(function(pt){ pt.x+=pt.vx; pt.y+=pt.vy; pt.vy+=0.2; pt.life--; });
+    particles=particles.filter(function(pt){ return pt.life>0; });
+    if(before>0 && projectiles.length===0 && state==='playing'){
+      setStatus('Aiming'); updateHUD(); checkLevelEnd();
+    }
+    updateHUD();
+  }
+  function loop(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawBackground(); drawCastle(); drawCatapult(); drawProjectiles();
+    if(state==='playing') update();
+    requestAnimationFrame(loop);
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', restartGame);
+  document.getElementById('nextBtn').addEventListener('click', nextLevel);
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('mouseleave', function(){ dragging=false; });
+  canvas.addEventListener('touchstart', onDown, {passive:false});
+  canvas.addEventListener('touchmove', onMove, {passive:false});
+  canvas.addEventListener('touchend', onUp);
+  canvas.addEventListener('touchcancel', function(){ dragging=false; });
+  document.addEventListener('keydown', function(e){
+    ensureAudio();
+    if(e.key==='ArrowUp'){ angle=Math.max(-80, angle-2); updateHUD(); e.preventDefault(); }
+    if(e.key==='ArrowDown'){ angle=Math.min(-10, angle+2); updateHUD(); e.preventDefault(); }
+    if(e.key==='ArrowRight'){ power=Math.min(100, power+3); updateHUD(); e.preventDefault(); }
+    if(e.key==='ArrowLeft'){ power=Math.max(15, power-3); updateHUD(); e.preventDefault(); }
+    if(e.key===' '||e.key==='Spacebar'){ if(state==='playing') launch(); e.preventDefault(); }
+    if(e.key==='r'||e.key==='R'){ if(state==='gameover'||state==='win') restartGame(); }
+    if(e.key==='m'||e.key==='M'){ muted=!muted; msgEl.textContent=muted?'Sound muted. Press M to unmute.':'Sound on.'; }
+    if(e.key==='Enter' && state==='title'){ startGame(); }
+  });
+  buildLevel(1);
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Timpani Thunder</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #120a1e; color: #f5eeda; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #ffd94d; text-shadow: 0 0 14px rgba(255,217,77,.6); margin: 6px 0 2px; text-align: center; }
+  .tagline { font-size: 13px; color: #c9b8e8; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; max-width: 520px; margin-bottom: 8px; }
+  .stat { background: #241536; border: 1px solid #5b3a8a; border-radius: 8px; padding: 6px 10px; font-size: 14px; min-width: 86px; text-align: center; }
+  .stat b { display: block; font-size: 18px; color: #ffd94d; }
+  #wrap { position: relative; width: 100%; max-width: 520px; }
+  canvas { display: block; width: 100%; height: auto; background: #1a1030; border: 3px solid #ffd94d; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(10,5,20,.92); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffd94d; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #e8ddf5; max-width: 400px; }
+  .overlay .keys { background: #241536; border: 1px solid #5b3a8a; border-radius: 8px; padding: 10px 14px; font-size: 14px; line-height: 1.6; }
+  button { background: #ffd94d; color: #241536; border: none; border-radius: 10px; padding: 14px 34px; font-size: 19px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8930a; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #8b6fd8; color: #fff; box-shadow: 0 4px 0 #5b3a8a; }
+  #feedback { font-size: 26px; font-weight: bold; color: #7dff9a; min-height: 32px; text-align: center; margin-top: 6px; text-shadow: 0 0 10px rgba(125,255,154,.7); }
+  .foot { font-size: 12px; color: #9d8ab8; margin-top: 6px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>&#129345; TIMPANI THUNDER &#129345;</h1>
+<p class="tagline">A falling-note drum rhythm game. Strike each timpani exactly on the beat!</p>
+
+<div id="hud">
+  <div class="stat">Score<b id="score">0</b></div>
+  <div class="stat">Combo<b id="combo">0</b></div>
+  <div class="stat">Accuracy<b id="accuracy">100%</b></div>
+  <div class="stat">Level<b id="level">1</b></div>
+  <div class="stat">Misses<b id="misses">0 / 20</b></div>
+  <div class="stat">Progress<b id="progress">0 / 90</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="520" height="640"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>TIMPANI THUNDER</h2>
+    <p>Notes tumble down four drum lanes. Hit each drum the instant its note crosses the golden strike line. Chain hits for combos and climb through three faster levels!</p>
+    <div class="keys">
+      <b>How to Play</b><br>
+      Keyboard: <b>D</b> <b>F</b> <b>J</b> <b>K</b> for lanes 1-2-3-4<br>
+      Mouse: click a lane &nbsp;|&nbsp; Touch: tap a lane<br>
+      Perfect = within the centre glow, Good = near the line<br>
+      Win: finish all 90 notes with 80%+ accuracy<br>
+      Game Over: 20 misses, or under 80% at the end
+    </div>
+    <button id="startBtn" type="button">Start</button>
+    <p style="font-size:12px;color:#9d8ab8;">Sound starts only after you press Start. Headphones recommended.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <p id="endStats" style="font-weight:bold;color:#ffd94d;"></p>
+    <button id="restartBtn" type="button">Restart</button>
+    <button id="menuBtn" type="button" class="secondary">Title Screen</button>
+  </div>
+</div>
+
+<div id="feedback"></div>
+<p class="foot">Level 1: steady march &nbsp;|&nbsp; Level 2: brisk allegro &nbsp;|&nbsp; Level 3: thunder finale</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var STRIKE_Y = 550;
+  var LANES = 4;
+  var LANE_W = W / LANES;
+  var LANE_COLORS = ['#ff5d73', '#ffb84d', '#4dd2ff', '#7dff9a'];
+  var LANE_KEYS = ['D', 'F', 'J', 'K'];
+  var DRUM_PITCH = [70, 90, 115, 145];
+  var TOTAL_NOTES = 90;
+  var NOTES_PER_LEVEL = 30;
+  var MAX_MISSES = 20;
+  var SPEEDS = [250, 330, 430];
+  var BEAT_MS = [640, 520, 420];
+
+  var state = 'title'; // title | playing | ended
+  var score = 0, combo = 0, bestCombo = 0, hits = 0, judged = 0, misses = 0;
+  var perfects = 0, goods = 0;
+  var notes = [];
+  var spawned = 0;
+  var lastSpawn = 0;
+  var lastTime = 0;
+  var flash = [0, 0, 0, 0];
+  var feedbackText = '', feedbackUntil = 0, feedbackColor = '#7dff9a';
+  var audioCtx = null;
+  var rafId = null;
+
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var accuracyEl = document.getElementById('accuracy');
+  var levelEl = document.getElementById('level');
+  var missesEl = document.getElementById('misses');
+  var progressEl = document.getElementById('progress');
+  var feedbackEl = document.getElementById('feedback');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  function currentLevel() {
+    if (spawned >= NOTES_PER_LEVEL * 2) return 3;
+    if (spawned >= NOTES_PER_LEVEL) return 2;
+    return 1;
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function playDrum(lane, vol) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(DRUM_PITCH[lane], t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30, DRUM_PITCH[lane] * 0.55), t + 0.28);
+    gain.gain.setValueAtTime(vol || 0.5, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.4);
+    // Click attack for a timpani mallet feel
+    var osc2 = audioCtx.createOscillator();
+    var g2 = audioCtx.createGain();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(DRUM_PITCH[lane] * 2, t);
+    g2.gain.setValueAtTime(0.12, t);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    osc2.connect(g2);
+    g2.connect(audioCtx.destination);
+    osc2.start(t);
+    osc2.stop(t + 0.1);
+  }
+
+  function playMiss() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(110, t);
+    osc.frequency.linearRampToValueAtTime(70, t + 0.2);
+    gain.gain.setValueAtTime(0.12, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.25);
+  }
+
+  function playFanfare(win) {
+    if (!audioCtx) return;
+    var seq = win ? [523, 659, 784, 1047] : [392, 330, 262, 196];
+    seq.forEach(function (f, i) {
+      var t = audioCtx.currentTime + i * 0.18;
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(f, t);
+      gain.gain.setValueAtTime(0.22, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.32);
+    });
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    comboEl.textContent = combo;
+    missesEl.textContent = misses + ' / ' + MAX_MISSES;
+    progressEl.textContent = judged + ' / ' + TOTAL_NOTES;
+    levelEl.textContent = currentLevel();
+    var acc = judged === 0 ? 100 : Math.round((hits / judged) * 100);
+    accuracyEl.textContent = acc + '%';
+  }
+
+  function setFeedback(text, color) {
+    feedbackText = text;
+    feedbackColor = color;
+    feedbackEl.textContent = text;
+    feedbackEl.style.color = color;
+    feedbackUntil = performance.now() + 700;
+  }
+
+  function spawnNote() {
+    var lane;
+    // Avoid repeating the same lane three times in a row for variety.
+    do {
+      lane = Math.floor(Math.random() * LANES);
+    } while (notes.length > 0 && notes[notes.length - 1].lane === lane && Math.random() < 0.7);
+    notes.push({ lane: lane, y: -30, hit: false, wobble: Math.random() * Math.PI * 2 });
+    spawned++;
+    lastSpawn = performance.now();
+    // Occasionally add a double hit in the finale for drama.
+    if (currentLevel() === 3 && spawned < TOTAL_NOTES && Math.random() < 0.18) {
+      var other = (lane + 1 + Math.floor(Math.random() * 3)) % LANES;
+      notes.push({ lane: other, y: -30, hit: false, wobble: Math.random() * Math.PI * 2 });
+      spawned++;
+    }
+  }
+
+  function hitLane(lane) {
+    if (state !== 'playing') return;
+    flash[lane] = 1;
+    playDrum(lane, 0.55);
+    var best = null, bestDist = Infinity;
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].lane !== lane || notes[i].hit) continue;
+      var d = Math.abs(notes[i].y - STRIKE_Y);
+      if (d < bestDist) { bestDist = d; best = notes[i]; }
+    }
+    if (best && bestDist <= 78) {
+      best.hit = true;
+      judged++;
+      hits++;
+      combo++;
+      if (combo > bestCombo) bestCombo = combo;
+      if (bestDist <= 34) {
+        perfects++;
+        score += 300 + Math.min(combo, 20) * 10;
+        setFeedback('PERFECT!', '#7dff9a');
+      } else {
+        goods++;
+        score += 100 + Math.min(combo, 20) * 5;
+        setFeedback('GOOD!', '#ffd94d');
+      }
+      notes.splice(notes.indexOf(best), 1);
+    } else {
+      // Empty strike: small combo penalty, no miss counted (misses come from dropped notes).
+      if (combo >= 8) { combo = 0; setFeedback('OFF BEAT', '#ff8a8a'); }
+    }
+    updateHud();
+    checkSongEnd();
+  }
+
+  function registerMiss(note) {
+    judged++;
+    misses++;
+    combo = 0;
+    playMiss();
+    setFeedback('MISS', '#ff5d73');
+    updateHud();
+    if (misses >= MAX_MISSES) {
+      endGame(false, 'Too many missed notes! The timpani section fell apart.');
+    }
+  }
+
+  function checkSongEnd() {
+    if (state !== 'playing') return;
+    if (spawned >= TOTAL_NOTES && notes.length === 0 && judged >= TOTAL_NOTES) {
+      var acc = Math.round((hits / judged) * 100);
+      if (acc >= 80) {
+        endGame(true, 'You held the rhythm through all three levels. Thunderous performance!');
+      } else {
+        endGame(false, 'You finished the song, but accuracy was only ' + acc + '%. You need 80%+ to win. Try again!');
+      }
+    }
+  }
+
+  function endGame(win, message) {
+    if (state !== 'playing') return;
+    state = 'ended';
+    var acc = judged === 0 ? 0 : Math.round((hits / judged) * 100);
+    endTitle.textContent = win ? 'YOU WIN!' : 'GAME OVER';
+    endTitle.style.color = win ? '#7dff9a' : '#ff5d73';
+    endText.textContent = message;
+    endStats.textContent = 'Score ' + score + '  |  Accuracy ' + acc + '%  |  Best combo ' + bestCombo + '  |  Perfect ' + perfects + '  |  Good ' + goods + '  |  Misses ' + misses;
+    endScreen.classList.remove('hidden');
+    playFanfare(win);
+    updateHud();
+  }
+
+  function resetGame() {
+    score = 0; combo = 0; bestCombo = 0; hits = 0; judged = 0; misses = 0;
+    perfects = 0; goods = 0; notes = []; spawned = 0; flash = [0, 0, 0, 0];
+    feedbackEl.textContent = '';
+    updateHud();
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    lastSpawn = performance.now();
+    lastTime = performance.now();
+    spawnNote();
+    if (!rafId) rafId = requestAnimationFrame(loop);
+  }
+
+  function goToTitle() {
+    state = 'title';
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    notes = [];
+    feedbackEl.textContent = '';
+  }
+
+  function drawDrum(x, y, r, color, glowing) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#3a2a12';
+    ctx.fill();
+    ctx.lineWidth = glowing ? 6 : 3;
+    ctx.strokeStyle = glowing ? '#ffffff' : color;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.72, 0, Math.PI * 2);
+    ctx.fillStyle = '#f5eeda';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x - r * 0.2, y - r * 0.25, r * 0.18, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fill();
+  }
+
+  function draw(now) {
+    ctx.clearRect(0, 0, W, H);
+    // Lane backgrounds
+    for (var l = 0; l < LANES; l++) {
+      ctx.fillStyle = flash[l] > 0.3 ? 'rgba(255,217,77,0.22)' : 'rgba(255,255,255,0.04)';
+      ctx.fillRect(l * LANE_W, 0, LANE_W, H);
+      ctx.strokeStyle = '#3d2a5e';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(l * LANE_W, 0);
+      ctx.lineTo(l * LANE_W, H);
+      ctx.stroke();
+      ctx.fillStyle = LANE_COLORS[l];
+      ctx.font = 'bold 20px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(LANE_KEYS[l], l * LANE_W + LANE_W / 2, 28);
+    }
+    // Strike line
+    ctx.strokeStyle = '#ffd94d';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(0, STRIKE_Y);
+    ctx.lineTo(W, STRIKE_Y);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,217,77,0.12)';
+    ctx.fillRect(0, STRIKE_Y - 34, W, 68);
+
+    // Notes
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      var cx = n.lane * LANE_W + LANE_W / 2 + Math.sin(n.wobble) * 3;
+      var dist = Math.abs(n.y - STRIKE_Y);
+      ctx.beginPath();
+      ctx.arc(cx, n.y, 30, 0, Math.PI * 2);
+      ctx.fillStyle = LANE_COLORS[n.lane];
+      ctx.fill();
+      ctx.lineWidth = dist <= 34 ? 5 : 2;
+      ctx.strokeStyle = dist <= 34 ? '#ffffff' : '#120a1e';
+      ctx.stroke();
+      ctx.fillStyle = '#120a1e';
+      ctx.font = 'bold 22px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('\u2669', cx, n.y + 8);
+    }
+
+    // Timpani drums at the bottom
+    for (var d = 0; d < LANES; d++) {
+      var dx = d * LANE_W + LANE_W / 2;
+      drawDrum(dx, STRIKE_Y + 62, 42, LANE_COLORS[d], flash[d] > 0.3);
+    }
+
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.font = '16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Press Start and feel the thunder', W / 2, H - 20);
+    }
+    if (state === 'playing') {
+      ctx.fillStyle = '#ffd94d';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText('LEVEL ' + currentLevel(), 12, H - 12);
+      ctx.textAlign = 'right';
+      ctx.fillText('SONG ' + Math.min(spawned, TOTAL_NOTES) + ' / ' + TOTAL_NOTES, W - 12, H - 12);
+    }
+  }
+
+  function loop(now) {
+    rafId = requestAnimationFrame(loop);
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    if (state === 'playing') {
+      var lvl = currentLevel();
+      var speed = SPEEDS[lvl - 1];
+      if (spawned < TOTAL_NOTES && now - lastSpawn >= BEAT_MS[lvl - 1]) {
+        spawnNote();
+      }
+      for (var i = notes.length - 1; i >= 0; i--) {
+        notes[i].y += speed * dt;
+        notes[i].wobble += dt * 4;
+        if (notes[i].y > STRIKE_Y + 85) {
+          var dropped = notes.splice(i, 1)[0];
+          registerMiss(dropped);
+          if (state !== 'playing') break;
+        }
+      }
+      for (var f = 0; f < LANES; f++) {
+        if (flash[f] > 0) flash[f] = Math.max(0, flash[f] - dt * 4);
+      }
+      if (feedbackText && now > feedbackUntil) {
+        feedbackText = '';
+        feedbackEl.textContent = '';
+      }
+      checkSongEnd();
+    }
+    draw(now);
+  }
+
+  function laneFromX(clientX) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    var lane = Math.floor(x / LANE_W);
+    if (lane < 0) lane = 0;
+    if (lane >= LANES) lane = LANES - 1;
+    return lane;
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', goToTitle);
+
+  document.addEventListener('keydown', function (e) {
+    var k = (e.key || '').toLowerCase();
+    var map = { d: 0, f: 1, j: 2, k: 3 };
+    if (k in map) {
+      e.preventDefault();
+      hitLane(map[k]);
+    }
+  });
+
+  canvas.addEventListener('mousedown', function (e) {
+    hitLane(laneFromX(e.clientX));
+  });
+
+  canvas.addEventListener('click', function (e) {
+    // Click fallback for browsers that report taps as clicks only.
+    if (state === 'playing') { /* mousedown already handled the hit */ }
+  });
+
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (e.touches && e.touches.length > 0) {
+      hitLane(laneFromX(e.touches[0].clientX));
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+  }, { passive: false });
+
+  updateHud();
+  rafId = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

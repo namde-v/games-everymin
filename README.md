@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 190
-- **Latest game:** 0190 — Dartboard Duel
+- **Total games:** 200
+- **Latest game:** 0200 — Catapult Castle
 - **Current volume:** 002 (Games 0101 to 0200)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -14,7 +14,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | Volume | Games | Catalog |
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
-| 002 | 0101–0200 (90 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
+| 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -28,20 +28,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 019
+## Latest batch — Batch 020
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0181 | Canyon Crasher | Arcade / River Raft Dodger | [Play](./games/game-0181.html) |
-| 0182 | Prism Pathfinder | Puzzle / Prism Refraction Routing | [Play](./games/game-0182.html) |
-| 0183 | Tea House Tycoon | Strategy / Tea House Management | [Play](./games/game-0183.html) |
-| 0184 | Steel Drum Serenade | Rhythm / Steelpan Beat Timing | [Play](./games/game-0184.html) |
-| 0185 | Boomerang Bounty | Precision / Boomerang Throw Aim | [Play](./games/game-0185.html) |
-| 0186 | Penguin Plunge | Arcade / Ice Slide Collector | [Play](./games/game-0186.html) |
-| 0187 | Word Well | Puzzle / Falling Letter Word Builder | [Play](./games/game-0187.html) |
-| 0188 | Terminal Tycoon | Strategy / Airport Terminal Management | [Play](./games/game-0188.html) |
-| 0189 | Folk Fiddle Fest | Rhythm / Fiddle Tune Timing | [Play](./games/game-0189.html) |
-| 0190 | Dartboard Duel | Precision / Moving Dartboard Aim | [Play](./games/game-0190.html) |
+| 0191 | Magma Marathon | Arcade / Lava Runner | [Play](./games/game-0191.html) |
+| 0192 | Rune Relay | Puzzle / Rune Sequence Logic | [Play](./games/game-0192.html) |
+| 0193 | Seaport Supervisor | Strategy / Port Management | [Play](./games/game-0193.html) |
+| 0194 | Timpani Thunder | Rhythm / Drum Beat Timing | [Play](./games/game-0194.html) |
+| 0195 | Crossbow Clash | Precision / Crossbow Targeting | [Play](./games/game-0195.html) |
+| 0196 | Bubble Bouncer | Arcade / Bubble Bounce Platformer | [Play](./games/game-0196.html) |
+| 0197 | Mirror Mansion | Puzzle / Mirror Reflection Logic | [Play](./games/game-0197.html) |
+| 0198 | Bakery Blitz | Strategy / Bakery Order Management | [Play](./games/game-0198.html) |
+| 0199 | Marimba Melody | Rhythm / Marimba Note Matching | [Play](./games/game-0199.html) |
+| 0200 | Catapult Castle | Precision / Catapult Siege Aim | [Play](./games/game-0200.html) |
 
 
 ## Quality standard

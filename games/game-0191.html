@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Magma Marathon — Lava Runner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #160a08; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 28px; letter-spacing: 2px; color: #ff7a2f; text-shadow: 0 0 14px #ff4400; margin: 6px 0 2px; text-align: center; }
+  p.sub { color: #ffb38a; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: 900px; max-width: 96vw; }
+  canvas { width: 100%; height: 500px; display: block; background: #1a0d0a; border: 3px solid #ff5a1f; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; background: #2b130c; border: 2px solid #7a2a10; border-radius: 8px; margin-bottom: 8px; font-weight: bold; font-size: 15px; flex-wrap: wrap; }
+  #hud span { white-space: nowrap; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,3,2,0.86); border-radius: 12px; padding: 20px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ff8c3a; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #ffe2cf; font-size: 15px; }
+  .overlay .keys { background: #3a1a0e; border: 1px solid #ff7a2f; border-radius: 8px; padding: 10px 14px; font-size: 14px; line-height: 1.6; }
+  button { cursor: pointer; background: #ff5a1f; color: #fff; border: none; border-radius: 10px; padding: 14px 28px; font-size: 19px; font-weight: bold; box-shadow: 0 4px 0 #a32a00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #444; box-shadow: 0 4px 0 #222; font-size: 15px; padding: 10px 20px; }
+  #msg { min-height: 22px; color: #ffd166; font-weight: bold; text-align: center; margin-top: 8px; }
+  .legend { color: #cbb; font-size: 13px; text-align: center; margin-top: 6px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🌋 MAGMA MARATHON 🌋</h1>
+<p class="sub">Outrun the volcano. Leap the lava. Grab every ember.</p>
+<div id="wrap">
+  <div id="hud">
+    <span id="hudScore">Score: 0</span>
+    <span id="hudGems">💎 Gems: 0</span>
+    <span id="hudLives">❤️ Lives: 3</span>
+    <span id="hudSpeed">Speed: 1.0x</span>
+    <span id="hudDist">Distance: 0m</span>
+    <span id="hudStatus">Status: Ready</span>
+  </div>
+  <canvas id="game" width="900" height="500"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>MAGMA MARATHON</h2>
+    <p>You are the Ember Runner, sprinting across a crumbling volcanic ridge. The ground falls away into lava pools and rock gaps — keep moving, keep jumping, and do not stop!</p>
+    <div class="keys">
+      <strong>HOW TO PLAY</strong><br>
+      Arrow Up / Space — Jump (press twice for DOUBLE-JUMP)<br>
+      Mouse Click — Jump &nbsp;•&nbsp; Touch / Tap — Jump<br>
+      Collect ember gems (+50 points) • Survive to the finish line or reach 2000 points to WIN<br>
+      Falling in lava or hitting rocks costs a life. Lose all 3 lives and it is Game Over.
+    </div>
+    <button id="startBtn">▶ START RUN</button>
+    <button id="howBtn" class="secondary">How to Play — Details</button>
+    <p id="howDetail" style="display:none;">Tip: jump late over wide lava pools, use your second jump in mid-air to clear rock gaps, and chain gems for bonus points. Speed rises every 250 metres — stay calm and time your jumps!</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText">The volcano claims another runner.</p>
+    <p id="endStats"></p>
+    <button id="restartBtn">↻ RESTART INSTANTLY</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+<div id="msg">Press Start, then jump with Space, click, or tap.</div>
+<p class="legend">Controls: Arrow Keys / Space = jump &amp; double-jump &nbsp;|&nbsp; Mouse click = jump &nbsp;|&nbsp; Touch tap = jump<br>Win: 2000 points OR reach the finish line at 2000m &nbsp;•&nbsp; Game Over: fall in lava or 3 hits</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 900, H = 500, GROUND = 420;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+  var hudScore = document.getElementById('hudScore');
+  var hudGems = document.getElementById('hudGems');
+  var hudLives = document.getElementById('hudLives');
+  var hudSpeed = document.getElementById('hudSpeed');
+  var hudDist = document.getElementById('hudDist');
+  var hudStatus = document.getElementById('hudStatus');
+  var msg = document.getElementById('msg');
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, gems = 0, lives = 3, distance = 0, speed = 4.2, frame = 0;
+  var player = { x: 120, y: GROUND - 46, w: 38, h: 46, vy: 0, jumps: 0, onGround: true, inv: 0, leg: 0 };
+  var obstacles = [], pickups = [], particles = [], clouds = [], embersBg = [];
+  var audioCtx = null, muted = false;
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function sfxJump() { beep(420, 0.16, 'square', 0.10); beep(640, 0.12, 'sine', 0.08); }
+  function sfxGem() { beep(880, 0.12, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.16, 'sine', 0.12); }, 70); }
+  function sfxHit() { beep(140, 0.30, 'sawtooth', 0.16); }
+  function sfxWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.14); }, i * 140); }); }
+  function sfxLose() { [400, 300, 200, 120].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'sawtooth', 0.12); }, i * 130); }); }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function resetWorld() {
+    score = 0; gems = 0; lives = 3; distance = 0; speed = 4.2; frame = 0;
+    player.y = GROUND - 46; player.vy = 0; player.jumps = 0; player.onGround = true; player.inv = 0;
+    obstacles = []; pickups = []; particles = [];
+    clouds = []; embersBg = [];
+    for (var i = 0; i < 7; i++) clouds.push({ x: rand(0, W), y: rand(20, 130), s: rand(0.5, 1.2) });
+    for (var j = 0; j < 40; j++) embersBg.push({ x: rand(0, W), y: rand(0, H), s: rand(1, 3), v: rand(0.3, 1.2) });
+    // Starter safe stretch, then first hazards well ahead.
+    spawnObstacle(650, 'rock');
+    spawnPickup(520, GROUND - 110);
+    spawnPickup(570, GROUND - 110);
+    updateHUD('Running');
+  }
+  function spawnObstacle(x, kind) {
+    if (kind === 'lava') obstacles.push({ x: x, kind: 'lava', w: rand(90, 150), y: GROUND, h: 60 });
+    else if (kind === 'gap') obstacles.push({ x: x, kind: 'gap', w: rand(80, 120), y: GROUND, h: 80 });
+    else obstacles.push({ x: x, kind: 'rock', w: rand(34, 52), y: GROUND - 40, h: 40 });
+  }
+  function spawnPickup(x, y) { pickups.push({ x: x, y: y, taken: false, bob: rand(0, 6) }); }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) particles.push({ x: x, y: y, vx: rand(-3, 3), vy: rand(-6, -1), life: rand(20, 45), color: color });
+  }
+  function maybeSpawn() {
+    var lastX = obstacles.length ? obstacles[obstacles.length - 1].x + obstacles[obstacles.length - 1].w : W;
+    if (lastX < W + 80) {
+      var gap = rand(280, 430);
+      var nx = Math.max(W + 40, lastX + gap);
+      var r = Math.random();
+      if (r < 0.38) spawnObstacle(nx, 'lava');
+      else if (r < 0.62) spawnObstacle(nx, 'gap');
+      else spawnObstacle(nx, 'rock');
+      if (Math.random() < 0.75) {
+        var gy = (Math.random() < 0.5) ? GROUND - 110 : GROUND - 180;
+        spawnPickup(nx + rand(40, 140), gy);
+        spawnPickup(nx + rand(150, 220), gy);
+      }
+    }
+  }
+  function doJump() {
+    if (state !== 'playing') return;
+    initAudio();
+    if (player.onGround) {
+      player.vy = -15.5; player.onGround = false; player.jumps = 1; sfxJump();
+      burst(player.x + 19, player.y + 46, '#ffb38a', 6);
+    } else if (player.jumps < 2) {
+      player.vy = -13.5; player.jumps = 2; sfxJump();
+      burst(player.x + 19, player.y + 20, '#ffd166', 10);
+    }
+  }
+  function loseLife(reason) {
+    if (player.inv > 0 || state !== 'playing') return;
+    lives--; player.inv = 90; sfxHit(); burst(player.x + 19, player.y + 20, '#ff3300', 22);
+    msg.textContent = reason + ' — Lives left: ' + lives;
+    if (lives <= 0) return endGame(false, 'You fell to the volcano after 3 hits.');
+    // Brief knockback to a safe spot: clear nearby hazards so one hit cannot chain.
+    obstacles = obstacles.filter(function(o){ return o.x < player.x - 60 || o.x > player.x + 140; });
+    updateHUD('Hit! Keep running');
+  }
+  function winGame(reason) {
+    state = 'win'; sfxWin();
+    endTitle.textContent = '🏆 YOU WIN! 🏆';
+    endText.textContent = reason;
+    endStats.textContent = 'Score: ' + score + ' • Gems: ' + gems + ' • Distance: ' + Math.floor(distance) + 'm • Lives left: ' + lives;
+    endScreen.classList.remove('hidden');
+    updateHUD('WINNER!');
+  }
+  function endGame(won, reason) {
+    if (won) return winGame(reason);
+    state = 'over'; sfxLose();
+    endTitle.textContent = '💀 GAME OVER 💀';
+    endText.textContent = reason;
+    endStats.textContent = 'Score: ' + score + ' • Gems: ' + gems + ' • Distance: ' + Math.floor(distance) + 'm';
+    endScreen.classList.remove('hidden');
+    updateHUD('Game Over');
+  }
+  function updateHUD(status) {
+    hudScore.textContent = 'Score: ' + score;
+    hudGems.textContent = '💎 Gems: ' + gems;
+    hudLives.textContent = '❤️ Lives: ' + lives;
+    hudSpeed.textContent = 'Speed: ' + (speed / 4.2).toFixed(1) + 'x';
+    hudDist.textContent = 'Distance: ' + Math.floor(distance) + 'm / 2000m';
+    if (status) hudStatus.textContent = 'Status: ' + status;
+  }
+  function startGame() {
+    initAudio();
+    resetWorld();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    msg.textContent = 'Run! Jump the lava, grab gems, reach 2000 points or 2000m.';
+    updateHUD('Running');
+  }
+  function backToTitle() {
+    state = 'title';
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    updateHUD('Ready');
+    msg.textContent = 'Press Start, then jump with Space, click, or tap.';
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    speed = 4.2 + Math.min(4.0, distance / 250 * 0.45);
+    distance += speed * 0.22;
+    score += 1;
+    if (frame % 60 === 0) score += 2;
+    player.leg += speed * 0.08;
+
+    // Gravity and vertical motion.
+    player.vy += 0.85;
+    player.y += player.vy;
+    if (player.y >= GROUND - 46) {
+      player.y = GROUND - 46; player.vy = 0; player.onGround = true; player.jumps = 0;
+    } else { player.onGround = false; }
+    if (player.inv > 0) player.inv--;
+
+    maybeSpawn();
+    var px = player.x, py = player.y, pw = player.w, ph = player.h;
+
+    obstacles.forEach(function(o){ o.x -= speed; });
+    pickups.forEach(function(p){ p.x -= speed; p.bob += 0.1; });
+    obstacles = obstacles.filter(function(o){ return o.x + o.w > -50; });
+    pickups = pickups.filter(function(p){ return p.x > -50 && !p.taken; });
+
+    // Collisions and lava / gap falls.
+    for (var i = 0; i < obstacles.length; i++) {
+      var o = obstacles[i];
+      var overlapX = px + pw > o.x && px < o.x + o.w;
+      if (o.kind === 'rock') {
+        if (overlapX && py + ph > o.y && py < o.y + o.h) loseLife('Ouch! You hit a rock.');
+      } else {
+        // Lava pool or rock gap: falling onto / into it while on the ground line is fatal contact.
+        var overHazard = px + 8 < o.x + o.w && px + pw - 8 > o.x;
+        var onGroundLine = player.y >= GROUND - 46 - 2;
+        if (overHazard && onGroundLine && player.onGround) {
+          if (o.kind === 'lava') { return endGame(false, 'You splashed into a lava pool!'); }
+          else { return endGame(false, 'You plunged into a rock gap!'); }
+        }
+        // Touching lava while low in a jump also burns.
+        if (o.kind === 'lava' && overlapX && py + ph > GROUND - 8 && player.vy > 0) {
+          return endGame(false, 'You clipped a lava pool!');
+        }
+      }
+    }
+    pickups.forEach(function(p){
+      if (!p.taken && Math.abs((p.x + 12) - (px + 19)) < 34 && Math.abs((p.y + Math.sin(p.bob) * 6 + 12) - (py + 23)) < 44) {
+        p.taken = true; gems++; score += 50; sfxGem(); burst(p.x, p.y, '#ffd166', 12);
+        msg.textContent = 'Ember gem! +50 points (total gems: ' + gems + ')';
+      }
+    });
+    particles.forEach(function(pt){ pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.2; pt.life--; });
+    particles = particles.filter(function(pt){ return pt.life > 0; });
+    clouds.forEach(function(c){ c.x -= speed * 0.2; if (c.x < -120) { c.x = W + 40; c.y = rand(20, 130); } });
+    embersBg.forEach(function(e){ e.y -= e.v; e.x -= speed * 0.3; if (e.y < -5) { e.y = H; e.x = rand(0, W); } });
+
+    // Win checks: points OR finish line.
+    if (score >= 2000) return winGame('You scored 2000 points — the Ember Crown is yours!');
+    if (distance >= 2000) return winGame('You crossed the 2000m finish line through the volcano!');
+    updateHUD('Running');
+  }
+
+  function drawGroundAndHazards() {
+    // Sky gradient by hand.
+    var sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#2b0f0a'); sky.addColorStop(0.55, '#4a1508'); sky.addColorStop(1, '#7a1e05');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    // Sun / volcano glow.
+    ctx.fillStyle = '#ff7a2f'; ctx.beginPath(); ctx.arc(770, 90, 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,122,47,0.25)'; ctx.beginPath(); ctx.arc(770, 90, 72, 0, Math.PI * 2); ctx.fill();
+    // Distant volcano silhouette.
+    ctx.fillStyle = '#1e0a06'; ctx.beginPath();
+    ctx.moveTo(520, GROUND); ctx.lineTo(650, 190); ctx.lineTo(700, 190); ctx.lineTo(840, GROUND); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff4400'; ctx.beginPath(); ctx.moveTo(650, 190); ctx.lineTo(675, 160); ctx.lineTo(700, 190); ctx.closePath(); ctx.fill();
+    clouds.forEach(function(c){
+      ctx.fillStyle = 'rgba(255,180,140,0.25)';
+      ctx.beginPath(); ctx.arc(c.x, c.y, 26 * c.s, 0, Math.PI * 2); ctx.arc(c.x + 28 * c.s, c.y - 8, 20 * c.s, 0, Math.PI * 2); ctx.fill();
+    });
+    embersBg.forEach(function(e){ ctx.fillStyle = '#ffb347'; ctx.fillRect(e.x, e.y, e.s, e.s); });
+
+    // Ground segments, broken where a gap hazard sits.
+    ctx.fillStyle = '#3d1c10';
+    var segments = [{ a: 0, b: W }];
+    obstacles.forEach(function(o){
+      if (o.kind !== 'gap') return;
+      var next = [];
+      segments.forEach(function(s){
+        if (o.x + o.w <= s.a || o.x >= s.b) next.push(s);
+        else { if (o.x > s.a) next.push({ a: s.a, b: o.x }); if (o.x + o.w < s.b) next.push({ a: o.x + o.w, b: s.b }); }
+      });
+      segments = next;
+    });
+    segments.forEach(function(s){ ctx.fillRect(s.a, GROUND, s.b - s.a, H - GROUND); });
+    ctx.fillStyle = '#ff5a1f'; ctx.fillRect(0, GROUND, W, 4);
+    ctx.fillStyle = '#5a2a14';
+    for (var x = 0; x < W; x += 46) ctx.fillRect(x + ((frame * speed) % 46), GROUND + 22, 20, 5);
+
+    // Finish banner near the end of the run.
+    var finishX = W - ((2000 - distance) * 0.45);
+    if (distance > 1500 && finishX > -40 && finishX < W + 40) {
+      ctx.fillStyle = '#fff'; ctx.fillRect(finishX, GROUND - 150, 6, 150);
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(finishX + 6, GROUND - 150, 90, 34);
+      ctx.fillStyle = '#160a08'; ctx.font = 'bold 14px Arial'; ctx.fillText('FINISH', finishX + 14, GROUND - 128);
+    }
+
+    obstacles.forEach(function(o){
+      if (o.kind === 'lava') {
+        ctx.fillStyle = '#ff3300'; ctx.fillRect(o.x, GROUND, o.w, 60);
+        ctx.fillStyle = '#ffcc00';
+        for (var bx = o.x + 6; bx < o.x + o.w - 8; bx += 22) {
+          var bob = Math.sin(frame * 0.15 + bx * 0.1) * 4;
+          ctx.beginPath(); ctx.arc(bx, GROUND + 6 + bob, 7, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = '#ff7a2f'; ctx.font = 'bold 13px Arial'; ctx.fillText('LAVA', o.x + o.w / 2 - 16, GROUND + 38);
+      } else if (o.kind === 'gap') {
+        ctx.fillStyle = '#000'; ctx.fillRect(o.x, GROUND, o.w, 80);
+        ctx.strokeStyle = '#ff5a1f'; ctx.strokeRect(o.x, GROUND, o.w, 80);
+        ctx.fillStyle = '#ff7a2f'; ctx.font = 'bold 12px Arial'; ctx.fillText('GAP', o.x + o.w / 2 - 12, GROUND + 70);
+      } else {
+        ctx.fillStyle = '#6b6b6b'; ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.fillStyle = '#9a9a9a'; ctx.fillRect(o.x, o.y, o.w, 12);
+        ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(o.x + o.w / 2, o.y + 20, 6, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    pickups.forEach(function(p){
+      var y = p.y + Math.sin(p.bob) * 6;
+      ctx.save(); ctx.translate(p.x + 12, y + 12); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(-9, -9, 18, 18);
+      ctx.fillStyle = '#ff7a2f'; ctx.fillRect(-5, -5, 10, 10); ctx.restore();
+    });
+  }
+  function drawPlayer() {
+    var blink = player.inv > 0 && Math.floor(frame / 6) % 2 === 0;
+    if (blink) ctx.globalAlpha = 0.35;
+    var runBob = player.onGround ? Math.sin(player.leg) * 3 : 0;
+    ctx.fillStyle = '#1e90ff';
+    ctx.fillRect(player.x, player.y + runBob, player.w, player.h);
+    ctx.fillStyle = '#ffcc66';
+    ctx.fillRect(player.x + 6, player.y - 4 + runBob, 26, 14); // helmet
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(player.x + 26, player.y + 10 + runBob, 8, 8); // eye
+    ctx.fillStyle = '#000'; ctx.fillRect(player.x + 31, player.y + 12 + runBob, 3, 4);
+    ctx.fillStyle = '#ff7a2f';
+    ctx.fillRect(player.x - 8, player.y + 16 + runBob, 10, 8); // scarf trailing
+    ctx.fillStyle = '#222';
+    ctx.fillRect(player.x + 4, player.y + player.h - 4 + runBob, 12, 6);
+    ctx.fillRect(player.x + 22, player.y + player.h - 4 + runBob, 12, 6);
+    ctx.globalAlpha = 1;
+    particles.forEach(function(pt){
+      ctx.fillStyle = pt.color; ctx.globalAlpha = Math.max(0, pt.life / 45);
+      ctx.fillRect(pt.x, pt.y, 4, 4); ctx.globalAlpha = 1;
+    });
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press START to run!', W / 2, 250); ctx.textAlign = 'left';
+    }
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px Arial';
+    ctx.fillText('Finish: 2000m  •  Win: 2000 pts', 16, 28);
+  }
+  function loop() {
+    update();
+    ctx.clearRect(0, 0, W, H);
+    drawGroundAndHazards();
+    drawPlayer();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, touch — all wired with addEventListener.
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', backToTitle);
+  document.getElementById('howBtn').addEventListener('click', function () {
+    var d = document.getElementById('howDetail');
+    d.style.display = (d.style.display === 'none' ? 'block' : 'none');
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'ArrowUp' || e.code === 'Space') { e.preventDefault(); initAudio(); doJump(); }
+    if (e.code === 'Enter' && (state === 'title' || state === 'win' || state === 'over')) startGame();
+    if (e.code === 'KeyM') muted = !muted;
+  });
+  canvas.addEventListener('mousedown', function (e) { e.preventDefault(); initAudio(); doJump(); });
+  canvas.addEventListener('click', function (e) { e.preventDefault(); initAudio(); if (state === 'playing') doJump(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); doJump(); }, { passive: false });
+  document.addEventListener('touchstart', function () { initAudio(); }, { passive: true });
+
+  resetWorld();
+  state = 'title';
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

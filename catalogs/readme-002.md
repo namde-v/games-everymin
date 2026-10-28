@@ -97,6 +97,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0188 | Terminal Tycoon | Strategy / Airport Terminal Management | Click/tap gates and controls, 1-4 assign, Space advance | [Play](./../games/game-0188.html) |
 | 0189 | Folk Fiddle Fest | Rhythm / Fiddle Tune Timing | Space / Down / F hold notes, mouse/touch hold | [Play](./../games/game-0189.html) |
 | 0190 | Dartboard Duel | Precision / Moving Dartboard Aim | Mouse/touch aim and throw, Arrow Keys aim, Space throw | [Play](./../games/game-0190.html) |
+| 0191 | Magma Marathon | Arcade / Lava Runner | Arrow Keys / Space jump and double-jump, mouse click jump, touch tap jump | [Play](./../games/game-0191.html) |
+| 0192 | Rune Relay | Puzzle / Rune Sequence Logic | Click/tap rune tiles, keys 1-6 select runes, R restart | [Play](./../games/game-0192.html) |
+| 0193 | Seaport Supervisor | Strategy / Port Management | Click/tap docks and ship cards, 1-4 assign, Space advance/end day | [Play](./../games/game-0193.html) |
+| 0194 | Timpani Thunder | Rhythm / Drum Beat Timing | D/F/J/K lanes, mouse click lanes, touch tap lanes | [Play](./../games/game-0194.html) |
+| 0195 | Crossbow Clash | Precision / Crossbow Targeting | Mouse/touch aim and shoot, Arrow Keys aim, Space shoot, R reload | [Play](./../games/game-0195.html) |
+| 0196 | Bubble Bouncer | Arcade / Bubble Bounce Platformer | Arrow Keys / A-D steer, Space bounce boost, mouse move steer, touch drag steer | [Play](./../games/game-0196.html) |
+| 0197 | Mirror Mansion | Puzzle / Mirror Reflection Logic | Click/tap mirror rotate, Arrow Keys select cell, Space rotate, R restart level | [Play](./../games/game-0197.html) |
+| 0198 | Bakery Blitz | Strategy / Bakery Order Management | Click/tap orders and ovens, 1-5 select item, Space serve | [Play](./../games/game-0198.html) |
+| 0199 | Marimba Melody | Rhythm / Marimba Note Matching | Click/tap marimba bars, A/S/D/F/G/H play bars | [Play](./../games/game-0199.html) |
+| 0200 | Catapult Castle | Precision / Catapult Siege Aim | Mouse/touch drag aim and release, Arrow Keys angle/power, Space launch | [Play](./../games/game-0200.html) |
 
 ## Batch notes
 
@@ -109,4 +119,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 017: 10 games, produced in one cycle.
 - Batch 018: 10 games, produced in one cycle.
 - Batch 019: 10 games, produced in one cycle.
+- Batch 020: 10 games, produced in one cycle. Volume 002 complete at game 0200.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

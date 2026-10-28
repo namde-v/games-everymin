@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mirror Mansion - Puzzle</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#120e24;color:#f3ead8;font-family:Georgia,serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:12px}
+  h1{font-size:28px;letter-spacing:2px;color:#ffd166;text-shadow:0 0 12px #ff9e00;margin:6px 0 2px;text-align:center}
+  .sub{color:#b8a9d9;font-size:13px;margin-bottom:10px;text-align:center}
+  #hud{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:8px 0;width:100%;max-width:640px}
+  .pill{background:#241d45;border:1px solid #5b4a8a;border-radius:20px;padding:6px 12px;font-size:14px;font-weight:bold}
+  .pill span{color:#ffd166}
+  #status{color:#a8e6a1;min-height:20px;text-align:center;font-size:14px}
+  #wrap{position:relative;width:min(92vw,560px);aspect-ratio:1/1}
+  canvas{width:100%;height:100%;background:#1c1638;border:3px solid #6b5aa8;border-radius:12px;display:block;touch-action:none;cursor:pointer}
+  .overlay{position:absolute;inset:0;background:rgba(10,6,26,.94);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px;gap:12px;z-index:5}
+  .overlay.hidden{display:none}
+  .overlay h2{color:#ffd166;font-size:30px}
+  .overlay p{font-size:15px;line-height:1.55;color:#ddd3f5;max-width:460px}
+  .overlay ul{text-align:left;color:#ddd3f5;font-size:14px;line-height:1.6;margin-left:18px}
+  button{background:#ffd166;color:#241233;border:0;padding:12px 22px;border-radius:10px;font-size:17px;font-weight:bold;cursor:pointer}
+  button:hover{background:#ffe08a}
+  button.secondary{background:#3a2f66;color:#fff}
+  #controls{margin-top:10px;font-size:13px;color:#b8a9d9;text-align:center;line-height:1.6;max-width:640px}
+  #legend{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;font-size:13px;color:#cfc4ee;margin-top:6px}
+  #msg{font-weight:bold;color:#ffd166}
+</style>
+</head>
+<body>
+<h1>&#127769; MIRROR MANSION &#128123;</h1>
+<p class="sub">Rotate mirrors. Guide the lantern light to every ghost door. Beware the blockers.</p>
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Level: <span id="level">1</span> / 10</div>
+  <div class="pill">Moves left: <span id="moves">0</span></div>
+  <div class="pill">Doors lit: <span id="doors">0 / 0</span></div>
+</div>
+<div id="status">Click Start to enter the mansion.</div>
+<div id="wrap">
+  <canvas id="game" width="560" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Mirror Mansion</h2>
+    <p><b>How to Play:</b> A lantern shines a beam across a haunted grid. Rotate the mirrors so the beam reaches <b>every ghost door</b>.</p>
+    <ul>
+      <li><b>Click / Tap</b> a mirror to rotate it between / and \</li>
+      <li><b>Arrow Keys</b> move the glowing selection, <b>Space</b> rotates, <b>R</b> restarts the level</li>
+      <li><b>Splitter (+)</b> splits the beam into two perpendicular beams</li>
+      <li><b>Colour filter</b> changes the beam colour &mdash; red and blue doors only open to matching light</li>
+      <li><b>Brick blockers</b> stop the beam cold. Each rotation costs 1 move!</li>
+      <li>Solve all <b>10 levels</b> to win. Run out of moves and the mansion claims you.</li>
+    </ul>
+    <button id="startBtn">Start Game</button>
+    <p>Levels get harder: more mirrors, splitters and colour filters.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart Game</button>
+    <button id="retryBtn" class="secondary">Retry This Level</button>
+  </div>
+</div>
+<div id="legend"><span>&#128161; Lantern</span><span>/ \ Mirror</span><span>+ Splitter</span><span>&#129704; Blocker</span><span>&#128123; Ghost Door</span><span>&#9679; Colour Filter</span></div>
+<div id="controls">Controls: Click / Tap mirror to rotate &bull; Arrow Keys select cell &bull; Space rotate &bull; R restart level &bull; Enter start</div>
+<p id="msg"></p>
+<script>
+(function(){
+"use strict";
+var canvas=document.getElementById("game");
+var ctx=canvas.getContext("2d");
+var scoreEl=document.getElementById("score");
+var levelEl=document.getElementById("level");
+var movesEl=document.getElementById("moves");
+var doorsEl=document.getElementById("doors");
+var statusEl=document.getElementById("status");
+var msgEl=document.getElementById("msg");
+var titleScreen=document.getElementById("titleScreen");
+var endScreen=document.getElementById("endScreen");
+var endTitle=document.getElementById("endTitle");
+var endText=document.getElementById("endText");
+var GRID=7, CELL=80;
+var levelIndex=0, score=0, movesLeft=0, started=false, gameOver=false, gameWon=false;
+var sel={x:3,y:3}, beamSegments=[], litDoors=[], animTime=0;
+var audioCtx=null;
+function audio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx&&audioCtx.state==="suspended"){ audioCtx.resume(); } return audioCtx; }
+function tone(freq,dur,type,vol){ var ac=audio(); if(!ac) return; try{ var o=ac.createOscillator(), g=ac.createGain(); o.type=type||"sine"; o.frequency.value=freq; g.gain.setValueAtTime(vol||0.12,ac.currentTime); g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+dur); o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+dur); }catch(e){} }
+function sRotate(){ tone(520,0.12,"triangle",0.12); tone(780,0.08,"sine",0.07); }
+function sWin(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f,0.25,"sine",0.14); }, i*120); }); }
+function sLose(){ [330,262,196,131].forEach(function(f,i){ setTimeout(function(){ tone(f,0.3,"sawtooth",0.08); }, i*140); }); }
+function sDoor(){ tone(880,0.2,"sine",0.12); }
+// Mirror flip helper: initial is opposite of solution.
+function M(x,y,sol){ return {x:x,y:y,cur:(sol==="/"? "\\" : "/"), sol:sol}; }
+// Levels: lantern, mirrors (solution), walls, splitters, filters, doors, moves.
+// Beam rules: / : up->right, right->up, down->left, left->down.
+// \ : up->left, left->up, down->right, right->down.
+// Splitter: incoming beam becomes two perpendicular beams, not straight.
+// Filter: beam colour becomes filter colour. Door colour "any" accepts all.
+var LEVELS=[
+ {name:"First Light", lantern:{x:0,y:3,dx:1,dy:0}, mirrors:[M(3,3,"\\")], walls:[{x:5,y:1},{x:1,y:5}], splitters:[], filters:[], doors:[{x:3,y:6,color:"any"}], moves:10},
+ {name:"Two Turns", lantern:{x:0,y:1,dx:1,dy:0}, mirrors:[M(2,1,"\\"),M(2,4,"\\")], walls:[{x:4,y:2},{x:0,y:5}], splitters:[], filters:[], doors:[{x:5,y:4,color:"any"}], moves:12},
+ {name:"Up And Over", lantern:{x:0,y:5,dx:1,dy:0}, mirrors:[M(3,5,"/"),M(3,2,"/")], walls:[{x:5,y:5},{x:1,y:1}], splitters:[], filters:[], doors:[{x:6,y:2,color:"any"}], moves:12},
+ {name:"Blocker Alley", lantern:{x:0,y:2,dx:1,dy:0}, mirrors:[M(4,2,"\\"),M(4,5,"\\")], walls:[{x:2,y:4},{x:5,y:3},{x:1,y:0}], splitters:[], filters:[], doors:[{x:6,y:5,color:"any"}], moves:14},
+ {name:"Split Decision", lantern:{x:0,y:3,dx:1,dy:0}, mirrors:[M(3,1,"/"),M(3,5,"/")], walls:[{x:5,y:3},{x:1,y:1}], splitters:[{x:3,y:3}], filters:[], doors:[{x:6,y:1,color:"any"},{x:0,y:5,color:"any"}], moves:14},
+ {name:"Red Filter", lantern:{x:0,y:3,dx:1,dy:0}, mirrors:[M(4,3,"\\")], walls:[{x:2,y:5},{x:5,y:1}], splitters:[], filters:[{x:2,y:3,color:"red"}], doors:[{x:4,y:6,color:"red"}], moves:12},
+ {name:"Blue Corridor", lantern:{x:0,y:1,dx:1,dy:0}, mirrors:[M(3,1,"\\"),M(3,5,"\\")], walls:[{x:5,y:3},{x:1,y:4}], splitters:[], filters:[{x:3,y:3,color:"blue"}], doors:[{x:6,y:5,color:"blue"}], moves:14},
+ {name:"Zigzag Hall", lantern:{x:0,y:2,dx:1,dy:0}, mirrors:[M(2,2,"\\"),M(2,4,"\\"),M(5,4,"/"),M(5,1,"/")], walls:[{x:4,y:0},{x:0,y:5}], splitters:[], filters:[], doors:[{x:6,y:1,color:"any"}], moves:16},
+ {name:"Split And Filter", lantern:{x:0,y:3,dx:1,dy:0}, mirrors:[M(2,1,"/")], walls:[{x:4,y:5},{x:5,y:3}], splitters:[{x:2,y:3}], filters:[{x:2,y:5,color:"red"}], doors:[{x:5,y:1,color:"any"},{x:2,y:6,color:"red"}], moves:14},
+ {name:"Grand Finale", lantern:{x:0,y:4,dx:1,dy:0}, mirrors:[M(2,4,"/"),M(2,1,"/"),M(4,1,"\\"),M(6,3,"\\")], walls:[{x:1,y:6},{x:5,y:5}], splitters:[{x:4,y:3}], filters:[], doors:[{x:0,y:3,color:"any"},{x:6,y:6,color:"any"}], moves:18}
+];
+var cur=null;
+function loadLevel(i){
+  levelIndex=i; cur=LEVELS[i]; movesLeft=cur.moves; gameOver=false; gameWon=false;
+  sel={x:cur.lantern.x,y:cur.lantern.y};
+  // Reset mirrors to their scrambled starting state on a fresh load only when called from start/advance.
+  // When retrying we also reset, which is correct: cur mirrors keep cur values set by play, so rebuild them.
+  computeBeam(); updateHUD();
+  statusEl.textContent="Level "+(i+1)+": "+cur.name+" - rotate mirrors to light every ghost door!";
+  msgEl.textContent="";
+}
+function freshLevel(i){
+  // Rebuild mirrors from solution so retry gives the original scrambled start.
+  var L=LEVELS[i];
+  L.mirrors=L.mirrors.map(function(m){ return M(m.x,m.y,m.sol); });
+  loadLevel(i);
+}
+function findMirror(x,y){ for(var k=0;k<cur.mirrors.length;k++){ if(cur.mirrors[k].x===x&&cur.mirrors[k].y===y) return cur.mirrors[k]; } return null; }
+function isWall(x,y){ for(var k=0;k<cur.walls.length;k++){ if(cur.walls[k].x===x&&cur.walls[k].y===y) return true; } return false; }
+function findSplitter(x,y){ for(var k=0;k<cur.splitters.length;k++){ if(cur.splitters[k].x===x&&cur.splitters[k].y===y) return true; } return false; }
+function findFilter(x,y){ for(var k=0;k<cur.filters.length;k++){ if(cur.filters[k].x===x&&cur.filters[k].y===y) return cur.filters[k]; } return null; }
+function findDoor(x,y){ for(var k=0;k<cur.doors.length;k++){ if(cur.doors[k].x===x&&cur.doors[k].y===y) return k; } return -1; }
+function reflect(mirror,dx,dy){
+  if(mirror==="/"){
+    if(dx===0&&dy===-1) return [1,0];
+    if(dx===1&&dy===0) return [0,-1];
+    if(dx===0&&dy===1) return [-1,0];
+    if(dx===-1&&dy===0) return [0,1];
+  } else {
+    if(dx===0&&dy===-1) return [-1,0];
+    if(dx===-1&&dy===0) return [0,-1];
+    if(dx===0&&dy===1) return [1,0];
+    if(dx===1&&dy===0) return [0,1];
+  }
+  return [dx,dy];
+}
+function computeBeam(){
+  beamSegments=[]; litDoors=cur.doors.map(function(){return false;});
+  var queue=[{x:cur.lantern.x,y:cur.lantern.y,dx:cur.lantern.dx,dy:cur.lantern.dy,color:"yellow"}];
+  var guard=0;
+  while(queue.length&&guard<500){
+    guard++;
+    var b=queue.shift();
+    var x=b.x, y=b.y, dx=b.dx, dy=b.dy, color=b.color;
+    var steps=0;
+    while(steps<60){
+      steps++;
+      var nx=x+dx, ny=y+dy;
+      if(nx<0||ny<0||nx>=GRID||ny>=GRID) break;
+      var key=nx+","+ny+","+dx+","+dy+","+color;
+      // Loop guard via segment count is enough for these small grids; visited check prevents infinite mirror loops.
+      beamSegments.push({x1:x,y1:y,x2:nx,y2:ny,color:color});
+      x=nx; y=ny;
+      if(isWall(x,y)) break;
+      var mir=findMirror(x,y);
+      if(mir){ var r=reflect(mir.cur,dx,dy); dx=r[0]; dy=r[1]; continue; }
+      if(findSplitter(x,y)){
+        // Perpendicular outputs only.
+        if(dx!==0){ queue.push({x:x,y:y,dx:0,dy:-1,color:color}); queue.push({x:x,y:y,dx:0,dy:1,color:color}); }
+        else { queue.push({x:x,y:y,dx:-1,dy:0,color:color}); queue.push({x:x,y:y,dx:1,dy:0,color:color}); }
+        break;
+      }
+      var fil=findFilter(x,y); if(fil){ color=fil.color; continue; }
+      var di=findDoor(x,y);
+      if(di>=0){ var d=cur.doors[di]; if(d.color==="any"||d.color===color) litDoors[di]=true; }
+    }
+  }
+}
+function litCount(){ var n=0; for(var i=0;i<litDoors.length;i++) if(litDoors[i]) n++; return n; }
+function updateHUD(){
+  scoreEl.textContent=score; levelEl.textContent=(levelIndex+1); movesEl.textContent=movesLeft;
+  doorsEl.textContent=litCount()+" / "+(cur?cur.doors.length:0);
+}
+function checkEnd(){
+  if(!started) return;
+  if(litCount()===cur.doors.length){
+    var bonus=100+movesLeft*10; score+=bonus; updateHUD(); sWin();
+    if(levelIndex>=LEVELS.length-1){
+      gameWon=true; started=false;
+      endTitle.textContent="You Win! The Mansion Is Lit!";
+      endText.textContent="You solved all 10 levels of Mirror Mansion. Final score: "+score+". The ghosts thank you.";
+      endScreen.classList.remove("hidden");
+    } else {
+      statusEl.textContent="Level solved! +"+bonus+" points. Entering level "+(levelIndex+2)+"...";
+      sDoor();
+      var next=levelIndex+1;
+      setTimeout(function(){ freshLevel(next); }, 1100);
+    }
+    return;
+  }
+  if(movesLeft<=0){
+    gameOver=true; started=false; sLose();
+    endTitle.textContent="Game Over - The Mansion Claims You!";
+    endText.textContent="You ran out of moves on level "+(levelIndex+1)+" ("+cur.name+"). Only "+litCount()+" of "+cur.doors.length+" ghost doors were lit. Try again!";
+    endScreen.classList.remove("hidden");
+  }
+}
+function rotateAt(x,y){
+  if(!started||gameOver||gameWon) return;
+  var mir=findMirror(x,y); if(!mir) return;
+  mir.cur=(mir.cur==="/"? "\\" : "/");
+  movesLeft--; sRotate(); computeBeam(); updateHUD();
+  statusEl.textContent=litCount()+" of "+cur.doors.length+" doors lit. Moves left: "+movesLeft+".";
+  checkEnd();
+}
+function draw(){
+  ctx.clearRect(0,0,560,560);
+  // Grid
+  for(var gy=0;gy<GRID;gy++) for(var gx=0;gx<GRID;gx++){
+    var px=gx*CELL, py=gy*CELL;
+    ctx.fillStyle=((gx+gy)%2===0)? "#221b47" : "#1a1436";
+    ctx.fillRect(px,py,CELL,CELL);
+    ctx.strokeStyle="#3a2f66"; ctx.strokeRect(px+0.5,py+0.5,CELL-1,CELL-1);
+  }
+  if(cur){
+    // Selection
+    ctx.strokeStyle="#ffd166"; ctx.lineWidth=3;
+    ctx.strokeRect(sel.x*CELL+3, sel.y*CELL+3, CELL-6, CELL-6);
+    ctx.lineWidth=1;
+    // Walls
+    cur.walls.forEach(function(w){
+      var px=w.x*CELL, py=w.y*CELL;
+      ctx.fillStyle="#7a5a3a"; ctx.fillRect(px+6,py+6,CELL-12,CELL-12);
+      ctx.fillStyle="#5a4028"; ctx.fillRect(px+6,py+6,CELL-12,10); ctx.fillRect(px+6,py+34,CELL-12,10);
+      ctx.fillStyle="#2b1d12"; ctx.font="bold 26px serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText("X", px+CELL/2, py+CELL/2);
+    });
+    // Filters
+    cur.filters.forEach(function(f){
+      var cx=f.x*CELL+CELL/2, cy=f.y*CELL+CELL/2;
+      ctx.fillStyle=f.color==="red"? "#ff5a5a" : "#5aa8ff";
+      ctx.beginPath(); ctx.arc(cx,cy,22,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle="#fff"; ctx.font="bold 13px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(f.color.toUpperCase(), cx, cy);
+    });
+    // Splitters
+    cur.splitters.forEach(function(s){
+      var cx=s.x*CELL+CELL/2, cy=s.y*CELL+CELL/2;
+      ctx.fillStyle="#b48cff"; ctx.save(); ctx.translate(cx,cy); ctx.rotate(Math.PI/4); ctx.fillRect(-18,-18,36,36); ctx.restore();
+      ctx.fillStyle="#120e24"; ctx.font="bold 26px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText("+",cx,cy);
+    });
+    // Doors
+    cur.doors.forEach(function(d,i){
+      var cx=d.x*CELL+CELL/2, cy=d.y*CELL+CELL/2 + Math.sin(animTime*2+i)*3;
+      var lit=litDoors[i];
+      ctx.fillStyle=lit? (d.color==="red"?"#ff7a7a":d.color==="blue"?"#7ab8ff":"#ffe08a") : "#8a7fb8";
+      ctx.beginPath(); ctx.arc(cx,cy-8,20,Math.PI,0); ctx.fill();
+      ctx.fillRect(cx-20,cy-8,40,34);
+      ctx.fillStyle=lit? "#120e24" : "#241d45";
+      ctx.beginPath(); ctx.arc(cx-7,cy+2,3.5,0,Math.PI*2); ctx.arc(cx+7,cy+2,3.5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=lit? "#ffd166" : "#5b4a8a"; ctx.font="bold 11px sans-serif"; ctx.textAlign="center";
+      ctx.fillText(lit? "OPEN" : (d.color==="any"?"GHOST":d.color.toUpperCase()), cx, cy+38);
+    });
+    // Mirrors
+    cur.mirrors.forEach(function(m){
+      var px=m.x*CELL, py=m.y*CELL;
+      ctx.fillStyle="#2e2458"; ctx.fillRect(px+8,py+8,CELL-16,CELL-16);
+      ctx.strokeStyle="#d9f2ff"; ctx.lineWidth=5; ctx.beginPath();
+      if(m.cur==="/"){ ctx.moveTo(px+14,py+CELL-14); ctx.lineTo(px+CELL-14,py+14); }
+      else { ctx.moveTo(px+14,py+14); ctx.lineTo(px+CELL-14,py+CELL-14); }
+      ctx.stroke(); ctx.lineWidth=1;
+    });
+    // Lantern
+    var lx=cur.lantern.x*CELL+CELL/2, ly=cur.lantern.y*CELL+CELL/2;
+    ctx.fillStyle="#ffd166"; ctx.beginPath(); ctx.arc(lx,ly,20,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#fff3c4"; ctx.beginPath(); ctx.arc(lx,ly,11,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#120e24"; ctx.font="bold 20px serif"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText("L",lx,ly);
+    // Beams
+    beamSegments.forEach(function(s,i){
+      var pulse=0.55+0.45*Math.sin(animTime*5+i*0.4);
+      ctx.strokeStyle=s.color==="red"? "rgba(255,90,90,"+pulse+")" : s.color==="blue"? "rgba(90,168,255,"+pulse+")" : "rgba(255,220,120,"+pulse+")";
+      ctx.lineWidth=5; ctx.beginPath();
+      ctx.moveTo(s.x1*CELL+CELL/2, s.y1*CELL+CELL/2);
+      ctx.lineTo(s.x2*CELL+CELL/2, s.y2*CELL+CELL/2);
+      ctx.stroke(); ctx.lineWidth=1;
+    });
+  }
+}
+function loop(t){
+  animTime=(t||0)/1000;
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+function startGame(){
+  audio(); titleScreen.classList.add("hidden"); endScreen.classList.add("hidden");
+  score=0; started=true; freshLevel(0); tone(523,0.2,"sine",0.12);
+}
+document.getElementById("startBtn").addEventListener("click", startGame);
+document.getElementById("restartBtn").addEventListener("click", function(){ endScreen.classList.add("hidden"); score=0; started=true; freshLevel(0); });
+document.getElementById("retryBtn").addEventListener("click", function(){ endScreen.classList.add("hidden"); started=true; freshLevel(levelIndex); });
+function cellFromEvent(e){
+  var r=canvas.getBoundingClientRect();
+  var clientX=(e.touches&&e.touches[0])? e.touches[0].clientX : e.clientX;
+  var clientY=(e.touches&&e.touches[0])? e.touches[0].clientY : e.clientY;
+  var x=Math.floor((clientX-r.left)/r.width*GRID);
+  var y=Math.floor((clientY-r.top)/r.height*GRID);
+  if(x<0) x=0; if(x>=GRID) x=GRID-1; if(y<0) y=0; if(y>=GRID) y=GRID-1;
+  return {x:x,y:y};
+}
+canvas.addEventListener("click", function(e){ var c=cellFromEvent(e); sel=c; if(started) rotateAt(c.x,c.y); });
+canvas.addEventListener("touchstart", function(e){ e.preventDefault(); var c=cellFromEvent(e); sel=c; if(started) rotateAt(c.x,c.y); }, {passive:false});
+canvas.addEventListener("touchend", function(e){ e.preventDefault(); });
+document.addEventListener("keydown", function(e){
+  if(e.key==="Enter" && !started && titleScreen && !titleScreen.classList.contains("hidden")){ startGame(); return; }
+  if(!started) return;
+  if(e.key==="ArrowUp"){ sel.y=Math.max(0,sel.y-1); e.preventDefault(); }
+  else if(e.key==="ArrowDown"){ sel.y=Math.min(GRID-1,sel.y+1); e.preventDefault(); }
+  else if(e.key==="ArrowLeft"){ sel.x=Math.max(0,sel.x-1); e.preventDefault(); }
+  else if(e.key==="ArrowRight"){ sel.x=Math.min(GRID-1,sel.x+1); e.preventDefault(); }
+  else if(e.key===" "||e.key==="Spacebar"){ e.preventDefault(); rotateAt(sel.x,sel.y); }
+  else if(e.key==="r"||e.key==="R"){ freshLevel(levelIndex); statusEl.textContent="Level restarted. Moves restored."; }
+});
+document.addEventListener("touchstart", function(){ audio(); }, {passive:true});
+document.addEventListener("mousedown", function(){ audio(); });
+// Initial preview: load level 1 visuals behind title screen without starting scoring.
+cur=LEVELS[0]; movesLeft=cur.moves; computeBeam(); updateHUD();
+})();
+</script>
+</body>
+</html>
