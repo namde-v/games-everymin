@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Boulder Bounce — Precision Ricochet Aim</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#1a120b;color:#fff7e6;font-family:Arial,Helvetica,sans-serif;overflow:hidden}
+  #wrap{max-width:920px;margin:0 auto;padding:10px}
+  h1{margin:4px 0 2px;text-align:center;font-size:26px;letter-spacing:1px;color:#ffcf5c}
+  p.sub{text-align:center;margin:0 0 8px;color:#e8d5b0;font-size:14px}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;background:#2d1f12;border:2px solid #7a5230;border-radius:10px;padding:8px 12px;font-weight:bold}
+  #hud span{white-space:nowrap}
+  #stage{position:relative;margin-top:10px;border:3px solid #7a5230;border-radius:12px;overflow:hidden;background:#2a1c10}
+  canvas{display:block;width:100%;height:520px;background:linear-gradient(180deg,#3b2a18,#241708 70%,#1a0f06);touch-action:none}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(10,6,2,.86);padding:20px;z-index:5}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:34px;margin:0 0 8px;color:#ffcf5c}
+  .overlay p{max-width:620px;line-height:1.55;margin:6px 0;color:#f3e6c8}
+  button{cursor:pointer;border:0;border-radius:10px;padding:13px 26px;font-size:18px;font-weight:bold;background:#ffb020;color:#241200;box-shadow:0 4px 0 #8a4a00;margin-top:12px}
+  button:active{transform:translateY(3px);box-shadow:none}
+  button.secondary{background:#e8d5b0}
+  .keys{background:#3a2716;border:1px solid #7a5230;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:14px;line-height:1.6}
+  #aimbar{height:12px;background:#3a2716;border:1px solid #7a5230;border-radius:8px;margin-top:8px;overflow:hidden}
+  #aimfill{height:100%;width:40%;background:linear-gradient(90deg,#59d98c,#ffcf5c,#ff5c5c)}
+  #msg{text-align:center;min-height:22px;font-weight:bold;color:#ffcf5c;margin-top:6px}
+  #foot{text-align:center;color:#cbb28a;font-size:12px;margin-top:6px}
+  @media(max-width:600px){canvas{height:440px}h1{font-size:22px}.overlay h2{font-size:28px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🪨 BOULDER BOUNCE</h1>
+  <p class="sub">Aim, ricochet off angled rocks, and smash every crystal before you run out of throws!</p>
+  <div id="hud">
+    <span>⭐ Score: <span id="score">0</span></span>
+    <span>🪨 Throws left: <span id="throws">12</span></span>
+    <span>💎 Targets left: <span id="targets">8</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="880" height="520"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>BOULDER BOUNCE</h2>
+      <p><strong>How to Play:</strong> You have 12 boulders to smash 8 glowing crystals. Rocks in the canyon are angled — bounce off them to reach crystals hidden behind barriers. Every ricochet before a hit adds a chain bonus!</p>
+      <div class="keys">
+        <strong>Controls:</strong><br>
+        🖱️ / 👆 <b>Drag</b> from the launcher to aim, <b>release</b> to throw<br>
+        ⌨️ <b>Arrow Up / Down</b> adjust angle &nbsp;•&nbsp; <b>Arrow Left / Right</b> adjust power &nbsp;•&nbsp; <b>Space</b> throw<br>
+        💡 Steeper angles bounce higher. More power flies farther. Watch the dotted aim line!
+      </div>
+      <button id="startBtn">▶ START GAME</button>
+      <p>Score: 100 per crystal + 50 per ricochet in the chain. Bonus throw awarded every 3 crystals!</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">YOU WIN!</h2>
+      <p id="endText"></p>
+      <p id="endScore"></p>
+      <button id="restartBtn">↻ PLAY AGAIN</button>
+    </div>
+  </div>
+  <div id="aimbar"><div id="aimfill"></div></div>
+  <div id="msg">Drag to aim — release to launch your boulder!</div>
+  <div id="foot">Precision / Boulder Ricochet Aim • Game 0175 • Fully offline — no downloads, no network needed.</div>
+</div>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var scoreEl=document.getElementById('score');
+  var throwsEl=document.getElementById('throws');
+  var targetsEl=document.getElementById('targets');
+  var statusEl=document.getElementById('status');
+  var msgEl=document.getElementById('msg');
+  var aimfill=document.getElementById('aimfill');
+  var titleScreen=document.getElementById('titleScreen');
+  var endScreen=document.getElementById('endScreen');
+  var endTitle=document.getElementById('endTitle');
+  var endText=document.getElementById('endText');
+  var endScore=document.getElementById('endScore');
+
+  var W=880, H=520;
+  var launcher={x:90,y:440};
+  var angle=-0.65, power=0.55; // radians, 0..1
+  var score=0, throwsLeft=12, targetsLeft=8, chain=0, bestChain=0;
+  var state='title'; // title, aiming, flying, over
+  var boulder=null, particles=[], floaters=[];
+  var aiming=false, dragX=0, dragY=0, hasDrag=false;
+  var audioCtx=null;
+
+  function audio(){
+    try{
+      if(!audioCtx){ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }
+      if(audioCtx.state==='suspended'){ audioCtx.resume(); }
+      return audioCtx;
+    }catch(e){ return null; }
+  }
+  function tone(freq,dur,type,vol){
+    var ac=audio(); if(!ac) return;
+    try{
+      var o=ac.createOscillator(), g=ac.createGain();
+      o.type=type||'sine'; o.frequency.value=freq;
+      g.gain.setValueAtTime(vol||0.15, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur);
+      o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
+    }catch(e){}
+  }
+  function sBounce(){ tone(180,0.12,'triangle',0.18); setTimeout(function(){tone(260,0.1,'triangle',0.12);},40); }
+  function sSmash(){ tone(520,0.25,'square',0.15); setTimeout(function(){tone(880,0.3,'sine',0.15);},60); }
+  function sThrow(){ tone(120,0.25,'sawtooth',0.12); }
+  function sWin(){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){tone(f,0.35,'sine',0.16);}, i*140); }); }
+  function sLose(){ [300,240,180,120].forEach(function(f,i){ setTimeout(function(){tone(f,0.3,'sawtooth',0.12);}, i*150); }); }
+
+  // Angled rocks: line segments {x1,y1,x2,y2}
+  var rocks=[
+    {x1:260,y1:380,x2:360,y2:300},
+    {x1:430,y1:430,x2:540,y2:350},
+    {x1:600,y1:300,x2:700,y2:380},
+    {x1:330,y1:210,x2:450,y2:150},
+    {x1:580,y1:180,x2:700,y2:110},
+    {x1:200,y1:120,x2:300,y2:190}
+  ];
+  // Barriers that block direct shots but can be bounced around
+  var barriers=[
+    {x:480,y:240,w:18,h:190},
+    {x:650,y:300,w:18,h:160}
+  ];
+  var targets=[];
+  function resetTargets(){
+    targets=[
+      {x:760,y:90,r:24,alive:true,color:'#7ef0ff'},
+      {x:820,y:220,r:22,alive:true,color:'#ff7ed9'},
+      {x:760,y:420,r:24,alive:true,color:'#ffe066'},
+      {x:560,y:90,r:22,alive:true,color:'#8dff7e'},
+      {x:390,y:300,r:20,alive:true,color:'#7ef0ff'},
+      {x:620,y:470,r:22,alive:true,color:'#ff9a5c'},
+      {x:240,y:60,r:20,alive:true,color:'#c07eff'},
+      {x:840,y:400,r:20,alive:true,color:'#8dff7e'}
+    ];
+  }
+  resetTargets();
+
+  function updateHUD(){
+    scoreEl.textContent=score;
+    throwsEl.textContent=throwsLeft;
+    targetsEl.textContent=targets.filter(function(t){return t.alive;}).length;
+    aimfill.style.width=Math.round(power*100)+'%';
+  }
+  function setStatus(s){ statusEl.textContent=s; }
+
+  function resetGame(){
+    score=0; throwsLeft=12; chain=0; bestChain=0; boulder=null; particles=[]; floaters=[];
+    angle=-0.65; power=0.55; resetTargets(); state='aiming';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    setStatus('Aiming'); msgEl.textContent='Drag to aim — release to launch your boulder!';
+    updateHUD();
+  }
+
+  function canvasPos(e){
+    var r=canvas.getBoundingClientRect();
+    var cx=(e.touches&&e.touches[0]?e.touches[0].clientX:e.clientX);
+    var cy=(e.touches&&e.touches[0]?e.touches[0].clientY:e.clientY);
+    return {x:(cx-r.left)*(W/r.width), y:(cy-r.top)*(H/r.height)};
+  }
+  function aimFromPoint(p){
+    var dx=p.x-launcher.x, dy=p.y-launcher.y;
+    if(Math.abs(dx)<5 && Math.abs(dy)<5) return;
+    angle=Math.atan2(dy,dx);
+    // Keep aim generally to the right / upward hemisphere for playability
+    if(angle>1.4) angle=1.4; if(angle<-1.55) angle=-1.55;
+    var dist=Math.sqrt(dx*dx+dy*dy);
+    power=Math.max(0.25, Math.min(1, dist/420));
+    updateHUD();
+  }
+
+  function throwBoulder(){
+    if(state!=='aiming') return;
+    if(throwsLeft<=0) return;
+    throwsLeft--; chain=0;
+    var speed=8+power*11;
+    boulder={x:launcher.x, y:launcher.y, vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed, r:16, alive:true};
+    state='flying'; setStatus('Boulder flying!'); msgEl.textContent='Ricochet! Chain bonus grows with every bounce.';
+    sThrow(); updateHUD();
+  }
+
+  function burst(x,y,color,n){
+    for(var i=0;i<(n||14);i++){
+      particles.push({x:x,y:y,vx:(Math.random()-0.5)*7,vy:(Math.random()-0.5)*7,life:28+Math.random()*20,color:color});
+    }
+  }
+  function floater(x,y,text){
+    floaters.push({x:x,y:y,text:text,life:70});
+  }
+  function reflect(vx,vy,nx,ny){
+    var d=vx*nx+vy*ny;
+    return {vx:vx-2*d*nx, vy:vy-2*d*ny};
+  }
+  function segNormal(seg){
+    var dx=seg.x2-seg.x1, dy=seg.y2-seg.y1, len=Math.sqrt(dx*dx+dy*dy)||1;
+    return {nx:-dy/len, ny:dx/len};
+  }
+  function closestOnSeg(px,py,seg){
+    var dx=seg.x2-seg.x1, dy=seg.y2-seg.y1;
+    var len2=dx*dx+dy*dy||1;
+    var t=((px-seg.x1)*dx+(py-seg.y1)*dy)/len2;
+    t=Math.max(0,Math.min(1,t));
+    return {x:seg.x1+dx*t, y:seg.y1+dy*t, t:t};
+  }
+
+  function stepPhysics(){
+    if(!boulder) return;
+    boulder.vy+=0.18; // gentle gravity so arcs feel weighty
+    boulder.x+=boulder.vx; boulder.y+=boulder.vy;
+    // Walls: bounce, not stop — ricochet is the game
+    if(boulder.x<boulder.r){ boulder.x=boulder.r; boulder.vx=Math.abs(boulder.vx)*0.92; chain++; bestChain=Math.max(bestChain,chain); sBounce(); }
+    if(boulder.x>W-boulder.r){ boulder.x=W-boulder.r; boulder.vx=-Math.abs(boulder.vx)*0.92; chain++; bestChain=Math.max(bestChain,chain); sBounce(); }
+    if(boulder.y<boulder.r){ boulder.y=boulder.r; boulder.vy=Math.abs(boulder.vy)*0.92; chain++; bestChain=Math.max(bestChain,chain); sBounce(); }
+    if(boulder.y>H-boulder.r){ boulder.y=H-boulder.r; boulder.vy=-Math.abs(boulder.vy)*0.88; boulder.vx*=0.97; chain++; bestChain=Math.max(bestChain,chain); sBounce(); }
+    // Angled rocks
+    for(var i=0;i<rocks.length;i++){
+      var seg=rocks[i], c=closestOnSeg(boulder.x,boulder.y,seg);
+      var dx=boulder.x-c.x, dy=boulder.y-c.y, d=Math.sqrt(dx*dx+dy*dy);
+      if(d<boulder.r+4){
+        var n=segNormal(seg);
+        // Face the normal toward the boulder
+        if(dx*n.nx+dy*n.ny<0){ n.nx=-n.nx; n.ny=-n.ny; }
+        var r=reflect(boulder.vx,boulder.vy,n.nx,n.ny);
+        boulder.vx=r.vx*0.94; boulder.vy=r.vy*0.94;
+        boulder.x=c.x+n.nx*(boulder.r+5); boulder.y=c.y+n.ny*(boulder.r+5);
+        chain++; bestChain=Math.max(bestChain,chain); sBounce();
+        burst(c.x,c.y,'#ffb020',8); msgEl.textContent='Ricochet x'+chain+'! Keep chaining for bonus points.';
+      }
+    }
+    // Barriers: simple AABB bounce
+    for(var j=0;j<barriers.length;j++){
+      var b=barriers[j];
+      if(boulder.x+boulder.r>b.x && boulder.x-boulder.r<b.x+b.w && boulder.y+boulder.r>b.y && boulder.y-boulder.r<b.y+b.h){
+        // Push out on smallest axis and reflect
+        var ox=Math.min(boulder.x+boulder.r-b.x, b.x+b.w-(boulder.x-boulder.r));
+        var oy=Math.min(boulder.y+boulder.r-b.y, b.y+b.h-(boulder.y-boulder.r));
+        if(ox<oy){ boulder.vx=-boulder.vx*0.9; } else { boulder.vy=-boulder.vy*0.9; }
+        chain++; sBounce();
+      }
+    }
+    // Targets
+    for(var k=0;k<targets.length;k++){
+      var t=targets[k]; if(!t.alive) continue;
+      var tdx=boulder.x-t.x, tdy=boulder.y-t.y;
+      if(Math.sqrt(tdx*tdx+tdy*tdy)<boulder.r+t.r){
+        t.alive=false;
+        var gained=100+chain*50;
+        score+=gained;
+        burst(t.x,t.y,t.color,22); floater(t.x,t.y-30,'+'+gained+(chain>0?'  CHAIN x'+chain:''));
+        sSmash();
+        var remaining=targets.filter(function(z){return z.alive;}).length;
+        if(remaining>0 && remaining%3===0){ /* placeholder for pacing */ }
+        // Bonus throw every 3 crystals smashed
+        var smashed=targets.filter(function(z){return !z.alive;}).length;
+        if(smashed%3===0){ throwsLeft++; floater(t.x,t.y+30,'+1 BONUS THROW!'); }
+        msgEl.textContent='Crystal smashed! +'+gained+' points.';
+        updateHUD();
+        break;
+      }
+    }
+    // End of flight: slow or out of energy
+    var speed=Math.sqrt(boulder.vx*boulder.vx+boulder.vy*boulder.vy);
+    if(speed<1.2){
+      boulder=null; endFlight();
+    }
+  }
+  function endFlight(){
+    var remaining=targets.filter(function(t){return t.alive;}).length;
+    if(remaining===0){
+      state='over'; setStatus('YOU WIN!');
+      endTitle.textContent='🏆 YOU WIN!';
+      endText.textContent='You smashed every crystal! Best ricochet chain: x'+bestChain+'.';
+      endScore.textContent='Final score: '+score+' • Throws left: '+throwsLeft;
+      endScreen.classList.remove('hidden'); sWin();
+    } else if(throwsLeft<=0){
+      state='over'; setStatus('Game Over');
+      endTitle.textContent='💥 GAME OVER';
+      endText.textContent='Out of throws with '+remaining+' crystal(s) still standing. Try a bouncier line next time!';
+      endScore.textContent='Final score: '+score+' • Best chain: x'+bestChain;
+      endScreen.classList.remove('hidden'); sLose();
+    } else {
+      state='aiming'; setStatus('Aiming');
+      msgEl.textContent='Next throw! Aim off a rock to reach hidden crystals.';
+    }
+    updateHUD();
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // Canyon backdrop
+    ctx.fillStyle='#4a3220';
+    ctx.beginPath(); ctx.moveTo(0,520); ctx.lineTo(0,420); ctx.lineTo(180,360); ctx.lineTo(320,430); ctx.lineTo(520,380); ctx.lineTo(700,440); ctx.lineTo(880,380); ctx.lineTo(880,520); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#5a3d26';
+    for(var m=0;m<14;m++){ ctx.beginPath(); ctx.arc(40+m*64, 500-(m%3)*8, 4, 0, Math.PI*2); ctx.fill(); }
+    // Barriers
+    barriers.forEach(function(b){
+      ctx.fillStyle='#6b4a2c'; ctx.fillRect(b.x,b.y,b.w,b.h);
+      ctx.fillStyle='#8a6138'; ctx.fillRect(b.x,b.y,b.w,10);
+    });
+    // Rocks
+    rocks.forEach(function(s){
+      ctx.strokeStyle='#9c7a52'; ctx.lineWidth=14; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2); ctx.stroke();
+      ctx.strokeStyle='#e8c48a'; ctx.lineWidth=5;
+      ctx.beginPath(); ctx.moveTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2); ctx.stroke();
+      ctx.fillStyle='#ffcf5c'; ctx.font='bold 13px Arial'; ctx.textAlign='center';
+      ctx.fillText('↗ BOUNCE', (s.x1+s.x2)/2, (s.y1+s.y2)/2-14);
+    });
+    // Targets
+    targets.forEach(function(t){
+      if(!t.alive) return;
+      var pulse=1+Math.sin(Date.now()/280+t.x)*0.08;
+      ctx.fillStyle=t.color; ctx.beginPath(); ctx.arc(t.x,t.y,t.r*pulse,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(t.x-6,t.y-6,6,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#ffffff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(t.x,t.y,t.r*pulse+4,0,Math.PI*2); ctx.stroke();
+      ctx.fillStyle='#241200'; ctx.font='bold 16px Arial'; ctx.textAlign='center'; ctx.fillText('💎',t.x,t.y+6);
+    });
+    // Launcher
+    ctx.fillStyle='#3a2716'; ctx.fillRect(launcher.x-28,launcher.y,56,26);
+    ctx.fillStyle='#ffb020'; ctx.beginPath(); ctx.arc(launcher.x,launcher.y,26,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#241200'; ctx.font='bold 22px Arial'; ctx.textAlign='center'; ctx.fillText('🪨',launcher.x,launcher.y+8);
+    // Aim guide
+    if(state==='aiming'){
+      var ax=launcher.x, ay=launcher.y, vx=Math.cos(angle), vy=Math.sin(angle);
+      ctx.fillStyle='rgba(255,255,255,.9)';
+      for(var i=1;i<=14;i++){
+        var gx=ax+vx*i*26, gy=ay+vy*i*26+0.09*i*i*4;
+        ctx.beginPath(); ctx.arc(gx,gy,4,0,Math.PI*2); ctx.fill();
+      }
+      ctx.strokeStyle='#ffcf5c'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(launcher.x,launcher.y); ctx.lineTo(launcher.x+Math.cos(angle)*70, launcher.y+Math.sin(angle)*70); ctx.stroke();
+      ctx.fillStyle='#ffcf5c'; ctx.font='bold 14px Arial'; ctx.textAlign='left';
+      ctx.fillText('Power '+Math.round(power*100)+'%  •  Chain bonus: +50 per bounce', 12, 24);
+    }
+    if(hasDrag && state==='aiming'){
+      ctx.strokeStyle='rgba(255,207,92,.7)'; ctx.setLineDash([6,6]); ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(launcher.x,launcher.y); ctx.lineTo(dragX,dragY); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // Boulder
+    if(boulder){
+      ctx.fillStyle='#8a7a66'; ctx.beginPath(); ctx.arc(boulder.x,boulder.y,boulder.r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#cbbfa8'; ctx.beginPath(); ctx.arc(boulder.x-5,boulder.y-5,6,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#241200'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(boulder.x,boulder.y,boulder.r,0,Math.PI*2); ctx.stroke();
+    }
+    // Particles + floaters
+    particles=particles.filter(function(p){return p.life>0;});
+    particles.forEach(function(p){ p.x+=p.vx; p.y+=p.vy; p.vy+=0.12; p.life--; ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); });
+    floaters=floaters.filter(function(f){return f.life>0;});
+    floaters.forEach(function(f){ f.y-=0.7; f.life--; ctx.fillStyle='#ffffff'; ctx.font='bold 16px Arial'; ctx.textAlign='center'; ctx.fillText(f.text,f.x,f.y); });
+  }
+  function loop(){
+    if(state==='flying'){ stepPhysics(); }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: mouse, touch, keyboard
+  document.getElementById('startBtn').addEventListener('click', function(){ audio(); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function(){ audio(); resetGame(); });
+  canvas.addEventListener('mousedown', function(e){ if(state!=='aiming') return; aiming=true; hasDrag=true; var p=canvasPos(e); dragX=p.x; dragY=p.y; aimFromPoint(p); });
+  canvas.addEventListener('mousemove', function(e){ if(!aiming||state!=='aiming') return; var p=canvasPos(e); dragX=p.x; dragY=p.y; aimFromPoint(p); });
+  canvas.addEventListener('mouseup', function(e){ if(!aiming) return; aiming=false; hasDrag=false; throwBoulder(); });
+  canvas.addEventListener('mouseleave', function(){ aiming=false; hasDrag=false; });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); if(state!=='aiming') return; aiming=true; hasDrag=true; var p=canvasPos(e); dragX=p.x; dragY=p.y; aimFromPoint(p); }, {passive:false});
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); if(!aiming||state!=='aiming') return; var p=canvasPos(e); dragX=p.x; dragY=p.y; aimFromPoint(p); }, {passive:false});
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); if(!aiming) return; aiming=false; hasDrag=false; throwBoulder(); }, {passive:false});
+  document.addEventListener('keydown', function(e){
+    if(state==='title' && (e.key==='Enter'||e.key===' ')){ audio(); resetGame(); return; }
+    if(state==='over' && (e.key==='Enter'||e.key===' ')){ audio(); resetGame(); return; }
+    if(state!=='aiming') return;
+    if(e.key==='ArrowUp'){ angle=Math.max(-1.55, angle-0.07); e.preventDefault(); }
+    if(e.key==='ArrowDown'){ angle=Math.min(1.4, angle+0.07); e.preventDefault(); }
+    if(e.key==='ArrowLeft'){ power=Math.max(0.25, power-0.07); e.preventDefault(); }
+    if(e.key==='ArrowRight'){ power=Math.min(1, power+0.07); e.preventDefault(); }
+    if(e.key===' '){ e.preventDefault(); throwBoulder(); }
+    updateHUD();
+  });
+  // Also allow clicking anywhere on stage to start when title is showing via keyboard focus
+  document.addEventListener('click', function(){ audio(); });
+
+  updateHUD();
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

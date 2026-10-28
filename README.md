@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 170
-- **Latest game:** 0170 — Archery Aurora
+- **Total games:** 180
+- **Latest game:** 0180 — Lasso Roundup
 - **Current volume:** 002 (Games 0101 to 0200)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -14,7 +14,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | Volume | Games | Catalog |
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
-| 002 | 0101–0200 (70 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
+| 002 | 0101–0200 (80 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -28,20 +28,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 017
+## Latest batch — Batch 018
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0161 | Glacier Glider | Arcade / Ice Momentum Slider | [Play](./games/game-0161.html) |
-| 0162 | Rune Reactor | Puzzle / Rune Sequence Logic | [Play](./games/game-0162.html) |
-| 0163 | Observatory Operator | Strategy / Telescope Scheduling | [Play](./games/game-0163.html) |
-| 0164 | Bongo Blitz | Rhythm / Drum Beat Timing | [Play](./games/game-0164.html) |
-| 0165 | Orbit Ordeal | Precision / Gravity Slingshot | [Play](./games/game-0165.html) |
-| 0166 | Neon Nightrider | Arcade / Neon Lane Dodger | [Play](./games/game-0166.html) |
-| 0167 | Hex Havoc | Puzzle / Hex Tile Rotation | [Play](./games/game-0167.html) |
-| 0168 | Farmstead Frontier | Strategy / Crop Rotation Simulation | [Play](./games/game-0168.html) |
-| 0169 | Meadow Maestro | Rhythm / Birdsong Conducting | [Play](./games/game-0169.html) |
-| 0170 | Archery Aurora | Precision / Wind Archery | [Play](./games/game-0170.html) |
+| 0171 | Kite Kraze | Arcade / Storm Kite Dodger | [Play](./games/game-0171.html) |
+| 0172 | Locksmith Labyrinth | Puzzle / Key-and-Lock Maze Logic | [Play](./games/game-0172.html) |
+| 0173 | Oasis Operator | Strategy / Desert Oasis Management | [Play](./games/game-0173.html) |
+| 0174 | Polka Party | Rhythm / Accordion Beat Timing | [Play](./games/game-0174.html) |
+| 0175 | Boulder Bounce | Precision / Boulder Ricochet Aim | [Play](./games/game-0175.html) |
+| 0176 | Skateboard Showdown | Arcade / Street Trick Runner | [Play](./games/game-0176.html) |
+| 0177 | Constellation Connector | Puzzle / Star Pattern Logic | [Play](./games/game-0177.html) |
+| 0178 | Submarine Salvage | Strategy / Deep-Sea Salvage Management | [Play](./games/game-0178.html) |
+| 0179 | Choir Conductor | Rhythm / Choir Cue Conducting | [Play](./games/game-0179.html) |
+| 0180 | Lasso Roundup | Precision / Lasso Targeting | [Play](./games/game-0180.html) |
 
 
 ## Quality standard

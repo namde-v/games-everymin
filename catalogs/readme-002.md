@@ -77,6 +77,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0169 | Meadow Maestro | Rhythm / Birdsong Conducting | Keys 1/A etc. echo birds, click/tap bird buttons | [Play](./../games/game-0169.html) |
 | 0170 | Archery Aurora | Precision / Wind Archery | Mouse/touch drag aim, Arrow Keys adjust, Click/Space shoot | [Play](./../games/game-0170.html) |
 
+| 0171 | Kite Kraze | Arcade / Storm Kite Dodger | Arrow Keys / WASD steer, mouse move steer, touch drag steer | [Play](./../games/game-0171.html) |
+| 0172 | Locksmith Labyrinth | Puzzle / Key-and-Lock Maze Logic | Arrow Keys / WASD move, click/tap maze cells, on-screen arrows, R restart | [Play](./../games/game-0172.html) |
+| 0173 | Oasis Operator | Strategy / Desert Oasis Management | Click/tap plots and action buttons, 1-4 select action, Space advance day | [Play](./../games/game-0173.html) |
+| 0174 | Polka Party | Rhythm / Accordion Beat Timing | D/F/J/K lanes, mouse click lanes, touch tap lanes | [Play](./../games/game-0174.html) |
+| 0175 | Boulder Bounce | Precision / Boulder Ricochet Aim | Mouse/touch drag aim and release, Arrow Keys angle/power, Space throw | [Play](./../games/game-0175.html) |
+| 0176 | Skateboard Showdown | Arcade / Street Trick Runner | Space / Up / W jump and trick, Arrow Keys / A-D steer, tap jump, swipe trick | [Play](./../games/game-0176.html) |
+| 0177 | Constellation Connector | Puzzle / Star Pattern Logic | Mouse/touch drag between stars, Arrow Keys select star, Enter connect, C clear | [Play](./../games/game-0177.html) |
+| 0178 | Submarine Salvage | Strategy / Deep-Sea Salvage Management | Click/tap dive cards and controls, 1-4 select dive, Space surface/dive, Arrow Keys navigate | [Play](./../games/game-0178.html) |
+| 0179 | Choir Conductor | Rhythm / Choir Cue Conducting | 1-4 / A/S/D/F cue sections, click/tap section buttons | [Play](./../games/game-0179.html) |
+| 0180 | Lasso Roundup | Precision / Lasso Targeting | Mouse/touch aim, hold to grow loop, release to throw, Arrow Keys aim, Space throw | [Play](./../games/game-0180.html) |
+
 ## Batch notes
 
 - Batch 011: 10 games, produced in one cycle. Volume 002 opened at game 0101.
@@ -86,4 +97,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 015: 10 games, produced in one cycle.
 - Batch 016: 10 games, produced in one cycle.
 - Batch 017: 10 games, produced in one cycle.
+- Batch 018: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

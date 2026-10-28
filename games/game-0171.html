@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Kite Kraze — Storm Kite Dodger</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b1026;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;overflow:hidden}
+  h1{font-size:clamp(26px,5vw,44px);letter-spacing:2px;text-shadow:0 0 18px #38bdf8;margin-bottom:4px}
+  .sub{color:#bae6fd;margin-bottom:10px;text-align:center;max-width:640px;line-height:1.4}
+  #wrap{position:relative;width:min(96vw,720px)}
+  canvas{display:block;width:100%;height:520px;background:linear-gradient(#1e3a8a,#0ea5e9 55%,#f59e0b);border:3px solid #facc15;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.5);touch-action:none}
+  #hud{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;gap:8px;font-weight:800;font-size:15px;text-shadow:1px 1px 3px #000;pointer-events:none}
+  #hud span{background:rgba(0,0,0,.45);padding:6px 10px;border-radius:999px}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(2,6,23,.72);border-radius:16px;padding:20px;gap:12px}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:32px}
+  .overlay p{max-width:520px;line-height:1.55;color:#e2e8f0}
+  .controls{font-size:14px;background:rgba(255,255,255,.12);padding:10px 14px;border-radius:10px}
+  button{background:#facc15;color:#111827;border:0;padding:13px 26px;font-size:18px;font-weight:900;border-radius:999px;cursor:pointer;box-shadow:0 4px 0 #b45309}
+  button:active{transform:translateY(3px);box-shadow:none}
+  button.secondary{background:#e2e8f0}
+  .bar{width:260px;height:12px;background:#334155;border-radius:999px;overflow:hidden}
+  .bar i{display:block;height:100%;background:#38bdf8;width:0%}
+  .legend{font-size:13px;color:#cbd5e1}
+  footer{margin-top:10px;font-size:13px;color:#94a3b8;text-align:center}
+</style>
+</head>
+<body>
+<h1>🪁 KITE KRAZE</h1>
+<p class="sub">Ride the storm! Steer your kite through gusts, dodge lightning clouds, and grab wind tokens before the storm wins.</p>
+<div id="wrap">
+  <canvas id="game" width="720" height="520"></canvas>
+  <div id="hud"><span id="score">Score: 0</span><span id="lives">❤️❤️❤️</span><span id="status">Storm: Calm</span></div>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🪁 Kite Kraze</h2>
+    <p><strong>How to Play:</strong> Your kite drifts with momentum — steer gently, don't fight the wind! Dodge dark lightning clouds and lightning bolts. Collect glowing wind tokens for points and gusts for speed boosts. Survive, collect <strong>25 tokens</strong>, and reach <strong>1500 points</strong> to WIN. Lose all 3 lives and the storm wins.</p>
+    <div class="controls">🎮 <strong>Controls:</strong> Arrow Keys / WASD steer &nbsp;•&nbsp; Mouse move steer &nbsp;•&nbsp; Touch drag steer &nbsp;•&nbsp; Space = gust boost</div>
+    <p class="legend">⚡ Lightning cloud = lose a life &nbsp;•&nbsp; 🌀 Wind token = +60 pts &nbsp;•&nbsp; 💨 Gust = +25 pts + boost &nbsp;•&nbsp; 🌟 Golden token = +150 pts</p>
+    <button id="startBtn">▶ Start Flying</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <div class="bar"><i id="progress"></i></div>
+    <p id="endStats"></p>
+    <button id="restartBtn">↻ Play Again — Instant Restart</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+<footer>0171 • Arcade / Storm Kite Dodger • Fully offline • Keyboard + Mouse + Touch</footer>
+
+<script>
+(function(){
+"use strict";
+var canvas=document.getElementById('game');
+var ctx=canvas.getContext('2d');
+var W=720,H=520;
+var scoreEl=document.getElementById('score');
+var livesEl=document.getElementById('lives');
+var statusEl=document.getElementById('status');
+var titleScreen=document.getElementById('titleScreen');
+var endScreen=document.getElementById('endScreen');
+var endTitle=document.getElementById('endTitle');
+var endText=document.getElementById('endText');
+var endStats=document.getElementById('endStats');
+var progress=document.getElementById('progress');
+
+var state='title'; // title, playing, over, win
+var score=0, lives=3, tokens=0, time=0, level=1, best=0;
+var kite={x:360,y:380,vx:0,vy:0,r:18,boost:0,inv:0};
+var keys={};
+var pointer={x:360,y:380,active:false};
+var tokensArr=[], clouds=[], bolts=[], gusts=[], particles=[], stars=[];
+var wind=0, windTarget=0, gustTimer=0;
+var audioCtx=null, muted=false;
+
+function initAudio(){
+  if(!audioCtx){
+    try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+  }
+  if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+}
+function beep(freq,dur,type,vol){
+  if(!audioCtx||muted) return;
+  try{
+    var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type=type||'sine'; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime+dur);
+  }catch(e){}
+}
+function sfxToken(){ beep(880,0.18,'sine',0.14); setTimeout(function(){beep(1320,0.15,'sine',0.1);},70); }
+function sfxHit(){ beep(160,0.3,'sawtooth',0.16); beep(90,0.3,'square',0.1); }
+function sfxWin(){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){beep(f,0.25,'triangle',0.14);}, i*130); }); }
+
+function reset(){
+  score=0; lives=3; tokens=0; time=0; level=1;
+  kite={x:360,y:380,vx:0,vy:0,r:18,boost:0,inv:0};
+  tokensArr=[]; clouds=[]; bolts=[]; gusts=[]; particles=[];
+  wind=0; windTarget=0; gustTimer=0;
+  stars=[];
+  for(var i=0;i<50;i++){ stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+0.5}); }
+  spawnToken(); spawnToken(); spawnToken();
+  updateHUD();
+}
+function rand(a,b){ return a+Math.random()*(b-a); }
+function spawnToken(){
+  var golden=Math.random()<0.18;
+  tokensArr.push({x:rand(40,W-40),y:rand(50,280),r:golden?16:12,golden:golden,phase:Math.random()*6.28,vy:rand(20,45)});
+}
+function spawnCloud(){
+  var speed=rand(55,95)+level*12;
+  clouds.push({x:Math.random()<0.5?-60:W+60,y:rand(30,300),vx:(Math.random()<0.5?1:-1)*speed,vy:rand(10,30),r:rand(28,44),flash:0,boltTimer:rand(1.2,3)});
+}
+function spawnGust(){
+  gusts.push({x:rand(50,W-50),y:-20,vy:rand(60,110),r:18,phase:Math.random()*6});
+}
+function spawnBolt(x,y){
+  bolts.push({x:x,y:y,vy:420,life:1.2,seg:[]});
+  for(var i=0;i<6;i++){ bolts[bolts.length-1].seg.push(rand(-14,14)); }
+}
+function burst(x,y,color,n){
+  for(var i=0;i<(n||16);i++){
+    particles.push({x:x,y:y,vx:rand(-160,160),vy:rand(-160,60),life:rand(0.4,0.9),max:0.9,color:color});
+  }
+}
+function updateHUD(){
+  scoreEl.textContent='Score: '+score+'  •  Tokens: '+tokens+'/25';
+  livesEl.textContent='❤️'.repeat(Math.max(0,lives)) + (lives===0?'💔':'');
+  var names=['Calm','Breezy','Gusty','Stormy','Tempest','HURRICANE!'];
+  var idx=Math.min(names.length-1,Math.floor(level/1));
+  // level maps roughly: 1 Calm, 2 Breezy, etc.
+  statusEl.textContent='Storm: '+(names[Math.min(5,level-1)]||'Calm')+'  Lv '+level;
+  progress.style.width=Math.min(100,(tokens/25*100))+'%';
+}
+function dist(a,b){ var dx=a.x-b.x,dy=a.y-b.y; return Math.sqrt(dx*dx+dy*dy); }
+
+function startGame(){
+  initAudio(); reset(); state='playing';
+  titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+  beep(440,0.2,'triangle',0.12);
+}
+function endGame(win){
+  state=win?'win':'over';
+  endTitle.textContent=win?'🏆 YOU TAME THE STORM!':'⛈️ GAME OVER — Storm Wins';
+  endText.textContent=win
+    ? 'Brilliant flying! You collected '+tokens+' wind tokens, scored '+score+' points, and rode out the storm like a legend.'
+    : 'Your kite was blown away after '+Math.floor(time)+' seconds. You collected '+tokens+' tokens and scored '+score+' points. Try again — the wind favors the bold!';
+  endStats.textContent='Final Score: '+score+'  •  Tokens: '+tokens+'/25  •  Time: '+Math.floor(time)+'s  •  Level reached: '+level;
+  progress.style.width=Math.min(100,(tokens/25*100))+'%';
+  endScreen.classList.remove('hidden');
+  if(win) sfxWin(); else sfxHit();
+}
+function hit(){
+  if(kite.inv>0) return;
+  lives--; kite.inv=2; kite.boost=0;
+  burst(kite.x,kite.y,'#facc15',22); sfxHit();
+  // knockback
+  kite.vx=rand(-180,180); kite.vy=120;
+  if(lives<=0){ updateHUD(); endGame(false); }
+  updateHUD();
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+document.getElementById('menuBtn').addEventListener('click', function(){
+  state='title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+});
+document.addEventListener('keydown', function(e){
+  keys[e.key.toLowerCase()]=true;
+  if(e.key===' '){ e.preventDefault(); if(state==='playing' && kite.boost<=0){ kite.boost=0.6; beep(300,0.2,'sine',0.1);} }
+  if((e.key==='Enter'||e.key===' ') && (state==='title'||state==='over'||state==='win')){ startGame(); }
+  if(e.key.toLowerCase()==='m'){ muted=!muted; }
+});
+document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()]=false; });
+canvas.addEventListener('mousemove', function(e){
+  var r=canvas.getBoundingClientRect();
+  pointer.x=(e.clientX-r.left)*(W/r.width);
+  pointer.y=(e.clientY-r.top)*(H/r.height);
+  pointer.active=true;
+});
+canvas.addEventListener('mouseenter', function(){ pointer.active=true; });
+canvas.addEventListener('mouseleave', function(){ pointer.active=false; });
+canvas.addEventListener('mousedown', function(e){ initAudio(); if(state==='title') startGame(); });
+canvas.addEventListener('touchstart', function(e){
+  e.preventDefault(); initAudio();
+  var t=e.touches[0], r=canvas.getBoundingClientRect();
+  pointer.x=(t.clientX-r.left)*(W/r.width); pointer.y=(t.clientY-r.top)*(H/r.height); pointer.active=true;
+  if(state==='title') startGame();
+}, {passive:false});
+canvas.addEventListener('touchmove', function(e){
+  e.preventDefault();
+  var t=e.touches[0], r=canvas.getBoundingClientRect();
+  pointer.x=(t.clientX-r.left)*(W/r.width); pointer.y=(t.clientY-r.top)*(H/r.height); pointer.active=true;
+}, {passive:false});
+canvas.addEventListener('touchend', function(e){ e.preventDefault(); pointer.active=false; });
+
+var last=performance.now();
+function loop(now){
+  requestAnimationFrame(loop);
+  var dt=Math.min(0.033,(now-last)/1000); last=now;
+  if(state==='playing'){ update(dt); }
+  draw();
+}
+function update(dt){
+  time+=dt;
+  level=1+Math.floor(time/18)+Math.floor(score/500);
+  windTarget=Math.sin(time*0.7)*90 + Math.sin(time*1.9)*40;
+  wind += (windTarget-wind)*dt*2;
+  gustTimer-=dt;
+  if(gustTimer<=0){ gustTimer=rand(2.5,5); spawnGust(); }
+  if(Math.random()<dt*(0.7+level*0.18) && clouds.length<4+level){ spawnCloud(); }
+  if(tokensArr.length<4 && Math.random()<dt*1.2){ spawnToken(); }
+
+  // Steering: keyboard with momentum / drift
+  var ax=0, ay=0;
+  if(keys['arrowleft']||keys['a']) ax-=1;
+  if(keys['arrowright']||keys['d']) ax+=1;
+  if(keys['arrowup']||keys['w']) ay-=1;
+  if(keys['arrowdown']||keys['s']) ay+=1;
+  // Mouse / touch steering pulls kite toward pointer
+  if(pointer.active && !keys['arrowleft'] && !keys['arrowright'] && !keys['arrowup'] && !keys['arrowdown'] && !keys['a'] && !keys['d'] && !keys['w'] && !keys['s']){
+    var dx=pointer.x-kite.x, dy=pointer.y-kite.y;
+    ax=dx/60; ay=dy/60;
+    // clamp
+    if(ax>1) ax=1; if(ax<-1) ax=-1; if(ay>1) ay=1; if(ay<-1) ay=-1;
+  }
+  var accel=520;
+  if(kite.boost>0){ accel=820; kite.boost-=dt; }
+  kite.vx += ax*accel*dt;
+  kite.vy += ay*accel*dt;
+  // Wind drift + drag = momentum feel
+  kite.vx += wind*dt*0.55;
+  kite.vx *= Math.pow(0.12, dt); // drag-ish decay via pow approximation
+  kite.vy *= Math.pow(0.12, dt);
+  // Actually use gentler drag: recompute slightly
+  kite.x += kite.vx*dt;
+  kite.y += kite.vy*dt;
+  if(kite.x<20){kite.x=20; kite.vx=Math.abs(kite.vx)*0.4;}
+  if(kite.x>W-20){kite.x=W-20; kite.vx=-Math.abs(kite.vx)*0.4;}
+  if(kite.y<20){kite.y=20; kite.vy=Math.abs(kite.vy)*0.4;}
+  if(kite.y>H-20){kite.y=H-20; kite.vy=-Math.abs(kite.vy)*0.4;}
+  if(kite.inv>0) kite.inv-=dt;
+
+  // Tokens
+  for(var i=tokensArr.length-1;i>=0;i--){
+    var t=tokensArr[i]; t.y+=t.vy*dt; t.phase+=dt*4;
+    if(t.y>H+20){ tokensArr.splice(i,1); continue; }
+    if(dist(kite,t)<kite.r+t.r){
+      tokens++; score+= t.golden?150:60;
+      burst(t.x,t.y, t.golden?'#facc15':'#38bdf8',14); sfxToken();
+      tokensArr.splice(i,1); spawnToken();
+    }
+  }
+  // Gusts
+  for(var j=gusts.length-1;j>=0;j--){
+    var g=gusts[j]; g.y+=g.vy*dt; g.phase+=dt*5;
+    if(g.y>H+20){ gusts.splice(j,1); continue; }
+    if(dist(kite,g)<kite.r+g.r){ score+=25; kite.boost=0.8; burst(g.x,g.y,'#e0f2fe',12); beep(500,0.2,'sine',0.1); gusts.splice(j,1); }
+  }
+  // Clouds + bolts
+  for(var k=clouds.length-1;k>=0;k--){
+    var c=clouds[k]; c.x+=c.vx*dt; c.y+=c.vy*dt; c.boltTimer-=dt; c.flash=Math.max(0,c.flash-dt*3);
+    if(c.y>H-80) c.vy=-Math.abs(c.vy);
+    if(c.y<20) c.vy=Math.abs(c.vy);
+    if(c.boltTimer<=0){ c.boltTimer=rand(1.8,3.5); c.flash=1; spawnBolt(c.x,c.y+30); beep(120,0.15,'sawtooth',0.06); }
+    if(c.x<-90||c.x>W+90){ clouds.splice(k,1); continue; }
+    if(dist(kite,c)<kite.r+c.r*0.75 && kite.inv<=0){ hit(); }
+  }
+  for(var b=bolts.length-1;b>=0;b--){
+    var bl=bolts[b]; bl.y+=bl.vy*dt; bl.life-=dt;
+    if(bl.y>H+20||bl.life<=0){ bolts.splice(b,1); continue; }
+    if(Math.abs(kite.x-bl.x)<18 && Math.abs(kite.y-bl.y)<28 && kite.inv<=0){ hit(); bolts.splice(b,1); }
+  }
+  // Particles
+  for(var p=particles.length-1;p>=0;p--){
+    var pt=particles[p]; pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.life-=dt;
+    if(pt.life<=0) particles.splice(p,1);
+  }
+  // Score trickle for survival + win check
+  score+=Math.floor(dt*4);
+  if(tokens>=25 && score>=1500){ updateHUD(); endGame(true); return; }
+  if(tokens>=25 && score<1500){
+    // keep playing until score catches up via survival trickle
+  }
+  updateHUD();
+}
+
+function draw(){
+  // Sky
+  var grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#1e1b4b'); grad.addColorStop(0.45,'#0369a1'); grad.addColorStop(1,'#f59e0b');
+  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+  // Stars / clouds backdrop
+  ctx.fillStyle='rgba(255,255,255,0.7)';
+  stars.forEach(function(s){ ctx.globalAlpha=0.5; ctx.fillRect(s.x,s.y,s.s,s.s); });
+  ctx.globalAlpha=1;
+  // Distant hills
+  ctx.fillStyle='#166534'; ctx.beginPath(); ctx.moveTo(0,470); ctx.quadraticCurveTo(180,430,360,470); ctx.quadraticCurveTo(540,500,720,450); ctx.lineTo(720,520); ctx.lineTo(0,520); ctx.fill();
+  // Wind streaks
+  ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=2;
+  for(var i=0;i<8;i++){
+    var y=((i*67+Math.floor(time*120))%H);
+    var xoff=((time*80+i*90)%(W+200))-100;
+    ctx.beginPath(); ctx.moveTo(xoff,y); ctx.lineTo(xoff+60+wind*0.2,y); ctx.stroke();
+  }
+  // Tokens
+  tokensArr.forEach(function(t){
+    var bob=Math.sin(t.phase)*4;
+    ctx.save(); ctx.translate(t.x,t.y+bob);
+    ctx.fillStyle=t.golden?'#facc15':'#38bdf8';
+    ctx.beginPath(); ctx.arc(0,0,t.r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(t.golden?'★':'🌀',0,1);
+    ctx.restore();
+  });
+  // Gusts
+  gusts.forEach(function(g){
+    ctx.save(); ctx.translate(g.x,g.y+Math.sin(g.phase)*3);
+    ctx.fillStyle='rgba(224,242,254,0.9)'; ctx.font='28px sans-serif'; ctx.textAlign='center'; ctx.fillText('💨',0,10);
+    ctx.restore();
+  });
+  // Clouds
+  clouds.forEach(function(c){
+    ctx.save(); ctx.translate(c.x,c.y);
+    ctx.fillStyle=c.flash>0.4?'#fef08a':'#334155';
+    ctx.beginPath();
+    ctx.arc(-18,0,20,0,Math.PI*2); ctx.arc(0,-10,26,0,Math.PI*2); ctx.arc(20,0,20,0,Math.PI*2); ctx.arc(0,8,22,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle='#facc15'; ctx.font='20px sans-serif'; ctx.textAlign='center'; ctx.fillText('⚡',0,6);
+    ctx.restore();
+  });
+  // Bolts
+  bolts.forEach(function(bl){
+    ctx.strokeStyle='#fde047'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(bl.x,bl.y-30);
+    var yy=bl.y-30;
+    bl.seg.forEach(function(off){ yy+=10; ctx.lineTo(bl.x+off,yy); });
+    ctx.stroke();
+  });
+  // Kite string
+  if(state!=='title'){
+    ctx.strokeStyle='rgba(255,255,255,0.8)'; ctx.lineWidth=1.5; ctx.beginPath();
+    ctx.moveTo(kite.x,kite.y+14);
+    ctx.quadraticCurveTo(kite.x - wind*0.3, kite.y+70, kite.x - wind*0.5, H-10);
+    ctx.stroke();
+  }
+  // Kite (only when playing / ended, blink when invulnerable)
+  if(state!=='title' && !(kite.inv>0 && Math.floor(time*12)%2===0)){
+    ctx.save(); ctx.translate(kite.x,kite.y); ctx.rotate(kite.vx*0.0015);
+    // diamond kite
+    ctx.fillStyle='#ef4444'; ctx.beginPath(); ctx.moveTo(0,-22); ctx.lineTo(18,0); ctx.lineTo(0,22); ctx.lineTo(-18,0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#facc15'; ctx.beginPath(); ctx.moveTo(0,-22); ctx.lineTo(18,0); ctx.lineTo(0,0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#3b82f6'; ctx.beginPath(); ctx.moveTo(-18,0); ctx.lineTo(0,0); ctx.lineTo(0,22); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 13px sans-serif'; ctx.textAlign='center'; ctx.fillText('🪁',0,5);
+    // tail
+    ctx.strokeStyle='#facc15'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,22);
+    for(var ti=1;ti<=3;ti++){ ctx.lineTo(Math.sin(time*6+ti)*6,22+ti*12); }
+    ctx.stroke();
+    ctx.restore();
+  }
+  // Particles
+  particles.forEach(function(pt){
+    ctx.globalAlpha=Math.max(0,pt.life/pt.max);
+    ctx.fillStyle=pt.color; ctx.beginPath(); ctx.arc(pt.x,pt.y,3,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1;
+  // Title hint on canvas when title
+  if(state==='title'){
+    ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.font='bold 22px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('🪁  Catch the wind — dodge the storm!  ⛈️', W/2, 470);
+  }
+  if(state==='playing' && kite.boost>0){
+    ctx.fillStyle='#fef08a'; ctx.font='bold 16px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('💨 GUST BOOST!', W/2, 40);
+  }
+}
+reset();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

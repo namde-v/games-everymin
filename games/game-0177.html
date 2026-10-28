@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Constellation Connector — Game 0177</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050816; color: #eef2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 12px; overflow-x: hidden; }
+  .wrap { width: 100%; max-width: 880px; }
+  h1 { text-align: center; font-size: clamp(1.4rem, 4vw, 2.2rem); letter-spacing: 0.04em; margin-bottom: 6px; text-shadow: 0 0 18px #6d8dff; }
+  .sub { text-align: center; color: #aab4e8; margin-bottom: 10px; font-size: 0.95rem; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; background: #0d1430; border: 1px solid #2a3a7a; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; font-weight: 600; }
+  #hud span { white-space: nowrap; }
+  #hud .lives { color: #ff8fa3; }
+  #hud .score { color: #ffd166; }
+  #canvasBox { position: relative; background: radial-gradient(circle at 30% 20%, #16224f 0%, #070b1e 55%, #03040c 100%); border: 1px solid #2a3a7a; border-radius: 14px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 22px; text-align: center; background: rgba(3, 5, 16, 0.86); }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: clamp(1.5rem, 5vw, 2.4rem); }
+  .overlay p { color: #c3cbee; max-width: 560px; line-height: 1.55; }
+  .howto { background: #101a3d; border: 1px solid #33448a; border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 0.95rem; line-height: 1.6; }
+  .howto b { color: #ffd166; }
+  button { background: #ffd166; color: #131313; border: none; border-radius: 999px; padding: 12px 26px; font-size: 1.05rem; font-weight: 800; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #3b4fa8; color: #fff; box-shadow: 0 4px 0 #24336e; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  #msg { text-align: center; min-height: 1.4em; margin-top: 8px; color: #ffd166; font-weight: 700; }
+  #clue { text-align: center; margin-top: 6px; color: #c3cbee; }
+  #clue b { color: #8ecbff; }
+  .controls { text-align: center; color: #8d97c4; font-size: 0.85rem; margin-top: 8px; line-height: 1.5; }
+  .shake { animation: shake 0.3s; }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>✦ Constellation Connector ✦</h1>
+  <p class="sub">Game 0177 &middot; Puzzle / Star Pattern Logic</p>
+  <div id="hud" aria-live="polite">
+    <span class="score">Score: <span id="score">0</span></span>
+    <span>Lives: <span id="lives" class="lives">♥ ♥ ♥</span></span>
+    <span>Level: <span id="level">1 / 8</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+    <span>Stars: <span id="progress">0 / 3</span></span>
+  </div>
+  <div id="canvasBox">
+    <canvas id="game" width="840" height="540"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Constellation Connector</h2>
+      <p>Draw the hidden constellation, star by star. Find the right pattern, never cross a line, and never reuse a star.</p>
+      <div class="howto">
+        <b>How to Play:</b><br>
+        • Mouse / touch: press on a star and drag through the stars in order, or click them one by one.<br>
+        • Arrow Keys: move the selection ring. Enter: connect the selected star.<br>
+        • C: clear your current line. A faint golden glow marks a helpful hint star.<br>
+        • Wrong star or crossed line? The line shakes and you lose a life. Clear all 8 constellations to win!
+      </div>
+      <div class="row">
+        <button id="startBtn">▶ Start Game</button>
+        <button id="howBtn" class="secondary">How to Play</button>
+      </div>
+      <p id="howExtra" style="display:none;">Later levels add decoy stars and mirrored patterns — the shape may be flipped! Watch the clue name, count the stars, and trust the shape, not just the position. You have 3 lives per run. Good luck, stargazer.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <div class="row">
+        <button id="restartBtn">↻ Play Again</button>
+      </div>
+    </div>
+  </div>
+  <div id="clue">Clue: <b id="clueText">—</b> &nbsp;|&nbsp; Shape stars: <b id="clueCount">—</b></div>
+  <div id="msg"></div>
+  <p class="controls">Controls: Mouse / touch drag between stars &middot; Arrow Keys select star &middot; Enter connect &middot; C clear &middot; R restart after game ends</p>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var statusEl = document.getElementById('status');
+  var progressEl = document.getElementById('progress');
+  var clueTextEl = document.getElementById('clueText');
+  var clueCountEl = document.getElementById('clueCount');
+  var msgEl = document.getElementById('msg');
+  var box = document.getElementById('canvasBox');
+
+  // Audio: procedural Web Audio, created only after user interaction.
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; } }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(); var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function goodSound() { tone(660, 0.15, 'sine', 0.12); setTimeout(function(){ tone(880, 0.2, 'sine', 0.12); }, 90); }
+  function badSound() { tone(160, 0.25, 'sawtooth', 0.08); }
+  function winSound() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, 'triangle', 0.14); }, i * 130); }); }
+
+  // Levels: stars are [x, y]; pattern is the order to connect.
+  // Later levels include decoys and mirrored shapes (note the mirrored flags in clues).
+  var LEVELS = [
+    { name: 'The Little Triangle', shape: 'Triangle — 3 bright stars', stars: [[200,180],[420,120],[360,380],[620,300],[120,430]], pattern: [0,1,2] },
+    { name: 'The Square of Dawn', shape: 'Square — 4 stars, corners only', stars: [[220,150],[560,150],[560,390],[220,390],[420,260],[680,250]], pattern: [0,1,2,3] },
+    { name: 'The Great W', shape: 'W shape — 5 stars, zig-zag down and up', stars: [[150,160],[280,360],[420,180],[560,360],[690,160],[420,420],[120,420]], pattern: [0,1,2,3,4] },
+    { name: 'The Mirrored Arrow', shape: 'Mirrored arrow — 5 stars pointing left', stars: [[620,140],[420,260],[640,380],[300,140],[300,380],[180,260]], pattern: [0,1,2,3,4,5].slice(0,5) },
+    { name: 'The Hunter Bow', shape: 'Curved bow — 5 stars in an arc', stars: [[180,380],[260,200],[430,140],[600,200],[690,380],[430,300],[150,250]], pattern: [0,1,2,3,4] },
+    { name: 'The Hexagon Crown', shape: 'Hexagon — 6 stars around a centre decoy', stars: [[420,110],[620,220],[620,380],[420,470],[220,380],[220,220],[420,290]], pattern: [0,1,2,3,4,5] },
+    { name: 'The Seven Sisters Path', shape: 'Dipper-like path — 7 stars, no crossings', stars: [[140,180],[260,140],[380,180],[480,260],[580,340],[680,330],[730,220],[320,380]], pattern: [0,1,2,3,4,5,6] },
+    { name: 'The Mirrored Crown', shape: 'Mirrored crown — 7 stars, zig-zag peaks', stars: [[120,340],[200,180],[300,320],[400,170],[500,320],[600,170],[700,320],[420,430]], pattern: [0,1,2,3,4,5,6] }
+  ];
+  // Level 4 pattern fix: use a clean non-crossing arrow order.
+  LEVELS[3].pattern = [3,5,0,1,2];
+  // Level 8 is a 7-star crown; clue count comes from pattern length, so it stays consistent.
+
+  var state = 'title'; // title | playing | won | over
+  var levelIndex = 0, score = 0, lives = 3;
+  var path = []; // indices into current level stars
+  var dragging = false, dragPos = null, selected = 0, flashStar = -1, flashUntil = 0, time = 0;
+  var bgStars = [];
+  for (var i = 0; i < 90; i++) { bgStars.push({ x: Math.random() * 840, y: Math.random() * 540, r: Math.random() * 1.6 + 0.4, p: Math.random() * Math.PI * 2 }); }
+
+  function level() { return LEVELS[levelIndex]; }
+  function setMsg(t) { msgEl.textContent = t; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives > 0 ? '♥ '.repeat(lives).trim() : '—';
+    levelEl.textContent = (levelIndex + 1) + ' / ' + LEVELS.length;
+    progressEl.textContent = path.length + ' / ' + level().pattern.length;
+    clueTextEl.textContent = level().name + ' — ' + level().shape;
+    clueCountEl.textContent = level().pattern.length;
+    statusEl.textContent = state === 'playing' ? 'Playing' : state === 'won' ? 'You Win!' : state === 'over' ? 'Game Over' : 'Ready';
+  }
+  function startGame() {
+    ensureAudio(); levelIndex = 0; score = 0; lives = 3; path = []; selected = 0;
+    state = 'playing'; titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    setMsg('Find the first star of ' + level().name + '. Follow the golden hint glow if you get stuck.');
+    updateHUD(); goodSound();
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    document.getElementById('endTitle').textContent = won ? '✦ You Win! ✦' : 'Game Over';
+    document.getElementById('endText').textContent = won
+      ? 'You connected all ' + LEVELS.length + ' constellations! Final score: ' + score + '. The night sky is complete.'
+      : 'You ran out of lives on ' + level().name + '. Final score: ' + score + '. Try again — the stars are waiting.';
+    endScreen.classList.remove('hidden'); updateHUD();
+    if (won) winSound(); else badSound();
+  }
+  function loseLife(reason) {
+    lives--; path = []; flashStar = -1; badSound();
+    box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+    setMsg(reason + ' You lose a life. ' + (lives > 0 ? 'Try again!' : ''));
+    updateHUD();
+    if (lives <= 0) { setTimeout(function(){ endGame(false); }, 450); }
+  }
+  function segIntersect(a, b, c, d) {
+    function orient(p, q, r) { var v = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y); return v === 0 ? 0 : (v > 0 ? 1 : 2); }
+    function onSeg(p, q, r) { return q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y); }
+    var o1 = orient(a, b, c), o2 = orient(a, b, d), o3 = orient(c, d, a), o4 = orient(c, d, b);
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && onSeg(a, c, b)) return true;
+    if (o2 === 0 && onSeg(a, d, b)) return true;
+    if (o3 === 0 && onSeg(c, a, d)) return true;
+    if (o4 === 0 && onSeg(c, b, d)) return true;
+    return false;
+  }
+  function crossesExisting(fromIdx, toIdx) {
+    var lv = level(); var a = { x: lv.stars[fromIdx][0], y: lv.stars[fromIdx][1] }; var b = { x: lv.stars[toIdx][0], y: lv.stars[toIdx][1] };
+    for (var i = 0; i + 1 < path.length; i++) {
+      var c = { x: lv.stars[path[i]][0], y: lv.stars[path[i]][1] }; var d = { x: lv.stars[path[i + 1]][0], y: lv.stars[path[i + 1]][1] };
+      if (path[i] === fromIdx || path[i + 1] === fromIdx) continue; // shared endpoint is fine
+      if (segIntersect(a, b, c, d)) return true;
+    }
+    return false;
+  }
+  function tryConnect(idx) {
+    if (state !== 'playing') return;
+    ensureAudio();
+    var lv = level();
+    if (path.indexOf(idx) !== -1) { setMsg('That star is already used — pick a fresh star.'); tone(300, 0.12, 'square', 0.06); return; }
+    var expected = lv.pattern[path.length];
+    if (idx !== expected) {
+      flashStar = idx; flashUntil = time + 600;
+      loseLife('Wrong star! That is not the next star in ' + lv.name + '.');
+      return;
+    }
+    if (path.length > 0 && crossesExisting(path[path.length - 1], idx)) {
+      flashStar = idx; flashUntil = time + 600;
+      setMsg('Crossed lines are not allowed! Your line stays as it was.'); badSound();
+      box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+      return;
+    }
+    path.push(idx); selected = idx; goodSound(); score += 10; updateHUD();
+    if (path.length === lv.pattern.length) {
+      score += 100 * (levelIndex + 1);
+      setMsg('Constellation complete! +' + (100 * (levelIndex + 1)) + ' bonus.');
+      updateHUD(); winSound();
+      setTimeout(function() {
+        if (state !== 'playing') return;
+        levelIndex++;
+        if (levelIndex >= LEVELS.length) { endGame(true); }
+        else { path = []; selected = 0; setMsg('Level ' + (levelIndex + 1) + ': ' + level().name + '. ' + level().shape + '.'); updateHUD(); }
+      }, 900);
+    } else {
+      setMsg('Good! ' + path.length + ' of ' + lv.pattern.length + ' stars connected.');
+    }
+  }
+  function starAt(x, y) {
+    var lv = level();
+    for (var i = 0; i < lv.stars.length; i++) {
+      var dx = x - lv.stars[i][0], dy = y - lv.stars[i][1];
+      if (dx * dx + dy * dy < 32 * 32) return i;
+    }
+    return -1;
+  }
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0));
+    var cy = (e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0));
+    return { x: (cx - r.left) * (canvas.width / r.width), y: (cy - r.top) * (canvas.height / r.height) };
+  }
+
+  // Pointer: mouse + touch drag / click.
+  canvas.addEventListener('pointerdown', function(e) {
+    if (state !== 'playing') return; ensureAudio();
+    var p = canvasPos(e); var idx = starAt(p.x, p.y);
+    if (idx !== -1) { dragging = true; dragPos = p; selected = idx; tryConnect(idx); }
+  });
+  canvas.addEventListener('pointermove', function(e) {
+    if (state !== 'playing') return;
+    var p = canvasPos(e); dragPos = dragging ? p : null;
+    if (dragging) { var idx = starAt(p.x, p.y); if (idx !== -1 && path[path.length - 1] !== idx) { selected = idx; tryConnect(idx); } }
+  });
+  function endDrag(e) { dragging = false; dragPos = null; }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerleave', endDrag);
+
+  // Keyboard: arrows select, Enter connects, C clears, R restarts from end screen.
+  document.addEventListener('keydown', function(e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startGame(); return; }
+    if (state !== 'playing') { if (e.key === 'r' || e.key === 'R') startGame(); return; }
+    var lv = level();
+    if (e.key === 'c' || e.key === 'C') { path = []; setMsg('Line cleared. Start again from the first star.'); updateHUD(); return; }
+    if (e.key === 'Enter') { ensureAudio(); tryConnect(selected); return; }
+    var dx = 0, dy = 0;
+    if (e.key === 'ArrowLeft') dx = -1; else if (e.key === 'ArrowRight') dx = 1;
+    else if (e.key === 'ArrowUp') dy = -1; else if (e.key === 'ArrowDown') dy = 1; else return;
+    e.preventDefault();
+    var cur = lv.stars[selected]; var best = selected, bestScore = Infinity;
+    for (var i = 0; i < lv.stars.length; i++) {
+      if (i === selected) continue;
+      var sx = lv.stars[i][0] - cur[0], sy = lv.stars[i][1] - cur[1];
+      if (dx !== 0 && Math.sign(sx) !== dx) continue;
+      if (dy !== 0 && Math.sign(sy) !== dy) continue;
+      var d = sx * sx + sy * sy; if (d < bestScore) { bestScore = d; best = i; }
+    }
+    selected = best; tone(440, 0.06, 'sine', 0.05);
+  });
+  // Mouse click fallback (also covers devices without pointer drag).
+  canvas.addEventListener('click', function(e) {
+    if (state !== 'playing' || dragging) return;
+    var p = canvasPos(e); var idx = starAt(p.x, p.y);
+    if (idx !== -1) { selected = idx; tryConnect(idx); }
+  });
+  // Touch events explicitly, in addition to pointer events.
+  canvas.addEventListener('touchstart', function(e) { if (state === 'playing') { e.preventDefault(); ensureAudio(); } }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { if (state === 'playing') e.preventDefault(); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function() {
+    var el = document.getElementById('howExtra');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  });
+
+  function draw() {
+    time += 16;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Background stars.
+    for (var i = 0; i < bgStars.length; i++) {
+      var s = bgStars[i]; var tw = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(time / 500 + s.p));
+      ctx.globalAlpha = tw * 0.8; ctx.fillStyle = '#cdd7ff';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    var lv = level();
+    // Hint glow on the next correct star.
+    if (state === 'playing' && path.length < lv.pattern.length) {
+      var hint = lv.stars[lv.pattern[path.length]];
+      var hg = ctx.createRadialGradient(hint[0], hint[1], 2, hint[0], hint[1], 46);
+      hg.addColorStop(0, 'rgba(255, 209, 102, 0.45)'); hg.addColorStop(1, 'rgba(255, 209, 102, 0)');
+      ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(hint[0], hint[1], 46, 0, Math.PI * 2); ctx.fill();
+    }
+    // Connected lines.
+    if (path.length > 1) {
+      ctx.strokeStyle = '#8ecbff'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.shadowColor = '#6d8dff'; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.moveTo(lv.stars[path[0]][0], lv.stars[path[0]][1]);
+      for (var j = 1; j < path.length; j++) ctx.lineTo(lv.stars[path[j]][0], lv.stars[path[j]][1]);
+      ctx.stroke(); ctx.shadowBlur = 0;
+    }
+    // Drag preview line.
+    if (dragging && dragPos && path.length > 0) {
+      var last = lv.stars[path[path.length - 1]];
+      ctx.strokeStyle = 'rgba(142, 203, 255, 0.6)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+      ctx.beginPath(); ctx.moveTo(last[0], last[1]); ctx.lineTo(dragPos.x, dragPos.y); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // Stars.
+    for (var k = 0; k < lv.stars.length; k++) {
+      var st = lv.stars[k]; var used = path.indexOf(k) !== -1;
+      var isHint = state === 'playing' && path.length < lv.pattern.length && lv.pattern[path.length] === k;
+      var tw2 = 0.7 + 0.3 * Math.sin(time / 400 + k);
+      ctx.fillStyle = used ? '#ffd166' : (flashStar === k && time < flashUntil ? '#ff5d73' : (isHint ? '#ffe9a3' : '#eef2ff'));
+      ctx.shadowColor = isHint ? '#ffd166' : '#ffffff'; ctx.shadowBlur = isHint ? 18 : 8 * tw2;
+      ctx.beginPath(); ctx.arc(st[0], st[1], used ? 11 : 9, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+      // Sparkle cross.
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(st[0] - 14, st[1]); ctx.lineTo(st[0] + 14, st[1]); ctx.moveTo(st[0], st[1] - 14); ctx.lineTo(st[0], st[1] + 14); ctx.stroke();
+      if (selected === k && state === 'playing') {
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.arc(st[0], st[1], 22, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+    // Title-screen dim already handled by overlay; still draw the first level behind it.
+    requestAnimationFrame(draw);
+  }
+  updateHUD();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

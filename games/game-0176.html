@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Skateboard Showdown</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#14101f; color:#fff; font-family:Arial,Helvetica,sans-serif; display:flex; justify-content:center; align-items:center; min-height:100vh; overflow:hidden; }
+  #wrap { position:relative; width:min(96vw,900px); }
+  canvas { display:block; width:100%; height:540px; background:linear-gradient(#2b1e4d,#14101f); border:3px solid #ff5da2; border-radius:14px; touch-action:none; }
+  #hud { position:absolute; top:12px; left:14px; right:14px; display:flex; justify-content:space-between; font-weight:bold; font-size:18px; text-shadow:2px 2px 0 #000; pointer-events:none; }
+  #hud span { background:rgba(0,0,0,.45); padding:6px 12px; border-radius:20px; }
+  #combo { position:absolute; top:64px; left:50%; transform:translateX(-50%); font-size:26px; font-weight:bold; color:#ffe14d; text-shadow:2px 2px 0 #000; pointer-events:none; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:rgba(10,6,20,.88); border-radius:14px; text-align:center; padding:24px; }
+  .hidden { display:none !important; }
+  h1 { font-size:52px; color:#ff5da2; text-shadow:3px 3px 0 #2b1e4d; letter-spacing:2px; }
+  h1 small { display:block; font-size:20px; color:#ffe14d; letter-spacing:4px; margin-top:6px; }
+  p { max-width:560px; line-height:1.55; font-size:16px; color:#e8e0ff; }
+  button { cursor:pointer; border:0; border-radius:30px; padding:14px 34px; font-size:20px; font-weight:bold; background:#ff5da2; color:#fff; box-shadow:0 5px 0 #b32a6a; }
+  button:active { transform:translateY(3px); box-shadow:0 2px 0 #b32a6a; }
+  button.secondary { background:#6c5cff; box-shadow:0 5px 0 #3d34a8; }
+  .keys { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .keys span { background:#2b1e4d; border:1px solid #6c5cff; padding:6px 12px; border-radius:8px; font-size:14px; }
+  #trickbar { width:280px; height:18px; background:#333; border-radius:10px; overflow:hidden; }
+  #trickfill { height:100%; width:0%; background:#ffe14d; }
+  @media (max-width:600px){ canvas{height:440px} h1{font-size:38px} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="540"></canvas>
+  <div id="hud"><span id="score">Score: 0</span><span id="lives">❤❤❤</span><span id="status">READY</span></div>
+  <div id="combo"></div>
+
+  <div id="title" class="screen">
+    <h1>SKATEBOARD<small>SHOWDOWN</small></h1>
+    <p><strong>How to Play:</strong> Ride the street, jump gaps, grind rails and land timed tricks. Press jump just as you leave a rail or crest a ramp for a <b>Perfect Trick</b> and a score multiplier. Miss a gap or hit a barrier and you lose a life. Reach <b>3000 points</b> to win!</p>
+    <div class="keys"><span>Space / Up / W — Jump &amp; Trick</span><span>A / D or ← → — Steer</span><span>Tap — Jump</span><span>Swipe — Trick</span></div>
+    <button id="startBtn">▶ START RUN</button>
+    <p>Grind a rail to build your trick meter. A full meter unlocks a mega trick worth big points!</p>
+  </div>
+
+  <div id="over" class="screen hidden">
+    <h1 id="overTitle">GAME OVER</h1>
+    <p id="overText"></p>
+    <div id="trickbar"><div id="trickfill"></div></div>
+    <p id="finalScore"></p>
+    <button id="restartBtn">↻ RESTART INSTANTLY</button>
+  </div>
+</div>
+<script>
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const statusEl = document.getElementById('status');
+const comboEl = document.getElementById('combo');
+const titleEl = document.getElementById('title');
+const overEl = document.getElementById('over');
+const overTitle = document.getElementById('overTitle');
+const overText = document.getElementById('overText');
+const finalScore = document.getElementById('finalScore');
+
+let state = 'title'; // title | playing | over
+let score = 0, lives = 3, dist = 0, speed = 5.2;
+let player = { x: 140, y: 400, vy: 0, grounded: true, trick: 0, lane: 0 };
+let obstacles = [], rails = [], gaps = [], particles = [];
+let meter = 0, mult = 1, combo = 0, comboTimer = 0;
+let keys = {}, frame = 0, trickFlash = 0;
+let audioCtx = null;
+
+function beep(freq, dur, type) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type || 'square'; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function initAudio() {
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+function reset() {
+  score = 0; lives = 3; dist = 0; speed = 5.2;
+  player = { x: 140, y: 400, vy: 0, grounded: true, trick: 0, lane: 0 };
+  obstacles = []; rails = []; gaps = []; particles = [];
+  meter = 0; mult = 1; combo = 0; comboTimer = 0; frame = 0;
+  spawnRow(900); spawnRow(1300);
+}
+function spawnRow(x) {
+  const kind = Math.floor(Math.random() * 3);
+  if (kind === 0) obstacles.push({ x: x, w: 42, h: 46, y: 404 });
+  else if (kind === 1) rails.push({ x: x, w: 190, grinding: false });
+  else gaps.push({ x: x, w: 130 });
+}
+function jump() {
+  if (state !== 'playing') return;
+  initAudio();
+  if (player.grounded) {
+    player.vy = -15; player.grounded = false; beep(320, 0.15, 'square');
+    // Trick bonus if jumping near a rail end / ramp crest
+    const nearRail = rails.some(r => Math.abs((r.x + r.w) - player.x) < 90);
+    if (nearRail) { doTrick(true); }
+  } else {
+    doTrick(false);
+  }
+}
+function doTrick(perfect) {
+  player.trick = 14;
+  const pts = perfect ? 150 * mult : 60 * mult;
+  score += pts; combo++; comboTimer = 120; meter = Math.min(100, meter + (perfect ? 35 : 15));
+  trickFlash = 20;
+  comboEl.textContent = perfect ? '★ PERFECT TRICK! +' + pts : 'Trick! +' + pts;
+  beep(perfect ? 880 : 620, 0.2, 'triangle');
+  if (meter >= 100) { score += 400; comboEl.textContent = '🔥 MEGA TRICK! +400'; meter = 0; beep(1200, 0.35, 'sawtooth'); }
+  if (combo >= 3) mult = Math.min(5, 1 + Math.floor(combo / 3));
+}
+function crash(msg) {
+  lives--; combo = 0; mult = 1; statusEl.textContent = msg;
+  beep(120, 0.4, 'sawtooth');
+  for (let i = 0; i < 24; i++) particles.push({ x: player.x + 20, y: player.y + 10, vx: (Math.random()-0.5)*8, vy: -Math.random()*6, life: 30 });
+  if (lives <= 0) endGame(false);
+  else { player.y = 400; player.vy = 0; player.grounded = true; }
+}
+function endGame(win) {
+  state = 'over';
+  overTitle.textContent = win ? '🏆 YOU WIN!' : '💥 GAME OVER';
+  overText.textContent = win ? 'You shredded the street and hit the target score!' : 'Your run wiped out. Grab the board and go again!';
+  finalScore.textContent = 'Final Score: ' + score + '  •  Distance: ' + Math.floor(dist) + 'm  •  Multiplier reached: x' + mult;
+  overEl.classList.remove('hidden');
+  beep(win ? 880 : 160, 0.5, 'triangle');
+}
+function startGame() {
+  initAudio(); reset(); state = 'playing';
+  titleEl.classList.add('hidden'); overEl.classList.add('hidden');
+  statusEl.textContent = 'RIDING!';
+}
+function update() {
+  if (state !== 'playing') return;
+  frame++; dist += speed * 0.06;
+  if (speed < 11) speed += 0.003;
+  if (keys['ArrowLeft'] || keys['a'] || keys['A']) player.x = Math.max(40, player.x - 4);
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) player.x = Math.min(780, player.x + 4);
+
+  // gravity
+  player.vy += 0.85; player.y += player.vy;
+  if (player.y >= 400) { player.y = 400; player.vy = 0; if (!player.grounded) { player.grounded = true; if (player.trick > 0) { score += 25; } } }
+  if (player.trick > 0) player.trick--;
+
+  // grinding
+  let grinding = false;
+  rails.forEach(r => {
+    r.x -= speed;
+    if (player.x + 30 > r.x && player.x < r.x + r.w && player.y >= 395) { grinding = true; meter = Math.min(100, meter + 0.4); score += 1; }
+  });
+  if (grinding) statusEl.textContent = 'GRINDING! Meter ' + Math.floor(meter) + '%';
+  else if (frame % 60 === 0) statusEl.textContent = 'RIDING! x' + mult;
+
+  obstacles.forEach(o => { o.x -= speed; });
+  gaps.forEach(g => { g.x -= speed; });
+
+  // collisions
+  obstacles.forEach(o => {
+    if (player.grounded && player.x + 34 > o.x && player.x < o.x + o.w) { o.x = -999; crash('CRASH! Barrier hit'); }
+  });
+  gaps.forEach(g => {
+    if (player.grounded && player.x + 30 > g.x && player.x < g.x + g.w) { g.x = -999; crash('WIPEOUT! Fell in gap'); }
+  });
+
+  obstacles = obstacles.filter(o => o.x > -80);
+  rails = rails.filter(r => r.x + r.w > -50);
+  gaps = gaps.filter(g => g.x + g.w > -50);
+  const last = Math.max(...obstacles.map(o=>o.x), ...rails.map(r=>r.x+r.w), ...gaps.map(g=>g.x+g.w), 0);
+  if (last < 700) spawnRow(950 + Math.random() * 250);
+
+  if (comboTimer > 0) { comboTimer--; if (comboTimer === 0) { combo = 0; mult = 1; comboEl.textContent = ''; } }
+  if (trickFlash > 0) trickFlash--;
+  particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.3; p.life--; });
+  particles = particles.filter(p => p.life > 0);
+
+  if (score >= 3000) endGame(true);
+  scoreEl.textContent = 'Score: ' + score;
+  livesEl.textContent = '❤'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+}
+function draw() {
+  ctx.clearRect(0, 0, 900, 540);
+  // skyline
+  ctx.fillStyle = '#1d1533'; ctx.fillRect(0, 0, 900, 340);
+  ctx.fillStyle = '#241a40';
+  for (let i = 0; i < 9; i++) { const bx = (i * 130 - (dist * 8 % 130)); ctx.fillRect(bx, 180 + (i % 3) * 30, 90, 200); ctx.fillStyle = '#ffe14d'; ctx.fillRect(bx + 15, 200 + (i % 3) * 30, 12, 12); ctx.fillStyle = '#241a40'; }
+  // street
+  ctx.fillStyle = '#3a2f55'; ctx.fillRect(0, 380, 900, 160);
+  ctx.fillStyle = '#ff5da2'; ctx.fillRect(0, 380, 900, 6);
+  ctx.fillStyle = '#ffe14d';
+  for (let i = 0; i < 10; i++) ctx.fillRect((i * 110 - (dist * 30 % 110)), 465, 50, 5);
+  // gaps
+  gaps.forEach(g => { ctx.fillStyle = '#0a0614'; ctx.fillRect(g.x, 386, g.w, 154); ctx.fillStyle = '#ff5da2'; ctx.fillText('GAP!', g.x + g.w/2 - 15, 420); });
+  // rails
+  rails.forEach(r => { ctx.fillStyle = '#c0c8e8'; ctx.fillRect(r.x, 398, r.w, 6); ctx.fillStyle = '#6c5cff'; for (let x = r.x; x < r.x + r.w; x += 30) ctx.fillRect(x, 404, 5, 20); });
+  // obstacles
+  obstacles.forEach(o => { ctx.fillStyle = '#ff3b3b'; ctx.fillRect(o.x, o.y, o.w, o.h); ctx.fillStyle = '#fff'; ctx.font = 'bold 22px Arial'; ctx.fillText('!', o.x + 15, o.y + 30); });
+  // skater
+  const py = player.y + (player.trick > 0 ? Math.sin(player.trick) * 6 : 0);
+  const tilt = player.trick > 0 ? (player.trick % 2 ? -0.3 : 0.3) : 0;
+  ctx.save(); ctx.translate(player.x + 20, py + 18); ctx.rotate(tilt);
+  ctx.fillStyle = '#ffe14d'; ctx.beginPath(); ctx.arc(0, -22, 13, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ff5da2'; ctx.fillRect(-8, -10, 16, 26);
+  ctx.fillStyle = '#222'; ctx.fillRect(-22, 14, 46, 6); ctx.beginPath(); ctx.arc(-14, 22, 6, 0, Math.PI * 2); ctx.arc(14, 22, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // particles
+  ctx.fillStyle = '#ff5da2';
+  particles.forEach(p => ctx.fillRect(p.x, p.y, 6, 6));
+  // meter
+  ctx.fillStyle = '#000'; ctx.fillRect(14, 500, 204, 18);
+  ctx.fillStyle = '#ffe14d'; ctx.fillRect(16, 502, meter * 2, 14);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('TRICK METER x' + mult, 16, 495);
+  if (trickFlash > 0) { ctx.fillStyle = '#ffe14d'; ctx.font = 'bold 30px Arial'; ctx.fillText('TRICK!', 380, 140); }
+}
+function loop() {
+  update(); draw();
+  requestAnimationFrame(loop);
+}
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+document.addEventListener('keydown', function(e) {
+  keys[e.key] = true;
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code) || e.code === 'Space') e.preventDefault();
+  if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') jump();
+  if ((e.code === 'Enter') && (state === 'title' || state === 'over')) startGame();
+});
+document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+cv.addEventListener('click', function() { if (state === 'playing') jump(); });
+cv.addEventListener('touchstart', function(e) { e.preventDefault(); initAudio(); if (state === 'playing') jump(); }, { passive: false });
+let touchX = null, touchY = null;
+cv.addEventListener('touchmove', function(e) {
+  const t = e.touches[0];
+  if (touchY !== null && touchY - t.clientY > 40) { jump(); touchY = null; }
+}, { passive: true });
+cv.addEventListener('touchend', function() { touchX = null; touchY = null; });
+document.addEventListener('mousedown', function(e) { if (e.target === cv && state === 'playing') jump(); });
+// swipe trick: mouse drag upward triggers a trick
+let mouseY = null;
+document.addEventListener('mousemove', function(e) { if (mouseY !== null && mouseY - e.clientY > 60) { doTrick(false); mouseY = null; } });
+document.addEventListener('mousedown', function(e) { mouseY = e.clientY; });
+document.addEventListener('mouseup', function() { mouseY = null; });
+loop();
+</script>
+</body>
+</html>

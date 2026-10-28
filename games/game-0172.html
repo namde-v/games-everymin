@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Locksmith Labyrinth</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0f172a;color:#e2e8f0;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+  h1{margin:6px 0 2px;font-size:26px;letter-spacing:1px;color:#fbbf24;text-align:center}
+  p.sub{margin:0 0 10px;color:#94a3b8;text-align:center}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:8px;width:100%;max-width:760px}
+  .pill{background:#1e293b;border:1px solid #334155;border-radius:999px;padding:6px 12px;font-weight:bold;font-size:14px}
+  .pill span{color:#fbbf24}
+  #wrap{position:relative;width:100%;max-width:760px}
+  canvas{display:block;width:100%;height:auto;background:#111827;border:3px solid #475569;border-radius:12px;touch-action:none}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(2,6,23,.88);border-radius:12px;padding:20px}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:32px;margin:0 0 8px;color:#fbbf24}
+  .overlay p{max-width:520px;line-height:1.55;color:#cbd5e1}
+  .keydot{display:inline-block;width:18px;height:18px;border-radius:50%;border:2px solid #fff;vertical-align:middle;margin:0 3px}
+  button{cursor:pointer;border:0;border-radius:10px;padding:12px 22px;font-size:17px;font-weight:bold;background:#f59e0b;color:#111827;margin:8px 4px}
+  button:hover{background:#fbbf24}
+  button.secondary{background:#334155;color:#fff}
+  #dpad{display:flex;gap:8px;justify-content:center;margin-top:10px;align-items:center}
+  #dpad button{width:56px;height:52px;padding:0;font-size:22px;background:#1e293b;color:#fff;border:1px solid #475569}
+  #dpad button:active{background:#f59e0b;color:#111827}
+  #msg{margin-top:8px;min-height:22px;color:#fde68a;font-weight:bold;text-align:center}
+  .legend{font-size:13px;color:#94a3b8;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>🔑 Locksmith Labyrinth</h1>
+<p class="sub">Collect the right keys, in the right order, and escape the maze.</p>
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Lives: <span id="lives">3</span></div>
+  <div class="pill">Moves: <span id="moves">0</span></div>
+  <div class="pill">Time: <span id="time">0s</span></div>
+  <div class="pill">Keys: <span id="keys">—</span></div>
+  <div class="pill">Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="760" height="520"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>Locksmith Labyrinth</h2>
+    <p><strong>How to Play:</strong> You are the locksmith trapped in a three-chamber maze. Find the <span class="keydot" style="background:#ef4444"></span> red key to open the red door, then the <span class="keydot" style="background:#3b82f6"></span> blue key for the blue door, then the <span class="keydot" style="background:#22c55e"></span> green key for the green door guarding the exit. Keys are single-use: each one vanishes when its door opens. Grab gold stars for bonus points and avoid the red spike traps — each trap costs a life. Reach the glowing exit to win!</p>
+    <p><strong>Controls:</strong> Arrow Keys / WASD to move &bull; Click or tap a nearby maze cell to step there &bull; Use the on-screen arrows &bull; Press R to restart.</p>
+    <button id="startBtn">▶ Start Game</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <p id="howText" style="display:none">Tip: do not waste a key — a door only opens when you bump into it while carrying its matching key. Plan a route through each chamber, collect every star you can, and watch out for traps near the doors. You have 3 lives and the clock is ticking for a time bonus.</p>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Play Again (R)</button>
+  </div>
+</div>
+<div id="dpad">
+  <button id="btnLeft" aria-label="Move left">◀</button>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <button id="btnUp" aria-label="Move up">▲</button>
+    <button id="btnDown" aria-label="Move down">▼</button>
+  </div>
+  <button id="btnRight" aria-label="Move right">▶</button>
+</div>
+<div id="msg">Find the red key first!</div>
+<div class="legend">Red door needs red key &bull; Blue door needs blue key &bull; Green door needs green key &bull; ★ = +50 &bull; Spike = −1 life</div>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var MAP=[
+    '###################',
+    '#P....#.....#.....#',
+    '#.r...#.....#..g..#',
+    '#..*..#..*..B.....#',
+    '#.....#.....#..*..#',
+    '#.##..#..##.#.....#',
+    '#.....R.....#.....#',
+    '#..*..#.....#######',
+    '#.....#..b..#.....#',
+    '#.##..#.....#..*..#',
+    '#.....#..*..#.....#',
+    '#..*..#.....#....E#',
+    '###################'
+  ];
+  // Note: the green door is the wall gap on the right chamber. It is added
+  // by code below so the printed map stays easy to read: row 7, col 15.
+  var COLS=19, ROWS=13, TILE=40;
+  var grid=[];
+  function buildGrid(){
+    grid=[];
+    for(var y=0;y<ROWS;y++){
+      var row=[];
+      for(var x=0;x<COLS;x++){
+        var ch=(MAP[y]&&MAP[y][x])||'#';
+        row.push(ch);
+      }
+      grid.push(row);
+    }
+    grid[7][15]='G'; // green door guarding the lower exit chamber
+    grid[7][13]='#'; grid[7][14]='#'; grid[7][16]='#'; grid[7][17]='#';
+  }
+  var COLORS={r:'#ef4444',b:'#3b82f6',g:'#22c55e'};
+  var DOOR_FOR={R:'r',B:'b',G:'g'};
+  var KEY_NAME={r:'Red',b:'Blue',g:'Green'};
+  var state=null, audioCtx=null, rafId=null, lastTime=0, elapsed=0;
+  var px=1, py=1, drawX=1, drawY=1, pathQueue=[];
+
+  function $(id){return document.getElementById(id);}
+  function setMsg(t){$('msg').textContent=t;}
+  function play(freq,dur,type,when){
+    if(!audioCtx) return;
+    try{
+      var t=audioCtx.currentTime+(when||0);
+      var o=audioCtx.createOscillator(), gn=audioCtx.createGain();
+      o.type=type||'square'; o.frequency.value=freq;
+      gn.gain.setValueAtTime(0.12,t); gn.gain.exponentialRampToValueAtTime(0.001,t+dur);
+      o.connect(gn); gn.connect(audioCtx.destination); o.start(t); o.stop(t+dur);
+    }catch(e){}
+  }
+  function ensureAudio(){
+    if(!audioCtx){
+      try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}
+      catch(e){audioCtx=null;}
+    }
+    if(audioCtx&&audioCtx.state==='suspended'){audioCtx.resume();}
+  }
+  function soundStep(){play(220,0.06,'square');}
+  function soundKey(){play(523,0.12,'sine');play(659,0.12,'sine',0.09);play(784,0.18,'sine',0.18);}
+  function soundDoor(){play(392,0.12,'triangle');play(523,0.16,'triangle',0.1);}
+  function soundTrap(){play(160,0.25,'sawtooth');}
+  function soundWin(){[523,659,784,1047].forEach(function(f,i){play(f,0.22,'sine',i*0.13);});}
+  function soundLose(){[330,262,196,131].forEach(function(f,i){play(f,0.22,'sawtooth',i*0.13);});}
+
+  function startGame(){
+    ensureAudio();
+    buildGrid();
+    state={score:0,lives:3,moves:0,keys:{r:false,b:false,g:false},opened:{R:false,B:false,G:false},playing:true,won:false,over:false,startAt:performance.now()};
+    px=1; py=1; drawX=1; drawY=1; pathQueue=[]; elapsed=0;
+    $('titleScreen').classList.add('hidden');
+    $('endScreen').classList.add('hidden');
+    $('status').textContent='Playing';
+    setMsg('Find the red key first!');
+    updateHUD();
+    if(!rafId){rafId=requestAnimationFrame(loop);}
+  }
+  function updateHUD(){
+    if(!state) return;
+    $('score').textContent=state.score;
+    $('lives').textContent=state.lives;
+    $('moves').textContent=state.moves;
+    var held=[];
+    if(state.keys.r) held.push('🔴'); if(state.keys.b) held.push('🔵'); if(state.keys.g) held.push('🟢');
+    $('keys').textContent=held.length?held.join(' '):'—';
+    $('time').textContent=Math.floor(elapsed)+'s';
+  }
+  function cellAt(x,y){ if(x<0||y<0||x>=COLS||y>=ROWS) return '#'; return grid[y][x]; }
+  function isWall(x,y){ return cellAt(x,y)==='#'; }
+  function tryMove(dx,dy){
+    if(!state||!state.playing) return;
+    var nx=px+dx, ny=py+dy, cell=cellAt(nx,ny);
+    if(cell==='#'){ setMsg('A wall blocks that way.'); play(110,0.08,'square'); return; }
+    if(DOOR_FOR[cell]){
+      var need=DOOR_FOR[cell];
+      if(!state.keys[need]){ setMsg('Locked! You need the '+KEY_NAME[need]+' key first.'); play(140,0.15,'square'); return; }
+      state.keys[need]=false; state.opened[cell]=true; state.score+=100;
+      grid[ny][nx]='.'; soundDoor();
+      setMsg(KEY_NAME[need]+' door unlocked! +100 points.');
+    }
+    px=nx; py=ny; state.moves++; soundStep();
+    var landed=cellAt(px,py);
+    if(landed==='r'||landed==='b'||landed==='g'){
+      state.keys[landed]=true; grid[py][px]='.'; state.score+=100; soundKey();
+      setMsg('You found the '+KEY_NAME[landed]+' key! Now find its matching door.');
+    } else if(landed==='*'){
+      grid[py][px]='.'; state.score+=50; play(880,0.12,'sine');
+      setMsg('Star collected! +50 points.');
+    } else if(landed==='X'||landed==='!'){
+      // traps are drawn as X in later variants; kept for safety
+      state.lives--; soundTrap(); setMsg('Trap! You lost a life.');
+      if(state.lives<=0){ endGame(false); return; }
+    }
+    // Spike traps live on two fixed tiles, drawn separately below.
+    if((px===4&&py===5)||(px===10&&py===9)||(px===13&&py===10)){
+      if(!state._trapHit){ state._trapHit={}; }
+      var key=px+','+py;
+      if(!state._trapHit[key]){
+        state._trapHit[key]=true; state.lives--; soundTrap();
+        setMsg('Spike trap! You lost a life. Lives left: '+state.lives);
+        if(state.lives<=0){ endGame(false); return; }
+      }
+    }
+    if(landed==='E' || (px===16&&py===11)){
+      endGame(true); return;
+    }
+    // Exit is the E tile at (16,11) in the lower-right chamber.
+    updateHUD();
+  }
+  function endGame(won){
+    state.playing=false; state.won=won; state.over=!won;
+    var bonus=won?Math.max(0,600-Math.floor(elapsed)*2):0;
+    if(won){ state.score+=bonus; soundWin(); }
+    else { soundLose(); }
+    $('status').textContent=won?'You Win!':'Game Over';
+    $('endTitle').textContent=won?'🏆 You Win!':'💀 Game Over';
+    $('endText').textContent=(won?('You escaped the labyrinth! Time bonus +'+bonus+'. ':'You ran out of lives. ')+'Final score: '+state.score+' in '+state.moves+' moves and '+Math.floor(elapsed)+' seconds. Press R or Play Again to try again.');
+    $('endScreen').classList.remove('hidden');
+    setMsg(won?'You escaped!':'Game over — try a different route.');
+    updateHUD();
+  }
+  function restart(){ startGame(); }
+  function findPath(tx,ty){
+    // BFS over walkable tiles, respecting locked doors without a key.
+    var seen={}, prev={}, q=[[px,py]]; seen[px+','+py]=true;
+    while(q.length){
+      var cur=q.shift(), cx=cur[0], cy=cur[1];
+      if(cx===tx&&cy===ty) break;
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(function(d){
+        var nx=cx+d[0], ny=cy+d[1], cell=cellAt(nx,ny), k=nx+','+ny;
+        if(seen[k]||cell==='#') return;
+        if(DOOR_FOR[cell]&&!state.keys[DOOR_FOR[cell]]) return;
+        seen[k]=true; prev[k]=[cx,cy]; q.push([nx,ny]);
+      });
+    }
+    if(!seen[tx+','+ty]) return null;
+    var path=[], cur=[tx,ty];
+    while(!(cur[0]===px&&cur[1]===py)){ path.unshift(cur); cur=prev[cur[0]+','+cur[1]]; }
+    return path;
+  }
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // Smooth the player toward its grid tile.
+    drawX+=(px-drawX)*0.35; drawY+=(py-drawY)*0.35;
+    for(var y=0;y<ROWS;y++){
+      for(var x=0;x<COLS;x++){
+        var cell=grid[y][x], ox=x*TILE, oy=y*TILE;
+        ctx.fillStyle='#1e293b'; ctx.fillRect(ox,oy,TILE,TILE);
+        ctx.strokeStyle='#0f172a'; ctx.strokeRect(ox+0.5,oy+0.5,TILE-1,TILE-1);
+        if(cell==='#'){ ctx.fillStyle='#334155'; ctx.fillRect(ox+3,oy+3,TILE-6,TILE-6); }
+        else if(cell==='r'||cell==='b'||cell==='g'){
+          ctx.fillStyle=COLORS[cell]; ctx.beginPath(); ctx.arc(ox+20,oy+16,9,0,Math.PI*2); ctx.fill();
+          ctx.fillStyle='#e2e8f0'; ctx.fillRect(ox+17,oy+22,6,10); ctx.fillRect(ox+17,oy+28,10,3);
+        } else if(cell==='R'||cell==='B'||cell==='G'){
+          ctx.fillStyle=COLORS[DOOR_FOR[cell]]; ctx.fillRect(ox+4,oy+4,TILE-8,TILE-8);
+          ctx.fillStyle='#0f172a'; ctx.font='bold 18px Arial'; ctx.textAlign='center'; ctx.fillText('🔒',ox+20,oy+27);
+        } else if(cell==='*'){
+          ctx.fillStyle='#fbbf24'; ctx.font='22px Arial'; ctx.textAlign='center'; ctx.fillText('★',ox+20,oy+28);
+        } else if(cell==='E'){
+          ctx.fillStyle='#22c55e'; ctx.fillRect(ox+3,oy+3,TILE-6,TILE-6);
+          ctx.fillStyle='#052e16'; ctx.font='bold 13px Arial'; ctx.textAlign='center'; ctx.fillText('EXIT',ox+20,oy+24);
+        }
+      }
+    }
+    // Spike traps (drawn, single-use per tile in logic above).
+    [[4,5],[10,9],[13,10]].forEach(function(p){
+      if(state&&state._trapHit&&state._trapHit[p[0]+','+p[1]]) return;
+      ctx.fillStyle='#ef4444'; ctx.beginPath();
+      ctx.moveTo(p[0]*TILE+8,p[1]*TILE+32); ctx.lineTo(p[0]*TILE+20,p[1]*TILE+10); ctx.lineTo(p[0]*TILE+32,p[1]*TILE+32); ctx.closePath(); ctx.fill();
+    });
+    // Player: locksmith with a key ring.
+    var cx=drawX*TILE+20, cy=drawY*TILE+20;
+    ctx.fillStyle='#f59e0b'; ctx.beginPath(); ctx.arc(cx,cy,14,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#111827'; ctx.font='18px Arial'; ctx.textAlign='center'; ctx.fillText('🔑',cx,cy+6);
+    if(state&&state.playing){ ctx.fillStyle='rgba(34,197,94,0.25)'; ctx.fillRect(16*TILE,11*TILE,TILE,TILE); }
+  }
+  function loop(ts){
+    if(lastTime===0) lastTime=ts;
+    var dt=(ts-lastTime)/1000; lastTime=ts;
+    if(state&&state.playing){ elapsed+=dt; }
+    draw(); updateHUD();
+    rafId=requestAnimationFrame(loop);
+  }
+  function moveDir(dx,dy){ ensureAudio(); if(state&&state.playing){ tryMove(dx,dy); } }
+  document.addEventListener('keydown',function(e){
+    ensureAudio();
+    var k=e.key.toLowerCase();
+    if(k==='r'){ restart(); return; }
+    if(k==='enter'&&$('titleScreen').classList.contains('hidden')===false){ startGame(); return; }
+    if(k==='arrowup'||k==='w'){ e.preventDefault(); moveDir(0,-1); }
+    else if(k==='arrowdown'||k==='s'){ e.preventDefault(); moveDir(0,1); }
+    else if(k==='arrowleft'||k==='a'){ e.preventDefault(); moveDir(-1,0); }
+    else if(k==='arrowright'||k==='d'){ e.preventDefault(); moveDir(1,0); }
+  });
+  canvas.addEventListener('click',function(e){
+    ensureAudio();
+    if(!state||!state.playing) return;
+    var rect=canvas.getBoundingClientRect();
+    var tx=Math.floor((e.clientX-rect.left)/rect.width*COLS);
+    var ty=Math.floor((e.clientY-rect.top)/rect.height*ROWS);
+    if(Math.abs(tx-px)+Math.abs(ty-py)===1){ tryMove(tx-px,ty-py); return; }
+    var path=findPath(tx,ty);
+    if(path&&path.length){
+      // Walk one step now; queue the rest for a smooth auto-walk.
+      pathQueue=path.slice(1);
+      tryMove(path[0][0]-px,path[0][1]-py);
+      var step=function(){
+        if(!state||!state.playing||!pathQueue.length) return;
+        var next=pathQueue.shift();
+        tryMove(next[0]-px,next[1]-py);
+        if(pathQueue.length) setTimeout(step,140);
+      };
+      if(pathQueue.length) setTimeout(step,140);
+    } else { setMsg('That cell cannot be reached yet — check for a locked door.'); }
+  });
+  canvas.addEventListener('touchstart',function(e){
+    e.preventDefault(); ensureAudio();
+    if(!state||!state.playing) return;
+    var t=e.touches[0], rect=canvas.getBoundingClientRect();
+    var tx=Math.floor((t.clientX-rect.left)/rect.width*COLS);
+    var ty=Math.floor((t.clientY-rect.top)/rect.height*ROWS);
+    if(Math.abs(tx-px)+Math.abs(ty-py)===1){ tryMove(tx-px,ty-py); }
+    else {
+      var path=findPath(tx,ty);
+      if(path&&path.length){ tryMove(path[0][0]-px,path[0][1]-py); }
+      else { setMsg('That cell cannot be reached yet.'); }
+    }
+  },{passive:false});
+  function bindBtn(id,dx,dy){
+    var b=$(id);
+    b.addEventListener('click',function(){ moveDir(dx,dy); });
+    b.addEventListener('touchstart',function(e){ e.preventDefault(); moveDir(dx,dy); },{passive:false});
+  }
+  bindBtn('btnUp',0,-1); bindBtn('btnDown',0,1); bindBtn('btnLeft',-1,0); bindBtn('btnRight',1,0);
+  $('startBtn').addEventListener('click',function(){ startGame(); });
+  $('startBtn').addEventListener('touchstart',function(e){ e.preventDefault(); startGame(); },{passive:false});
+  $('restartBtn').addEventListener('click',function(){ restart(); });
+  $('restartBtn').addEventListener('touchstart',function(e){ e.preventDefault(); restart(); },{passive:false});
+  $('howBtn').addEventListener('click',function(){
+    var h=$('howText'); h.style.display=(h.style.display==='none')?'block':'none';
+  });
+  // Initial render behind the title screen.
+  buildGrid(); state={score:0,lives:3,moves:0,keys:{r:false,b:false,g:false},opened:{},playing:false,won:false,over:false};
+  draw(); rafId=requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
