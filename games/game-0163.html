@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Observatory Operator</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #050816; color: #eef2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+  #wrap { max-width: 980px; margin: 0 auto; padding: 12px 12px 28px; }
+  h1 { margin: 6px 0 2px; font-size: 30px; letter-spacing: 0.4px; }
+  .sub { color: #aab4e6; margin: 0 0 10px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .stat { background: #121a38; border: 1px solid #2b3a73; border-radius: 10px; padding: 8px 12px; min-width: 118px; }
+  .stat b { display: block; font-size: 19px; }
+  .stat span { font-size: 12px; color: #aab4e6; text-transform: uppercase; letter-spacing: 0.6px; }
+  .stat.warn b { color: #ffb020; }
+  .stat.bad b { color: #ff5d6c; }
+  .stat.good b { color: #4ade80; }
+  #skyWrap { position: relative; background: #070d26; border: 1px solid #2b3a73; border-radius: 14px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 240px; background: radial-gradient(circle at 75% 20%, #1b2a63 0, #070d26 55%); }
+  #weatherBar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: #0d1430; border-top: 1px solid #2b3a73; flex-wrap: wrap; }
+  #weatherText { font-weight: 700; }
+  #nightBarOuter { flex: 1; min-width: 180px; height: 14px; background: #1d274d; border-radius: 99px; overflow: hidden; }
+  #nightBar { height: 100%; width: 0%; background: linear-gradient(90deg, #fbbf24, #f472b6, #818cf8); }
+  #telescope { background: #101736; border: 1px solid #2b3a73; border-radius: 12px; padding: 12px; margin-top: 10px; }
+  #telescope h2, #queue h2 { margin: 0 0 8px; font-size: 18px; }
+  #obsName { font-size: 18px; font-weight: 700; }
+  #obsDetail { color: #c6cdea; min-height: 22px; }
+  #obsBarOuter { height: 18px; background: #1d274d; border-radius: 99px; overflow: hidden; margin: 8px 0; }
+  #obsBar { height: 100%; width: 0%; background: #4ade80; }
+  #queue { margin-top: 12px; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+  .card { background: #121a38; border: 2px solid #2b3a73; border-radius: 12px; padding: 10px; cursor: pointer; text-align: left; color: inherit; }
+  .card.selected { border-color: #fbbf24; background: #1c2650; box-shadow: 0 0 0 3px rgba(251,191,36,0.25); }
+  .card.urgent { border-color: #fb7185; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+  .card p { margin: 3px 0; color: #c6cdea; font-size: 14px; }
+  .winBarOuter { height: 10px; background: #1d274d; border-radius: 99px; overflow: hidden; margin-top: 7px; }
+  .winBar { height: 100%; background: #fbbf24; }
+  .btnRow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  button { cursor: pointer; border: 0; border-radius: 10px; padding: 11px 16px; font-size: 16px; font-weight: 700; background: #fbbf24; color: #111827; }
+  button.secondary { background: #26315e; color: #eef2ff; border: 1px solid #3b4a84; }
+  button.danger { background: #ef4444; color: white; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #msg { min-height: 26px; font-weight: 700; margin-top: 8px; }
+  #msg.good { color: #4ade80; } #msg.bad { color: #ff7b86; } #msg.info { color: #fcd34d; }
+  .overlay { position: fixed; inset: 0; background: rgba(2,4,18,0.92); display: flex; align-items: center; justify-content: center; padding: 18px; z-index: 20; }
+  .panel { max-width: 640px; width: 100%; background: #0f1736; border: 1px solid #3b4a84; border-radius: 16px; padding: 22px; text-align: center; }
+  .panel h2 { margin-top: 0; font-size: 30px; }
+  .panel p, .panel li { text-align: left; line-height: 1.55; color: #d7dcefff; }
+  .panel ul { padding-left: 20px; }
+  .hidden { display: none !important; }
+  #howto { text-align: left; background: #0a1130; border: 1px solid #2b3a73; border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
+  .big { font-size: 42px; margin: 0; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; color: #aab4e6; font-size: 14px; margin-top: 8px; }
+  @media (max-width: 600px) { h1 { font-size: 25px; } canvas { height: 200px; } .stat { min-width: 102px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🔭 Observatory Operator</h1>
+  <p class="sub">Run the night shift. Schedule the right target, in the right weather window, before the sky — or the budget — runs out.</p>
+
+  <div id="hud" aria-label="Game status">
+    <div class="stat good"><b id="repVal">0</b><span>Reputation / Score</span></div>
+    <div class="stat"><b id="budgetVal">120</b><span>Budget Credits</span></div>
+    <div class="stat"><b id="nightVal">Night 1 / 5</b><span>Shift</span></div>
+    <div class="stat good"><b id="doneVal">0</b><span>Completed</span></div>
+    <div class="stat" id="livesStat"><b id="livesVal">● ● ●</b><span>Missed Windows Left</span></div>
+    <div class="stat"><b id="clockVal">20:00</b><span>Observatory Clock</span></div>
+  </div>
+
+  <div id="skyWrap">
+    <canvas id="sky" width="940" height="240"></canvas>
+    <div id="weatherBar">
+      <span>Weather:</span><span id="weatherText">Clear Skies</span><span id="weatherHint">— Observations progress normally</span>
+      <div id="nightBarOuter"><div id="nightBar"></div></div>
+      <span id="nightLabel">Night progress</span>
+    </div>
+  </div>
+
+  <div id="telescope">
+    <h2>Telescope Control</h2>
+    <div id="obsName">No observation running</div>
+    <div id="obsDetail">Select a request below, then press Observe. Clear skies are required for progress.</div>
+    <div id="obsBarOuter"><div id="obsBar"></div></div>
+    <div class="btnRow">
+      <button id="observeBtn">▶ Observe Selected</button>
+      <button id="dismissBtn" class="secondary">Dismiss Selected (−3 Rep)</button>
+      <button id="helpBtn" class="secondary">How to Play</button>
+    </div>
+    <div id="msg" class="info" role="status"></div>
+    <div class="legend"><span>Keys 1–4: select request</span><span>Enter / Space: observe</span><span>D: dismiss</span><span>R: restart after ending</span><span>Mouse &amp; touch work everywhere</span></div>
+  </div>
+
+  <div id="queue">
+    <h2>Researcher Requests — tap a card to select it</h2>
+    <div id="cards"></div>
+    <p id="emptyNote" style="color:#aab4e6">Requests are arriving from researchers around the world. The first ones will appear in a few seconds.</p>
+  </div>
+</div>
+
+<div id="titleScreen" class="overlay">
+  <div class="panel">
+    <p class="big">🔭</p>
+    <h2>Observatory Operator</h2>
+    <p><strong>Your mission:</strong> reach <strong>150 Reputation</strong> by completing telescope observations — or finish Night 5 with at least 10 completed observations. Lose 3 weather windows and the director ends your shift.</p>
+    <button id="startBtn">Start Night Shift</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <div id="howto" class="hidden">
+      <ul>
+        <li><strong>Select a request</strong> by tapping its card, or pressing 1, 2, 3 or 4.</li>
+        <li><strong>Observe</strong> costs budget credits. It only makes progress in <strong>Clear</strong> weather. Cloudy weather pauses it; Storm weather pauses it and eats into its window.</li>
+        <li>Every request has a <strong>window timer</strong>. Finish before it runs out, or it counts as a missed window.</li>
+        <li>Urgent requests (red border) pay bonus reputation. Short, cheap targets are safer when clouds are coming.</li>
+        <li>Watch the night clock: at dawn, unfinished work is cleared and the next night begins.</li>
+        <li>Win at 150 Reputation, or by surviving 5 nights with 10+ completions. Game over after 3 missed windows.</li>
+      </ul>
+    </div>
+    <p style="text-align:center;color:#aab4e6">No downloads. No network needed. Sound starts only after you press Start.</p>
+  </div>
+</div>
+
+<div id="helpOverlay" class="overlay hidden">
+  <div class="panel">
+    <h2>How to Play</h2>
+    <ul>
+      <li>Pick a request, press Observe, and finish it before its window expires.</li>
+      <li>Clear weather = progress. Cloudy or Storm = paused. Plan around the forecast.</li>
+      <li>Balance cost, duration and reward. Urgent targets pay more but expire faster.</li>
+      <li>Reach 150 Reputation to win immediately. Three missed windows ends the game.</li>
+    </ul>
+    <button id="closeHelpBtn">Back to the Telescope</button>
+  </div>
+</div>
+
+<div id="endScreen" class="overlay hidden">
+  <div class="panel">
+    <p class="big" id="endEmoji">🏆</p>
+    <h2 id="endTitle">Shift Complete</h2>
+    <p id="endText" style="text-align:center"></p>
+    <p id="endStats" style="text-align:center;color:#c6cdea"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+    <p style="text-align:center;color:#aab4e6">Press R to restart, or tap the button above.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('sky');
+  var ctx = canvas.getContext('2d');
+  var repEl = document.getElementById('repVal');
+  var budgetEl = document.getElementById('budgetVal');
+  var nightEl = document.getElementById('nightVal');
+  var doneEl = document.getElementById('doneVal');
+  var livesEl = document.getElementById('livesVal');
+  var clockEl = document.getElementById('clockVal');
+  var weatherText = document.getElementById('weatherText');
+  var weatherHint = document.getElementById('weatherHint');
+  var nightBar = document.getElementById('nightBar');
+  var obsName = document.getElementById('obsName');
+  var obsDetail = document.getElementById('obsDetail');
+  var obsBar = document.getElementById('obsBar');
+  var msgEl = document.getElementById('msg');
+  var cardsEl = document.getElementById('cards');
+  var emptyNote = document.getElementById('emptyNote');
+
+  var TARGETS = [
+    ['Andromeda Galaxy', 'Galaxy survey'], ['Orion Nebula', 'Star formation'],
+    ['Jupiter Storm Watch', 'Planetary'], ['Saturn Ring Scan', 'Planetary'],
+    ['Whirlpool Galaxy', 'Galaxy survey'], ['Pleiades Cluster', 'Star cluster'],
+    ['Comet Hale Trail', 'Comet tracking'], ['Lunar South Pole', 'Lunar mapping'],
+    ['Crab Nebula Remnant', 'Supernova remnant'], ['Eagle Nebula Pillars', 'Star formation'],
+    ['Sombrero Galaxy', 'Galaxy survey'], ['Mars Dust Storm', 'Planetary'],
+    ['Veil Nebula Arc', 'Supernova remnant'], ['Hercules Cluster', 'Star cluster'],
+    ['Titan Atmosphere', 'Planetary'], ['Ring Nebula', 'Planetary nebula'],
+    ['Triangulum Galaxy', 'Galaxy survey'], ['Rosette Nebula', 'Star formation'],
+    ['Asteroid Belt Survey', 'Asteroid tracking'], ['Venus Cloud Tops', 'Planetary']
+  ];
+  var RESEARCHERS = ['Dr. Alvarez', 'Prof. Chen', 'Dr. Okafor', 'Dr. Novak', 'Prof. Lindqvist', 'Dr. Patel', 'Dr. Rossi', 'Prof. Tanaka'];
+  var WEATHERS = ['Clear', 'Clear', 'Clear', 'Cloudy', 'Cloudy', 'Storm'];
+
+  var state = 'title';
+  var rep = 0, budget = 120, night = 1, completed = 0, missed = 0;
+  var nightElapsed = 0, nightDuration = 80000;
+  var weather = 'Clear', weatherTimer = 0, weatherNext = 11000;
+  var spawnTimer = 1200, requestId = 0, selectedId = null, active = null;
+  var requests = [], stars = [], clouds = [], lastTime = 0, messageTimer = 0;
+  var audioCtx = null;
+
+  for (var i = 0; i < 110; i++) {
+    stars.push({ x: Math.random() * 940, y: Math.random() * 170, r: Math.random() * 1.8 + 0.4, tw: Math.random() * 6.28 });
+  }
+  for (var c = 0; c < 6; c++) {
+    clouds.push({ x: Math.random() * 940, y: 20 + Math.random() * 90, s: 50 + Math.random() * 70, v: 8 + Math.random() * 14 });
+  }
+
+  function setMessage(text, kind) {
+    msgEl.textContent = text;
+    msgEl.className = kind || 'info';
+    messageTimer = 4200;
+  }
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime + (when || 0);
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol || 0.08, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (dur || 0.18));
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + (dur || 0.18) + 0.05);
+  }
+  function playClick() { ensureAudio(); tone(660, 0.08, 'triangle', 0.06); }
+  function playSuccess() { ensureAudio(); tone(523, 0.16, 'sine', 0.09); tone(659, 0.16, 'sine', 0.09, 0.12); tone(784, 0.28, 'sine', 0.09, 0.24); }
+  function playFail() { ensureAudio(); tone(180, 0.25, 'sawtooth', 0.07); tone(130, 0.3, 'sawtooth', 0.07, 0.15); }
+  function playWin() { ensureAudio(); [523, 659, 784, 1046].forEach(function (f, idx) { tone(f, 0.3, 'triangle', 0.09, idx * 0.16); }); }
+
+  function randomRequest() {
+    var t = TARGETS[Math.floor(Math.random() * TARGETS.length)];
+    var urgent = Math.random() < 0.28;
+    var duration = 6 + Math.floor(Math.random() * 7);
+    var windowMs = urgent ? 22000 + Math.random() * 8000 : 30000 + Math.random() * 14000;
+    var cost = 12 + Math.floor(Math.random() * 22);
+    var reward = urgent ? 20 + Math.floor(Math.random() * 10) : 12 + Math.floor(Math.random() * 9);
+    requestId++;
+    return { id: requestId, target: t[0], kind: t[1], researcher: RESEARCHERS[Math.floor(Math.random() * RESEARCHERS.length)], duration: duration, progress: 0, windowMs: windowMs, maxWindow: windowMs, cost: cost, reward: reward, urgent: urgent };
+  }
+  function resetGame() {
+    rep = 0; budget = 120; night = 1; completed = 0; missed = 0;
+    nightElapsed = 0; weather = 'Clear'; weatherTimer = 0; weatherNext = 11000;
+    spawnTimer = 900; requests = []; selectedId = null; active = null;
+    document.getElementById('endScreen').classList.add('hidden');
+    document.getElementById('titleScreen').classList.add('hidden');
+    state = 'playing';
+    setMessage('Night 1 begins. Select a request and start observing while the sky is clear.', 'info');
+  }
+  function startGame() { ensureAudio(); playClick(); resetGame(); }
+  function endGame(win, title, text) {
+    state = win ? 'win' : 'gameover';
+    document.getElementById('endEmoji').textContent = win ? '🏆' : '🌩️';
+    document.getElementById('endTitle').textContent = title;
+    document.getElementById('endText').textContent = text;
+    document.getElementById('endStats').textContent = 'Reputation: ' + rep + '  •  Completed: ' + completed + '  •  Missed: ' + missed + '  •  Budget left: ' + budget + '  •  Reached Night ' + night;
+    document.getElementById('endScreen').classList.remove('hidden');
+    if (win) playWin(); else playFail();
+  }
+  function checkEnd() {
+    if (rep >= 150) { endGame(true, 'Director Commendation — You Win!', '150 Reputation reached. Your scheduling kept the observatory productive all night. Outstanding operator work.'); return true; }
+    if (missed >= 3) { endGame(false, 'Shift Ended — Game Over', 'Three weather windows were missed. The director has closed the dome for tonight. Try a faster, cheaper schedule next time.'); return true; }
+    return false;
+  }
+  function selectRequest(id) {
+    selectedId = id;
+    playClick();
+    renderCards();
+    var r = requests.filter(function (x) { return x.id === id; })[0];
+    if (r && !active) { obsName.textContent = 'Ready: ' + r.target; obsDetail.textContent = r.researcher + ' • ' + r.kind + ' • Cost ' + r.cost + ' • Reward +' + r.reward + ' Rep • ' + r.duration + 's of clear sky needed'; }
+  }
+  function startObservation() {
+    if (state !== 'playing') return;
+    if (active) { setMessage('Telescope is already busy. Finish the current observation first.', 'bad'); return; }
+    var r = requests.filter(function (x) { return x.id === selectedId; })[0];
+    if (!r) { setMessage('Select a request card first, or press 1–4.', 'info'); return; }
+    if (budget < r.cost) { setMessage('Not enough budget for ' + r.target + '. Pick a cheaper target or dismiss one.', 'bad'); playFail(); return; }
+    budget -= r.cost; active = r;
+    requests = requests.filter(function (x) { return x.id !== r.id; });
+    selectedId = null; renderCards();
+    obsName.textContent = 'Observing: ' + r.target;
+    obsDetail.textContent = r.researcher + ' • ' + r.kind + ' • Needs ' + r.duration + 's of clear sky';
+    setMessage('Telescope slewing to ' + r.target + '. Hold for clear skies.', 'info');
+    playClick();
+  }
+  function dismissSelected() {
+    if (state !== 'playing') return;
+    var idx = -1;
+    for (var i = 0; i < requests.length; i++) { if (requests[i].id === selectedId) idx = i; }
+    if (idx < 0) { setMessage('Select a request to dismiss.', 'info'); return; }
+    var r = requests[idx];
+    requests.splice(idx, 1); selectedId = null; rep = Math.max(0, rep - 3);
+    setMessage('Dismissed ' + r.target + ' (−3 Rep). A polite decline is better than a missed window.', 'info');
+    playClick(); renderCards();
+  }
+  function renderCards() {
+    cardsEl.innerHTML = '';
+    emptyNote.style.display = requests.length ? 'none' : 'block';
+    requests.forEach(function (r, idx) {
+      var btn = document.createElement('button');
+      btn.className = 'card' + (r.id === selectedId ? ' selected' : '') + (r.urgent ? ' urgent' : '');
+      btn.setAttribute('data-id', r.id);
+      var secs = Math.ceil(r.windowMs / 1000);
+      var pct = Math.max(0, Math.round(r.windowMs / r.maxWindow * 100));
+      btn.innerHTML = '<h3>' + (r.urgent ? '⚠ URGENT — ' : '') + r.target + '</h3>' +
+        '<p>' + r.researcher + ' • ' + r.kind + '</p>' +
+        '<p>Needs ' + r.duration + 's clear sky • Cost ' + r.cost + ' • Reward +' + r.reward + ' Rep</p>' +
+        '<p>Window: ' + secs + 's left &nbsp;•&nbsp; Key ' + (idx + 1) + '</p>' +
+        '<div class="winBarOuter"><div class="winBar" style="width:' + pct + '%"></div></div>';
+      btn.addEventListener('click', function () { selectRequest(r.id); });
+      btn.addEventListener('touchstart', function (e) { e.preventDefault(); selectRequest(r.id); }, { passive: false });
+      cardsEl.appendChild(btn);
+    });
+  }
+  function updateHud() {
+    repEl.textContent = rep;
+    budgetEl.textContent = budget;
+    nightEl.textContent = 'Night ' + night + ' / 5';
+    doneEl.textContent = completed;
+    var left = Math.max(0, 3 - missed);
+    livesEl.textContent = left === 3 ? '● ● ●' : left === 2 ? '● ● ○' : left === 1 ? '● ○ ○' : '○ ○ ○';
+    document.getElementById('livesStat').className = 'stat' + (left === 1 ? ' bad' : left === 2 ? ' warn' : '');
+    var totalMinutes = 20 * 60 + Math.floor(nightElapsed / 1000 * 10 / 10 * 0 + nightElapsed / 80000 * 600);
+    var hh = Math.floor(totalMinutes / 60) % 24, mm = totalMinutes % 60;
+    clockEl.textContent = (hh < 10 ? '0' + hh : hh) + ':' + (mm < 10 ? '0' + mm : mm);
+    weatherText.textContent = weather === 'Clear' ? 'Clear Skies' : weather === 'Cloudy' ? 'Cloudy' : 'Storm';
+    weatherHint.textContent = weather === 'Clear' ? '— Observations progress normally' : weather === 'Cloudy' ? '— Observations paused, windows still tick' : '— Observations paused, beware the window';
+    nightBar.style.width = Math.min(100, nightElapsed / nightDuration * 100) + '%';
+    if (active) {
+      obsName.textContent = 'Observing: ' + active.target;
+      obsBar.style.width = Math.min(100, active.progress / active.duration * 100) + '%';
+      obsDetail.textContent = weather === 'Clear' ? 'Collecting photons… ' + Math.ceil(active.progress) + 's / ' + active.duration + 's' : weather + ' — holding position, ' + Math.ceil(active.progress) + 's / ' + active.duration + 's';
+    } else {
+      obsBar.style.width = '0%';
+      if (selectedId === null) { obsName.textContent = 'No observation running'; obsDetail.textContent = 'Select a request below, then press Observe. Clear skies are required for progress.'; }
+    }
+  }
+  function dawn() {
+    if (active) { missed++; active = null; setMessage('Dawn arrived mid-observation — that window counts as missed.', 'bad'); playFail(); }
+    requests = []; selectedId = null; renderCards();
+    if (checkEnd()) return;
+    night++;
+    if (night > 5) {
+      if (completed >= 10) endGame(true, 'Five Nights Survived — You Win!', 'You finished the full run with ' + completed + ' completed observations. The observatory log is full of good science.');
+      else endGame(false, 'Run Complete — Game Over', 'Five nights are over with only ' + completed + ' completions. You needed 10 to keep the programme funded.');
+      return;
+    }
+    nightElapsed = 0; weather = 'Clear'; weatherTimer = 0; spawnTimer = 800;
+    setMessage('Dawn. Night ' + night + ' begins tonight — fresh requests are coming in.', 'info');
+  }
+  function update(dt) {
+    if (state !== 'playing') return;
+    nightElapsed += dt;
+    weatherTimer += dt;
+    if (weatherTimer >= weatherNext) {
+      weatherTimer = 0; weatherNext = 9000 + Math.random() * 6000;
+      weather = WEATHERS[Math.floor(Math.random() * WEATHERS.length)];
+      if (weather !== 'Clear') setMessage('Weather changed: ' + weather + '. Observations are paused.', 'info');
+    }
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnTimer = 6500 + Math.random() * 2500;
+      if (requests.length < 4) { requests.push(randomRequest()); if (selectedId === null && requests.length) selectedId = requests[0].id; renderCards(); }
+    }
+    var expired = [];
+    requests.forEach(function (r) { r.windowMs -= dt; if (r.windowMs <= 0) expired.push(r); });
+    if (expired.length) {
+      expired.forEach(function (r) { requests = requests.filter(function (x) { return x.id !== r.id; }); if (selectedId === r.id) selectedId = null; });
+      missed += expired.length;
+      setMessage('Missed window: ' + expired.map(function (r) { return r.target; }).join(', ') + '. Missed total: ' + missed + ' / 3.', 'bad');
+      playFail(); renderCards();
+      if (checkEnd()) return;
+    }
+    if (active) {
+      active.windowMs -= dt;
+      if (active.windowMs <= 0) {
+        setMessage('Window expired during ' + active.target + ' — missed.', 'bad');
+        missed++; active = null; playFail(); if (checkEnd()) return;
+      } else if (weather === 'Clear') {
+        active.progress += dt / 1000;
+        if (active.progress >= active.duration) {
+          var done = active; active = null;
+          completed++; rep += done.reward; budget += Math.floor(done.reward / 2);
+          setMessage('Success! ' + done.target + ' complete: +' + done.reward + ' Rep, +' + Math.floor(done.reward / 2) + ' budget funding.', 'good');
+          playSuccess(); if (checkEnd()) return;
+        }
+      }
+    }
+    if (messageTimer > 0) { messageTimer -= dt; if (messageTimer <= 0) msgEl.textContent = ''; }
+    if (nightElapsed >= nightDuration) dawn();
+  }
+  function drawSky(now) {
+    ctx.clearRect(0, 0, 940, 240);
+    ctx.fillStyle = '#070d26'; ctx.fillRect(0, 0, 940, 240);
+    stars.forEach(function (s) {
+      var a = 0.45 + 0.55 * Math.abs(Math.sin(now / 900 + s.tw));
+      ctx.globalAlpha = a; ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.283); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#e8e6d9'; ctx.beginPath(); ctx.arc(820, 42, 24, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#c9c7b2'; ctx.beginPath(); ctx.arc(812, 36, 6, 0, 6.283); ctx.fill(); ctx.beginPath(); ctx.arc(830, 50, 4, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#1a2347'; ctx.fillRect(0, 195, 940, 45);
+    ctx.fillStyle = '#2b3a73';
+    ctx.beginPath(); ctx.arc(150, 200, 52, Math.PI, 0); ctx.fill(); ctx.fillRect(98, 198, 104, 8);
+    var angle = active ? -0.6 + Math.sin(now / 500) * 0.08 : -0.35 + Math.sin(now / 1200) * 0.12;
+    ctx.save(); ctx.translate(150, 178); ctx.rotate(angle);
+    ctx.fillStyle = '#d7dcefff'; ctx.fillRect(-6, -58, 12, 58);
+    ctx.fillStyle = '#fbbf24'; ctx.fillRect(-10, -64, 20, 10);
+    ctx.restore();
+    ctx.fillStyle = '#eef2ff'; ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.fillText(active ? 'Tracking: ' + active.target : 'Dome idle — awaiting target', 240, 214);
+    ctx.font = '13px system-ui, sans-serif'; ctx.fillStyle = '#aab4e6';
+    ctx.fillText('Weather: ' + weather + '  •  Telescope: ' + (active ? (weather === 'Clear' ? 'COLLECTING' : 'HOLDING') : 'IDLE'), 240, 232);
+    if (weather !== 'Clear') {
+      clouds.forEach(function (cl) {
+        ctx.fillStyle = weather === 'Storm' ? 'rgba(90,100,140,0.85)' : 'rgba(160,175,220,0.55)';
+        ctx.beginPath(); ctx.ellipse(cl.x, cl.y, cl.s, 20, 0, 0, 6.283); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cl.x + 26, cl.y + 6, cl.s * 0.6, 15, 0, 0, 6.283); ctx.fill();
+      });
+    }
+    if (weather === 'Storm') {
+      ctx.strokeStyle = 'rgba(250,204,21,0.9)'; ctx.lineWidth = 2; ctx.beginPath();
+      var lx = 300 + (now % 3000) / 3000 * 300; ctx.moveTo(lx, 10); ctx.lineTo(lx - 14, 52); ctx.lineTo(lx + 4, 52); ctx.lineTo(lx - 10, 96); ctx.stroke();
+    }
+  }
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = lastTime ? Math.min(100, now - lastTime) : 16;
+    lastTime = now;
+    if (state === 'playing') update(dt);
+    clouds.forEach(function (cl) { cl.x += cl.v * dt / 1000; if (cl.x > 1000) cl.x = -90; });
+    updateHud();
+    drawSky(now);
+    if (state === 'playing' && (now % 1000 < 20)) renderCards();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('startBtn').addEventListener('touchstart', function (e) { e.preventDefault(); startGame(); }, { passive: false });
+  document.getElementById('howBtn').addEventListener('click', function () { document.getElementById('howto').classList.toggle('hidden'); playClick(); });
+  document.getElementById('observeBtn').addEventListener('click', function () { ensureAudio(); startObservation(); });
+  document.getElementById('observeBtn').addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); startObservation(); }, { passive: false });
+  document.getElementById('dismissBtn').addEventListener('click', function () { ensureAudio(); dismissSelected(); });
+  document.getElementById('dismissBtn').addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); dismissSelected(); }, { passive: false });
+  document.getElementById('helpBtn').addEventListener('click', function () { document.getElementById('helpOverlay').classList.remove('hidden'); });
+  document.getElementById('closeHelpBtn').addEventListener('click', function () { document.getElementById('helpOverlay').classList.add('hidden'); });
+  document.getElementById('restartBtn').addEventListener('click', function () { ensureAudio(); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); resetGame(); }, { passive: false });
+  canvas.addEventListener('click', function () { ensureAudio(); playClick(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); playClick(); }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startGame(); return; }
+    if ((state === 'win' || state === 'gameover') && (e.key === 'r' || e.key === 'R' || e.key === 'Enter')) { resetGame(); return; }
+    if (state !== 'playing') return;
+    if (e.key >= '1' && e.key <= '4') { var idx = parseInt(e.key, 10) - 1; if (requests[idx]) selectRequest(requests[idx].id); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ensureAudio(); startObservation(); }
+    else if (e.key === 'd' || e.key === 'D') { dismissSelected(); }
+    else if (e.key === 'h' || e.key === 'H') { document.getElementById('helpOverlay').classList.toggle('hidden'); }
+  });
+  document.addEventListener('touchstart', function () { ensureAudio(); }, { passive: true });
+  document.addEventListener('click', function () { ensureAudio(); });
+
+  renderCards(); updateHud(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

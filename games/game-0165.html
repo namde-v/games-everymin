@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Orbit Ordeal — Gravity Slingshot</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #050816; color: #eaf2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; overflow: hidden; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; height: 100%; padding: 10px; gap: 8px; }
+  h1 { font-size: 26px; letter-spacing: 1px; text-align: center; }
+  h1 span { color: #ffd166; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 860px; }
+  .pill { background: #121a35; border: 1px solid #2b3a6b; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 700; white-space: nowrap; }
+  .pill b { color: #ffd166; }
+  #status { min-height: 22px; font-size: 14px; color: #a9d6ff; text-align: center; }
+  #stage { position: relative; width: min(860px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 860 / 580; background: radial-gradient(circle at 50% 40%, #16224d 0%, #070b1d 55%, #03040c 100%); border: 2px solid #2b3a6b; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; text-align: center; background: rgba(3, 6, 18, 0.86); border-radius: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #cbd8f2; }
+  .overlay .big { font-size: 18px; color: #fff; }
+  button { cursor: pointer; border: 0; border-radius: 999px; padding: 12px 22px; font-size: 16px; font-weight: 800; background: #ffd166; color: #1a1200; }
+  button.secondary { background: #22315f; color: #fff; border: 1px solid #3d5296; }
+  button:active { transform: scale(0.97); }
+  #howto { display: none; max-width: 580px; text-align: left; background: #0e1733; border: 1px solid #2b3a6b; border-radius: 10px; padding: 12px 16px; font-size: 14px; line-height: 1.6; }
+  #howto.show { display: block; }
+  #howto ul { padding-left: 20px; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #controls button { padding: 8px 14px; font-size: 13px; }
+  .hint { font-size: 12px; color: #8fa3cc; text-align: center; }
+  #powerbar { width: min(420px, 80%); height: 12px; background: #1b2444; border-radius: 999px; overflow: hidden; border: 1px solid #2b3a6b; }
+  #powerfill { height: 100%; width: 0%; background: linear-gradient(90deg, #4ade80, #ffd166, #ff6b6b); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>ORBIT <span>ORDEAL</span></h1>
+  <div id="hud">
+    <div class="pill">Score: <b id="score">0</b></div>
+    <div class="pill">Launches left: <b id="lives">5</b></div>
+    <div class="pill">Round: <b id="round">1 / 3</b></div>
+    <div class="pill">Stars: <b id="stars">0</b></div>
+  </div>
+  <div id="status">Drag from the launch pad to aim, release to slingshot the probe.</div>
+  <div id="stage">
+    <canvas id="game" width="860" height="580"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>ORBIT ORDEAL</h2>
+      <p class="big">Slingshot a probe around planets. Bend its path with gravity. Dock with the moving station.</p>
+      <p>You have 5 launches to dock in all 3 rounds. Crash into a planet or fly into deep space and you lose a launch. Grab stars for bonus points. Precision beats power.</p>
+      <button id="startBtn">▶ Start Mission</button>
+      <button id="howBtn" class="secondary">How to Play</button>
+      <div id="howto">
+        <ul>
+          <li><b>Mouse / touch:</b> press near the launch pad, drag backwards like a slingshot, release to launch.</li>
+          <li><b>Keyboard:</b> ← → adjust angle, ↑ ↓ adjust power, Space to launch, R to restart.</li>
+          <li>Gravity from every planet bends your flight. Use it to curve around obstacles toward the station.</li>
+          <li>Dotted preview shows your predicted path. Watch it change as planets pull.</li>
+          <li>Win by docking in Round 3. Lose if you run out of launches.</li>
+        </ul>
+      </div>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">MISSION COMPLETE</h2>
+      <p class="big" id="endText"></p>
+      <p id="endScore"></p>
+      <div id="powerbar"><div id="powerfill"></div></div>
+      <button id="restartBtn">↻ Play Again (Instant Restart)</button>
+    </div>
+  </div>
+  <div id="controls">
+    <button id="restartSmall" class="secondary">Restart</button>
+    <button id="soundBtn" class="secondary">Sound: On</button>
+    <button id="trailBtn" class="secondary">Preview: On</button>
+  </div>
+  <p class="hint">Keyboard: ← → angle &nbsp;•&nbsp; ↑ ↓ power &nbsp;•&nbsp; Space launch &nbsp;•&nbsp; R restart &nbsp;&nbsp;|&nbsp;&nbsp; Mouse and touch dragging also work.</p>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 860, H = 580;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var roundEl = document.getElementById('round');
+  var starsEl = document.getElementById('stars');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  // ---------- Audio (procedural, only after user interaction) ----------
+  var audioCtx = null, soundOn = true, audioStarted = false;
+  function ensureAudio() {
+    if (!audioStarted) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) { audioCtx = new AC(); audioStarted = true; }
+      } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function fanfare(win) {
+    if (!soundOn || !audioCtx) return;
+    var notes = win ? [523, 659, 784, 1047] : [330, 262, 196, 131];
+    notes.forEach(function (f, i) {
+      setTimeout(function () { beep(f, 0.28, 'triangle', 0.16); }, i * 130);
+    });
+  }
+
+  // ---------- Game state ----------
+  var state = 'title'; // title, aiming, flying, over
+  var score = 0, launches = 5, round = 1, starCount = 0, showPreview = true;
+  var launchPad = { x: 108, y: 492 };
+  var aimAngle = -0.72, aimPower = 0.62, dragging = false, dragPos = null;
+  var probe = null, particles = [], trail = [], messageTimer = 0;
+  var planets = [
+    { x: 430, y: 280, r: 62, mass: 2600, color: '#e07a5f', name: 'Ember' },
+    { x: 205, y: 175, r: 38, mass: 1500, color: '#81b29a', name: 'Verdant' },
+    { x: 645, y: 400, r: 46, mass: 1900, color: '#6d8fd6', name: 'Azure' },
+    { x: 560, y: 130, r: 26, mass: 900, color: '#c9a7e8', name: 'Pebble' }
+  ];
+  var stationAngle = 0.4, stationRadius = 150, stationSpeed = 0.0035;
+  var stars = [];
+  var twinkles = [];
+  for (var i = 0; i < 90; i++) {
+    twinkles.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.6 + 0.4, p: Math.random() * 6.28, s: 0.01 + Math.random() * 0.03 });
+  }
+
+  function stationPos() {
+    return { x: 430 + Math.cos(stationAngle) * stationRadius, y: 280 + Math.sin(stationAngle) * stationRadius * 0.82 };
+  }
+  function resetStars() {
+    stars = [];
+    var spots = [
+      { x: 300, y: 420 }, { x: 520, y: 180 }, { x: 700, y: 250 },
+      { x: 180, y: 330 }, { x: 430, y: 90 }, { x: 620, y: 510 }
+    ];
+    // Pick 3 per round, shifting with round so layouts feel fresh.
+    for (var k = 0; k < 3; k++) {
+      var s = spots[(round - 1 + k * 2) % spots.length];
+      stars.push({ x: s.x, y: s.y, taken: false, p: Math.random() * 6 });
+    }
+  }
+  function resetProbe() {
+    probe = { x: launchPad.x, y: launchPad.y, vx: 0, vy: 0, alive: true };
+    trail = []; particles = [];
+    aimAngle = -0.72; aimPower = 0.62; dragging = false; dragPos = null;
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = launches;
+    roundEl.textContent = round + ' / 3';
+    starsEl.textContent = starCount;
+  }
+  function setStatus(t) { statusEl.textContent = t; }
+  function newGame() {
+    score = 0; launches = 5; round = 1; starCount = 0; stationAngle = 0.4;
+    resetStars(); resetProbe(); state = 'aiming';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    setStatus('Round 1: drag from the pad, curve around Ember, dock with the station.');
+    updateHUD();
+  }
+  function endGame(win) {
+    state = 'over';
+    endTitle.textContent = win ? 'MISSION COMPLETE!' : 'GAME OVER';
+    endText.textContent = win
+      ? 'You docked in all 3 rounds. Brilliant piloting — gravity obeyed you.'
+      : 'Out of launches. The station drifts on without you. Try a gentler arc.';
+    endScore.textContent = 'Final score: ' + score + '  •  Stars collected: ' + starCount + '  •  Rounds completed: ' + (win ? 3 : (round - 1));
+    endScreen.classList.remove('hidden');
+    fanfare(win);
+  }
+  function launch() {
+    if (state !== 'aiming') return;
+    ensureAudio();
+    var speed = 3.2 + aimPower * 7.5;
+    probe.vx = Math.cos(aimAngle) * speed;
+    probe.vy = Math.sin(aimAngle) * speed;
+    state = 'flying';
+    trail = [];
+    setStatus('Probe away! Gravity is steering now — watch the curve.');
+    beep(440, 0.18, 'square', 0.10);
+  }
+  function onCrash() {
+    launches--; updateHUD();
+    burst(probe.x, probe.y, '#ff6b6b', 26);
+    beep(140, 0.35, 'sawtooth', 0.14);
+    if (launches <= 0) { setStatus('Crashed. No launches left.'); endGame(false); }
+    else { state = 'aiming'; resetProbe(); setStatus('Crash! ' + launches + ' launch(es) left. Aim wider around the planet this time.'); }
+  }
+  function onMiss() {
+    launches--; updateHUD();
+    beep(180, 0.30, 'sawtooth', 0.12);
+    if (launches <= 0) { setStatus('Lost in deep space. No launches left.'); endGame(false); }
+    else { state = 'aiming'; resetProbe(); setStatus('Lost in deep space! ' + launches + ' launch(es) left. Use less power or aim back toward the planets.'); }
+  }
+  function onDock() {
+    var bonus = 300 + Math.round(aimPower * 100) + starCount * 25;
+    score += 400 + Math.max(0, 250 - Math.round(trail.length));
+    burst(probe.x, probe.y, '#ffd166', 34);
+    beep(880, 0.25, 'triangle', 0.16);
+    setTimeout(function () { beep(1174, 0.30, 'triangle', 0.16); }, 120);
+    if (round >= 3) { updateHUD(); endGame(true); return; }
+    round++; stationAngle += 1.1; stationSpeed += 0.0007;
+    resetStars(); resetProbe(); state = 'aiming';
+    setStatus('Docked! Round ' + round + ': the station has moved to a faster orbit.');
+    updateHUD();
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * 6.28, sp = 1 + Math.random() * 3.5;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 28 + Math.random() * 22, color: color });
+    }
+  }
+
+  // ---------- Physics ----------
+  function gravityAt(x, y) {
+    var ax = 0, ay = 0;
+    for (var i = 0; i < planets.length; i++) {
+      var p = planets[i];
+      var dx = p.x - x, dy = p.y - y;
+      var d2 = dx * dx + dy * dy + 400;
+      var d = Math.sqrt(d2);
+      var f = p.mass / d2;
+      ax += dx / d * f; ay += dy / d * f;
+    }
+    return { ax: ax, ay: ay };
+  }
+  function stepProbe() {
+    var g = gravityAt(probe.x, probe.y);
+    probe.vx += g.ax; probe.vy += g.ay;
+    probe.x += probe.vx; probe.y += probe.vy;
+    trail.push({ x: probe.x, y: probe.y });
+    if (trail.length > 180) trail.shift();
+    // Stars
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      if (!s.taken) {
+        var dx = probe.x - s.x, dy = probe.y - s.y;
+        if (dx * dx + dy * dy < 26 * 26) {
+          s.taken = true; starCount++; score += 100; updateHUD();
+          burst(s.x, s.y, '#ffe066', 14); beep(1320, 0.16, 'sine', 0.14);
+          setStatus('Star collected! +100 points.');
+        }
+      }
+    }
+    // Planets
+    for (var j = 0; j < planets.length; j++) {
+      var pl = planets[j];
+      var ddx = probe.x - pl.x, ddy = probe.y - pl.y;
+      if (ddx * ddx + ddy * ddy < (pl.r + 7) * (pl.r + 7)) { onCrash(); return; }
+    }
+    // Station
+    var st = stationPos();
+    var sdx = probe.x - st.x, sdy = probe.y - st.y;
+    if (sdx * sdx + sdy * sdy < 26 * 26) { onDock(); return; }
+    // Out of bounds
+    if (probe.x < -60 || probe.x > W + 60 || probe.y < -60 || probe.y > H + 60) { onMiss(); return; }
+  }
+  function predictedPath() {
+    var pts = [];
+    var x = launchPad.x, y = launchPad.y;
+    var speed = 3.2 + aimPower * 7.5;
+    var vx = Math.cos(aimAngle) * speed, vy = Math.sin(aimAngle) * speed;
+    for (var i = 0; i < 110; i++) {
+      var g = gravityAt(x, y);
+      vx += g.ax; vy += g.ay; x += vx; y += vy;
+      if (i % 3 === 0) pts.push({ x: x, y: y });
+      if (x < -20 || x > W + 20 || y < -20 || y > H + 20) break;
+    }
+    return pts;
+  }
+
+  // ---------- Drawing ----------
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Starfield
+    for (var i = 0; i < twinkles.length; i++) {
+      var t = twinkles[i]; t.p += t.s;
+      ctx.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(t.p));
+      ctx.fillStyle = '#cfe0ff';
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, 6.283); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Gravity rings
+    for (var j = 0; j < planets.length; j++) {
+      var p = planets[j];
+      ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 34, 0, 6.283); ctx.stroke();
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 62, 0, 6.283); ctx.stroke();
+    }
+    // Launch pad
+    ctx.fillStyle = '#2b3a6b';
+    ctx.fillRect(launchPad.x - 34, launchPad.y + 6, 68, 12);
+    ctx.fillStyle = '#ffd166';
+    ctx.font = 'bold 12px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('LAUNCH PAD', launchPad.x, launchPad.y + 32);
+    // Stars
+    for (var k = 0; k < stars.length; k++) {
+      var s = stars[k];
+      if (s.taken) continue;
+      s.p += 0.05;
+      ctx.fillStyle = '#ffe066';
+      ctx.save(); ctx.translate(s.x, s.y + Math.sin(s.p) * 3); ctx.rotate(s.p * 0.4);
+      ctx.font = '22px system-ui, sans-serif'; ctx.fillText('★', 0, 8); ctx.restore();
+    }
+    // Planets
+    for (var m = 0; m < planets.length; m++) {
+      var pl = planets[m];
+      var grad = ctx.createRadialGradient(pl.x - pl.r * 0.35, pl.y - pl.r * 0.35, pl.r * 0.2, pl.x, pl.y, pl.r);
+      grad.addColorStop(0, '#ffffff'); grad.addColorStop(0.25, pl.color); grad.addColorStop(1, '#0b1026');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r, 0, 6.283); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.fillText(pl.name, pl.x, pl.y - pl.r - 8);
+    }
+    // Station (orbits central planet)
+    var st = stationPos();
+    ctx.strokeStyle = 'rgba(255,209,102,0.35)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(430, 280, stationRadius, stationRadius * 0.82, 0, 0, 6.283); ctx.stroke();
+    ctx.fillStyle = '#101a38'; ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(st.x, st.y, 17, 0, 6.283); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 11px system-ui, sans-serif';
+    ctx.fillText('STATION', st.x, st.y - 26);
+    ctx.fillStyle = '#7CFC9A'; ctx.beginPath(); ctx.arc(st.x, st.y, 5, 0, 6.283); ctx.fill();
+    // Trail
+    if (trail.length > 1) {
+      ctx.strokeStyle = 'rgba(125,211,252,0.8)'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(trail[0].x, trail[0].y);
+      for (var ti = 1; ti < trail.length; ti++) ctx.lineTo(trail[ti].x, trail[ti].y);
+      ctx.stroke();
+    }
+    // Aim preview + slingshot band
+    if (state === 'aiming') {
+      if (showPreview) {
+        var pts = predictedPath();
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        for (var pi = 0; pi < pts.length; pi++) {
+          ctx.beginPath(); ctx.arc(pts[pi].x, pts[pi].y, pi % 6 === 0 ? 3 : 1.8, 0, 6.283); ctx.fill();
+        }
+      }
+      var ax = launchPad.x + Math.cos(aimAngle) * (20 + aimPower * 90);
+      var ay = launchPad.y + Math.sin(aimAngle) * (20 + aimPower * 90);
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(launchPad.x, launchPad.y); ctx.lineTo(ax, ay); ctx.stroke();
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(ax, ay, 6, 0, 6.283); ctx.fill();
+      if (dragging && dragPos) {
+        ctx.strokeStyle = 'rgba(255,209,102,0.6)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(launchPad.x, launchPad.y); ctx.lineTo(dragPos.x, dragPos.y); ctx.stroke();
+      }
+      ctx.fillStyle = '#fff'; ctx.font = '13px system-ui, sans-serif';
+      ctx.fillText('Power ' + Math.round(aimPower * 100) + '%  •  Angle ' + Math.round(aimAngle * 57.3) + '°', launchPad.x + 10, launchPad.y - 18);
+    }
+    // Probe
+    if (probe && state !== 'over') {
+      ctx.fillStyle = '#eaf2ff';
+      ctx.beginPath(); ctx.arc(probe.x, probe.y, 8, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath(); ctx.arc(probe.x - 2, probe.y - 2, 3.5, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(probe.x, probe.y, 12, 0, 6.283); ctx.stroke();
+    }
+    // Particles
+    for (var pi2 = 0; pi2 < particles.length; pi2++) {
+      var pt = particles[pi2];
+      ctx.globalAlpha = Math.max(0, pt.life / 40);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, 6.283); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function loop() {
+    if (state === 'flying' && probe) stepProbe();
+    if (state === 'aiming' || state === 'flying') stationAngle += stationSpeed;
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var pt = particles[i];
+      pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+      if (pt.life <= 0) particles.splice(i, 1);
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Input: pointer (mouse + touch) ----------
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  function onDown(e) {
+    ensureAudio();
+    if (state !== 'aiming') return;
+    var pos = canvasPos(e);
+    var dx = pos.x - launchPad.x, dy = pos.y - launchPad.y;
+    if (dx * dx + dy * dy < 110 * 110) { dragging = true; dragPos = pos; }
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (!dragging || state !== 'aiming') return;
+    var pos = canvasPos(e);
+    dragPos = pos;
+    // Slingshot: drag backwards, launch goes the opposite way.
+    var dx = launchPad.x - pos.x, dy = launchPad.y - pos.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 8) {
+      aimAngle = Math.atan2(dy, dx);
+      aimPower = Math.min(1, Math.max(0.15, dist / 190));
+    }
+    e.preventDefault();
+  }
+  function onUp(e) {
+    if (!dragging) return;
+    dragging = false; dragPos = null;
+    if (state === 'aiming') launch();
+    e.preventDefault();
+  }
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp, { passive: false });
+
+  // ---------- Keyboard ----------
+  document.addEventListener('keydown', function (e) {
+    ensureAudio();
+    if (e.key === 'ArrowLeft') { aimAngle -= 0.06; e.preventDefault(); }
+    if (e.key === 'ArrowRight') { aimAngle += 0.06; e.preventDefault(); }
+    if (e.key === 'ArrowUp') { aimPower = Math.min(1, aimPower + 0.05); e.preventDefault(); }
+    if (e.key === 'ArrowDown') { aimPower = Math.max(0.15, aimPower - 0.05); e.preventDefault(); }
+    if (e.key === ' ' || e.key === 'Enter') {
+      if (state === 'title') { newGame(); }
+      else if (state === 'aiming') { launch(); }
+      else if (state === 'over') { newGame(); }
+      e.preventDefault();
+    }
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') newGame(); }
+  });
+  // Extra listeners so keyboard + mouse + touch are all explicitly present.
+  canvas.addEventListener('click', function () { ensureAudio(); });
+  document.addEventListener('keyup', function () {});
+  window.addEventListener('touchstart', function () { ensureAudio(); }, { passive: true });
+
+  // ---------- Buttons ----------
+  document.getElementById('startBtn').addEventListener('click', function () { ensureAudio(); beep(660, 0.15, 'triangle', 0.14); newGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function () { ensureAudio(); newGame(); });
+  document.getElementById('restartSmall').addEventListener('click', function () { ensureAudio(); newGame(); });
+  document.getElementById('howBtn').addEventListener('click', function () {
+    ensureAudio();
+    var h = document.getElementById('howto');
+    h.classList.toggle('show');
+    document.getElementById('howBtn').textContent = h.classList.contains('show') ? 'Hide How to Play' : 'How to Play';
+  });
+  document.getElementById('soundBtn').addEventListener('click', function (ev) {
+    ensureAudio(); soundOn = !soundOn;
+    ev.target.textContent = 'Sound: ' + (soundOn ? 'On' : 'Off');
+    if (soundOn) beep(660, 0.12, 'sine', 0.12);
+  });
+  document.getElementById('trailBtn').addEventListener('click', function (ev) {
+    showPreview = !showPreview;
+    ev.target.textContent = 'Preview: ' + (showPreview ? 'On' : 'Off');
+  });
+
+  resetStars(); resetProbe(); updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

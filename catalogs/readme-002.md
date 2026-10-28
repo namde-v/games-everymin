@@ -66,6 +66,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0159 | Ukulele Uprising | Rhythm / Strum Timing | Chord keys / tap chord buttons, mouse/touch | [Play](./../games/game-0159.html) |
 | 0160 | Tightrope Titan | Precision / Balance Walk | Arrow Keys / A-D lean, mouse/touch lean | [Play](./../games/game-0160.html) |
 
+| 0161 | Glacier Glider | Arcade / Ice Momentum Slider | Arrow Keys / WASD push, swipe, click/tap canvas glide | [Play](./../games/game-0161.html) |
+| 0162 | Rune Reactor | Puzzle / Rune Sequence Logic | Keys 1-6 pick rune, Enter submit, click/tap buttons | [Play](./../games/game-0162.html) |
+| 0163 | Observatory Operator | Strategy / Telescope Scheduling | Click/tap request cards, 1-4 select, mouse/touch | [Play](./../games/game-0163.html) |
+| 0164 | Bongo Blitz | Rhythm / Drum Beat Timing | A/S/D/J/K drums, mouse/touch tap pads | [Play](./../games/game-0164.html) |
+| 0165 | Orbit Ordeal | Precision / Gravity Slingshot | Mouse/touch drag slingshot, Arrow Keys aim, Space launch | [Play](./../games/game-0165.html) |
+| 0166 | Neon Nightrider | Arcade / Neon Lane Dodger | Arrow Keys / A-D lane switch, Space jump, touch swipe/tap | [Play](./../games/game-0166.html) |
+| 0167 | Hex Havoc | Puzzle / Hex Tile Rotation | Click/tap hex rotate, Arrow Keys / WASD cursor, Space rotate | [Play](./../games/game-0167.html) |
+| 0168 | Farmstead Frontier | Strategy / Crop Rotation Simulation | Arrow Keys move, 1-6 plant, W water, H harvest, click/tap plots | [Play](./../games/game-0168.html) |
+| 0169 | Meadow Maestro | Rhythm / Birdsong Conducting | Keys 1/A etc. echo birds, click/tap bird buttons | [Play](./../games/game-0169.html) |
+| 0170 | Archery Aurora | Precision / Wind Archery | Mouse/touch drag aim, Arrow Keys adjust, Click/Space shoot | [Play](./../games/game-0170.html) |
+
 ## Batch notes
 
 - Batch 011: 10 games, produced in one cycle. Volume 002 opened at game 0101.
@@ -74,4 +85,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 014: 10 games, produced in one cycle.
 - Batch 015: 10 games, produced in one cycle.
 - Batch 016: 10 games, produced in one cycle.
+- Batch 017: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
