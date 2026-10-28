@@ -74,3 +74,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0768 | Mountain Ski Resort Manager | Strategy / Resort Management | Mouse/touch select buildings, Arrow Keys select, Keys 1-3 actions, Space confirm | [Play](./../games/game-0768.html) |
 | 0769 | Alpine Yodel Echo | Rhythm / Melody Echo Timing | Keys A/S/D/F play notes, mouse click, touch tap | [Play](./../games/game-0769.html) |
 | 0770 | Comet Tail Navigator | Precision / Asteroid Gate Navigation | Arrow Keys/WASD thrust, Space brake, mouse/touch drag steer | [Play](./../games/game-0770.html) |
+| 0771 | Volcano Lava Runner | Arcade / Lava Dodge Runner | Arrow Keys/WASD jump and duck, mouse/touch control | [Play](./../games/game-0771.html) |
+| 0772 | Lighthouse Lens Puzzle | Puzzle / Light Beam Logic | Mouse/touch tap rotate, Arrow Keys select, Space rotate | [Play](./../games/game-0772.html) |
+| 0773 | Desert Oasis Trader | Strategy / Caravan Trading | Mouse/touch buy, sell and travel, Arrow Keys select, Space confirm | [Play](./../games/game-0773.html) |
+| 0774 | Jazz Saxophone Jam | Rhythm / Sax Note Timing | Keys D/F/J/K play notes, mouse/touch tap lanes | [Play](./../games/game-0774.html) |
+| 0775 | Deep Sea Pearl Diver | Precision / Breath-Hold Diving | Arrow Keys/WASD dive, Space dash, mouse/touch steer | [Play](./../games/game-0775.html) |
+| 0776 | Tornado Storm Chaser | Arcade / Storm Data Collector | Arrow Keys/WASD drive, mouse/touch steer | [Play](./../games/game-0776.html) |
+| 0777 | Ancient Rune Decoder | Puzzle / Rune Sequence Logic | Mouse/touch tap runes, Keys 1-6 select | [Play](./../games/game-0777.html) |
+| 0778 | Space Station Hydroponics | Strategy / Station Farming Management | Mouse/touch plant, water and harvest, Keys 1-6 select, P/W/H/D actions | [Play](./../games/game-0778.html) |
+| 0779 | Opera Aria Pitch Match | Rhythm / Vocal Pitch Matching | Keys hold pitch, mouse/touch pitch control | [Play](./../games/game-0779.html) |
+| 0780 | Arctic Ice Fisher | Precision / Ice Fishing Timing | Space strike, mouse/touch tap strike | [Play](./../games/game-0780.html) |

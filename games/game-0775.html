@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Deep Sea Pearl Diver</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #00101f; color: #eaf7ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 26px; margin: 6px 0 4px; text-align: center; text-shadow: 0 2px 8px #00c8ff; letter-spacing: 0.5px; }
+  p.sub { color: #9fd8ef; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(96vw, 720px); }
+  canvas { width: 100%; height: 520px; display: block; background: linear-gradient(#0a5a8a, #032a4d 38%, #011428 75%, #00060f); border: 3px solid #35c5ff; border-radius: 14px; box-shadow: 0 0 24px rgba(0,200,255,.35); touch-action: none; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; justify-content: center; }
+  .pill { background: #062b45; border: 1px solid #2aa8d8; border-radius: 999px; padding: 7px 12px; font-size: 14px; font-weight: bold; }
+  .pill span { color: #ffe08a; }
+  #airWrap { width: min(96vw, 720px); background: #062b45; border: 1px solid #2aa8d8; border-radius: 999px; padding: 4px; margin-bottom: 10px; }
+  #airBar { height: 18px; border-radius: 999px; width: 100%; background: linear-gradient(90deg, #35e0ff, #00a8ff); transition: width .18s linear; }
+  #airBar.low { background: linear-gradient(90deg, #ff5a4e, #ffb347); }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(0, 10, 22, .78); border-radius: 14px; padding: 22px; z-index: 5; }
+  .overlay h2 { font-size: 32px; margin-bottom: 10px; }
+  .overlay p { max-width: 540px; line-height: 1.55; font-size: 15px; color: #d8f1ff; margin: 6px 0; }
+  .overlay .small { font-size: 13px; color: #a9d3e6; }
+  button { margin-top: 14px; padding: 13px 26px; font-size: 18px; font-weight: bold; border: 0; border-radius: 10px; cursor: pointer; background: #ffcf3d; color: #102a00; box-shadow: 0 4px 0 #b88600; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #35c5ff; color: #002233; box-shadow: 0 4px 0 #0a6d96; }
+  #keys { font-size: 13px; color: #a9d3e6; text-align: center; line-height: 1.6; max-width: 700px; }
+  #keys b { color: #fff; }
+  .hidden { display: none !important; }
+  @media (max-width: 520px) { canvas { height: 460px; } h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<h1>🌊 Deep Sea Pearl Diver 🦪</h1>
+<p class="sub">Precision / Breath-Hold Diving — dive deep, grab pearls, and surface alive.</p>
+
+<div id="wrap">
+  <canvas id="game" width="720" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Deep Sea Pearl Diver</h2>
+    <p><b>How to Play:</b> You start at the surface with a full air tank. Dive down, collect <b>12 pearls</b> to win, then return to the surface — or surface early to refill your air and dive again!</p>
+    <p>Deeper pearls are worth more points, but your air drains faster the deeper you go. Watch out for jellyfish and sharks — touching one costs air and knocks you back. Bubbles refill a little air.</p>
+    <p class="small"><b>Controls:</b> Arrow keys / WASD to swim &bull; Mouse: hold and move to steer toward the pointer &bull; Touch: drag on the screen to swim. Press Space to dash (costs a little air).</p>
+    <p class="small">Win: collect 12 pearls. Game Over: your air reaches 0 while underwater.</p>
+    <button id="startBtn" type="button">▶ Start Dive</button>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>🏆 You Did It!</h2>
+    <p id="winText">You collected all the pearls and made it back to the surface!</p>
+    <p id="winScore"></p>
+    <button id="winRestartBtn" type="button">↻ Dive Again</button>
+  </div>
+
+  <div id="gameOverScreen" class="overlay hidden">
+    <h2>💀 Out of Air!</h2>
+    <p>You ran out of air deep below the surface. The sea keeps its pearls… this time.</p>
+    <p id="overScore"></p>
+    <button id="overRestartBtn" type="button">↻ Try Again</button>
+  </div>
+</div>
+
+<div id="hud">
+  <div class="pill">Score: <span id="scoreVal">0</span></div>
+  <div class="pill">Pearls: <span id="pearlVal">0 / 12</span></div>
+  <div class="pill">Depth: <span id="depthVal">0 m</span></div>
+  <div class="pill">Air: <span id="airVal">100%</span></div>
+  <div class="pill">Status: <span id="statusVal">At the surface</span></div>
+</div>
+<div id="airWrap"><div id="airBar"></div></div>
+<div id="keys"><b>Keyboard:</b> WASD / Arrows to swim, Space to dash &bull; <b>Mouse:</b> hold to steer &bull; <b>Touch:</b> drag to swim &bull; <b>P</b> pause &bull; <b>R</b> restart</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var gameOverScreen = document.getElementById('gameOverScreen');
+  var scoreVal = document.getElementById('scoreVal');
+  var pearlVal = document.getElementById('pearlVal');
+  var depthVal = document.getElementById('depthVal');
+  var airVal = document.getElementById('airVal');
+  var statusVal = document.getElementById('statusVal');
+  var airBar = document.getElementById('airBar');
+  var winScore = document.getElementById('winScore');
+  var overScore = document.getElementById('overScore');
+
+  var QUOTA = 12;
+  var state = 'title'; // title | playing | paused | win | over
+  var score = 0, pearls = 0, air = 100, time = 0, dashCooldown = 0, invuln = 0;
+  var keys = {};
+  var mouse = { active: false, x: W / 2, y: 60 };
+  var touch = { active: false, x: W / 2, y: 60 };
+  var diver = { x: W / 2, y: 46, vx: 0, vy: 0, r: 15, face: 1 };
+  var pearlsList = [], hazards = [], bubbles = [], particles = [], fish = [], seaweed = [];
+
+  // ---------- Procedural Web Audio (only after user interaction) ----------
+  var audioCtx = null, masterGain = null;
+  function ensureAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (!audioCtx) return;
+    if (name === 'pearl') { tone(880, 0.18, 'sine', 0.7, 1320); setTimeout(function(){ tone(1320, 0.22, 'sine', 0.5, 1760); }, 90); }
+    else if (name === 'bubble') { tone(500, 0.16, 'sine', 0.4, 900); }
+    else if (name === 'hurt') { tone(180, 0.3, 'sawtooth', 0.6, 70); }
+    else if (name === 'surface') { tone(400, 0.4, 'sine', 0.5, 900); }
+    else if (name === 'win') { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.35, 'triangle', 0.6); }, i * 130); }); }
+    else if (name === 'over') { [300, 240, 180, 120].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.35, 'sawtooth', 0.4); }, i * 150); }); }
+    else if (name === 'dash') { tone(300, 0.15, 'sine', 0.4, 700); }
+  }
+
+  // ---------- World setup ----------
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function resetWorld() {
+    score = 0; pearls = 0; air = 100; time = 0; dashCooldown = 0; invuln = 0;
+    diver.x = W / 2; diver.y = 46; diver.vx = 0; diver.vy = 0; diver.face = 1;
+    pearlsList = []; hazards = []; bubbles = []; particles = []; fish = []; seaweed = [];
+    for (var i = 0; i < 26; i++) {
+      var depth = rand(110, 490);
+      var value = depth < 200 ? 50 : depth < 330 ? 100 : depth < 430 ? 200 : 350;
+      pearlsList.push({ x: rand(35, W - 35), y: depth, r: 11, value: value, bob: rand(0, 6), taken: false, deep: depth >= 330 });
+    }
+    for (var j = 0; j < 11; j++) {
+      hazards.push({ x: rand(50, W - 50), y: rand(130, 480), r: rand(16, 24), kind: j % 3 === 0 ? 'shark' : 'jelly', vx: rand(-0.6, 0.6), phase: rand(0, 6) });
+    }
+    for (var k = 0; k < 9; k++) bubbles.push({ x: rand(40, W - 40), y: rand(140, 480), r: 13, bob: rand(0, 6) });
+    for (var f = 0; f < 8; f++) fish.push({ x: rand(0, W), y: rand(60, 430), speed: rand(0.4, 1.1), dir: Math.random() < 0.5 ? 1 : -1, hue: Math.floor(rand(0, 360)) });
+    for (var s = 0; s < 14; s++) seaweed.push({ x: rand(10, W - 10), h: rand(30, 90), sway: rand(0, 6) });
+    updateHUD();
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: rand(-2, 2), vy: rand(-2, 2), life: 1, color: color });
+  }
+  function updateHUD() {
+    var depth = Math.max(0, Math.round((diver.y - 40) / 9));
+    scoreVal.textContent = score;
+    pearlVal.textContent = pearls + ' / ' + QUOTA;
+    depthVal.textContent = depth + ' m';
+    airVal.textContent = Math.max(0, Math.round(air)) + '%';
+    airBar.style.width = Math.max(0, air) + '%';
+    airBar.className = air < 30 ? 'low' : '';
+    if (state === 'win') statusVal.textContent = 'Victory!';
+    else if (state === 'over') statusVal.textContent = 'Out of air';
+    else if (state === 'paused') statusVal.textContent = 'Paused';
+    else if (diver.y <= 58) statusVal.textContent = pearls >= QUOTA ? 'Quota done — surface to win!' : 'At the surface — refilling air';
+    else if (air < 30) statusVal.textContent = 'LOW AIR — surface now!';
+    else statusVal.textContent = 'Diving… ' + pearls + '/' + QUOTA + ' pearls';
+  }
+
+  function showScreen(which) {
+    titleScreen.classList.toggle('hidden', which !== 'title');
+    winScreen.classList.toggle('hidden', which !== 'win');
+    gameOverScreen.classList.toggle('hidden', which !== 'over');
+  }
+  function startGame() {
+    ensureAudio();
+    resetWorld();
+    state = 'playing';
+    showScreen('none');
+    sfx('surface');
+  }
+  function endWin() {
+    state = 'win';
+    winScore.textContent = 'Final score: ' + score + ' points with ' + pearls + ' pearls collected.';
+    showScreen('win');
+    sfx('win');
+    updateHUD();
+  }
+  function endOver() {
+    state = 'over';
+    overScore.textContent = 'Final score: ' + score + ' points with ' + pearls + ' pearls collected.';
+    showScreen('over');
+    sfx('over');
+    updateHUD();
+  }
+
+  // ---------- Input: keyboard, mouse, touch ----------
+  document.addEventListener('keydown', function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+    if (e.key.toLowerCase() === 'p' && state === 'playing') { state = 'paused'; updateHUD(); }
+    else if (e.key.toLowerCase() === 'p' && state === 'paused') { state = 'playing'; updateHUD(); }
+    if (e.key.toLowerCase() === 'r' && (state === 'playing' || state === 'paused' || state === 'win' || state === 'over')) startGame();
+    if (e.key === ' ' && state === 'playing' && dashCooldown <= 0) {
+      diver.vx *= 2.2; diver.vy *= 2.2; air = Math.max(0, air - 3); dashCooldown = 0.9; sfx('dash');
+      burst(diver.x, diver.y + 10, '#bfefff', 10);
+    }
+    if (e.key === 'Enter' && state === 'title') startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+  canvas.addEventListener('mousedown', function (e) {
+    ensureAudio();
+    mouse.active = true;
+    var r = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - r.left) * (W / r.width);
+    mouse.y = (e.clientY - r.top) * (H / r.height);
+  });
+  document.addEventListener('mouseup', function () { mouse.active = false; });
+  canvas.addEventListener('mousemove', function (e) {
+    if (!mouse.active) return;
+    var r = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - r.left) * (W / r.width);
+    mouse.y = (e.clientY - r.top) * (H / r.height);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio();
+    e.preventDefault();
+    var t = e.touches[0];
+    var r = canvas.getBoundingClientRect();
+    touch.active = true;
+    touch.x = (t.clientX - r.left) * (W / r.width);
+    touch.y = (t.clientY - r.top) * (H / r.height);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    var r = canvas.getBoundingClientRect();
+    touch.x = (t.clientX - r.left) * (W / r.width);
+    touch.y = (t.clientY - r.top) * (H / r.height);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); touch.active = false; });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+
+  // ---------- Update ----------
+  function update(dt) {
+    if (state !== 'playing') return;
+    time += dt;
+    if (dashCooldown > 0) dashCooldown -= dt;
+    if (invuln > 0) invuln -= dt;
+
+    var ax = 0, ay = 0;
+    if (keys['arrowleft'] || keys['a']) ax -= 1;
+    if (keys['arrowright'] || keys['d']) ax += 1;
+    if (keys['arrowup'] || keys['w']) ay -= 1;
+    if (keys['arrowdown'] || keys['s']) ay += 1;
+    if (mouse.active) {
+      var mdx = mouse.x - diver.x, mdy = mouse.y - diver.y;
+      var md = Math.sqrt(mdx * mdx + mdy * mdy);
+      if (md > 8) { ax = mdx / md; ay = mdy / md; }
+    }
+    if (touch.active) {
+      var tdx = touch.x - diver.x, tdy = touch.y - diver.y;
+      var td = Math.sqrt(tdx * tdx + tdy * tdy);
+      if (td > 8) { ax = tdx / td; ay = tdy / td; }
+    }
+    var len = Math.sqrt(ax * ax + ay * ay);
+    if (len > 0) { ax /= len; ay /= len; if (ax !== 0) diver.face = ax > 0 ? 1 : -1; }
+    diver.vx += ax * 900 * dt; diver.vy += ay * 900 * dt;
+    diver.vx *= 0.88; diver.vy *= 0.88;
+    // Gentle upward buoyancy near the surface so surfacing feels natural.
+    if (diver.y > 50) diver.vy += 12 * dt;
+    diver.x += diver.vx * dt; diver.y += diver.vy * dt;
+    diver.x = Math.max(18, Math.min(W - 18, diver.x));
+    diver.y = Math.max(30, Math.min(H - 20, diver.y));
+
+    var atSurface = diver.y <= 58;
+    var depthFactor = 1 + Math.max(0, (diver.y - 58) / 200);
+    if (atSurface) {
+      air = Math.min(100, air + 22 * dt);
+      if (pearls >= QUOTA && state === 'playing') { endWin(); return; }
+    } else {
+      air -= (2.1 * depthFactor) * dt;
+    }
+    if (air <= 0 && !atSurface) { air = 0; endOver(); return; }
+    if (air <= 0 && atSurface) air = 1;
+
+    // Pearls
+    pearlsList.forEach(function (p) {
+      if (p.taken) return;
+      var dx = p.x - diver.x, dy = p.y - diver.y;
+      if (Math.sqrt(dx * dx + dy * dy) < diver.r + p.r + 4) {
+        p.taken = true; pearls++; score += p.value;
+        burst(p.x, p.y, '#ffe08a', 16); sfx('pearl');
+        if (pearls >= QUOTA) statusVal.textContent = 'Quota done — surface to win!';
+      }
+    });
+    // Bubbles refill air
+    bubbles.forEach(function (b) {
+      b.y -= 12 * dt; if (b.y < 70) b.y = rand(400, 490);
+      var dx = b.x - diver.x, dy = b.y - diver.y;
+      if (Math.sqrt(dx * dx + dy * dy) < diver.r + b.r) { air = Math.min(100, air + 18); burst(b.x, b.y, '#bfefff', 8); sfx('bubble'); b.y = rand(400, 490); b.x = rand(40, W - 40); }
+    });
+    // Hazards
+    hazards.forEach(function (hz) {
+      hz.x += hz.vx; hz.y += Math.sin(time * 1.4 + hz.phase) * 0.35;
+      if (hz.x < 30 || hz.x > W - 30) hz.vx *= -1;
+      var dx = hz.x - diver.x, dy = hz.y - diver.y;
+      if (invuln <= 0 && Math.sqrt(dx * dx + dy * dy) < diver.r + hz.r - 4) {
+        air = Math.max(0, air - 16);
+        diver.vx = dx > 0 ? -260 : 260; diver.vy = -180; invuln = 1.2;
+        burst(diver.x, diver.y, '#ff5a4e', 14); sfx('hurt');
+        if (air <= 0 && diver.y > 58) { endOver(); return; }
+      }
+    });
+    fish.forEach(function (f) {
+      f.x += f.speed * f.dir;
+      if (f.x > W + 20) f.x = -20; if (f.x < -20) f.x = W + 20;
+    });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life -= dt * 2; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    updateHUD();
+  }
+
+  // ---------- Draw ----------
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Light rays
+    ctx.save();
+    ctx.globalAlpha = 0.10; ctx.fillStyle = '#7fe3ff';
+    for (var i = 0; i < 5; i++) {
+      var lx = 80 + i * 140 + Math.sin(time * 0.5 + i) * 20;
+      ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx + 50, 0); ctx.lineTo(lx + 110, 260); ctx.lineTo(lx + 10, 260); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    // Surface waves
+    ctx.fillStyle = '#2fb8e6'; ctx.fillRect(0, 0, W, 18);
+    ctx.fillStyle = '#7fe3ff';
+    for (var wx = 0; wx < W; wx += 36) {
+      ctx.beginPath(); ctx.arc(wx + (Math.sin(time * 2 + wx) * 4), 18, 9, Math.PI, 0); ctx.fill();
+    }
+    // Depth markers
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '12px Arial';
+    ctx.fillText('10 m', 10, 130); ctx.fillText('25 m', 10, 280); ctx.fillText('45 m', 10, 440);
+    // Seaweed
+    seaweed.forEach(function (s) {
+      ctx.strokeStyle = '#2fae6a'; ctx.lineWidth = 5; ctx.beginPath();
+      ctx.moveTo(s.x, H);
+      ctx.quadraticCurveTo(s.x + Math.sin(time + s.sway) * 12, H - s.h / 2, s.x + Math.sin(time * 1.3 + s.sway) * 16, H - s.h);
+      ctx.stroke();
+    });
+    // Fish
+    fish.forEach(function (f) {
+      ctx.fillStyle = 'hsl(' + f.hue + ',70%,60%)';
+      ctx.beginPath(); ctx.ellipse(f.x, f.y, 14, 8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(f.x - f.dir * 14, f.y); ctx.lineTo(f.x - f.dir * 24, f.y - 8); ctx.lineTo(f.x - f.dir * 24, f.y + 8); ctx.closePath(); ctx.fill();
+    });
+    // Pearls in shells
+    pearlsList.forEach(function (p) {
+      if (p.taken) return;
+      var bobY = p.y + Math.sin(time * 2 + p.bob) * 3;
+      ctx.fillStyle = p.deep ? '#c77dff' : '#ff9ecb';
+      ctx.beginPath(); ctx.ellipse(p.x, bobY + 10, 20, 9, 0, 0, Math.PI); ctx.fill();
+      ctx.fillStyle = '#fff8d6';
+      ctx.beginPath(); ctx.arc(p.x, bobY, p.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath(); ctx.arc(p.x - 3, bobY - 3, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(p.value, p.x, bobY - 18); ctx.textAlign = 'left';
+    });
+    // Bubbles
+    bubbles.forEach(function (b) {
+      ctx.strokeStyle = 'rgba(191,239,255,0.9)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(b.x, b.y + Math.sin(time * 2 + b.bob) * 2, b.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath(); ctx.arc(b.x - 4, b.y - 4, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    // Hazards
+    hazards.forEach(function (hz) {
+      if (hz.kind === 'jelly') {
+        ctx.fillStyle = 'rgba(255,110,220,0.85)';
+        ctx.beginPath(); ctx.arc(hz.x, hz.y, hz.r, Math.PI, 0); ctx.fill();
+        ctx.strokeStyle = '#ff6edc'; ctx.lineWidth = 2;
+        for (var t = 0; t < 4; t++) {
+          ctx.beginPath(); ctx.moveTo(hz.x - 12 + t * 8, hz.y);
+          ctx.quadraticCurveTo(hz.x - 12 + t * 8 + Math.sin(time * 4 + t) * 5, hz.y + 16, hz.x - 12 + t * 8, hz.y + 28); ctx.stroke();
+        }
+      } else {
+        ctx.fillStyle = '#7a8a99';
+        ctx.beginPath(); ctx.ellipse(hz.x, hz.y, hz.r + 8, hz.r - 4, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(hz.x + hz.r + 4, hz.y - 6); ctx.lineTo(hz.x + hz.r + 18, hz.y - 16); ctx.lineTo(hz.x + hz.r + 14, hz.y + 4); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ff5a4e'; ctx.beginPath(); ctx.arc(hz.x - hz.r / 2, hz.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    // Diver (blink while invulnerable)
+    if (invuln <= 0 || Math.floor(time * 10) % 2 === 0) {
+      ctx.save(); ctx.translate(diver.x, diver.y); ctx.scale(diver.face, 1);
+      ctx.fillStyle = '#1a2a3a'; ctx.fillRect(-12, -6, 24, 18);
+      ctx.fillStyle = '#ffcf3d'; ctx.fillRect(-12, -6, 24, 6);
+      ctx.fillStyle = '#ffd9a0'; ctx.beginPath(); ctx.arc(8, -6, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#222'; ctx.fillRect(4, -9, 10, 5);
+      ctx.fillStyle = '#35c5ff'; ctx.fillRect(12, -8, 4, 3);
+      ctx.fillStyle = '#ff8a3d'; ctx.beginPath(); ctx.ellipse(-14, 8, 7, 4, 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // Air bubbles trailing the diver
+      if (Math.random() < 0.2) particles.push({ x: diver.x, y: diver.y - 12, vx: rand(-0.3, 0.3), vy: -1.2, life: 0.8, color: '#bfefff' });
+    }
+    // Particles
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED — press P to resume', W / 2, H / 2); ctx.textAlign = 'left';
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = '14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to begin your dive', W / 2, 500); ctx.textAlign = 'left';
+    }
+  }
+
+  function loop(timestamp) {
+    var dt = Math.min(0.033, (timestamp - (loop.last || timestamp)) / 1000 || 0.016);
+    loop.last = timestamp;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  resetWorld();
+  showScreen('title');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

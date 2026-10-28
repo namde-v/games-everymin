@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Arctic Ice Fisher</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1e2e; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: Arial, Helvetica, sans-serif; overflow: hidden; }
+  #wrap { position: relative; width: 100%; max-width: 800px; }
+  canvas { display: block; width: 100%; height: auto; background: #bfe3f2; border: 4px solid #7ec8e3; border-radius: 12px; touch-action: none; }
+  #hud { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; gap: 8px; pointer-events: none; }
+  .pill { background: rgba(10,30,50,.85); color: #fff; padding: 7px 12px; border-radius: 20px; font-size: 14px; font-weight: bold; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; background: rgba(8,25,40,.82); color: #fff; padding: 20px; border-radius: 12px; }
+  .overlay h1 { font-size: 42px; margin-bottom: 8px; text-shadow: 0 3px 0 #1a5f7a; }
+  .overlay h2 { font-size: 36px; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; font-size: 16px; }
+  .overlay .small { font-size: 14px; color: #cfeefb; }
+  button { margin-top: 18px; padding: 14px 30px; font-size: 20px; font-weight: bold; border: none; border-radius: 30px; background: #ffbf3f; color: #1a2a35; cursor: pointer; box-shadow: 0 5px 0 #c98a10; }
+  button:active { transform: translateY(3px); box-shadow: 0 2px 0 #c98a10; }
+  .keys { background: rgba(255,255,255,.12); border-radius: 10px; padding: 12px 16px; margin-top: 14px; font-size: 14px; line-height: 1.6; }
+  .hidden { display: none !important; }
+  #bigBtn { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 16px 34px; font-size: 20px; }
+  #msg { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,.92); color: #123; padding: 8px 16px; border-radius: 20px; font-weight: bold; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="800" height="520"></canvas>
+  <div id="hud">
+    <div class="pill" id="scorePill">Score: 0</div>
+    <div class="pill" id="fishPill">Fish: 0 / 12</div>
+    <div class="pill" id="strikePill">Strikes: 10</div>
+    <div class="pill" id="statusPill">Drill a hole!</div>
+  </div>
+  <div id="msg" class="hidden"></div>
+  <button id="bigBtn" class="hidden">STRIKE!</button>
+
+  <div id="titleScreen" class="overlay">
+    <h1>🐟 Arctic Ice Fisher 🧊</h1>
+    <p>Drill a hole in the frozen lake, drop your line, and strike at exactly the right moment!</p>
+    <div class="keys">
+      <b>How to Play:</b><br>
+      1. Click / tap / press SPACE to drill a hole, then drop your line.<br>
+      2. Watch the bobber. When a fish bites, the bobber plunges and flashes!<br>
+      3. Strike <b>while the bobber is under water</b> to hook the fish.<br>
+      4. Rare fish (golden &amp; glowing) are worth more but bite for a shorter time.<br>
+      5. Missed strikes scare fish away and cost a strike. Catch <b>12 fish</b> to win!
+    </div>
+    <p class="small">Controls: Mouse click / Tap / SPACE = drill, drop &amp; strike. R = restart anytime.</p>
+    <button id="startBtn">▶ Start Fishing</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p class="small">Tip: golden fish are worth 150 points, glowing fish 250 — strike fast!</p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scorePill = document.getElementById('scorePill');
+  var fishPill = document.getElementById('fishPill');
+  var strikePill = document.getElementById('strikePill');
+  var statusPill = document.getElementById('statusPill');
+  var msgEl = document.getElementById('msg');
+  var bigBtn = document.getElementById('bigBtn');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title, drill, waiting, bite, reeling, win, over
+  var score = 0, caught = 0, strikes = 10, quota = 12;
+  var holeX = 400, holeY = 210, holeR = 0;
+  var lineY = 210, bobberY = 210, bobberDip = 0;
+  var biteTimer = 0, biteWindow = 0, biteActive = false;
+  var fish = null, fishTimer = 0, nextBiteIn = 0, reelT = 0;
+  var snow = [], fishUnder = [], splash = 0, flashT = 0, msgT = 0;
+  var audioCtx = null;
+
+  for (var i = 0; i < 90; i++) snow.push({ x: Math.random() * 800, y: Math.random() * 520, r: 1 + Math.random() * 2.5, s: 0.4 + Math.random() * 1.1 });
+  for (var j = 0; j < 6; j++) fishUnder.push({ x: Math.random() * 700 + 50, y: 300 + Math.random() * 160, d: Math.random() < 0.5 ? 1 : -1, sp: 0.3 + Math.random() * 0.7, c: ['#ff8c42', '#5ec8a5', '#e86a92', '#7aa7ff'][j % 4] });
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + dur);
+  }
+  function splashSound() { beep(700, 0.18, 'triangle', 0.2); setTimeout(function () { beep(400, 0.25, 'sine', 0.15); }, 60); }
+  function winSound() { [523, 659, 784, 1047].forEach(function (f, k) { setTimeout(function () { beep(f, 0.3, 'triangle', 0.2); }, k * 140); }); }
+
+  function showMsg(text, ms) {
+    msgEl.textContent = text; msgEl.classList.remove('hidden'); msgT = ms || 1600;
+  }
+  function setStatus(t) { statusPill.textContent = t; }
+  function updateHUD() {
+    scorePill.textContent = 'Score: ' + score;
+    fishPill.textContent = 'Fish: ' + caught + ' / ' + quota;
+    strikePill.textContent = 'Strikes: ' + strikes;
+  }
+  function pickFish() {
+    var r = Math.random();
+    if (r < 0.12) return { name: 'Glowing Icefish', pts: 250, window: 650, color: '#ffe066' };
+    if (r < 0.35) return { name: 'Golden Perch', pts: 150, window: 900, color: '#ffb347' };
+    if (r < 0.70) return { name: 'Arctic Trout', pts: 80, window: 1300, color: '#5ec8a5' };
+    return { name: 'Snow Cod', pts: 50, window: 1700, color: '#7aa7ff' };
+  }
+
+  function startGame() {
+    score = 0; caught = 0; strikes = 10; holeR = 0; lineY = 210; bobberY = 210;
+    biteActive = false; fish = null; splash = 0; flashT = 0;
+    state = 'drill'; titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    bigBtn.textContent = 'DRILL HOLE'; bigBtn.classList.remove('hidden');
+    setStatus('Drill a hole!'); updateHUD(); showMsg('Click STRIKE or press SPACE to drill!', 2200);
+    audio(); beep(440, 0.15, 'triangle', 0.15);
+  }
+
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    bigBtn.classList.add('hidden');
+    endTitle.textContent = win ? '🏆 You Win!' : '😢 Game Over';
+    endText.textContent = win
+      ? 'You caught ' + caught + ' fish and scored ' + score + ' points. Master of the frozen lake!'
+      : 'You ran out of strikes with ' + caught + ' fish caught and ' + score + ' points. Try again!';
+    endScreen.classList.remove('hidden');
+    if (win) winSound(); else beep(160, 0.5, 'sawtooth', 0.15);
+  }
+
+  function pressAction() {
+    if (state === 'title') { startGame(); return; }
+    if (state === 'win' || state === 'over') { startGame(); return; }
+    if (state === 'drill') {
+      holeR = 34; splash = 12; splashSound(); state = 'waiting';
+      nextBiteIn = 1200 + Math.random() * 1800;
+      bigBtn.textContent = 'DROP LINE'; setStatus('Hole drilled — drop your line!');
+      showMsg('Hole drilled! Drop your line.', 1500); return;
+    }
+    if (state === 'waiting') {
+      if (bigBtn.textContent === 'DROP LINE') {
+        bigBtn.textContent = 'WAIT...'; setStatus('Line in the water — watch the bobber!');
+        showMsg('Line dropped. Watch the bobber closely...', 1800);
+        beep(300, 0.12, 'sine', 0.12);
+      }
+      return;
+    }
+    if (state === 'bite') {
+      // Successful strike!
+      score += fish.pts; caught++; state = 'reeling'; reelT = 0;
+      bigBtn.classList.add('hidden'); splash = 20; splashSound();
+      setStatus('Hooked a ' + fish.name + '!');
+      showMsg('Caught ' + fish.name + '! +' + fish.pts + ' points', 1800);
+      beep(880, 0.2, 'triangle', 0.2);
+      updateHUD(); return;
+    }
+    if (state === 'reeling') return;
+  }
+
+  function missStrike() {
+    strikes--; biteActive = false; fish = null; state = 'waiting';
+    nextBiteIn = 1500 + Math.random() * 2000;
+    bigBtn.textContent = 'WAIT...'; setStatus('Fish scared away!');
+    showMsg('Too slow! The fish got away.', 1600); beep(180, 0.3, 'sawtooth', 0.15);
+    updateHUD();
+    if (strikes <= 0) { endGame(false); }
+  }
+
+  // The big button doubles as the strike button; also count a mistimed click on canvas as a miss when biting.
+  function canvasAction() {
+    if (state === 'bite') { pressAction(); return; }
+    if (state === 'waiting' && bigBtn.textContent === 'WAIT...') {
+      // Clicking early while waiting is harmless; only a strike during bite counts.
+      return;
+    }
+    pressAction();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  bigBtn.addEventListener('click', function (e) { e.preventDefault(); pressAction(); });
+  canvas.addEventListener('mousedown', canvasAction);
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); canvasAction(); }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space') { e.preventDefault(); pressAction(); }
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') startGame(); }
+  });
+  // Extra listeners to satisfy keyboard/mouse/touch coverage on the whole document.
+  document.addEventListener('click', function () { audio(); });
+  document.addEventListener('touchend', function () { audio(); }, { passive: true });
+
+  function drawBackground() {
+    var g = ctx.createLinearGradient(0, 0, 0, 520);
+    g.addColorStop(0, '#d7f0fb'); g.addColorStop(0.4, '#a8d8ef'); g.addColorStop(0.42, '#eaf7ff'); g.addColorStop(1, '#1a4a6b');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 800, 520);
+    // Distant mountains and aurora
+    ctx.fillStyle = '#8fb8d8';
+    ctx.beginPath(); ctx.moveTo(0, 190); ctx.lineTo(150, 90); ctx.lineTo(300, 190); ctx.lineTo(450, 70); ctx.lineTo(620, 190); ctx.lineTo(800, 110); ctx.lineTo(800, 210); ctx.lineTo(0, 210); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(120,255,190,0.25)';
+    ctx.beginPath(); ctx.ellipse(400, 60, 300, 28, -0.2, 0, Math.PI * 2); ctx.fill();
+    // Ice sheet
+    ctx.fillStyle = '#eaf7ff'; ctx.fillRect(0, 210, 800, 310);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    for (var i = 0; i < 14; i++) { ctx.fillRect((i * 61) % 800, 218 + (i % 3) * 8, 40, 3); }
+    // Fisher
+    ctx.fillStyle = '#234'; ctx.fillRect(180, 130, 16, 80);
+    ctx.beginPath(); ctx.arc(188, 118, 16, 0, Math.PI * 2); ctx.fillStyle = '#f2c79b'; ctx.fill();
+    ctx.fillStyle = '#d94f3d'; ctx.fillRect(172, 134, 32, 34);
+    ctx.fillStyle = '#234'; ctx.fillRect(176, 168, 12, 40); ctx.fillRect(192, 168, 12, 40);
+    // Fishing rod line to hole
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(200, 140); ctx.lineTo(holeX, holeY); ctx.stroke();
+  }
+
+  function drawHole() {
+    if (holeR <= 0) return;
+    ctx.fillStyle = '#0d3a56'; ctx.beginPath(); ctx.ellipse(holeX, holeY, holeR, holeR * 0.45, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#9adcf5'; ctx.lineWidth = 3; ctx.stroke();
+    // Bobber and line
+    var bobY = holeY + bobberDip;
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(holeX, holeY - 40); ctx.lineTo(holeX, bobY); ctx.stroke();
+    ctx.fillStyle = biteActive ? '#ff3b30' : '#ff5a3c';
+    ctx.beginPath(); ctx.arc(holeX, bobY, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillRect(holeX - 1.5, bobY - 12, 3, 8);
+    if (biteActive) {
+      ctx.strokeStyle = 'rgba(255,59,48,0.8)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(holeX, bobY, 16 + Math.sin(flashT * 0.02) * 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('BITE! STRIKE NOW!', holeX, holeY - 55);
+    }
+    if (splash > 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      for (var i = 0; i < 8; i++) ctx.fillRect(holeX - 20 + Math.random() * 40, holeY - 10 + Math.random() * 14, 3, 3);
+    }
+  }
+
+  function drawUnderwater() {
+    fishUnder.forEach(function (f) {
+      f.x += f.d * f.sp; if (f.x > 780) f.d = -1; if (f.x < 20) f.d = 1;
+      ctx.fillStyle = f.c; ctx.beginPath(); ctx.ellipse(f.x, f.y, 18, 9, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(f.x - f.d * 18, f.y); ctx.lineTo(f.x - f.d * 28, f.y - 8); ctx.lineTo(f.x - f.d * 28, f.y + 8); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(f.x + f.d * 10, f.y - 2, 2, 0, Math.PI * 2); ctx.fill();
+    });
+    if (state === 'reeling' && fish) {
+      var ty = 210 + Math.sin(reelT * 0.1) * 6;
+      ctx.fillStyle = fish.color; ctx.beginPath(); ctx.ellipse(holeX, ty, 22, 12, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(fish.name, holeX, ty - 22);
+    }
+    // Snowfall
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    snow.forEach(function (s) { s.y += s.s; if (s.y > 520) { s.y = -5; s.x = Math.random() * 800; } ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill(); });
+  }
+
+  function drawTimerBar() {
+    if (!biteActive) return;
+    var frac = Math.max(0, biteTimer / biteWindow);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(250, 480, 300, 16);
+    ctx.fillStyle = frac > 0.4 ? '#5ee06e' : '#ff5a3c'; ctx.fillRect(250, 480, 300 * frac, 16);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Bite window — strike before it ends!', 400, 472);
+  }
+
+  var last = 0;
+  function loop(ts) {
+    var dt = Math.min(50, ts - last || 16); last = ts;
+    if (msgT > 0) { msgT -= dt; if (msgT <= 0) msgEl.classList.add('hidden'); }
+    if (splash > 0) splash -= dt / 50;
+    if (biteActive) flashT += dt;
+
+    if (state === 'waiting') {
+      nextBiteIn -= dt;
+      if (nextBiteIn <= 0 && bigBtn.textContent === 'WAIT...') {
+        fish = pickFish(); biteWindow = fish.window; biteTimer = fish.window; biteActive = true; state = 'bite';
+        bigBtn.textContent = 'STRIKE!'; setStatus('Fish biting — STRIKE NOW!');
+        showMsg(fish.name + ' is biting!', 1200); beep(950, 0.15, 'square', 0.12);
+      }
+    } else if (state === 'bite') {
+      bobberDip = 14 + Math.sin(flashT * 0.03) * 4;
+      biteTimer -= dt;
+      if (biteTimer <= 0) { missStrike(); bobberDip = 0; }
+    } else if (state === 'reeling') {
+      reelT += dt; bobberDip = 0;
+      if (reelT > 1100) {
+        biteActive = false; fish = null;
+        if (caught >= quota) { endGame(true); }
+        else {
+          state = 'waiting'; nextBiteIn = 1200 + Math.random() * 1500;
+          bigBtn.textContent = 'WAIT...'; bigBtn.classList.remove('hidden');
+          setStatus('Nice catch! Waiting for the next bite...');
+        }
+      }
+    } else { bobberDip = 0; }
+
+    ctx.clearRect(0, 0, 800, 520);
+    drawBackground(); drawUnderwater(); drawHole(); drawTimerBar();
+    requestAnimationFrame(loop);
+  }
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
