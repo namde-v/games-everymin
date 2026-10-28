@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Circuit Courier</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0b1220; color: #e8f1ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    padding: 12px;
+  }
+  .wrap { width: min(680px, 100%); }
+  h1 { text-align: center; margin: 4px 0 2px; font-size: 30px; letter-spacing: 1px; color: #7dd3fc; }
+  .tag { text-align: center; color: #94a3b8; font-size: 14px; margin-bottom: 10px; }
+  #hud {
+    display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between;
+    background: #111c33; border: 1px solid #24365c; border-radius: 10px; padding: 8px 10px; margin-bottom: 10px;
+    font-size: 14px; font-weight: 600;
+  }
+  #hud span { white-space: nowrap; }
+  #status { text-align: center; min-height: 22px; color: #fde68a; font-size: 14px; margin-bottom: 8px; }
+  .stage { position: relative; background: #0f1a30; border: 1px solid #24365c; border-radius: 12px; padding: 10px; }
+  canvas { display: block; width: 100%; height: auto; background: #0a1428; border-radius: 8px; touch-action: none; cursor: pointer; }
+  .overlay {
+    position: absolute; inset: 10px; border-radius: 8px; background: rgba(5, 12, 26, 0.92);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 20px; gap: 10px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0; font-size: 28px; color: #7dd3fc; }
+  .overlay p { margin: 0; color: #cbd5e1; font-size: 15px; line-height: 1.5; max-width: 480px; }
+  .overlay .big { font-size: 19px; color: #fde68a; font-weight: 700; }
+  button {
+    background: #38bdf8; color: #082f49; border: 0; border-radius: 10px; padding: 12px 22px;
+    font-size: 17px; font-weight: 800; cursor: pointer; margin-top: 6px;
+  }
+  button:hover, button:active { background: #7dd3fc; }
+  button.secondary { background: #334155; color: #e2e8f0; }
+  .keys { font-size: 13px; color: #94a3b8; line-height: 1.5; }
+  .controls { display: flex; gap: 8px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+  .controls button { padding: 9px 14px; font-size: 14px; }
+  kbd { background: #1e293b; border: 1px solid #475569; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>&#9889; CIRCUIT COURIER</h1>
+  <div class="tag">Route the delivery signal from the start chip to the target chip.</div>
+
+  <div id="hud">
+    <span>Level: <span id="hudLevel">1 / 5</span></span>
+    <span>Score: <span id="hudScore">0</span></span>
+    <span>Retries: <span id="hudLives">3</span></span>
+    <span>Wire: <span id="hudWire">0 / 12</span></span>
+    <span>Par: <span id="hudPar">10</span></span>
+  </div>
+  <div id="status">Press Start to begin your first delivery.</div>
+
+  <div class="stage">
+    <canvas id="game" width="720" height="560"></canvas>
+
+    <div class="overlay" id="titleScreen">
+      <h2>CIRCUIT COURIER</h2>
+      <p class="big">Deliver the signal. Do not short the circuit.</p>
+      <p><strong>How to Play:</strong> A glowing signal must travel from the green START chip to the gold TARGET chip.
+      Click or tap a cell next to the wire tip to extend the wire. Click any earlier wire cell to rewind back to it.
+      Wires may never cross themselves and may never pass through grey blocked cells.</p>
+      <p>Each level has a maximum wire length. Reach the target before you run out of wire.
+      Complete all 5 circuits to win. Running out of wire costs one retry.</p>
+      <p class="keys">Mouse / Touch: tap a neighbouring cell &nbsp;|&nbsp; Keyboard: <kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd> move cursor, <kbd>Space</kbd> place wire, <kbd>U</kbd> undo, <kbd>R</kbd> retry level</p>
+      <button id="startBtn">Start Delivery</button>
+    </div>
+
+    <div class="overlay hidden" id="winScreen">
+      <h2>&#127942; ALL CIRCUITS DELIVERED!</h2>
+      <p class="big" id="winText">You completed all 5 circuits.</p>
+      <p>Every signal arrived intact. The grid is yours, Courier.</p>
+      <button id="winRestartBtn">Play Again</button>
+    </div>
+
+    <div class="overlay hidden" id="overScreen">
+      <h2>GAME OVER</h2>
+      <p class="big" id="overText">The signal faded out.</p>
+      <p>You ran out of retries. The board resets, but a good courier always tries again.</p>
+      <button id="overRestartBtn">Restart</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="secondary" id="undoBtn">Undo Step</button>
+    <button class="secondary" id="retryBtn">Retry Level</button>
+    <button class="secondary" id="soundBtn">Sound: On</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var hudLevel = document.getElementById('hudLevel');
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudWire = document.getElementById('hudWire');
+  var hudPar = document.getElementById('hudPar');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+  var winText = document.getElementById('winText');
+  var overText = document.getElementById('overText');
+
+  var COLS = 9, ROWS = 7;
+  var CELL = 80, OX = 0, OY = 0;
+
+  // Each level: start, target, blocked cells as [x,y], max wire steps, par steps.
+  var LEVELS = [
+    { start: [0, 3], target: [8, 3], blocked: [[4, 2], [4, 4]], maxLen: 12, par: 10, name: 'First Run' },
+    { start: [0, 0], target: [8, 6], blocked: [[3, 1], [3, 2], [3, 3], [5, 4], [5, 5]], maxLen: 20, par: 16, name: 'The Wall' },
+    { start: [8, 0], target: [0, 6], blocked: [[4, 2], [4, 3], [4, 4], [2, 5], [6, 1]], maxLen: 20, par: 16, name: 'Cross Town' },
+    { start: [0, 6], target: [8, 0], blocked: [[2, 2], [3, 2], [4, 2], [5, 3], [5, 4], [6, 4]], maxLen: 22, par: 18, name: 'Staircase' },
+    { start: [0, 0], target: [8, 6], blocked: [[1, 2], [2, 2], [3, 2], [4, 4], [5, 4], [6, 2], [6, 3], [6, 4]], maxLen: 24, par: 18, name: 'Final Grid' }
+  ];
+
+  var state = 'title'; // title | playing | leveldone | won | over
+  var levelIndex = 0;
+  var score = 0;
+  var retries = 3;
+  var path = []; // array of [x,y]
+  var cursor = [0, 0];
+  var pulse = 0;
+  var flash = 0; // frames of red flash on failed move
+  var flashMsg = '';
+  var soundOn = true;
+  var audioCtx = null;
+
+  function key(x, y) { return x + ',' + y; }
+  function level() { return LEVELS[levelIndex]; }
+  function isBlocked(x, y) {
+    var b = level().blocked;
+    for (var i = 0; i < b.length; i++) { if (b[i][0] === x && b[i][1] === y) return true; }
+    return false;
+  }
+  function inPath(x, y) {
+    for (var i = 0; i < path.length; i++) { if (path[i][0] === x && path[i][1] === y) return i; }
+    return -1;
+  }
+  function adjacent(a, b) {
+    return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) === 1;
+  }
+  function inside(x, y) { return x >= 0 && x < COLS && y >= 0 && y < ROWS; }
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+
+  function updateHUD() {
+    var lv = level();
+    hudLevel.textContent = (levelIndex + 1) + ' / 5 - ' + lv.name;
+    hudScore.textContent = String(score);
+    hudLives.textContent = String(retries);
+    hudWire.textContent = (path.length - 1) + ' / ' + lv.maxLen;
+    hudPar.textContent = String(lv.par);
+  }
+
+  function startLevel() {
+    var lv = level();
+    path = [[lv.start[0], lv.start[1]]];
+    cursor = [lv.start[0], lv.start[1]];
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+    setStatus('Level ' + (levelIndex + 1) + ': ' + lv.name + ' - route the signal to the gold chip.');
+    updateHUD();
+  }
+
+  function startGame() {
+    initAudio();
+    levelIndex = 0;
+    score = 0;
+    retries = 3;
+    startLevel();
+    beep(660, 0.12, 'sine');
+  }
+
+  function failLevel(reason) {
+    retries -= 1;
+    beep(140, 0.3, 'sawtooth');
+    updateHUD();
+    if (retries <= 0) {
+      state = 'over';
+      overText.textContent = 'Out of retries on level ' + (levelIndex + 1) + '. Final score: ' + score + '.';
+      overScreen.classList.remove('hidden');
+      setStatus('Game over. Press Restart to try the whole run again.');
+    } else {
+      setStatus(reason + ' Retry left: ' + retries + '. The level resets - try a shorter route.');
+      startLevel();
+    }
+  }
+
+  function completeLevel() {
+    var lv = level();
+    var steps = path.length - 1;
+    var gained = 100 + Math.max(0, (lv.par - steps)) * 25 + retries * 10;
+    score += gained;
+    beep(880, 0.15, 'sine');
+    setTimeout(function () { beep(1174, 0.2, 'sine'); }, 120);
+    setStatus('Circuit ' + (levelIndex + 1) + ' complete in ' + steps + ' steps! +' + gained + ' points.');
+    updateHUD();
+    levelIndex += 1;
+    if (levelIndex >= LEVELS.length) {
+      state = 'won';
+      winText.textContent = 'You completed all 5 circuits with a score of ' + score + '.';
+      winScreen.classList.remove('hidden');
+    } else {
+      state = 'leveldone';
+      setTimeout(function () {
+        if (state === 'leveldone') { startLevel(); }
+      }, 900);
+    }
+  }
+
+  function tryPlace(x, y) {
+    if (state !== 'playing') return;
+    if (!inside(x, y)) return;
+    cursor = [x, y];
+    var idx = inPath(x, y);
+    if (idx >= 0) {
+      // Rewind the wire back to the tapped cell.
+      if (idx < path.length - 1) {
+        path = path.slice(0, idx + 1);
+        beep(440, 0.06, 'triangle');
+        updateHUD();
+      }
+      return;
+    }
+    if (isBlocked(x, y)) {
+      flash = 14; flashMsg = 'Blocked cell!';
+      setStatus('That cell is blocked. Route around it.');
+      beep(180, 0.12, 'square');
+      return;
+    }
+    var tip = path[path.length - 1];
+    if (!adjacent(tip, [x, y])) {
+      flash = 10; flashMsg = 'Too far!';
+      setStatus('Wire can only extend to a neighbouring cell. Tap a cell next to the glowing tip.');
+      beep(220, 0.08, 'square');
+      return;
+    }
+    path.push([x, y]);
+    beep(520 + path.length * 12, 0.07, 'triangle');
+    var lv = level();
+    var tx = lv.target[0], ty = lv.target[1];
+    if (x === tx && y === ty) { updateHUD(); completeLevel(); return; }
+    if (path.length - 1 >= lv.maxLen) {
+      updateHUD();
+      failLevel('Wire limit reached before the target.');
+      return;
+    }
+    updateHUD();
+  }
+
+  function undoStep() {
+    if (state !== 'playing' || path.length <= 1) return;
+    path.pop();
+    var tip = path[path.length - 1];
+    cursor = [tip[0], tip[1]];
+    beep(440, 0.06, 'triangle');
+    updateHUD();
+  }
+
+  function retryLevel() {
+    if (state !== 'playing') return;
+    startLevel();
+    setStatus('Level restarted. Same board, fresh wire.');
+  }
+
+  // ---- Audio: created only after a user gesture (Start click) ----
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable, game continues silently */ }
+  }
+
+  // ---- Drawing ----
+  function cellCenter(x, y) {
+    return [OX + x * CELL + CELL / 2, OY + y * CELL + CELL / 2];
+  }
+
+  function draw() {
+    var W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    // Board background and grid
+    ctx.fillStyle = '#0a1428';
+    ctx.fillRect(0, 0, W, H);
+    var lv = level();
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        var px = OX + x * CELL, py = OY + y * CELL;
+        ctx.fillStyle = ((x + y) % 2 === 0) ? '#101f3d' : '#0d1930';
+        ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+        if (isBlocked(x, y)) {
+          ctx.fillStyle = '#475569';
+          ctx.fillRect(px + 6, py + 6, CELL - 12, CELL - 12);
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(px + 16, py + 16); ctx.lineTo(px + CELL - 16, py + CELL - 16);
+          ctx.moveTo(px + CELL - 16, py + 16); ctx.lineTo(px + 16, py + CELL - 16);
+          ctx.stroke();
+        }
+      }
+    }
+    // Wire path
+    if (path.length > 1) {
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 9;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      var c0 = cellCenter(path[0][0], path[0][1]);
+      ctx.moveTo(c0[0], c0[1]);
+      for (var i = 1; i < path.length; i++) {
+        var c = cellCenter(path[i][0], path[i][1]);
+        ctx.lineTo(c[0], c[1]);
+      }
+      ctx.stroke();
+      // Glowing tip
+      var tip = path[path.length - 1];
+      var tc = cellCenter(tip[0], tip[1]);
+      var glow = 14 + Math.sin(pulse * 0.09) * 5;
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.35)';
+      ctx.beginPath(); ctx.arc(tc[0], tc[1], glow + 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#e0f2fe';
+      ctx.beginPath(); ctx.arc(tc[0], tc[1], 9, 0, Math.PI * 2); ctx.fill();
+    }
+    // Start chip
+    var sc = cellCenter(lv.start[0], lv.start[1]);
+    ctx.fillStyle = '#16a34a';
+    ctx.fillRect(sc[0] - 26, sc[1] - 26, 52, 52);
+    ctx.fillStyle = '#052e16';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('START', sc[0], sc[1]);
+    // Target chip
+    var tc2 = cellCenter(lv.target[0], lv.target[1]);
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath(); ctx.arc(tc2[0], tc2[1], 28, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#451a03';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('GOAL', tc2[0], tc2[1]);
+    // Cursor (keyboard)
+    if (state === 'playing') {
+      var cc = cellCenter(cursor[0], cursor[1]);
+      ctx.strokeStyle = flash > 0 ? '#f87171' : '#facc15';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(cc[0] - CELL / 2 + 3, cc[1] - CELL / 2 + 3, CELL - 6, CELL - 6);
+    }
+    if (flash > 0 && flashMsg) {
+      ctx.fillStyle = '#f87171';
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(flashMsg, W / 2, 26);
+    }
+    // Level label
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('Circuit ' + (levelIndex + 1) + ' of 5', 8, H - 8);
+    ctx.textAlign = 'right';
+    ctx.fillText('Wire used: ' + (path.length - 1) + ' / ' + lv.maxLen, W - 8, H - 8);
+  }
+
+  function loop() {
+    pulse += 1;
+    if (flash > 0) flash -= 1;
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input: mouse, touch, keyboard ----
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    var sx = (clientX - rect.left) * (canvas.width / rect.width);
+    var sy = (clientY - rect.top) * (canvas.height / rect.height);
+    return [Math.floor((sx - OX) / CELL), Math.floor((sy - OY) / CELL)];
+  }
+
+  canvas.addEventListener('click', function (e) {
+    var cell = cellFromEvent(e);
+    tryPlace(cell[0], cell[1]);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var cell = cellFromEvent(e);
+    tryPlace(cell[0], cell[1]);
+  }, { passive: false });
+  canvas.addEventListener('mousemove', function (e) {
+    var cell = cellFromEvent(e);
+    if (inside(cell[0], cell[1])) cursor = cell;
+  });
+  document.addEventListener('keydown', function (e) {
+    if (state !== 'playing') {
+      if (e.key === 'Enter' && state === 'title') startGame();
+      return;
+    }
+    var moved = true;
+    if (e.key === 'ArrowUp') cursor[1] = Math.max(0, cursor[1] - 1);
+    else if (e.key === 'ArrowDown') cursor[1] = Math.min(ROWS - 1, cursor[1] + 1);
+    else if (e.key === 'ArrowLeft') cursor[0] = Math.max(0, cursor[0] - 1);
+    else if (e.key === 'ArrowRight') cursor[0] = Math.min(COLS - 1, cursor[0] + 1);
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); tryPlace(cursor[0], cursor[1]); moved = false; }
+    else if (e.key === 'u' || e.key === 'U') { undoStep(); moved = false; }
+    else if (e.key === 'r' || e.key === 'R') { retryLevel(); moved = false; }
+    else moved = false;
+    if (moved) e.preventDefault();
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+  document.getElementById('undoBtn').addEventListener('click', undoStep);
+  document.getElementById('retryBtn').addEventListener('click', retryLevel);
+  document.getElementById('soundBtn').addEventListener('click', function (ev) {
+    soundOn = !soundOn;
+    ev.target.textContent = soundOn ? 'Sound: On' : 'Sound: Off';
+    if (soundOn) { initAudio(); beep(660, 0.1, 'sine'); }
+  });
+
+  // Init: board sized to canvas, path starts on the first level's start chip.
+  (function init() {
+    var totalW = COLS * CELL, totalH = ROWS * CELL;
+    OX = (canvas.width - totalW) / 2;
+    OY = (canvas.height - totalH) / 2;
+    path = [[LEVELS[0].start[0], LEVELS[0].start[1]]];
+    cursor = [LEVELS[0].start[0], LEVELS[0].start[1]];
+    updateHUD();
+    requestAnimationFrame(loop);
+  })();
+})();
+</script>
+</body>
+</html>

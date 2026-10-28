@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Starlight Sonata</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a22; font-family: system-ui, -apple-system, Segoe UI, sans-serif; color: #fff; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; gap: 8px; }
+  h1 { font-size: clamp(22px, 5vw, 38px); letter-spacing: 2px; color: #ffe98a; text-shadow: 0 0 18px rgba(255,220,120,.7); text-align: center; }
+  .sub { color: #b9c6ff; font-size: 14px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; font-size: 15px; font-weight: 700; }
+  #hud span { background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.25); border-radius: 999px; padding: 5px 12px; }
+  #hud .good { color: #8dffb0; } #hud .bad { color: #ff8a8a; }
+  #energyBar { width: min(640px, 92vw); height: 14px; background: #222; border-radius: 999px; overflow: hidden; border: 1px solid #555; }
+  #energyFill { height: 100%; width: 100%; background: linear-gradient(90deg,#ffd76a,#ff7ad9); transition: width .2s; }
+  canvas { background: linear-gradient(#14143a,#241a55 60%,#0f1230); border: 2px solid #ffe98a; border-radius: 14px; touch-action: none; max-width: 96vw; max-height: 62vh; box-shadow: 0 0 30px rgba(120,100,255,.45); }
+  .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(4,4,20,.86); padding: 20px; text-align: center; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: clamp(24px, 6vw, 42px); color: #ffe98a; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #dfe6ff; font-size: 16px; }
+  .keys { font-size: 15px; background: rgba(255,255,255,.08); border-radius: 12px; padding: 10px 14px; line-height: 1.6; }
+  button { cursor: pointer; border: 0; border-radius: 999px; padding: 13px 30px; font-size: 18px; font-weight: 800; color: #1a1230; background: #ffe98a; box-shadow: 0 4px 0 #b89a2e; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #b9c6ff; box-shadow: 0 4px 0 #6d7fc0; }
+  #feedback { min-height: 24px; font-size: 19px; font-weight: 800; color: #ffe98a; }
+  #keysRow { display: flex; gap: 6px; }
+  #keysRow button { flex: 1; min-width: 54px; padding: 12px 4px; font-size: 16px; background: #fff; color: #222; }
+  #keysRow button.hit { background: #ffe98a; }
+  @media (max-width: 520px) { #keysRow button { min-width: 0; } .keys { font-size: 14px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>✦ STARLIGHT SONATA ✦</h1>
+  <div class="sub">Play the falling stars on the piano before they fade away.</div>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span class="good">Perfect: <span id="perfect">0</span></span>
+    <span>Streak: <span id="streak">0</span></span>
+    <span>Note: <span id="noteCount">0</span> / 60</span>
+    <span class="bad">Energy: <span id="energyText">100</span>%</span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="energyBar"><div id="energyFill"></div></div>
+  <canvas id="game" width="640" height="480"></canvas>
+  <div id="feedback">Press Start and feel the music.</div>
+  <div id="keysRow" aria-label="Piano keys">
+    <button data-lane="0">1 / A<br>C</button>
+    <button data-lane="1">2 / S<br>D</button>
+    <button data-lane="2">3 / D<br>E</button>
+    <button data-lane="3">4 / F<br>F</button>
+    <button data-lane="4">5 / G<br>G</button>
+  </div>
+</div>
+
+<div id="titleScreen" class="overlay">
+  <h2>Starlight Sonata</h2>
+  <p>A gentle rhythm game under a midnight sky. Golden notes fall in five lanes toward the glowing keyboard line. Strike each note exactly as it lands to keep the sonata alive.</p>
+  <div class="keys">
+    <strong>How to Play</strong><br>
+    Keyboard: <strong>1 2 3 4 5</strong> or <strong>A S D F G</strong><br>
+    Mouse: click a piano key below the canvas.<br>
+    Touch: tap a piano key or tap its lane on the canvas.<br>
+    Hit notes near the line for Perfect or Good points. Misses drain energy.<br>
+    Finish all <strong>60 notes</strong> with energy left to win!
+  </div>
+  <button id="startBtn">▶ Start the Sonata</button>
+  <p>Sound starts only after you press Start. No downloads, no connection needed.</p>
+</div>
+
+<div id="endScreen" class="overlay hidden">
+  <h2 id="endTitle">Sonata Complete!</h2>
+  <p id="endText"></p>
+  <div class="keys" id="endStats"></div>
+  <button id="restartBtn">↻ Play Again</button>
+  <button id="menuBtn" class="secondary">Back to Title</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var scoreEl = document.getElementById('score');
+  var perfectEl = document.getElementById('perfect');
+  var streakEl = document.getElementById('streak');
+  var noteEl = document.getElementById('noteCount');
+  var energyText = document.getElementById('energyText');
+  var energyFill = document.getElementById('energyFill');
+  var statusEl = document.getElementById('status');
+  var feedbackEl = document.getElementById('feedback');
+  var keyButtons = Array.prototype.slice.call(document.querySelectorAll('#keysRow button'));
+
+  var W = 640, H = 480;
+  var LANES = 5;
+  var laneW = W / LANES;
+  var hitY = H - 88;
+  var TOTAL = 60;
+  var running = false, over = false, won = false;
+  var score = 0, perfect = 0, good = 0, missed = 0, streak = 0, bestStreak = 0, completed = 0;
+  var energy = 100;
+  var notes = [], particles = [], stars = [];
+  var spawnTimer = 0, spawnInterval = 62, noteSpeed = 2.55;
+  var laneFlash = [0, 0, 0, 0, 0];
+  var laneColors = ['#ffd76a', '#7ad9ff', '#8dffb0', '#ff9ad9', '#c9a8ff'];
+  var freqs = [261.63, 293.66, 329.63, 349.23, 392.00];
+  var names = ['C', 'D', 'E', 'F', 'G'];
+  var audioCtx = null, master = null;
+
+  // A simple, singable scale pattern: rise, fall, leap, resolve, repeated with variation.
+  var melody = [0,1,2,3,4,3,2,1,0,2,4,3,2,1,2,4,4,3,2,1,0,1,2,4,3,1,0,2,3,4,2,1,0,1,3,2,4,3,2,0,1,2,3,1,4,2,0,3,1,2,4,3,1,0,2,4,1,3,2,0];
+  for (var i = 0; i < 130; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.8 + 0.4, tw: Math.random() * Math.PI * 2 });
+  }
+
+  function initAudio() {
+    if (!audioCtx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      master = audioCtx.createGain();
+      master.gain.value = 0.32;
+      master.connect(audioCtx.destination);
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function playTone(lane, kind) {
+    if (!audioCtx) return;
+    var now = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var osc2 = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc2.type = 'triangle';
+    osc.frequency.value = freqs[lane];
+    osc2.frequency.value = freqs[lane] * 2;
+    var vol = kind === 'perfect' ? 0.55 : (kind === 'good' ? 0.42 : 0.30);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(vol, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+    var g2 = audioCtx.createGain(); g2.gain.value = 0.25;
+    osc.connect(gain); osc2.connect(g2); g2.connect(gain); gain.connect(master);
+    osc.start(now); osc2.start(now); osc.stop(now + 1.0); osc2.stop(now + 1.0);
+  }
+
+  function playMiss() {
+    if (!audioCtx) return;
+    var now = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sawtooth'; osc.frequency.value = 130;
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+    osc.connect(gain); gain.connect(master);
+    osc.start(now); osc.stop(now + 0.3);
+  }
+
+  function reset() {
+    score = 0; perfect = 0; good = 0; missed = 0; streak = 0; bestStreak = 0; completed = 0;
+    energy = 100; notes = []; particles = []; spawnTimer = 0; noteSpeed = 2.55;
+    laneFlash = [0, 0, 0, 0, 0];
+    updateHUD('Playing');
+    feedbackEl.textContent = 'Listen for the pattern — C D E F G!';
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    perfectEl.textContent = perfect;
+    streakEl.textContent = streak;
+    noteEl.textContent = completed;
+    energyText.textContent = Math.max(0, Math.round(energy));
+    energyFill.style.width = Math.max(0, energy) + '%';
+    if (status) statusEl.textContent = status;
+  }
+
+  function spawnNote() {
+    var lane = melody[completed + notes.length] !== undefined ? melody[completed + notes.length] : Math.floor(Math.random() * 5);
+    notes.push({ lane: lane, y: -30, hit: false });
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.7) * 5, life: 30, color: color });
+    }
+  }
+
+  function strike(lane) {
+    if (!running || over) return;
+    laneFlash[lane] = 12;
+    keyButtons[lane].classList.add('hit');
+    setTimeout(function () { keyButtons[lane].classList.remove('hit'); }, 140);
+    var best = null, bestDist = 999;
+    for (var i = 0; i < notes.length; i++) {
+      var d = Math.abs(notes[i].y - hitY);
+      if (notes[i].lane === lane && d < bestDist) { bestDist = d; best = notes[i]; }
+    }
+    if (!best || bestDist > 62) {
+      // Wrong key or empty lane: small penalty, no note consumed.
+      energy = Math.max(0, energy - 2);
+      streak = 0;
+      feedbackEl.textContent = 'Off-key! Wait for the star to reach the line.';
+      playMiss();
+      updateHUD();
+      checkEnd();
+      return;
+    }
+    notes.splice(notes.indexOf(best), 1);
+    completed++;
+    var kind = bestDist <= 26 ? 'perfect' : 'good';
+    if (kind === 'perfect') { perfect++; score += 100; feedbackEl.textContent = '✦ Perfect! ' + names[lane] + ' rings true.'; }
+    else { good++; score += 50; feedbackEl.textContent = '♪ Good! ' + names[lane] + ' played.'; }
+    streak++; bestStreak = Math.max(bestStreak, streak);
+    if (streak > 0 && streak % 10 === 0) { score += 50; feedbackEl.textContent += ' 10-note streak bonus +50!'; }
+    energy = Math.min(100, energy + 1);
+    burst(lane * laneW + laneW / 2, hitY, laneColors[lane]);
+    playTone(lane, kind);
+    updateHUD();
+    if (completed >= TOTAL && notes.length === 0) endGame(true);
+  }
+
+  function checkEnd() {
+    if (energy <= 0) endGame(false);
+  }
+
+  function endGame(didWin) {
+    if (over) return;
+    over = true; running = false; won = didWin;
+    var title = didWin ? '✦ Sonata Complete! ✦' : 'The Music Faded…';
+    document.getElementById('endTitle').textContent = title;
+    document.getElementById('endText').textContent = didWin
+      ? 'You played all 60 notes and kept the starlight alive. Bravo, pianist!'
+      : 'Your energy ran out before the final note. The sonata waits — try again!';
+    document.getElementById('endStats').innerHTML =
+      'Score: <strong>' + score + '</strong> &nbsp;|&nbsp; Perfect: <strong>' + perfect + '</strong> &nbsp;|&nbsp; Good: <strong>' + good + '</strong><br>' +
+      'Missed: <strong>' + missed + '</strong> &nbsp;|&nbsp; Best streak: <strong>' + bestStreak + '</strong> &nbsp;|&nbsp; Energy left: <strong>' + Math.max(0, Math.round(energy)) + '%</strong>';
+    updateHUD(didWin ? 'Won!' : 'Game Over');
+    endScreen.classList.remove('hidden');
+  }
+
+  function startGame() {
+    initAudio();
+    reset();
+    running = true; over = false; won = false;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Playing');
+  }
+
+  function laneFromX(x) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (x - rect.left) * (W / rect.width);
+    return Math.max(0, Math.min(4, Math.floor(cx / laneW)));
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var t = Date.now() / 1000;
+    for (var s = 0; s < stars.length; s++) {
+      var st = stars[s];
+      ctx.globalAlpha = 0.35 + 0.3 * Math.sin(t + st.tw);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (var l = 0; l < LANES; l++) {
+      ctx.fillStyle = laneFlash[l] > 0 ? 'rgba(255,233,138,0.22)' : 'rgba(255,255,255,0.05)';
+      ctx.fillRect(l * laneW, 0, laneW - 2, H);
+      ctx.fillStyle = laneColors[l];
+      ctx.font = 'bold 15px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(names[l], l * laneW + laneW / 2, H - 18);
+    }
+    // Keyboard hit line
+    ctx.fillStyle = '#ffe98a';
+    ctx.fillRect(0, hitY, W, 4);
+    ctx.fillStyle = 'rgba(255,233,138,0.15)';
+    ctx.fillRect(0, hitY - 30, W, 64);
+    // Notes
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      var x = n.lane * laneW + laneW / 2;
+      ctx.fillStyle = laneColors[n.lane];
+      ctx.shadowColor = laneColors[n.lane]; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(x, n.y, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#1a1230';
+      ctx.font = 'bold 18px system-ui, sans-serif';
+      ctx.fillText(names[n.lane], x, n.y + 6);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '14px system-ui, sans-serif';
+      ctx.fillText('✦', x + 24, n.y - 18);
+    }
+    // Particles
+    for (var p = 0; p < particles.length; p++) {
+      var pt = particles[p];
+      ctx.globalAlpha = Math.max(0, pt.life / 30);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#dfe6ff';
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    if (!running && !over) ctx.fillText('Press Start to begin the sonata', W / 2, 40);
+  }
+
+  function loop() {
+    requestAnimationFrame(loop);
+    for (var l = 0; l < LANES; l++) if (laneFlash[l] > 0) laneFlash[l]--;
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx; particles[p].y += particles[p].vy; particles[p].life--;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    if (running && !over) {
+      spawnTimer++;
+      if (spawnTimer >= spawnInterval && completed + notes.length < TOTAL) {
+        spawnNote(); spawnTimer = 0;
+        if (completed > 30) noteSpeed = 2.9; else if (completed > 15) noteSpeed = 2.7;
+      }
+      for (var i = notes.length - 1; i >= 0; i--) {
+        notes[i].y += noteSpeed;
+        if (notes[i].y > hitY + 70) {
+          notes.splice(i, 1);
+          completed++; missed++; streak = 0;
+          energy = Math.max(0, energy - 12);
+          feedbackEl.textContent = 'Missed a note! Energy -12.';
+          playMiss();
+          updateHUD();
+          checkEnd();
+        }
+      }
+      if (completed >= TOTAL && notes.length === 0) endGame(true);
+    }
+    draw();
+  }
+
+  var keyMap = { '1': 0, 'a': 0, '2': 1, 's': 1, '3': 2, 'd': 2, '4': 3, 'f': 3, '5': 4, 'g': 4 };
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    if (keyMap[k] !== undefined) { e.preventDefault(); strike(keyMap[k]); }
+    if (k === 'enter' && !running && !over) startGame();
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    running = false; over = false;
+    updateHUD('Ready');
+  });
+  keyButtons.forEach(function (btn) {
+    var lane = parseInt(btn.getAttribute('data-lane'), 10);
+    btn.addEventListener('click', function () { strike(lane); });
+    btn.addEventListener('touchstart', function (e) { e.preventDefault(); strike(lane); }, { passive: false });
+  });
+  canvas.addEventListener('mousedown', function (e) { strike(laneFromX(e.clientX)); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); strike(laneFromX(e.touches[0].clientX)); }, { passive: false });
+  canvas.addEventListener('click', function (e) { if (!running && !over) { /* canvas tap alone does not start; use Start */ } });
+
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

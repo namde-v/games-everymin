@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Anchor Aim — Precision Pendulum Drop</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#062a3a; font-family:Arial, Helvetica, sans-serif; color:#fff; }
+  #wrap { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:linear-gradient(180deg,#0b3d5c 0%,#0e6a8a 45%,#0a4a66 100%); }
+  canvas { display:block; width:100%; height:100%; max-width:900px; max-height:700px; background:transparent; touch-action:none; }
+  .hud { position:absolute; top:0; left:0; right:0; display:flex; justify-content:space-between; gap:8px; padding:12px 16px; font-weight:bold; font-size:15px; text-shadow:1px 1px 2px #000; pointer-events:none; z-index:5; }
+  .hud span { background:rgba(0,0,0,.35); padding:6px 10px; border-radius:20px; border:1px solid rgba(255,255,255,.25); white-space:nowrap; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; background:rgba(2,25,38,.72); z-index:10; }
+  .overlay.hidden { display:none; }
+  h1 { font-size:52px; letter-spacing:2px; margin-bottom:6px; text-shadow:3px 3px 0 #d98e04; }
+  h2 { font-size:40px; margin-bottom:10px; }
+  .sub { font-size:18px; color:#ffd166; margin-bottom:16px; }
+  p { max-width:560px; line-height:1.6; font-size:16px; margin:6px 0; color:#eaf6ff; }
+  .howto { background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.3); border-radius:14px; padding:14px 18px; margin:16px 0; text-align:left; }
+  .howto b { color:#ffd166; }
+  button { margin-top:18px; padding:15px 34px; font-size:20px; font-weight:bold; border:none; border-radius:30px; background:#ffb703; color:#123; cursor:pointer; box-shadow:0 5px 0 #b77900; }
+  button:active { transform:translateY(3px); box-shadow:0 2px 0 #b77900; }
+  button.secondary { background:#fff; color:#123; box-shadow:0 5px 0 #999; }
+  .big { font-size:26px; font-weight:bold; margin:10px 0; }
+  .keys { font-size:13px; opacity:.9; margin-top:12px; }
+  @media (max-width:600px){ h1{font-size:38px;} .hud{font-size:12px; padding:8px;} .hud span{padding:4px 7px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="700"></canvas>
+  <div class="hud" id="hud">
+    <span id="scoreBox">Score: 0</span>
+    <span id="roundBox">Target: 1 / 10</span>
+    <span id="livesBox">Misses: 0 / 3</span>
+    <span id="windBox">Wind: Calm</span>
+  </div>
+
+  <div class="overlay" id="titleScreen">
+    <h1>⚓ ANCHOR AIM</h1>
+    <div class="sub">Precision / Pendulum Drop</div>
+    <p>Time the swing. Drop the anchor. Sink it dead-centre.</p>
+    <div class="howto">
+      <p><b>How to play:</b> A pendulum swings above the sea. Press <b>Space</b>, click, or tap to release the anchor.</p>
+      <p><b>Score:</b> The closer to the target centre, the more points — up to 100 per drop. Targets drift and shrink every round.</p>
+      <p><b>Watch the wind:</b> Wind in the HUD slightly speeds up or slows down the swing.</p>
+      <p><b>Win:</b> Hit all 10 targets. <b>Lose:</b> 3 misses and the game is over.</p>
+    </div>
+    <button id="startBtn">▶ START GAME</button>
+    <div class="keys">Space / Click / Tap = Release &nbsp;•&nbsp; R = Restart after game over</div>
+  </div>
+
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <div class="big" id="endScore">Score: 0</div>
+    <p id="endMsg"></p>
+    <button id="restartBtn">↻ PLAY AGAIN</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = 900, H = 700;
+  var scoreBox = document.getElementById("scoreBox");
+  var roundBox = document.getElementById("roundBox");
+  var livesBox = document.getElementById("livesBox");
+  var windBox = document.getElementById("windBox");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endScore = document.getElementById("endScore");
+  var endMsg = document.getElementById("endMsg");
+
+  var state = "title"; // title | playing | falling | splash | win | over
+  var score = 0, round = 1, misses = 0;
+  var totalRounds = 10;
+
+  // Pendulum
+  var pivot = { x: W/2, y: 90 };
+  var ropeLen = 150;
+  var angle = -0.9, angleVel = 0, swingSpeed = 1.7;
+  var wind = 0, windLabel = "Calm";
+
+  // Anchor
+  var anchor = null; // {x,y,vy}
+  var splashTimer = 0, splashText = "", splashColor = "#ffd166";
+  var lastHit = null; // {x,y,pts,round}
+
+  // Target (buoy)
+  var target = { x: 450, y: 560, r: 62, vx: 0.7, dir: 1 };
+
+  // Audio (procedural only, created on Start)
+  var audioCtx = null;
+  function initAudio(){
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    } catch(e) {}
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function sfx(kind){
+    if (kind === "release") beep(320, 0.15, "triangle", 0.18);
+    else if (kind === "hit") { beep(660, 0.18, "sine", 0.2); setTimeout(function(){ beep(880, 0.25, "sine", 0.2); }, 90); }
+    else if (kind === "miss") { beep(180, 0.35, "sawtooth", 0.12); }
+    else if (kind === "win") { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.3, "sine", 0.2); }, i*140); }); }
+    else if (kind === "over") { [400,300,200,140].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.3, "sawtooth", 0.1); }, i*150); }); }
+  }
+
+  function setWind(){
+    var r = Math.random();
+    if (r < 0.33) { wind = -0.25; windLabel = "Wind: ← West"; }
+    else if (r < 0.66) { wind = 0; windLabel = "Wind: Calm"; }
+    else { wind = 0.25; windLabel = "Wind: East →"; }
+  }
+  function setupRound(){
+    setWind();
+    target.r = Math.max(30, 64 - (round - 1) * 3.5);
+    target.x = 140 + Math.random() * (W - 280);
+    target.y = 540 + Math.random() * 60;
+    target.vx = (0.6 + round * 0.22) * (Math.random() < 0.5 ? -1 : 1);
+    target.dir = target.vx > 0 ? 1 : -1;
+    swingSpeed = 1.7 + round * 0.08 + wind * 0.5;
+    angle = -0.9; angleVel = 0;
+    anchor = null;
+    state = "playing";
+    updateHUD();
+  }
+  function updateHUD(){
+    scoreBox.textContent = "Score: " + score;
+    roundBox.textContent = "Target: " + Math.min(round, totalRounds) + " / " + totalRounds;
+    livesBox.textContent = "Misses: " + misses + " / 3";
+    windBox.textContent = windLabel + (wind !== 0 ? " (swing " + (wind > 0 ? "faster" : "slower") + ")" : "");
+  }
+  function startGame(){
+    initAudio();
+    score = 0; round = 1; misses = 0;
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    splashText = "";
+    setupRound();
+  }
+  function endGame(win){
+    state = win ? "win" : "over";
+    endTitle.textContent = win ? "🏆 YOU WIN!" : "🌊 GAME OVER";
+    endScore.textContent = "Final Score: " + score;
+    endMsg.textContent = win
+      ? "All 10 targets hit! You are a true harbour master."
+      : "Three misses sank the run. Try again — watch the wind!";
+    endScreen.classList.remove("hidden");
+    sfx(win ? "win" : "over");
+    updateHUD();
+  }
+  function release(){
+    if (state !== "playing") return;
+    var ax = pivot.x + Math.sin(angle) * ropeLen;
+    var ay = pivot.y + Math.cos(angle) * ropeLen;
+    anchor = { x: ax, y: ay, vy: 2 };
+    state = "falling";
+    sfx("release");
+  }
+  function nextRoundOrEnd(){
+    if (misses >= 3) { endGame(false); return; }
+    if (round > totalRounds) { endGame(true); return; }
+    setupRound();
+  }
+  function resolveDrop(){
+    var dx = anchor.x - target.x;
+    var dy = anchor.y - target.y;
+    var dist = Math.sqrt(dx*dx + dy*dy);
+    lastHit = { x: anchor.x, y: anchor.y, dist: dist };
+    if (dist <= target.r) {
+      var pts = Math.max(20, Math.round(100 - (dist / target.r) * 80));
+      score += pts;
+      var label = dist < target.r * 0.25 ? "BULLSEYE! +" : (dist < target.r * 0.6 ? "Great hit! +" : "Hit! +");
+      splashText = label + pts;
+      splashColor = "#7CFC9A";
+      sfx("hit");
+      round++;
+      splashTimer = 90;
+      state = "splash";
+    } else {
+      misses++;
+      splashText = "MISS! Anchor splashed " + Math.round(dist) + "px away";
+      splashColor = "#ff6b6b";
+      sfx("miss");
+      round++;
+      splashTimer = 90;
+      state = "splash";
+    }
+    updateHUD();
+  }
+
+  function drawSea(){
+    // Sky / sea gradient bands
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#0b3d5c"); g.addColorStop(0.32, "#12779e"); g.addColorStop(0.45, "#0a5f80"); g.addColorStop(1, "#083a52");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // Sun
+    ctx.fillStyle = "#ffd166"; ctx.beginPath(); ctx.arc(800, 70, 34, 0, Math.PI*2); ctx.fill();
+    // Clouds
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    [[120,60],[180,50],[660,110]].forEach(function(c){
+      ctx.beginPath(); ctx.arc(c[0], c[1], 22, 0, Math.PI*2); ctx.arc(c[0]+24, c[1]+4, 16, 0, Math.PI*2); ctx.arc(c[0]-24, c[1]+5, 15, 0, Math.PI*2); ctx.fill();
+    });
+    // Waves
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 3;
+    for (var i = 0; i < 5; i++){
+      var y = 340 + i * 70;
+      ctx.beginPath();
+      for (var x = 0; x <= W; x += 20){
+        var wy = y + Math.sin(x * 0.02 + i * 2 + Date.now() * 0.001) * 8;
+        if (x === 0) ctx.moveTo(x, wy); else ctx.lineTo(x, wy);
+      }
+      ctx.stroke();
+    }
+  }
+  function drawShip(){
+    // Crane / mast at top
+    ctx.fillStyle = "#5b3a1e"; ctx.fillRect(pivot.x - 8, 20, 16, 80);
+    ctx.fillStyle = "#8b5a2b"; ctx.fillRect(pivot.x - 60, 20, 120, 14);
+    ctx.fillStyle = "#ffd166"; ctx.beginPath(); ctx.arc(pivot.x, 90, 10, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.font = "bold 13px Arial"; ctx.textAlign = "center";
+    ctx.fillText("SHIP", pivot.x, 14);
+  }
+  function drawTarget(){
+    // Concentric rings
+    var rings = [["#ff595e", 1], ["#ffffff", 0.72], ["#ff595e", 0.45], ["#ffd166", 0.2]];
+    rings.forEach(function(r){
+      ctx.fillStyle = r[0]; ctx.beginPath(); ctx.arc(target.x, target.y, target.r * r[1], 0, Math.PI*2); ctx.fill();
+    });
+    ctx.strokeStyle = "#123"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(target.x, target.y, target.r, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = "#123"; ctx.font = "bold 14px Arial"; ctx.textAlign = "center";
+    ctx.fillText("◎", target.x, target.y + 5);
+  }
+  function drawAnchor(ax, ay){
+    ctx.strokeStyle = "#ddd"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(pivot.x, pivot.y); ctx.lineTo(ax, ay); ctx.stroke();
+    // Anchor shape
+    ctx.strokeStyle = "#e8e8e8"; ctx.lineWidth = 5; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(ax, ay - 16); ctx.lineTo(ax, ay + 16); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ax, ay + 16, 13, 0, Math.PI, false); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ax - 16, ay - 4); ctx.lineTo(ax + 16, ay - 4); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ax, ay - 18, 6, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = "#ffd166"; ctx.beginPath(); ctx.arc(ax, ay - 18, 3, 0, Math.PI*2); ctx.fill();
+  }
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    drawSea();
+    if (state !== "title") drawTarget();
+    drawShip();
+    if (state === "playing") {
+      var ax = pivot.x + Math.sin(angle) * ropeLen;
+      var ay = pivot.y + Math.cos(angle) * ropeLen;
+      drawAnchor(ax, ay);
+      // Aim hint line (short)
+      ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.setLineDash([6,6]);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax, H - 80); ctx.stroke(); ctx.setLineDash([]);
+    } else if (anchor) {
+      drawAnchor(anchor.x, anchor.y);
+    }
+    // Splash rings
+    if (state === "splash" && lastHit) {
+      ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 3;
+      var pr = (90 - splashTimer) * 1.2;
+      ctx.beginPath(); ctx.arc(lastHit.x, lastHit.y, pr, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = splashColor; ctx.font = "bold 28px Arial"; ctx.textAlign = "center";
+      ctx.fillText(splashText, W/2, 300);
+    }
+    // Round prompt
+    if (state === "playing") {
+      ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.font = "bold 20px Arial"; ctx.textAlign = "center";
+      ctx.fillText("Press SPACE / CLICK / TAP to drop!", W/2, H - 28);
+      ctx.font = "14px Arial";
+      ctx.fillText("Aim for the centre — wind: " + windLabel.replace("Wind: ", ""), W/2, H - 8);
+    }
+  }
+  function update(){
+    if (state === "playing") {
+      // Pendulum physics: simple harmonic swing, wind tweaks speed
+      angleVel += (-0.0016 * Math.sin(angle) * swingSpeed) ;
+      // Drive oscillation: use sinusoidal time-based swing for smooth play
+      var t = Date.now() / 1000;
+      angle = Math.sin(t * swingSpeed) * 1.0;
+      // Target drift
+      target.x += target.vx;
+      if (target.x < target.r + 10) { target.x = target.r + 10; target.vx = Math.abs(target.vx); }
+      if (target.x > W - target.r - 10) { target.x = W - target.r - 10; target.vx = -Math.abs(target.vx); }
+    } else if (state === "falling" && anchor) {
+      anchor.vy += 0.45;
+      anchor.y += anchor.vy;
+      anchor.x += wind * 1.2; // wind pushes falling anchor slightly
+      if (anchor.y >= target.y - 10) resolveDrop();
+      if (anchor.y > H) resolveDrop();
+    } else if (state === "splash") {
+      splashTimer--;
+      if (splashTimer <= 0) nextRoundOrEnd();
+    }
+  }
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, touch
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  document.addEventListener("keydown", function(e){
+    if (e.code === "Space" || e.key === " ") {
+      e.preventDefault();
+      if (state === "title") startGame();
+      else if (state === "win" || state === "over") startGame();
+      else release();
+    }
+    if ((e.key === "r" || e.key === "R") && (state === "win" || state === "over")) startGame();
+  });
+  canvas.addEventListener("mousedown", function(e){
+    e.preventDefault();
+    if (state === "playing") release();
+  });
+  canvas.addEventListener("touchstart", function(e){
+    e.preventDefault();
+    if (state === "playing") release();
+  }, { passive: false });
+  document.addEventListener("click", function(e){
+    if (e.target && e.target.id === "startBtn") return;
+    if (state === "playing" && e.target === canvas) release();
+  });
+  // Touch on overlays: start buttons already handled; also allow tap anywhere on title
+  titleScreen.addEventListener("touchstart", function(e){
+    if (e.target && e.target.id === "startBtn") return;
+  }, { passive: true });
+
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

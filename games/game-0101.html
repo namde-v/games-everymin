@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Ember Escort</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#070914; color:#fff; font-family:system-ui, Arial, sans-serif; overflow:hidden; display:flex; align-items:center; justify-content:center; height:100vh; }
+  #wrap { position:relative; width:100%; max-width:900px; aspect-ratio:16/9; background:#0a0f26; }
+  canvas { display:block; width:100%; height:100%; touch-action:none; background:linear-gradient(180deg,#0a0f26 0%,#141a3a 55%,#1c1230 100%); }
+  #hud { position:absolute; top:0; left:0; right:0; display:flex; justify-content:space-between; padding:10px 14px; font-weight:700; font-size:15px; text-shadow:0 1px 3px #000; pointer-events:none; }
+  #hud span { background:rgba(0,0,0,.35); padding:5px 9px; border-radius:8px; }
+  #shieldBar { display:inline-block; width:90px; height:10px; background:#333; border-radius:5px; vertical-align:middle; overflow:hidden; }
+  #shieldFill { display:block; height:100%; width:100%; background:#59d8ff; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; background:rgba(3,5,18,.82); padding:22px; }
+  .hidden { display:none !important; }
+  h1 { font-size:clamp(34px,6vw,62px); color:#ffb347; letter-spacing:1px; text-shadow:0 0 24px rgba(255,150,30,.7); }
+  h2 { font-size:clamp(28px,5vw,46px); color:#ffd166; }
+  p { max-width:620px; line-height:1.55; color:#e8eaf5; }
+  .keys { font-size:14px; color:#c9d1ff; }
+  button { cursor:pointer; border:0; border-radius:12px; padding:14px 28px; font-size:19px; font-weight:800; color:#241203; background:#ffb347; box-shadow:0 6px 0 #b45a00; }
+  button:active { transform:translateY(4px); box-shadow:0 2px 0 #b45a00; }
+  .small { font-size:13px; color:#aab3dd; }
+  .hearts { font-size:26px; letter-spacing:4px; }
+  @media (max-width:600px){ #hud{font-size:12px} #shieldBar{width:55px} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="506"></canvas>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span id="hearts">❤❤❤</span>
+    <span>Distance: <b id="dist">0</b>m</span>
+    <span>Shield <span id="shieldBar"><span id="shieldFill"></span></span></span>
+    <span id="status">Night Path</span>
+  </div>
+
+  <div id="titleScreen" class="screen">
+    <h1>🔥 Ember Escort</h1>
+    <p>Carry a fragile lantern flame across the dark night path to the far shrine. Wind gusts and cold rain will try to dim it — but a brave escort never lets the light go out.</p>
+    <div class="keys"><b>How to Play:</b><br>
+      Move the lantern with Arrow Keys / WASD, Mouse, or Touch drag.<br>
+      Hold <b>Space</b>, Mouse button, or Touch-and-hold to raise your shield.<br>
+      Shield blocks gusts and rain, but drains energy — lower it to recharge.<br>
+      Collect glowing embers for points. Reach the shrine to win!</div>
+    <button id="startBtn">▶ Start Escort</button>
+    <div class="small">3 hearts. Shield up at the right moment. Fully offline — no downloads needed.</div>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <div class="hearts" id="endHearts"></div>
+    <button id="restartBtn">↻ Restart Instantly</button>
+    <div class="small">Press R or Enter to play again.</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById("score");
+  var heartsEl = document.getElementById("hearts");
+  var distEl = document.getElementById("dist");
+  var statusEl = document.getElementById("status");
+  var shieldFill = document.getElementById("shieldFill");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+  var endHearts = document.getElementById("endHearts");
+
+  var state = "title"; // title | playing | win | over
+  var score = 0, lives = 3, distance = 0, shield = 100, shielding = false;
+  var px = 140, py = 250, vx = 0, vy = 0;
+  var keys = {};
+  var mouse = { x: px, y: py, down: false, active: false };
+  var touch = { x: px, y: py, down: false, active: false };
+  var embers = [], gusts = [], rains = [], stars = [], trees = [], particles = [];
+  var spawnT = 0, rainT = 0, gustT = 0, flashT = 0, lastTime = 0, flameT = 0;
+  var audioCtx = null, muted = false;
+
+  for (var i = 0; i < 90; i++) stars.push({ x: Math.random()*W, y: Math.random()*H*0.7, r: Math.random()*1.8+0.4, tw: Math.random()*6 });
+  for (var j = 0; j < 22; j++) trees.push({ x: j*48 + Math.random()*30, y: H-28, h: 42+Math.random()*70, w: 26+Math.random()*26 });
+
+  function initAudio(){
+    if (audioCtx) return;
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function sfx(kind){
+    if (kind === "pickup") tone(880, 0.18, "sine", 0.14, 1320);
+    else if (kind === "hit") tone(180, 0.3, "sawtooth", 0.16, 70);
+    else if (kind === "shield") tone(320, 0.12, "triangle", 0.1, 420);
+    else if (kind === "win") { tone(523,0.3,"sine",0.15); setTimeout(function(){ tone(659,0.3,"sine",0.15); },140); setTimeout(function(){ tone(784,0.5,"sine",0.16); },280); }
+    else if (kind === "lose") tone(300, 0.5, "sawtooth", 0.14, 90);
+  }
+
+  function reset(){
+    score = 0; lives = 3; distance = 0; shield = 100; shielding = false;
+    px = 140; py = 250; vx = 0; vy = 0;
+    embers = []; gusts = []; rains = []; particles = [];
+    spawnT = 0; rainT = 0; gustT = 0; flashT = 0;
+    updateHUD();
+  }
+  function updateHUD(){
+    scoreEl.textContent = score;
+    heartsEl.textContent = "❤".repeat(Math.max(0, lives)) + "♡".repeat(Math.max(0, 3-lives));
+    distEl.textContent = Math.floor(distance);
+    shieldFill.style.width = Math.max(0, Math.min(100, shield)) + "%";
+    statusEl.textContent = state === "playing" ? (shielding ? "🛡 Shield Up" : "Night Path") : (state === "win" ? "Shrine Reached!" : (state === "over" ? "Flame Out" : "Night Path"));
+  }
+  function spawnEmber(){
+    embers.push({ x: W + 20, y: 90 + Math.random()*(H-190), r: 9, bob: Math.random()*6 });
+  }
+  function spawnGust(){
+    gusts.push({ x: W + 30, y: 80 + Math.random()*(H-170), w: 90, h: 46, speed: 2.6 + Math.random()*1.4, drift: (Math.random()-0.5)*1.2 });
+  }
+  function spawnRain(){
+    rains.push({ x: 60 + Math.random()*(W-120), y: -16, speed: 4.2 + Math.random()*2.2, r: 6 });
+  }
+  function burst(x, y, color, n){
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: (Math.random()-0.5)*5, vy: (Math.random()-0.5)*5, life: 22+Math.random()*18, color: color });
+  }
+  function damage(kind){
+    if (shielding) { sfx("shield"); burst(px, py, "#59d8ff", 10); return; }
+    lives--; flashT = 14; sfx("hit"); burst(px, py, "#ff5a3c", 22);
+    if (lives <= 0) endGame(false);
+    updateHUD();
+  }
+  function endGame(won){
+    state = won ? "win" : "over";
+    endTitle.textContent = won ? "🏯 You Win! The Shrine Glows!" : "💨 Game Over — The Flame Went Out";
+    endText.textContent = won
+      ? "The lantern flame reached the shrine safely. Final score: " + score + "  •  Distance: " + Math.floor(distance) + "m  •  Hearts left: " + lives
+      : "The night wind won this time. Final score: " + score + "  •  Distance: " + Math.floor(distance) + "m. Try again — shield the gusts!";
+    endHearts.textContent = "❤".repeat(Math.max(0, lives)) + "♡".repeat(Math.max(0, 3-lives));
+    endScreen.classList.remove("hidden");
+    if (won) sfx("win"); else sfx("lose");
+    updateHUD();
+  }
+  function startGame(){
+    initAudio();
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    reset();
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function drawBackground(){
+    // Moon and clouds
+    ctx.fillStyle = "#ffe9a8"; ctx.beginPath(); ctx.arc(790, 72, 34, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "rgba(255,233,168,0.14)"; ctx.beginPath(); ctx.arc(790, 72, 56, 0, Math.PI*2); ctx.fill();
+    stars.forEach(function(s){
+      s.tw += 0.05;
+      ctx.fillStyle = "rgba(255,255,255," + (0.4 + 0.5*Math.abs(Math.sin(s.tw))) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+    });
+    // Distant hills and ground
+    ctx.fillStyle = "#101736"; ctx.beginPath(); ctx.moveTo(0, 400); ctx.quadraticCurveTo(250, 350, 500, 400); ctx.quadraticCurveTo(700, 440, 900, 390); ctx.lineTo(900, 506); ctx.lineTo(0, 506); ctx.fill();
+    ctx.fillStyle = "#1d2447"; ctx.fillRect(0, 452, W, 54);
+    ctx.fillStyle = "#2a3466"; ctx.fillRect(0, 452, W, 4);
+    // Trees scrolling slowly
+    trees.forEach(function(t){
+      ctx.fillStyle = "#0d2b1d";
+      ctx.beginPath(); ctx.moveTo(t.x, t.y - t.h); ctx.lineTo(t.x - t.w/2, t.y); ctx.lineTo(t.x + t.w/2, t.y); ctx.fill();
+      ctx.fillStyle = "#123d28"; ctx.beginPath(); ctx.arc(t.x, t.y - t.h, t.w*0.42, 0, Math.PI*2); ctx.fill();
+    });
+    // Shrine goal marker at far right when close
+    var goalX = W - 70 - Math.max(0, (1000 - distance)) * 0.35;
+    if (distance > 650) {
+      ctx.fillStyle = "#ffd166"; ctx.fillRect(goalX - 26, 330, 52, 110);
+      ctx.fillStyle = "#b45a00"; ctx.beginPath(); ctx.moveTo(goalX - 36, 330); ctx.lineTo(goalX, 292); ctx.lineTo(goalX + 36, 330); ctx.fill();
+      ctx.fillStyle = "#ff7b2d"; ctx.beginPath(); ctx.arc(goalX, 312, 9, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 13px Arial"; ctx.textAlign = "center"; ctx.fillText("SHRINE", goalX, 280);
+    }
+    // Path lanterns
+    for (var x = 40; x < W; x += 130) {
+      ctx.fillStyle = "#3a2a12"; ctx.fillRect(x, 436, 4, 22);
+      ctx.fillStyle = "rgba(255,180,60,0.9)"; ctx.beginPath(); ctx.arc(x+2, 430, 6, 0, Math.PI*2); ctx.fill();
+    }
+  }
+  function drawPlayer(){
+    flameT += 0.16;
+    var flick = Math.sin(flameT) * 3;
+    // Shield bubble
+    if (shielding) {
+      ctx.strokeStyle = "rgba(89,216,255,0.95)"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(px, py, 40, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = "rgba(89,216,255,0.12)"; ctx.beginPath(); ctx.arc(px, py, 40, 0, Math.PI*2); ctx.fill();
+    }
+    // Lantern body
+    ctx.fillStyle = "#3a2a12"; ctx.fillRect(px-16, py-6, 32, 30);
+    ctx.strokeStyle = "#ffb347"; ctx.lineWidth = 2; ctx.strokeRect(px-16, py-6, 32, 30);
+    ctx.fillStyle = "#241203"; ctx.fillRect(px-12, py-12, 24, 6);
+    // Flame
+    var fy = py + 4;
+    ctx.fillStyle = "rgba(255,150,30,0.28)"; ctx.beginPath(); ctx.arc(px, fy, 26 + flick, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#ff7b2d"; ctx.beginPath();
+    ctx.moveTo(px, fy - 22 - flick); ctx.quadraticCurveTo(px+13, fy-2, px+6, fy+8); ctx.quadraticCurveTo(px, fy+12, px-6, fy+8); ctx.quadraticCurveTo(px-13, fy-2, px, fy-22-flick); ctx.fill();
+    ctx.fillStyle = "#ffe9a8"; ctx.beginPath(); ctx.arc(px, fy+1, 6, 0, Math.PI*2); ctx.fill();
+  }
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    // Embers
+    embers.forEach(function(e){
+      var bob = Math.sin(flameT + e.bob) * 4;
+      ctx.fillStyle = "rgba(255,180,60,0.25)"; ctx.beginPath(); ctx.arc(e.x, e.y+bob, 16, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#ffb347"; ctx.beginPath(); ctx.arc(e.x, e.y+bob, e.r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#fff3c4"; ctx.beginPath(); ctx.arc(e.x, e.y+bob, 4, 0, Math.PI*2); ctx.fill();
+    });
+    // Gusts
+    gusts.forEach(function(g){
+      ctx.fillStyle = "rgba(160,220,255,0.35)";
+      ctx.beginPath(); ctx.ellipse(g.x, g.y, g.w/2, g.h/2, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#d8f2ff"; ctx.font = "bold 20px Arial"; ctx.textAlign = "center"; ctx.fillText("≋ ≋", g.x, g.y+7);
+    });
+    // Rain drops
+    rains.forEach(function(r){
+      ctx.fillStyle = "#7ec8ff"; ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#cfeaff"; ctx.beginPath(); ctx.arc(r.x-2, r.y-2, 2.5, 0, Math.PI*2); ctx.fill();
+    });
+    drawPlayer();
+    // Particles
+    particles.forEach(function(p){
+      ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life/30);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+    if (flashT > 0) { ctx.fillStyle = "rgba(255,60,40,0.18)"; ctx.fillRect(0, 0, W, H); }
+    if (state === "playing") {
+      ctx.fillStyle = "#fff"; ctx.font = "bold 14px Arial"; ctx.textAlign = "left";
+      ctx.fillText("Shrine in " + Math.max(0, Math.ceil(1000 - distance)) + "m", 14, 480);
+    }
+  }
+  function update(dt){
+    if (state !== "playing") return;
+    distance += dt * 0.045;
+    score += Math.floor(dt * 0.02);
+    if (flashT > 0) flashT--;
+    // Shield drain / recharge
+    if (shielding) { shield -= dt * 0.045; if (shield <= 0) { shield = 0; shielding = false; } }
+    else shield = Math.min(100, shield + dt * 0.02);
+
+    // Movement: keyboard velocity, pointer target
+    var speed = 5.2;
+    vx = 0; vy = 0;
+    if (keys["ArrowLeft"] || keys["a"] || keys["A"]) vx = -speed;
+    if (keys["ArrowRight"] || keys["d"] || keys["D"]) vx = speed;
+    if (keys["ArrowUp"] || keys["w"] || keys["W"]) vy = -speed;
+    if (keys["ArrowDown"] || keys["s"] || keys["S"]) vy = speed;
+    if (touch.active) { px += (touch.x - px) * 0.22; py += (touch.y - py) * 0.22; }
+    else if (mouse.active) { px += (mouse.x - px) * 0.14; py += (mouse.y - py) * 0.14; }
+    px += vx; py += vy;
+    px = Math.max(30, Math.min(W-30, px));
+    py = Math.max(70, Math.min(H-70, py));
+
+    // Spawning
+    spawnT -= dt; rainT -= dt; gustT -= dt;
+    if (spawnT <= 0) { spawnEmber(); spawnT = 900 + Math.random()*700; }
+    if (gustT <= 0) { spawnGust(); gustT = 1500 + Math.random()*1200; }
+    if (rainT <= 0) { spawnRain(); rainT = 450 + Math.random()*450; }
+
+    // Move hazards
+    embers.forEach(function(e){ e.x -= 1.8; });
+    gusts.forEach(function(g){ g.x -= g.speed; g.y += g.drift; });
+    rains.forEach(function(r){ r.y += r.speed; r.x -= 0.6; });
+    trees.forEach(function(t){ t.x -= 0.7; if (t.x < -40) { t.x = W + 20; t.h = 42+Math.random()*70; } });
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+
+    // Collisions: embers
+    embers = embers.filter(function(e){
+      var dx = e.x - px, dy = e.y - py;
+      if (dx*dx + dy*dy < 34*34) { score += 50; sfx("pickup"); burst(e.x, e.y, "#ffb347", 12); return false; }
+      return e.x > -30;
+    });
+    // Collisions: gusts
+    gusts = gusts.filter(function(g){
+      var hit = Math.abs(g.x - px) < 55 && Math.abs(g.y - py) < 38;
+      if (hit) { damage("gust"); return false; }
+      return g.x > -120;
+    });
+    // Collisions: rain
+    rains = rains.filter(function(r){
+      var dx = r.x - px, dy = r.y - py;
+      if (dx*dx + dy*dy < 28*28) { damage("rain"); return false; }
+      return r.y < H + 20;
+    });
+
+    if (distance >= 1000) { endGame(true); return; }
+    updateHUD();
+  }
+  function loop(now){
+    if (state !== "playing") { draw(); return; }
+    var dt = Math.min(50, now - (lastTime || now));
+    lastTime = now;
+    update(dt);
+    draw();
+    if (state === "playing") requestAnimationFrame(loop);
+    else draw();
+  }
+
+  function canvasPos(e){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+
+  document.addEventListener("keydown", function(e){
+    keys[e.key] = true;
+    if (e.key === " " || e.key === "Spacebar") { shielding = true; e.preventDefault(); }
+    if ((e.key === "r" || e.key === "R" || e.key === "Enter") && (state === "win" || state === "over")) startGame();
+    if (e.key === "m" || e.key === "M") muted = !muted;
+  });
+  document.addEventListener("keyup", function(e){
+    keys[e.key] = false;
+    if (e.key === " " || e.key === "Spacebar") shielding = false;
+  });
+  canvas.addEventListener("mousemove", function(e){ var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y; mouse.active = true; });
+  canvas.addEventListener("mousedown", function(e){ var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y; mouse.active = true; mouse.down = true; shielding = true; if (state === "title") startGame(); });
+  document.addEventListener("mouseup", function(){ mouse.down = false; if (!keys[" "]) shielding = false; });
+  canvas.addEventListener("touchstart", function(e){ e.preventDefault(); var p = canvasPos(e); touch.x = p.x; touch.y = p.y; touch.active = true; touch.down = true; shielding = true; if (state === "title") startGame(); }, { passive: false });
+  canvas.addEventListener("touchmove", function(e){ e.preventDefault(); var p = canvasPos(e); touch.x = p.x; touch.y = p.y; }, { passive: false });
+  canvas.addEventListener("touchend", function(e){ e.preventDefault(); touch.down = false; touch.active = false; if (!keys[" "]) shielding = false; }, { passive: false });
+
+  draw();
+  updateHUD();
+})();
+</script>
+</body>
+</html>
