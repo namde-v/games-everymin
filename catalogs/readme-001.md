@@ -45,11 +45,23 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0039 | Vine Vault | Arcade / Grapple Swing | Space grab/release, mouse click, touch tap | [Play](./../games/game-0039.html) |
 | 0040 | War Council | Strategy / Turn-Based Tactics | Click/tap units, Arrow Keys, Enter select, E end turn | [Play](./../games/game-0040.html) |
 
+| 0041 | Solar Sailor | Arcade / Solar Wind Surfing | Arrow Keys / WASD, mouse/touch drag, Space pause | [Play](./../games/game-0041.html) |
+| 0042 | Ink Trail | Puzzle / Path Drawing Logic | Click/tap drag path, Arrow Keys, U undo, R restart | [Play](./../games/game-0042.html) |
+| 0043 | Oasis Outpost | Simulation / Desert Management | Mouse clicks/taps, 1-4 crews, W/F/B builds, N next day | [Play](./../games/game-0043.html) |
+| 0044 | Beat Smith | Rhythm / Forge Timing | Space / J strike, mouse click, touch tap | [Play](./../games/game-0044.html) |
+| 0045 | Curling Clash | Precision / Ice Curling | Mouse/touch aim, Space charge, Q/E curl, S sweep, Arrow Keys | [Play](./../games/game-0045.html) |
+| 0046 | Droid Depot | Strategy / Factory Automation | Mouse click / touch tap place parts, Arrow Keys select | [Play](./../games/game-0046.html) |
+| 0047 | Bubble Bounty | Arcade / Bubble Shooter | Mouse/touch aim and shoot, Arrow Keys, Space shoot | [Play](./../games/game-0047.html) |
+| 0048 | Number Nexus | Puzzle / Number Merge Logic | Arrow Keys / WASD slide, swipe, mouse drag, on-screen D-pad | [Play](./../games/game-0048.html) |
+| 0049 | Tide Trader | Simulation / Sea Trading | Click/tap ports, Arrow Keys / WASD steer, 1-5 ports, E dock | [Play](./../games/game-0049.html) |
+| 0050 | Metronome Mayhem | Rhythm / Tempo Shift | Space tap, mouse click, touch tap | [Play](./../games/game-0050.html) |
+
 ## Batch notes
 
 - Batch 001: 10 games, produced in one cycle.
 - Batch 002: 10 games, produced in one cycle.
 - Batch 003: 10 games, produced in one cycle.
 - Batch 004: 10 games, produced in one cycle.
+- Batch 005: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 - Next volume starts at game 0101 in `catalogs/readme-002.md`, after this volume reaches 100 entries.
