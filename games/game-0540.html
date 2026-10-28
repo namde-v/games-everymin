@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Dune Dasher — Sandboard Descent</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#1a1207; color:#fff8e1; font-family:Arial, Helvetica, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; overflow:hidden; }
+  h1 { font-size:32px; letter-spacing:2px; color:#ffb347; text-shadow:2px 2px 0 #7a3e00; margin:10px 0 4px; }
+  .tag { color:#ffe9a8; font-size:14px; margin-bottom:8px; }
+  #wrap { position:relative; width:800px; max-width:96vw; }
+  canvas { display:block; width:100%; height:500px; background:linear-gradient(#87ceeb,#f4a460); border:4px solid #ffb347; border-radius:12px; }
+  #hud { display:flex; justify-content:space-between; padding:8px 12px; background:#3d2408; border-radius:8px; margin-bottom:8px; font-weight:bold; font-size:16px; }
+  #hud span { color:#ffd54a; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; background:rgba(20,12,0,0.78); border-radius:12px; text-align:center; padding:20px; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { font-size:36px; color:#ffb347; margin-bottom:10px; }
+  .overlay p { max-width:560px; line-height:1.6; font-size:15px; margin-bottom:10px; }
+  .keys { background:#5d3a0a; padding:10px 14px; border-radius:8px; font-size:14px; line-height:1.7; }
+  button { margin-top:14px; padding:14px 34px; font-size:20px; font-weight:bold; color:#3d2408; background:#ffb347; border:none; border-radius:10px; cursor:pointer; }
+  button:hover { background:#ffc95e; }
+  button:active { transform:scale(0.97); }
+  .small { font-size:13px; color:#ffe9a8; margin-top:8px; }
+</style>
+</head>
+<body>
+<h1>🏂 DUNE DASHER</h1>
+<div class="tag">Sandboard Descent — ride the dunes to the oasis!</div>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">❤❤❤</span></div>
+    <div>Distance: <span id="dist">0m</span> / 1500m</div>
+    <div>Status: <span id="status">READY</span></div>
+  </div>
+  <canvas id="game" width="800" height="500"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🏂 DUNE DASHER</h2>
+    <p>Sandboard down shifting dunes, jump over rocks, grind rails for bonus points, and switch lanes to grab flags. Speed increases every section — reach the oasis at 1500m to win!</p>
+    <div class="keys">
+      <b>HOW TO PLAY</b><br>
+      ← → or A / D — Switch dune lane &nbsp;|&nbsp; ↑ / W / Space — Jump<br>
+      Mouse move — Steer lanes &nbsp;|&nbsp; Mouse click / Tap — Jump<br>
+      Touch: drag left/right to steer, tap to jump<br>
+      🪨 Rocks = lose a life &nbsp;|&nbsp; 🚩 Flags = +50 &nbsp;|&nbsp; 🛤️ Rails = +10 per grind tick
+    </div>
+    <button id="startBtn">▶ START RIDE</button>
+    <div class="small">Press Enter or tap Start to begin. Audio starts only after you interact.</div>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ RESTART</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var cv = document.getElementById('game');
+  var ctx = cv.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var W = 800, H = 500;
+  var lanes = [190, 320, 450]; // x centres of 3 dune lanes
+  var state = 'title'; // title, playing, won, over
+  var score = 0, lives = 3, distance = 0, speed = 5;
+  var player = { lane: 1, x: lanes[1], y: 380, vy: 0, jumping: false, grinding: false };
+  var obstacles = [], flags = [], rails = [], particles = [];
+  var spawnTimer = 0, section = 1, frame = 0;
+  var audioCtx = null, muted = false;
+
+  function initAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function sJump(){ beep(520, 0.15, 'sine'); }
+  function sFlag(){ beep(880, 0.12, 'triangle'); setTimeout(function(){ beep(1320, 0.15, 'triangle'); }, 80); }
+  function sCrash(){ beep(120, 0.3, 'sawtooth'); }
+  function sWin(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f,0.25,'triangle'); }, i*140); }); }
+
+  function reset(){
+    score = 0; lives = 3; distance = 0; speed = 5; section = 1;
+    player.lane = 1; player.x = lanes[1]; player.y = 380; player.vy = 0; player.jumping = false; player.grinding = false;
+    obstacles = []; flags = []; rails = []; particles = []; spawnTimer = 0; frame = 0;
+    updateHUD('RIDING');
+  }
+  function updateHUD(s){
+    scoreEl.textContent = score;
+    livesEl.textContent = '❤'.repeat(Math.max(0,lives)) || '—';
+    distEl.textContent = Math.floor(distance) + 'm';
+    if (s) statusEl.textContent = s;
+  }
+  function startGame(){
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    beep(440, 0.15, 'triangle');
+  }
+  function endGame(won){
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '🌴 YOU REACHED THE OASIS!' : '💥 WIPED OUT!';
+    endText.textContent = won
+      ? 'You rode ' + Math.floor(distance) + 'm and finished with ' + score + ' points. Legendary sandboarder!'
+      : 'You crashed out after ' + Math.floor(distance) + 'm with ' + score + ' points. The dunes await your return!';
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'WIN!' : 'GAME OVER');
+    if (won) sWin(); else sCrash();
+  }
+  function jump(){
+    if (state !== 'playing') return;
+    if (!player.jumping) { player.jumping = true; player.vy = -13; sJump(); }
+  }
+  function switchLane(dir){
+    if (state !== 'playing') return;
+    var nl = player.lane + dir;
+    if (nl >= 0 && nl <= 2) { player.lane = nl; beep(300, 0.08, 'sine'); }
+  }
+
+  function spawn(){
+    var r = Math.random();
+    var lane = Math.floor(Math.random() * 3);
+    if (r < 0.45) obstacles.push({ lane: lane, y: -40, type: 'rock' });
+    else if (r < 0.70) flags.push({ lane: lane, y: -40 });
+    else if (r < 0.85) rails.push({ lane: lane, y: -160, len: 120 });
+    else obstacles.push({ lane: lane, y: -40, type: 'cactus' });
+  }
+
+  function update(){
+    if (state !== 'playing') return;
+    frame++;
+    distance += speed * 0.35;
+    section = 1 + Math.floor(distance / 300);
+    speed = 5 + (section - 1) * 1.2;
+    score += 1; // survival points
+    spawnTimer -= speed;
+    if (spawnTimer <= 0) { spawn(); spawnTimer = 55 + Math.random() * 40; }
+
+    // smooth lane movement
+    var targetX = lanes[player.lane];
+    player.x += (targetX - player.x) * 0.25;
+
+    // jumping physics
+    if (player.jumping) {
+      player.y += player.vy; player.vy += 0.8;
+      if (player.y >= 380) { player.y = 380; player.jumping = false; player.vy = 0; }
+    }
+
+    // move world down
+    obstacles.forEach(function(o){ o.y += speed; });
+    flags.forEach(function(f){ f.y += speed; });
+    rails.forEach(function(r){ r.y += speed; });
+
+    // grinding: on a rail in same lane near player
+    player.grinding = false;
+    rails.forEach(function(r){
+      if (r.lane === player.lane && player.y >= r.y && player.y <= r.y + r.len && !player.jumping) {
+        player.grinding = true; score += 10;
+        if (frame % 10 === 0) beep(900, 0.05, 'sawtooth');
+      }
+    });
+
+    // collisions
+    obstacles = obstacles.filter(function(o){
+      if (o.y > H + 60) return false;
+      if (o.lane === player.lane && Math.abs(o.y - player.y) < 42 && !player.jumping) {
+        lives--; sCrash(); updateHUD('CRASH!');
+        spawnBurst(player.x, player.y);
+        if (lives <= 0) { endGame(false); }
+        return false;
+      }
+      return true;
+    });
+    flags = flags.filter(function(f){
+      if (f.y > H + 60) return false;
+      if (f.lane === player.lane && Math.abs(f.y - player.y) < 40) { score += 50; sFlag(); spawnBurst(f.x || lanes[f.lane], f.y); return false; }
+      return true;
+    });
+    rails = rails.filter(function(r){ return r.y < H + 200; });
+
+    // particles
+    particles.forEach(function(p){ p.y += 2; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+
+    if (distance >= 1500) endGame(true);
+    updateHUD('SECTION ' + section + (player.grinding ? ' — GRINDING!' : ''));
+  }
+  function spawnBurst(x, y){
+    for (var i = 0; i < 14; i++) particles.push({ x: x + (Math.random()*40-20), y: y + (Math.random()*20-10), life: 25 + Math.random()*15 });
+  }
+
+  function drawDune(offset, baseY, col1, col2){
+    ctx.fillStyle = col1;
+    ctx.beginPath();
+    ctx.moveTo(0, baseY);
+    for (var x = 0; x <= W; x += 40) ctx.lineTo(x, baseY + Math.sin((x + offset) / 90) * 14);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = col2;
+    ctx.beginPath();
+    ctx.moveTo(0, baseY + 22);
+    for (var x2 = 0; x2 <= W; x2 += 40) ctx.lineTo(x2, baseY + 22 + Math.sin((x2 + offset * 1.4) / 70) * 10);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+  }
+
+  function draw(){
+    // sky and sun
+    var sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#87ceeb'); sky.addColorStop(0.55, '#f9d976'); sky.addColorStop(1, '#f4a460');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffdf6b'; ctx.beginPath(); ctx.arc(700, 70, 42, 0, Math.PI * 2); ctx.fill();
+    // distant dunes
+    drawDune(distance * 0.5, 170, '#e8b96a', '#d99a4e');
+    drawDune(distance * 0.8, 230, '#f0c078', '#e0a85c');
+    // lane guides
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 3; ctx.setLineDash([18, 18]);
+    [255, 385].forEach(function(x){ ctx.beginPath(); ctx.moveTo(x, 240); ctx.lineTo(x, H); ctx.stroke(); });
+    ctx.setLineDash([]);
+    // rails
+    rails.forEach(function(r){
+      var x = lanes[r.lane];
+      ctx.fillStyle = '#8d6e63'; ctx.fillRect(x - 30, r.y, 60, r.len);
+      ctx.fillStyle = '#bcaaa4'; ctx.fillRect(x - 30, r.y, 60, 6);
+    });
+    // flags
+    flags.forEach(function(f){
+      var x = lanes[f.lane];
+      ctx.strokeStyle = '#5d4037'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x, f.y + 30); ctx.lineTo(x, f.y - 25); ctx.stroke();
+      ctx.fillStyle = '#e53935'; ctx.beginPath(); ctx.moveTo(x, f.y - 25); ctx.lineTo(x + 28, f.y - 15); ctx.lineTo(x, f.y - 5); ctx.closePath(); ctx.fill();
+    });
+    // obstacles
+    obstacles.forEach(function(o){
+      var x = lanes[o.lane];
+      if (o.type === 'rock') {
+        ctx.fillStyle = '#8d6e63'; ctx.beginPath(); ctx.arc(x, o.y, 26, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#a1887f'; ctx.beginPath(); ctx.arc(x - 8, o.y - 8, 12, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = '#2e7d32'; ctx.fillRect(x - 5, o.y - 28, 10, 50);
+        ctx.fillStyle = '#43a047'; ctx.beginPath(); ctx.arc(x - 14, o.y - 10, 10, 0, Math.PI * 2); ctx.arc(x + 14, o.y - 10, 10, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    // player sandboarder
+    var py = player.y, shadow = player.jumping ? 380 : py;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(player.x, shadow + 32, 30, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.translate(player.x, py);
+    if (player.grinding) ctx.fillStyle = '#ffe082';
+    ctx.fillStyle = player.grinding ? '#ffe082' : '#ff8f00';
+    ctx.beginPath(); ctx.ellipse(0, 24, 34, 8, -0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1565c0'; ctx.fillRect(-10, -18, 20, 36);
+    ctx.fillStyle = '#ffcc80'; ctx.beginPath(); ctx.arc(0, -28, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ef6c00'; ctx.beginPath(); ctx.arc(0, -28, 14, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // sand particles
+    ctx.fillStyle = '#ffecb3';
+    particles.forEach(function(p){ ctx.fillRect(p.x, p.y, 5, 5); });
+    // progress bar
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(20, 14, W - 40, 14);
+    ctx.fillStyle = '#ffb347'; ctx.fillRect(20, 14, (W - 40) * Math.min(1, distance / 1500), 14);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('🌴 OASIS', W - 90, 12);
+    // oasis hint near finish
+    if (distance > 1350) {
+      ctx.fillStyle = '#2e7d32'; ctx.beginPath(); ctx.arc(400, 120, 50, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4fc3f7'; ctx.beginPath(); ctx.arc(400, 130, 30, 0, Math.PI * 2); ctx.fill();
+      ctx.font = 'bold 20px Arial'; ctx.fillStyle = '#fff'; ctx.fillText('OASIS AHEAD!', 320, 70);
+    }
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Keyboard
+  document.addEventListener('keydown', function(e){
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    if ((state === 'won' || state === 'over') && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') switchLane(-1);
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') switchLane(1);
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') { e.preventDefault(); jump(); }
+  });
+  // Mouse
+  cv.addEventListener('mousemove', function(e){
+    if (state !== 'playing') return;
+    var rect = cv.getBoundingClientRect();
+    var mx = (e.clientX - rect.left) * (W / rect.width);
+    if (mx < 270) player.lane = 0; else if (mx < 540) player.lane = 1; else player.lane = 2;
+  });
+  cv.addEventListener('mousedown', function(e){
+    if (state === 'playing') { initAudio(); jump(); }
+  });
+  // Touch
+  cv.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    if (state !== 'playing') return;
+    initAudio();
+    var t = e.touches[0];
+    var rect = cv.getBoundingClientRect();
+    var mx = (t.clientX - rect.left) * (W / rect.width);
+    if (mx < 270) player.lane = 0; else if (mx < 540) player.lane = 1; else player.lane = 2;
+    jump();
+  }, { passive: false });
+  cv.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    if (state !== 'playing') return;
+    var t = e.touches[0];
+    var rect = cv.getBoundingClientRect();
+    var mx = (t.clientX - rect.left) * (W / rect.width);
+    if (mx < 270) player.lane = 0; else if (mx < 540) player.lane = 1; else player.lane = 2;
+  }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  updateHUD('READY');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Storm Sailor — Storm Ship Dodger</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#06121f; color:#eaf6ff; font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; overflow:hidden; }
+  #wrap { width:min(96vw, 520px); }
+  h1 { text-align:center; font-size:28px; letter-spacing:1px; margin:10px 0 4px; text-shadow:0 2px 12px rgba(0,200,255,.5); }
+  .sub { text-align:center; color:#9fd8ff; font-size:13px; margin-bottom:10px; }
+  #hud { display:flex; justify-content:space-between; gap:6px; background:#0b2438; border:1px solid #1e4a6b; border-radius:10px; padding:8px 10px; font-weight:700; font-size:14px; margin-bottom:8px; }
+  #hud span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #hud .lives { color:#ff8fa3; }
+  #hud .score { color:#ffe066; }
+  #hud .level { color:#7df9c8; }
+  #gameBox { position:relative; border:2px solid #2a6a99; border-radius:14px; overflow:hidden; background:#071e33; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  canvas { display:block; width:100%; height:560px; background:linear-gradient(#0a2e4d,#06233d 55%,#041a30); touch-action:none; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:22px; background:rgba(2,12,24,.78); backdrop-filter:blur(2px); }
+  .overlay.hidden { display:none; }
+  .overlay h2 { font-size:30px; margin-bottom:8px; }
+  .overlay p { color:#cfeaff; line-height:1.55; font-size:15px; max-width:420px; }
+  .howto { background:#0d2f4a; border:1px solid #2a5d84; border-radius:10px; padding:12px 14px; margin:14px 0; text-align:left; font-size:14px; line-height:1.6; }
+  .howto b { color:#ffe066; }
+  button { cursor:pointer; border:0; border-radius:999px; padding:13px 26px; font-size:17px; font-weight:800; color:#04202f; background:#ffd84d; box-shadow:0 4px 0 #b8931e; margin-top:14px; }
+  button:active { transform:translateY(2px); box-shadow:0 2px 0 #b8931e; }
+  button.secondary { background:#7df9c8; box-shadow:0 4px 0 #2ea97f; }
+  .big { font-size:44px; margin-bottom:6px; }
+  .small { font-size:13px; color:#9fd8ff; margin-top:10px; }
+  .bar { width:100%; height:10px; background:#122f47; border-radius:99px; overflow:hidden; margin-top:10px; }
+  #timeBar { height:100%; width:100%; background:linear-gradient(90deg,#7df9c8,#ffd84d); transition:width .2s linear; }
+  #msg { text-align:center; min-height:20px; font-size:13px; color:#ffd84d; margin-top:8px; }
+  @media (max-width:480px){ canvas{height:520px;} h1{font-size:24px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>⛈️ Storm Sailor</h1>
+  <div class="sub">Arcade / Storm Ship Dodger — Survive the storm, grab the barrels!</div>
+  <div id="hud">
+    <span class="score">⭐ Score: <span id="score">0</span></span>
+    <span class="lives">❤️ Lives: <span id="lives">3</span></span>
+    <span class="level">🌊 Level: <span id="level">1</span> / 3</span>
+    <span id="status">Ready</span>
+  </div>
+  <div id="gameBox">
+    <canvas id="c" width="520" height="560"></canvas>
+
+    <div id="titleScreen" class="overlay">
+      <div class="big">⛵⚡</div>
+      <h2>Storm Sailor</h2>
+      <p>Sail through a raging storm! Dodge lightning and wreckage, collect barrels, and survive all 3 storm levels to win.</p>
+      <div class="howto">
+        <b>How to Play:</b><br>
+        • <b>Steer:</b> Arrow Keys / WASD (Left &amp; Right) — or drag with Mouse / Touch<br>
+        • <b>Collect:</b> 🛢️ Barrels = +25 points<br>
+        • <b>Avoid:</b> ⚡ Lightning strikes &amp; floating wreckage — each hit costs 1 life<br>
+        • <b>Win:</b> Survive all 3 levels (20s each) OR reach 500 points<br>
+        • <b>Tip:</b> Lightning flashes before it strikes — move away from the glow!
+      </div>
+      <button id="startBtn">▶ Start Sailing</button>
+      <div class="small">Sound starts only after you press Start. Fully offline — no downloads needed.</div>
+    </div>
+
+    <div id="endScreen" class="overlay hidden">
+      <div class="big" id="endEmoji">🏆</div>
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText">You survived the storm!</p>
+      <button id="restartBtn" class="secondary">↻ Play Again</button>
+      <div class="small">Press R or tap Play Again for an instant restart.</div>
+    </div>
+  </div>
+  <div class="bar"><div id="timeBar"></div></div>
+  <div id="msg">Tip: watch for the yellow lightning warning glow.</div>
+</div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('c');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var statusEl = document.getElementById('status');
+  var timeBar = document.getElementById('timeBar');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endEmoji = document.getElementById('endEmoji');
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, lives = 3, level = 1;
+  var levelTime = 20, timeLeft = 20, lastTime = 0;
+  var ship = { x: W/2, y: H-90, w: 54, h: 62, vx: 0, targetX: W/2 };
+  var keys = {};
+  var pointerActive = false, pointerX = W/2;
+  var barrels = [], hazards = [], strikes = [], waves = [], rain = [], sparks = [];
+  var spawnT = 0, strikeT = 0, wavePhase = 0;
+  var audioCtx = null, muted = false;
+
+  function initAudio(){
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch(e){}
+  }
+  function tone(freq, dur, type, vol, slide){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, slide), audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e){}
+  }
+  function sfxPick(){ tone(880, 0.12, 'triangle', 0.14, 1320); }
+  function sfxHit(){ tone(220, 0.3, 'sawtooth', 0.18, 60); }
+  function sfxZap(){ tone(1400, 0.18, 'square', 0.10, 120); }
+  function sfxWin(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f,0.25,'triangle',0.15); }, i*130); }); }
+
+  function resetGame(){
+    score = 0; lives = 3; level = 1; levelTime = 20; timeLeft = 20;
+    ship.x = W/2; ship.targetX = W/2; ship.vx = 0;
+    barrels = []; hazards = []; strikes = []; sparks = [];
+    spawnT = 0; strikeT = 0; state = 'playing';
+    updateHUD('Sailing!');
+    endScreen.classList.add('hidden');
+    titleScreen.classList.add('hidden');
+  }
+  function updateHUD(status){
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    levelEl.textContent = level;
+    if (status) statusEl.textContent = status;
+    timeBar.style.width = Math.max(0, (timeLeft / levelTime) * 100) + '%';
+  }
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function spawnBarrel(){
+    barrels.push({ x: rand(30, W-30), y: -30, vy: rand(90, 150) + level*18, r: 16, bob: rand(0,6) });
+  }
+  function spawnHazard(){
+    var kind = Math.random() < 0.5 ? 'wreck' : 'rock';
+    hazards.push({ x: rand(30, W-30), y: -40, vy: rand(110, 190) + level*22, w: rand(36,58), h: rand(28,44), kind: kind, rot: rand(0,3) });
+  }
+  function spawnStrike(){
+    var x = rand(50, W-50);
+    strikes.push({ x: x, y: 0, w: 54, warn: 0.9, active: 0.35, done: false });
+    msgEl.textContent = '⚡ Lightning incoming — move away from the glow!';
+  }
+  function showEnd(win){
+    state = win ? 'win' : 'over';
+    endEmoji.textContent = win ? '🏆' : '💥';
+    endTitle.textContent = win ? 'You Win!' : 'Game Over';
+    endText.textContent = win
+      ? 'You survived all 3 storm levels with ' + score + ' points and ' + lives + ' lives left. Legendary sailing!'
+      : 'Your ship was lost in the storm. Final score: ' + score + '. Try again, sailor!';
+    statusEl.textContent = win ? 'Victory!' : 'Shipwrecked';
+    endScreen.classList.remove('hidden');
+    if (win) sfxWin();
+  }
+  function loseLife(reason){
+    lives--; sfxHit(); updateHUD('Hit! ' + reason);
+    sparks.push({ x: ship.x, y: ship.y, t: 0.6 });
+    ship.x = W/2; ship.targetX = W/2;
+    if (lives <= 0) { showEnd(false); }
+  }
+  function startGame(){
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    resetGame();
+    lastTime = performance.now();
+    msgEl.textContent = 'Level 1 — Dodge, collect, survive 20 seconds!';
+  }
+
+  // Controls: keyboard
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === 'arrowleft' || k === 'arrowright' || k === 'a' || k === 'd') e.preventDefault();
+    if (state === 'title' && (k === 'enter' || k === ' ')) startGame();
+    if ((state === 'win' || state === 'over') && k === 'r') startGame();
+    if (k === 'm') { muted = !muted; msgEl.textContent = muted ? 'Sound muted (M to unmute).' : 'Sound on.'; }
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+
+  // Controls: mouse
+  canvas.addEventListener('mousedown', function(e){
+    pointerActive = true;
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+    ship.targetX = pointerX;
+  });
+  document.addEventListener('mousemove', function(e){
+    if (!pointerActive) return;
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+    ship.targetX = pointerX;
+  });
+  document.addEventListener('mouseup', function(){ pointerActive = false; });
+
+  // Controls: touch
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    pointerActive = true;
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    pointerX = (t.clientX - r.left) * (W / r.width);
+    ship.targetX = pointerX;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    pointerX = (t.clientX - r.left) * (W / r.width);
+    ship.targetX = pointerX;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(){ pointerActive = false; });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  function drawShip(){
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(Math.max(-0.18, Math.min(0.18, ship.vx * 0.0006)));
+    // hull
+    ctx.fillStyle = '#8b5a2b';
+    ctx.beginPath();
+    ctx.moveTo(0, -32); ctx.lineTo(24, 10); ctx.lineTo(18, 30); ctx.lineTo(-18, 30); ctx.lineTo(-24, 10);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5d3a1a';
+    ctx.fillRect(-18, 8, 36, 8);
+    // mast + sail
+    ctx.fillStyle = '#6b4a2f'; ctx.fillRect(-2, -30, 4, 34);
+    ctx.fillStyle = '#f4f1e6';
+    ctx.beginPath(); ctx.moveTo(2, -28); ctx.lineTo(26, -4); ctx.lineTo(2, -2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd84d'; ctx.fillRect(-12, -38, 24, 10);
+    ctx.restore();
+  }
+  function drawBackground(t){
+    // sea with rolling waves
+    ctx.fillStyle = '#0a2e4d'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#0d3a5e';
+    for (var i = 0; i < 4; i++){
+      ctx.beginPath();
+      var y0 = 90 + i*110;
+      ctx.moveTo(0, y0);
+      for (var x = 0; x <= W; x += 20){
+        ctx.lineTo(x, y0 + Math.sin((x/60) + t*2 + i*1.4) * 10);
+      }
+      ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    }
+    // rain
+    ctx.strokeStyle = 'rgba(180,220,255,0.35)'; ctx.lineWidth = 1;
+    rain.forEach(function(r){
+      ctx.beginPath(); ctx.moveTo(r.x, r.y); ctx.lineTo(r.x - 4, r.y + 14); ctx.stroke();
+    });
+    // clouds
+    ctx.fillStyle = 'rgba(20,30,50,0.85)';
+    ctx.beginPath(); ctx.ellipse(90, 40, 90, 26, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(400, 30, 110, 30, 0, 0, Math.PI*2); ctx.fill();
+  }
+  function drawBarrel(b){
+    ctx.save(); ctx.translate(b.x, b.y + Math.sin(b.bob)*3);
+    ctx.fillStyle = '#7a4a1f'; ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#c98f3d'; ctx.fillRect(-b.r, -5, b.r*2, 10);
+    ctx.fillStyle = '#ffe066'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('🛢', 0, 5);
+    ctx.restore();
+  }
+  function drawHazard(h){
+    ctx.save(); ctx.translate(h.x, h.y); ctx.rotate(h.rot * 0.2);
+    if (h.kind === 'wreck'){
+      ctx.fillStyle = '#5a3a22'; ctx.fillRect(-h.w/2, -h.h/2, h.w, h.h);
+      ctx.fillStyle = '#2f1d10'; ctx.fillRect(-h.w/2, -4, h.w, 8);
+    } else {
+      ctx.fillStyle = '#5b6b7a'; ctx.beginPath(); ctx.arc(0, 0, h.w/2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#8fa3b3'; ctx.beginPath(); ctx.arc(-6, -6, h.w/4, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+  function update(dt){
+    wavePhase += dt;
+    // rain recycle
+    if (rain.length < 70) rain.push({ x: rand(0, W), y: rand(0, H), v: rand(300, 500) });
+    rain.forEach(function(r){ r.y += r.v*dt; r.x -= 40*dt; if (r.y > H){ r.y = -15; r.x = rand(0, W); } });
+
+    // steering: keyboard has priority, otherwise pointer target
+    var speed = 340;
+    if (keys['arrowleft'] || keys['a']) { ship.x -= speed*dt; ship.targetX = ship.x; ship.vx = -speed; }
+    else if (keys['arrowright'] || keys['d']) { ship.x += speed*dt; ship.targetX = ship.x; ship.vx = speed; }
+    else {
+      var dx = ship.targetX - ship.x;
+      ship.vx = dx * 10;
+      ship.x += dx * Math.min(1, dt*12);
+    }
+    ship.x = Math.max(30, Math.min(W-30, ship.x));
+    ship.targetX = Math.max(30, Math.min(W-30, ship.targetX));
+
+    // spawning
+    spawnT -= dt; strikeT -= dt;
+    if (spawnT <= 0){ spawnT = rand(0.45, 0.9); if (Math.random() < 0.42) spawnBarrel(); else spawnHazard(); }
+    if (strikeT <= 0){ strikeT = rand(2.2, 3.8) - level*0.25; spawnStrike(); }
+
+    // barrels
+    for (var i = barrels.length-1; i >= 0; i--){
+      var b = barrels[i]; b.y += b.vy*dt; b.bob += dt*4;
+      var ddx = b.x - ship.x, ddy = b.y - ship.y;
+      if (Math.abs(ddx) < 38 && Math.abs(ddy) < 42){ score += 25; sfxPick(); barrels.splice(i,1); msgEl.textContent = 'Barrel! +25 points.'; continue; }
+      if (b.y > H+30) barrels.splice(i,1);
+    }
+    // hazards
+    for (var j = hazards.length-1; j >= 0; j--){
+      var h = hazards[j]; h.y += h.vy*dt;
+      if (Math.abs(h.x - ship.x) < (h.w/2 + 20) && Math.abs(h.y - ship.y) < (h.h/2 + 24)){
+        hazards.splice(j,1); loseLife('Wreckage hit!'); if (state !== 'playing') return; continue;
+      }
+      if (h.y > H+50) hazards.splice(j,1);
+    }
+    // lightning
+    for (var k = strikes.length-1; k >= 0; k--){
+      var s = strikes[k];
+      if (s.warn > 0){ s.warn -= dt; }
+      else if (s.active > 0){
+        s.active -= dt;
+        if (!s.done && Math.abs(s.x - ship.x) < 34 && ship.y > 80){
+          s.done = true; sfxZap(); loseLife('Lightning strike!'); if (state !== 'playing') return;
+        }
+      } else strikes.splice(k,1);
+    }
+    sparks.forEach(function(p){ p.t -= dt; });
+    sparks = sparks.filter(function(p){ return p.t > 0; });
+
+    // level timer
+    timeLeft -= dt;
+    if (timeLeft <= 0){
+      if (level >= 3){ score += 100; updateHUD('Victory!'); showEnd(true); return; }
+      level++; timeLeft = levelTime; barrels = []; hazards = [];strikes = [];
+      msgEl.textContent = 'Level ' + level + ' — the storm gets stronger!';
+      tone(660, 0.2, 'triangle', 0.14, 990);
+    }
+    if (score >= 500){ score += 50; updateHUD('Victory!'); showEnd(true); return; }
+    updateHUD();
+  }
+  function render(t){
+    drawBackground(t);
+    // lightning warning + bolt
+    strikes.forEach(function(s){
+      if (s.warn > 0){
+        ctx.fillStyle = s.warn > 0.45 || Math.floor(t*8)%2 === 0 ? 'rgba(255,216,77,0.28)' : 'rgba(255,216,77,0.08)';
+        ctx.fillRect(s.x - s.w/2, 0, s.w, H);
+        ctx.fillStyle = '#ffe066'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('⚡', s.x, 70);
+      } else if (s.active > 0){
+        ctx.strokeStyle = '#fff59d'; ctx.lineWidth = 5; ctx.beginPath();
+        var lx = s.x; ctx.moveTo(lx, 0);
+        for (var y = 0; y < H; y += 60){ lx += rand(-22, 22); ctx.lineTo(lx, y); }
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,240,150,0.18)'; ctx.fillRect(s.x - 30, 0, 60, H);
+      }
+    });
+    barrels.forEach(drawBarrel);
+    hazards.forEach(drawHazard);
+    if (state !== 'title') drawShip();
+    sparks.forEach(function(p){
+      ctx.fillStyle = 'rgba(255,120,120,0.8)'; ctx.font = '28px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('💥', p.x, p.y);
+    });
+    // level banner text during play
+    if (state === 'playing'){
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText('⏱ ' + Math.ceil(Math.max(0, timeLeft)) + 's left  •  Goal: 500 pts or survive L3', 12, 24);
+    }
+  }
+  function loop(now){
+    requestAnimationFrame(loop);
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    if (state === 'playing') update(dt);
+    render(now / 1000);
+  }
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

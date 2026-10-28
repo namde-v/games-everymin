@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Banjo Barnstorm - Rhythm Banjo Strum Melody</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1207; color: #ffe9b0; font-family: Georgia, 'Times New Roman', serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 34px; color: #ffcf5e; text-shadow: 2px 2px 0 #7a3c00; margin: 6px 0 2px; text-align: center; }
+  .sub { color: #c9a86a; font-style: italic; margin-bottom: 8px; text-align: center; }
+  #wrap { position: relative; width: min(560px, 96vw); }
+  canvas { display: block; width: 100%; height: 520px; background: linear-gradient(#2b1d0a, #17100a); border: 3px solid #8a5a1e; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+  .pill { background: #3a2708; border: 2px solid #8a5a1e; border-radius: 20px; padding: 6px 12px; font-weight: bold; font-size: 15px; }
+  .pill span { color: #ffcf5e; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(20,12,2,0.92); border-radius: 12px; padding: 22px; gap: 10px; }
+  #overlay h2 { font-size: 30px; color: #ffcf5e; }
+  #overlay p { line-height: 1.5; font-size: 16px; max-width: 440px; }
+  #overlay .small { font-size: 14px; color: #d8bd85; }
+  button { background: #ffcf5e; color: #3a1e00; border: 3px solid #fff1c4; border-radius: 12px; padding: 12px 26px; font-size: 20px; font-weight: bold; cursor: pointer; font-family: inherit; }
+  button:hover { background: #fff1c4; }
+  button:active { transform: scale(0.96); }
+  .keys { background: #2b1d0a; border: 1px solid #8a5a1e; border-radius: 8px; padding: 10px; font-size: 15px; line-height: 1.6; }
+  #msg { min-height: 22px; text-align: center; font-weight: bold; color: #ffcf5e; margin-top: 4px; }
+  .stringbar { display: flex; gap: 6px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+  .sbtn { padding: 10px 14px; font-size: 15px; }
+</style>
+</head>
+<body>
+<h1>&#127928; Banjo Barnstorm &#127928;</h1>
+<div class="sub">Strum the barn down! Follow the scrolling tablature and play the tune.</div>
+<div id="wrap">
+  <canvas id="game" width="560" height="520"></canvas>
+  <div id="overlay">
+    <h2>Banjo Barnstorm</h2>
+    <p><b>How to Play:</b> Notes scroll down five banjo strings toward the golden strum line. Strum the matching string exactly when a note touches the line to play the tune and earn points. Perfect timing builds your combo. A wrong strum or a missed note breaks the flow and costs stamina.</p>
+    <div class="keys">
+      <b>Controls:</b><br>
+      Keys <b>1-5</b> or <b>A / S / D / F / G</b> strum strings 1-5<br>
+      <b>Mouse:</b> click a string lane or a string button below<br>
+      <b>Touch:</b> tap a string lane or a string button<br>
+      Press <b>Enter</b> or tap Start to begin. Reach <b>500 points</b> and finish the tune to win!
+    </div>
+    <p class="small">Stamina: 5 hearts. Misses and wrong strums cost 1 stamina. Finish all 64 notes to complete the barn tune.</p>
+    <button id="startBtn" type="button">Start Strumming</button>
+  </div>
+  <div id="hud">
+    <div class="pill">Score: <span id="score">0</span></div>
+    <div class="pill">Stamina: <span id="lives">&#10084;&#10084;&#10084;&#10084;&#10084;</span></div>
+    <div class="pill">Combo: <span id="combo">x0</span></div>
+    <div class="pill">Notes: <span id="prog">0 / 64</span></div>
+    <div class="pill">Status: <span id="status">Ready</span></div>
+  </div>
+  <div id="msg"></div>
+  <div class="stringbar" id="stringbar"></div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var startBtn = document.getElementById('startBtn');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var comboEl = document.getElementById('combo');
+  var progEl = document.getElementById('prog');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var bar = document.getElementById('stringbar');
+
+  var STRINGS = 5;
+  var LANE_W = 560 / STRINGS;
+  var STRUM_Y = 440;
+  var TOTAL_NOTES = 64;
+  var TARGET = 500;
+  var FREQS = [392.00, 293.66, 246.94, 196.00, 146.83];
+  var NAMES = ['G4', 'D4', 'B3', 'G3', 'D3'];
+  var KEYMAP = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, 'a': 0, 's': 1, 'd': 2, 'f': 3, 'g': 4 };
+
+  // A cheerful barn melody: repeating melodic pattern across the 5 strings.
+  var MELODY = [0,1,2,1,0,2,3,2, 1,0,1,2,3,4,3,2, 0,2,4,3,2,1,0,1, 2,3,4,3,2,1,2,0, 4,3,2,1,0,1,2,3, 2,1,0,2,1,0,4,3, 1,2,0,1,3,2,4,2, 0,1,2,3,4,3,2,0];
+  // MELODY has exactly 64 entries, one per note of the tune.
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, stamina = 5, combo = 0, bestCombo = 0, noteIndex = 0, played = 0;
+  var notes = [], spawnTimer = 0, flash = [0,0,0,0,0], lastHit = '';
+  var audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+
+  function pluck(stringIdx, good) {
+    ensureAudio();
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var osc2 = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    var filter = audioCtx.createBiquadFilter();
+    osc.type = 'triangle';
+    osc2.type = 'square';
+    osc.frequency.value = FREQS[stringIdx];
+    osc2.frequency.value = FREQS[stringIdx] * 2;
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(2400, t);
+    filter.frequency.exponentialRampToValueAtTime(300, t + 0.45);
+    gain.gain.setValueAtTime(good ? 0.28 : 0.12, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + (good ? 0.55 : 0.25));
+    var g2 = audioCtx.createGain();
+    g2.gain.value = 0.25;
+    osc.connect(filter); osc2.connect(g2); g2.connect(filter);
+    filter.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(t); osc2.start(t); osc.stop(t + 0.6); osc2.stop(t + 0.6);
+  }
+
+  function buildButtons() {
+    for (var i = 0; i < STRINGS; i++) {
+      (function (idx) {
+        var b = document.createElement('button');
+        b.className = 'sbtn'; b.type = 'button';
+        b.textContent = 'String ' + (idx + 1) + ' (' + NAMES[idx] + ')';
+        b.addEventListener('click', function () { strum(idx); });
+        b.addEventListener('touchstart', function (e) { e.preventDefault(); strum(idx); }, { passive: false });
+        bar.appendChild(b);
+      })(i);
+    }
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, stamina));
+    comboEl.textContent = 'x' + combo;
+    progEl.textContent = played + ' / ' + TOTAL_NOTES;
+    if (status) statusEl.textContent = status;
+  }
+
+  function setOverlay(title, body, btnText) {
+    overlay.style.display = 'flex';
+    overlay.innerHTML = '';
+    var h = document.createElement('h2'); h.textContent = title;
+    var p = document.createElement('p'); p.innerHTML = body;
+    var b = document.createElement('button'); b.type = 'button'; b.textContent = btnText;
+    b.addEventListener('click', startGame);
+    overlay.appendChild(h); overlay.appendChild(p); overlay.appendChild(b);
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; stamina = 5; combo = 0; bestCombo = 0; noteIndex = 0; played = 0;
+    notes = []; spawnTimer = 0; lastHit = '';
+    state = 'playing';
+    overlay.style.display = 'none';
+    msgEl.textContent = 'Play the tune! Watch the tablature scroll down.';
+    updateHUD('Playing');
+  }
+
+  function restart() { startGame(); }
+
+  function endWin() {
+    state = 'win';
+    updateHUD('WIN!');
+    setOverlay('Barnstorm Win!', 'You finished the tune with <b>' + score + ' points</b> (target ' + TARGET + ') and a best combo of x' + bestCombo + '. The whole barn is dancing! Play it again for an even better score.', 'Restart');
+  }
+
+  function endOver() {
+    state = 'over';
+    updateHUD('Game Over');
+    setOverlay('Game Over', 'Your stamina ran out after ' + played + ' notes with <b>' + score + ' points</b>. The banjo needs a rest - then strum it again!', 'Restart');
+  }
+
+  function spawnNote() {
+    if (noteIndex >= TOTAL_NOTES) return;
+    notes.push({ string: MELODY[noteIndex], y: -30, hit: false });
+    noteIndex++;
+  }
+
+  function strum(idx) {
+    if (state !== 'playing') return;
+    ensureAudio();
+    flash[idx] = 1;
+    var best = -1, bestDist = 9999;
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].string === idx && !notes[i].hit) {
+        var d = Math.abs(notes[i].y - STRUM_Y);
+        if (d < bestDist) { bestDist = d; best = i; }
+      }
+    }
+    if (best >= 0 && bestDist <= 62) {
+      notes[best].hit = true;
+      notes.splice(best, 1);
+      combo++; if (combo > bestCombo) bestCombo = combo;
+      var pts = 10 + Math.min(combo, 10);
+      if (bestDist <= 22) { pts += 10; lastHit = 'Perfect! +' + pts; } else { lastHit = 'Good strum! +' + pts; }
+      score += pts; played++;
+      pluck(idx, true);
+      msgEl.textContent = lastHit + '  (' + NAMES[idx] + ')';
+    } else {
+      combo = 0; stamina--;
+      pluck(idx, false);
+      msgEl.textContent = 'Wrong strum! That broke the flow. Stamina -1.';
+      if (stamina <= 0) { updateHUD(); endOver(); return; }
+    }
+    updateHUD();
+    if (played >= TOTAL_NOTES && state === 'playing') {
+      if (score >= TARGET) { endWin(); }
+      else { endOver(); }
+    }
+  }
+
+  function laneFromX(x) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (x - r.left) * (canvas.width / r.width);
+    var lane = Math.floor(cx / LANE_W);
+    return Math.max(0, Math.min(STRINGS - 1, lane));
+  }
+
+  function loop(now) {
+    requestAnimationFrame(loop);
+    ctx.clearRect(0, 0, 560, 520);
+    // Barn backdrop
+    ctx.fillStyle = '#241708'; ctx.fillRect(0, 0, 560, 520);
+    ctx.fillStyle = '#3a2708';
+    for (var i = 0; i < 8; i++) { ctx.fillRect(0, 40 + i * 62, 560, 2); }
+    // Lanes and strings
+    for (var s = 0; s < STRINGS; s++) {
+      var cx = s * LANE_W + LANE_W / 2;
+      ctx.strokeStyle = flash[s] > 0.2 ? '#ffe066' : '#c9a86a';
+      ctx.lineWidth = flash[s] > 0.2 ? 5 : 2;
+      ctx.beginPath(); ctx.moveTo(cx, 10); ctx.lineTo(cx, 510); ctx.stroke();
+      ctx.fillStyle = '#ffe9b0'; ctx.font = 'bold 13px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText('String ' + (s + 1) + ' ' + NAMES[s], cx, 24);
+      if (flash[s] > 0) flash[s] -= 0.06;
+    }
+    // Strum line
+    ctx.fillStyle = '#ffcf5e'; ctx.fillRect(0, STRUM_Y - 3, 560, 6);
+    ctx.fillStyle = '#1a1207'; ctx.font = 'bold 14px Georgia'; ctx.textAlign = 'left';
+    ctx.fillText('STRUM LINE', 10, STRUM_Y - 10);
+    ctx.textAlign = 'right';
+    ctx.fillText('Target ' + TARGET + ' pts', 550, STRUM_Y - 10);
+    ctx.textAlign = 'center';
+    if (state === 'playing') {
+      spawnTimer++;
+      if (spawnTimer >= 52 && noteIndex < TOTAL_NOTES) { spawnNote(); spawnTimer = 0; }
+      for (var n = notes.length - 1; n >= 0; n--) {
+        notes[n].y += 2.6;
+        if (notes[n].y > STRUM_Y + 62) {
+          notes.splice(n, 1);
+          combo = 0; stamina--; played++;
+          msgEl.textContent = 'Missed a note! Stamina -1.';
+          if (stamina <= 0) { updateHUD(); endOver(); break; }
+          updateHUD();
+          if (played >= TOTAL_NOTES) {
+            if (score >= TARGET) endWin(); else endOver();
+            break;
+          }
+        }
+      }
+    }
+    // Notes as banjo picks on tablature
+    for (var k = 0; k < notes.length; k++) {
+      var note = notes[k];
+      var nx = note.string * LANE_W + LANE_W / 2;
+      var dist = Math.abs(note.y - STRUM_Y);
+      ctx.fillStyle = dist <= 22 ? '#7dff8a' : (dist <= 62 ? '#ffcf5e' : '#ff8a5e');
+      ctx.beginPath(); ctx.arc(nx, note.y, 20, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#1a1207'; ctx.font = 'bold 15px Georgia';
+      ctx.fillText(NAMES[note.string], nx, note.y + 5);
+    }
+    if (state === 'title') {
+      ctx.fillStyle = '#ffe9b0'; ctx.font = 'bold 20px Georgia';
+      ctx.fillText('Tap Start, then strum when notes hit the line!', 280, 280);
+    }
+  }
+
+  buildButtons();
+  startBtn.addEventListener('click', startGame);
+  document.addEventListener('keydown', function (e) {
+    var key = e.key.toLowerCase();
+    if (state === 'title' && (key === 'enter' || key === ' ')) { startGame(); return; }
+    if ((state === 'win' || state === 'over') && key === 'enter') { restart(); return; }
+    if (key in KEYMAP) { e.preventDefault(); strum(KEYMAP[key]); }
+  });
+  canvas.addEventListener('mousedown', function (e) { strum(laneFromX(e.clientX)); });
+  canvas.addEventListener('click', function (e) { /* click also strums via mousedown; kept for mouse support */ });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (e.touches.length) strum(laneFromX(e.touches[0].clientX)); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Moss Maze — Living Maze Path Logic</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; background: #0e2417; color: #eaf7ec; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 14px; overflow-x: hidden; }
+  h1 { margin: 6px 0 2px; font-size: 30px; letter-spacing: 1px; color: #b6f2a6; text-shadow: 0 2px 0 #123; }
+  .tag { color: #a9d8b0; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 8px 0 12px; width: 100%; max-width: 560px; }
+  .pill { background: #173d24; border: 2px solid #3d7a4a; border-radius: 999px; padding: 7px 12px; font-weight: bold; font-size: 14px; min-width: 110px; text-align: center; }
+  .pill span { color: #ffe08a; }
+  #wrap { position: relative; width: min(92vw, 480px); }
+  #board { display: grid; gap: 6px; background: #122f1d; border: 3px solid #4a8a55; border-radius: 14px; padding: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+  .tile { aspect-ratio: 1; border-radius: 10px; background: #22492e; border: 2px solid #3a6b44; cursor: pointer; position: relative; display: flex; align-items: center; justify-content: center; font-size: 34px; user-select: none; touch-action: manipulation; transition: transform .12s, border-color .12s, background .12s; }
+  .tile:hover { border-color: #b6f2a6; }
+  .tile.sel { border-color: #ffe08a; box-shadow: 0 0 0 3px #ffe08a55; transform: scale(1.04); background: #2e5f38; }
+  .tile.fixed { border-style: dashed; border-color: #8fd19a; cursor: default; }
+  .tile.path { background: #2f6b3a; }
+  .tile .mini { position: absolute; bottom: 2px; right: 5px; font-size: 10px; color: #cdeed2; }
+  .tile .glyph { pointer-events: none; line-height: 1; }
+  #msg { min-height: 26px; margin: 10px 0 4px; text-align: center; font-weight: bold; color: #ffe08a; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+  button { background: #7ed957; color: #0d2412; border: 0; border-radius: 999px; padding: 11px 18px; font-weight: bold; font-size: 15px; cursor: pointer; }
+  button.secondary { background: #eaf7ec; }
+  button:active { transform: scale(.97); }
+  .overlay { position: absolute; inset: 0; background: rgba(6,20,11,.94); border-radius: 14px; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 10px; }
+  .overlay h2 { margin: 0; font-size: 28px; color: #b6f2a6; }
+  .overlay p { margin: 4px 0; line-height: 1.55; font-size: 14px; color: #dff0e1; max-width: 400px; }
+  .overlay ul { text-align: left; font-size: 13px; line-height: 1.6; margin: 4px 0; }
+  .hidden { display: none !important; }
+  #seedbar { height: 8px; background: #1d3a26; border-radius: 99px; overflow: hidden; margin-top: 10px; }
+  #seedfill { height: 100%; width: 0%; background: linear-gradient(90deg, #7ed957, #ffe08a); transition: width .4s; }
+  .foot { font-size: 12px; color: #9cc4a4; margin-top: 12px; text-align: center; max-width: 520px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🌿 Moss Maze</h1>
+<div class="tag">Puzzle / Living Maze Path Logic — grow the moss, guide the seed home.</div>
+
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Moves: <span id="moves">12</span></div>
+  <div class="pill">Level: <span id="level">1 / 4</span></div>
+  <div class="pill">Status: <span id="status">Ready</span></div>
+</div>
+
+<div id="wrap">
+  <div id="board" aria-label="Moss maze grid"></div>
+  <div id="seedbar"><div id="seedfill"></div></div>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🌿 Moss Maze</h2>
+    <p><b>Grow a living path of moss</b> so a tiny seed can travel from the sprout to the flower.</p>
+    <ul>
+      <li><b>Goal:</b> Connect START 🌱 to FLOWER 🌸 with moss paths, using at least the target route length.</li>
+      <li><b>Mouse / Touch:</b> Tap a tile to rotate its moss path. Tap <b>Send Seed</b> when ready.</li>
+      <li><b>Keyboard:</b> Arrow Keys select a tile. Enter or Space rotates it. Press S to send the seed.</li>
+      <li><b>Limits:</b> Every rotation costs 1 move. Run out of moves and the maze withers.</li>
+      <li><b>Win:</b> Finish all 4 levels. <b>Game Over:</b> Out of moves before the seed blooms.</li>
+    </ul>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Tip: corners turn the path, straights go through, crosses connect everywhere. Fixed tiles cannot rotate.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Game</button>
+  </div>
+</div>
+
+<div id="msg">Press Start, then rotate moss tiles to build a path.</div>
+<div id="controls">
+  <button id="sendBtn">🌱 Send Seed</button>
+  <button id="hintBtn" class="secondary">💡 Hint</button>
+  <button id="resetBtn" class="secondary">↻ Restart Level</button>
+</div>
+<p class="foot">Controls: Mouse / touch tap to rotate &nbsp;•&nbsp; Arrow Keys move selection &nbsp;•&nbsp; Enter / Space rotate &nbsp;•&nbsp; S sends the seed &nbsp;•&nbsp; R restarts. No internet needed — everything runs offline in this one file.</p>
+
+<script>
+(function(){
+  "use strict";
+  var boardEl = document.getElementById("board");
+  var scoreEl = document.getElementById("score");
+  var movesEl = document.getElementById("moves");
+  var levelEl = document.getElementById("level");
+  var statusEl = document.getElementById("status");
+  var msgEl = document.getElementById("msg");
+  var fillEl = document.getElementById("seedfill");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+
+  // Audio: created only after user interaction.
+  var audioCtx = null;
+  function ensureAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type){
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch(e) {}
+  }
+  function fanfare(){
+    [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,0.22,"triangle"); }, i*120); });
+  }
+
+  // Directions: 0=N 1=E 2=S 3=W. Connections as bitmask per tile type.
+  // straight: N+S, corner: N+E (rotates), tee: N+E+S, cross: all, end: one side.
+  var BASE = { straight:[5,10,5,10], corner:[3,6,12,9], tee:[7,11,14,13], cross:[15,15,15,15], endN:[1,2,4,8] };
+  function glyphFor(type, rot){
+    if (type === "straight") return (rot % 2 === 0) ? "┃" : "━";
+    if (type === "corner") return ["┗","┏","┓","┛"][rot % 4];
+    if (type === "tee") return ["┻","┣","┳","┫"][rot % 4];
+    if (type === "cross") return "╋";
+    return "•";
+  }
+  function conns(type, rot){ return BASE[type][rot % BASE[type].length]; }
+
+  // Levels: size, move budget, target route length, and a solvable-ish layout.
+  // Layout is seeded by type/rotation; player must rotate the middle tiles.
+  var LEVELS = [
+    { size: 4, moves: 12, target: 5, tiles: [
+      ["start","straight","corner","empty"],["corner","corner","straight","empty"],["empty","straight","corner","flower"],["empty","empty","empty","empty"]
+    ]},
+    { size: 5, moves: 16, target: 7, tiles: [
+      ["start","corner","empty","empty","empty"],["straight","corner","straight","corner","empty"],["empty","straight","tee","straight","flower"],["empty","corner","straight","corner","empty"],["empty","empty","empty","empty","empty"]
+    ]},
+    { size: 5, moves: 18, target: 8, tiles: [
+      ["start","straight","corner","empty","empty"],["empty","corner","straight","corner","empty"],["empty","empty","tee","straight","flower"],["corner","straight","corner","empty","empty"],["empty","empty","empty","empty","empty"]
+    ]},
+    { size: 5, moves: 20, target: 9, tiles: [
+      ["start","corner","straight","corner","empty"],["straight","tee","corner","straight","flower"],["corner","straight","corner","tee","empty"],["empty","corner","straight","corner","empty"],["empty","empty","empty","empty","empty"]
+    ]}
+  ];
+
+  var levelIdx = 0, score = 0, movesLeft = 12, started = false, over = false;
+  var grid = [], sel = 0, cells = [], animTick = 0, seedPath = [];
+
+  function currentLevel(){ return LEVELS[levelIdx]; }
+
+  function buildLevel(){
+    var L = currentLevel();
+    movesLeft = L.moves; seedPath = []; over = false;
+    grid = []; cells = []; sel = 0;
+    boardEl.style.gridTemplateColumns = "repeat(" + L.size + ", 1fr)";
+    boardEl.innerHTML = "";
+    var fixedCount = 0;
+    for (var r = 0; r < L.size; r++) {
+      for (var c = 0; c < L.size; c++) {
+        var kind = L.tiles[r][c];
+        var tile = { r:r, c:c, kind:kind, type:"empty", rot:0, fixed:false, el:null };
+        if (kind === "start") { tile.type = "endN"; tile.rot = 2; tile.fixed = true; }
+        else if (kind === "flower") { tile.type = "endN"; tile.rot = 0; tile.fixed = true; }
+        else if (kind === "empty") { tile.type = "empty"; }
+        else { tile.type = kind; tile.rot = Math.floor(Math.random()*4); if (tile.type === "straight") tile.rot = Math.floor(Math.random()*2); }
+        grid.push(tile);
+        var d = document.createElement("div");
+        d.className = "tile" + (tile.fixed ? " fixed" : "");
+        d.setAttribute("role","button");
+        d.setAttribute("tabindex","0");
+        tile.el = d;
+        (function(t, el){
+          el.addEventListener("click", function(){ onTileTap(t); });
+          el.addEventListener("touchstart", function(e){ e.preventDefault(); onTileTap(t); }, {passive:false});
+        })(tile, d);
+        boardEl.appendChild(d);
+        cells.push(d);
+      }
+    }
+    render();
+    updateHUD("Level " + (levelIdx+1) + " — grow the path!");
+    msgEl.textContent = "Level " + (levelIdx+1) + ": connect 🌱 to 🌸 in at least " + L.target + " steps. Moves left: " + movesLeft + ".";
+  }
+
+  function at(r,c){
+    var L = currentLevel();
+    if (r < 0 || c < 0 || r >= L.size || c >= L.size) return null;
+    return grid[r * L.size + c];
+  }
+  function render(){
+    grid.forEach(function(t){
+      var el = t.el;
+      var label = "";
+      if (t.kind === "start") label = "🌱";
+      else if (t.kind === "flower") label = "🌸";
+      else if (t.type === "empty") label = "🍂";
+      else label = glyphFor(t.type, t.rot);
+      el.innerHTML = '<span class="glyph">' + label + '</span>' + (t.fixed ? '<span class="mini">fixed</span>' : '<span class="mini">tap ↻</span>');
+      el.classList.toggle("path", seedPath.indexOf(t) >= 0);
+    });
+    cells.forEach(function(el,i){ el.classList.toggle("sel", i === sel && started && !over); });
+    fillEl.style.width = Math.min(100, Math.max(0, (score / 400) * 100)) + "%";
+  }
+  function updateHUD(status){
+    scoreEl.textContent = score;
+    movesEl.textContent = movesLeft;
+    levelEl.textContent = (levelIdx+1) + " / " + LEVELS.length;
+    statusEl.textContent = status || "Playing";
+  }
+  function spendMove(){
+    movesLeft--;
+    updateHUD("Playing");
+    movesEl.textContent = movesLeft;
+    if (movesLeft <= 0) {
+      // One last chance is already spent; check handled by send, but out-of-moves ends if no path yet.
+      msgEl.textContent = "Out of moves! Send the seed now or restart the level before it withers.";
+    }
+  }
+  function onTileTap(t){
+    if (!started || over) return;
+    ensureAudio();
+    sel = grid.indexOf(t);
+    if (t.fixed || t.type === "empty") { beep(180,0.08,"square"); msgEl.textContent = "That tile is fixed or bare moss — try a moss path tile."; render(); return; }
+    if (movesLeft <= 0) { msgEl.textContent = "No moves left! Press Send Seed or Restart Level."; return; }
+    t.rot = (t.rot + 1) % 4;
+    spendMove();
+    beep(420 + t.rot*60, 0.09, "triangle");
+    msgEl.textContent = "Rotated! Moves left: " + movesLeft + ".";
+    if (movesLeft <= 0) { updateHUD("No moves"); }
+    render();
+  }
+
+  // Trace a path from start following connections. Returns list of tiles or null.
+  function tracePath(){
+    var L = currentLevel();
+    var start = grid.filter(function(t){ return t.kind === "start"; })[0];
+    var flower = grid.filter(function(t){ return t.kind === "flower"; })[0];
+    var visited = [], cur = start, prevDir = -1, steps = 0;
+    var dirs = [[-1,0],[0,1],[1,0],[0,-1]];
+    while (cur && steps < 40) {
+      visited.push(cur);
+      if (cur === flower) return visited;
+      var mask = (cur.type === "empty") ? 0 : conns(cur.type, cur.rot);
+      var next = null, nextDir = -1;
+      for (var d = 0; d < 4; d++) {
+        if (d === prevDir) continue;
+        if (!(mask & (1 << d))) continue;
+        var nr = cur.r + dirs[d][0], nc = cur.c + dirs[d][1];
+        var nb = at(nr, nc);
+        if (!nb || nb.type === "empty") continue;
+        var back = (d + 2) % 4;
+        var nmask = conns(nb.type, nb.rot);
+        if (!(nmask & (1 << back))) continue;
+        next = nb; nextDir = d; break;
+      }
+      if (!next) return null;
+      prevDir = (nextDir + 2) % 4;
+      cur = next; steps++;
+    }
+    return null;
+  }
+
+  function sendSeed(){
+    if (!started || over) return;
+    ensureAudio();
+    var L = currentLevel();
+    var path = tracePath();
+    if (!path) {
+      beep(160,0.2,"sawtooth");
+      msgEl.textContent = "The seed cannot reach the flower yet — a moss link is broken. Keep rotating!";
+      if (movesLeft <= 0) { return gameOver("Out of moves — the seed never reached the flower."); }
+      return;
+    }
+    if (path.length - 1 < L.target) {
+      beep(300,0.15,"square");
+      msgEl.textContent = "Path found, but only " + (path.length-1) + " steps — you need at least " + L.target + ". Grow a longer route!";
+      return;
+    }
+    seedPath = path;
+    var gained = 100 + movesLeft * 10 + L.target * 5;
+    score += gained;
+    fanfare();
+    render();
+    msgEl.textContent = "🌸 Bloom! The seed travelled " + (path.length-1) + " steps. +" + gained + " points.";
+    updateHUD("Bloomed!");
+    setTimeout(function(){
+      if (levelIdx + 1 >= LEVELS.length) {
+        return winGame();
+      }
+      levelIdx++;
+      buildLevel();
+      msgEl.textContent = "Level " + (levelIdx+1) + " unlocked! Connect the seed to the flower.";
+    }, 1100);
+  }
+  function gameOver(reason){
+    over = true;
+    updateHUD("Game Over");
+    endTitle.textContent = "🍂 Game Over";
+    endText.textContent = reason + " Final score: " + score + ". Try again — the moss regrows!";
+    endScreen.classList.remove("hidden");
+    beep(140,0.4,"sawtooth");
+  }
+  function winGame(){
+    over = true;
+    updateHUD("You Win!");
+    endTitle.textContent = "🌸 You Win!";
+    endText.textContent = "You guided the seed through all " + LEVELS.length + " moss mazes! Final score: " + score + ".";
+    endScreen.classList.remove("hidden");
+    fanfare();
+  }
+  function restartAll(){
+    ensureAudio();
+    levelIdx = 0; score = 0;
+    endScreen.classList.add("hidden");
+    over = false; started = true;
+    buildLevel();
+    msgEl.textContent = "Fresh moss! Level 1 — connect 🌱 to 🌸.";
+    updateHUD("Playing");
+  }
+  function restartLevel(){
+    if (!started) return;
+    ensureAudio();
+    buildLevel();
+    msgEl.textContent = "Level restarted with a fresh move budget.";
+  }
+  function startGame(){
+    ensureAudio();
+    started = true; over = false; levelIdx = 0; score = 0;
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    buildLevel();
+    beep(523,0.15,"triangle");
+    msgEl.textContent = "Level 1: tap moss tiles to rotate them, then Send Seed!";
+    updateHUD("Playing");
+  }
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", restartAll);
+  document.getElementById("sendBtn").addEventListener("click", sendSeed);
+  document.getElementById("resetBtn").addEventListener("click", restartLevel);
+  document.getElementById("hintBtn").addEventListener("click", function(){
+    ensureAudio(); beep(660,0.1,"sine");
+    var p = tracePath();
+    msgEl.textContent = p ? ("A path exists with " + (p.length-1) + " steps — send the seed if it meets the target!") : "No complete path yet. Look for a broken link between 🌱 and 🌸.";
+  });
+
+  // Keyboard + touch on the whole document.
+  document.addEventListener("keydown", function(e){
+    if (!started && (e.key === "Enter" || e.key === " ")) { startGame(); return; }
+    if (!started || over) {
+      if (e.key === "Enter" || e.key === " ") { restartAll(); }
+      return;
+    }
+    var L = currentLevel(), size = L.size;
+    var r = Math.floor(sel / size), c = sel % size;
+    if (e.key === "ArrowUp") { r = Math.max(0, r-1); e.preventDefault(); }
+    else if (e.key === "ArrowDown") { r = Math.min(size-1, r+1); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { c = Math.max(0, c-1); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { c = Math.min(size-1, c+1); e.preventDefault(); }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTileTap(grid[sel]); return; }
+    else if (e.key === "s" || e.key === "S") { sendSeed(); return; }
+    else if (e.key === "r" || e.key === "R") { restartLevel(); return; }
+    else return;
+    sel = r * size + c;
+    render();
+  });
+  document.addEventListener("touchstart", function(){ if (started) ensureAudio(); }, {passive:true});
+  document.addEventListener("mousedown", function(){ if (started) ensureAudio(); });
+
+  // Animation loop: gentle moss shimmer + seed pulse.
+  function loop(t){
+    animTick++;
+    if (started && !over && animTick % 90 === 0) {
+      var live = grid.filter(function(x){ return x.type !== "empty"; });
+      if (live.length) {
+        var pick = live[Math.floor(Math.random()*live.length)];
+        if (pick.el) { pick.el.style.transform = "scale(1.03)"; setTimeout(function(){ if (pick.el) pick.el.style.transform = ""; }, 220); }
+      }
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  buildLevel();
+  started = false;
+  render();
+})();
+</script>
+</body>
+</html>

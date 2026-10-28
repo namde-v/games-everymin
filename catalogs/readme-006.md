@@ -35,3 +35,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0528 | Taproot Tango | Rhythm / Dance Step Timing | Arrow Keys step on beat, mouse/touch tap arrows | [Play](./../games/game-0528.html) |
 | 0529 | Comet Catcher | Precision / Orbital Slingshot Aim | Mouse/touch drag aim and release, Arrow Keys aim, Space launch | [Play](./../games/game-0529.html) |
 | 0530 | Kaleidoscope Keeper | Puzzle / Mirror Reflection Logic | Mouse/touch click mirrors to rotate, Arrow Keys select, Enter rotate | [Play](./../games/game-0530.html) |
+| 0531 | Storm Sailor | Arcade / Storm Ship Dodger | Arrow Keys/WASD steer, mouse/touch drag steer | [Play](./../games/game-0531.html) |
+| 0532 | Moss Maze | Puzzle / Living Maze Path Logic | Mouse/touch click tiles, Arrow Keys select, Enter/Space rotate | [Play](./../games/game-0532.html) |
+| 0533 | Paper Mill Tycoon | Strategy / Paper Mill Management | Mouse/touch click panels, 1-4 assign workers, N next day | [Play](./../games/game-0533.html) |
+| 0534 | Clap Cascade | Rhythm / Handclap Beat Timing | D/F/J/K hit lanes, mouse click, touch tap lanes | [Play](./../games/game-0534.html) |
+| 0535 | Glacier Grappler | Precision / Ice Hook Aim | Mouse/touch drag aim and release, Arrow Keys aim, Space launch | [Play](./../games/game-0535.html) |
+| 0536 | Coral Current | Puzzle / Reef Tile Connection Logic | Mouse/touch click tiles to place/rotate, Arrow Keys select, Enter place/rotate | [Play](./../games/game-0536.html) |
+| 0537 | Observatory Operator | Strategy / Telescope Night Scheduling | Mouse/touch click targets/slots, 1-4 select target, Arrow Keys select, Enter schedule | [Play](./../games/game-0537.html) |
+| 0538 | Banjo Barnstorm | Rhythm / Banjo Strum Melody | 1-5 / A/S/D/F/G strum, mouse click, touch tap strings | [Play](./../games/game-0538.html) |
+| 0539 | Lantern Launcher | Precision / Lantern Trajectory Aim | Mouse/touch drag aim and release, Arrow Keys adjust, Space launch | [Play](./../games/game-0539.html) |
+| 0540 | Dune Dasher | Arcade / Sandboard Descent | Arrow Keys/WASD move and jump, mouse/touch steer and tap to jump | [Play](./../games/game-0540.html) |

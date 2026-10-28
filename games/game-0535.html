@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Glacier Grappler</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0a1626; color:#eaf6ff; font-family:Arial, Helvetica, sans-serif; display:flex; flex-direction:column; align-items:center; min-height:100vh; padding:10px; overflow:hidden; }
+  h1 { font-size:26px; letter-spacing:1px; margin:6px 0 2px; text-shadow:0 2px 0 #1a4a6e; }
+  #hud { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; font-size:15px; font-weight:bold; margin:6px 0; }
+  #hud span { background:#123a5c; padding:5px 11px; border-radius:20px; border:1px solid #3d7ea6; }
+  #wrap { position:relative; width:min(92vw,760px); }
+  canvas { width:100%; height:480px; display:block; background:linear-gradient(#8fc9e8,#d8efff 55%,#eaf7ff); border:3px solid #7fc4e8; border-radius:12px; touch-action:none; cursor:crosshair; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:12px; padding:24px; background:rgba(6,25,44,.82); border-radius:12px; }
+  .screen.hidden { display:none; }
+  .screen h2 { font-size:34px; color:#aee6ff; }
+  .screen p { max-width:520px; line-height:1.55; font-size:15px; }
+  button { background:#ffcf3d; color:#12233a; border:0; border-radius:10px; padding:12px 26px; font-size:18px; font-weight:bold; cursor:pointer; box-shadow:0 4px 0 #b8860b; }
+  button:active { transform:translateY(3px); box-shadow:none; }
+  .keys { font-size:13px; color:#cfeeff; background:rgba(255,255,255,.08); padding:10px 14px; border-radius:8px; }
+  #msg { min-height:22px; font-weight:bold; color:#ffe082; }
+</style>
+</head>
+<body>
+<h1>🧊 Glacier Grappler</h1>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Attempts: <b id="lives">5</b></span>
+  <span>Chasm: <b id="level">1 / 5</b></span>
+  <span>Status: <b id="status">Aim!</b></span>
+  <span>Wind: <b id="wind">Calm</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="760" height="480"></canvas>
+  <div id="titleScreen" class="screen">
+    <h2>🧊 Glacier Grappler</h2>
+    <p>Swing across frozen chasms! Aim your grappling hook, watch the wind, and land on every glowing target platform.</p>
+    <div class="keys">
+      <b>How to Play:</b><br>
+      Mouse / Touch: press, drag to aim, release to launch the hook.<br>
+      Keyboard: Arrow Keys aim &nbsp;|&nbsp; Space launches &nbsp;|&nbsp; R restarts<br>
+      Land on the target to advance. Miss the ice and you lose an attempt!
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<div id="msg">Drag from the climber to aim — the dotted arc shows your shot.</div>
+<script>
+(function(){
+  var cv = document.getElementById('game'), ctx = cv.getContext('2d');
+  var W = 760, H = 480;
+  var scoreEl = document.getElementById('score'), livesEl = document.getElementById('lives'),
+      levelEl = document.getElementById('level'), statusEl = document.getElementById('status'),
+      windEl = document.getElementById('wind'), msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen'), endScreen = document.getElementById('endScreen');
+
+  var state = 'title', score = 0, lives = 5, level = 1, totalLevels = 5;
+  var player = { x: 90, y: 340 };
+  var aim = { angle: -0.7, power: 320, aiming: false, sx: 0, sy: 0 };
+  var hook = null, rope = null, particles = [];
+  var wind = 0, windTimer = 0, t = 0, flash = 0;
+  var audioCtx = null;
+
+  function platformFor(l){
+    // Target platform moves farther and higher as levels progress.
+    return { x: 430 + l * 42, y: 350 - l * 12, w: 96 - l * 4, h: 26 };
+  }
+  function setWind(){
+    wind = (Math.random() * 90 - 45) | 0;
+    windEl.textContent = wind === 0 ? 'Calm' : (wind > 0 ? 'Right ' + wind : 'Left ' + Math.abs(wind));
+  }
+  function updateHUD(status){
+    scoreEl.textContent = score; livesEl.textContent = lives;
+    levelEl.textContent = level + ' / ' + totalLevels;
+    if (status) statusEl.textContent = status;
+  }
+  function beep(freq, dur, type){
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e){}
+  }
+  function initAudio(){
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function burst(x, y, color){
+    for (var i = 0; i < 22; i++){
+      particles.push({ x:x, y:y, vx:(Math.random()-0.5)*260, vy:(Math.random()-0.7)*220, life:0.8, color:color });
+    }
+  }
+  function posFromEvent(e){
+    var r = cv.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX);
+    var cy = (e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY);
+    return { x: (cx - r.left) * W / r.width, y: (cy - r.top) * H / r.height };
+  }
+  function startAim(p){ if (state !== 'play') return; aim.aiming = true; aim.sx = p.x; aim.sy = p.y; }
+  function dragAim(p){
+    if (!aim.aiming) return;
+    var dx = p.x - player.x, dy = p.y - player.y;
+    aim.angle = Math.atan2(dy, dx);
+    aim.power = Math.min(520, Math.max(120, Math.hypot(dx, dy) * 1.6));
+    updateHUD('Aiming...');
+  }
+  function launch(){
+    if (state !== 'play' || hook) return;
+    initAudio();
+    hook = { x: player.x, y: player.y, vx: Math.cos(aim.angle) * aim.power, vy: Math.sin(aim.angle) * aim.power };
+    beep(520, 0.18, 'triangle');
+    updateHUD('Hook flying!');
+    msgEl.textContent = 'Hook away! Mind the wind...';
+  }
+  function endAim(p){ if (aim.aiming){ aim.aiming = false; dragAim(p); launch(); } }
+
+  cv.addEventListener('mousedown', function(e){ startAim(posFromEvent(e)); });
+  cv.addEventListener('mousemove', function(e){ dragAim(posFromEvent(e)); });
+  cv.addEventListener('mouseup', function(e){ endAim(posFromEvent(e)); });
+  cv.addEventListener('mouseleave', function(){ aim.aiming = false; });
+  cv.addEventListener('touchstart', function(e){ e.preventDefault(); startAim(posFromEvent(e)); }, { passive:false });
+  cv.addEventListener('touchmove', function(e){ e.preventDefault(); dragAim(posFromEvent(e)); }, { passive:false });
+  cv.addEventListener('touchend', function(e){ e.preventDefault(); endAim(posFromEvent(e)); }, { passive:false });
+
+  document.addEventListener('keydown', function(e){
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startGame(); return; }
+    if (state === 'end' && (e.key === 'Enter' || e.key.toLowerCase() === 'r')) { startGame(); return; }
+    if (state !== 'play') return;
+    if (e.key === 'ArrowLeft') aim.angle -= 0.08;
+    if (e.key === 'ArrowRight') aim.angle += 0.08;
+    if (e.key === 'ArrowUp') aim.power = Math.min(520, aim.power + 18);
+    if (e.key === 'ArrowDown') aim.power = Math.max(120, aim.power - 18);
+    if (e.key === ' ') { e.preventDefault(); launch(); }
+    if (e.key.toLowerCase() === 'r') startGame();
+    updateHUD('Aiming with keys...');
+  });
+
+  function startGame(){
+    initAudio();
+    score = 0; lives = 5; level = 1; hook = null; rope = null; particles = [];
+    player.x = 90; player.y = 340; aim.angle = -0.7; aim.power = 320;
+    setWind(); state = 'play';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    updateHUD('Aim!'); msgEl.textContent = 'Drag to aim, release to launch. Land on the glowing target!';
+    beep(660, 0.15, 'sine');
+  }
+  function gameOver(win){
+    state = 'end';
+    document.getElementById('endTitle').textContent = win ? '🏆 You Win!' : '💔 Game Over';
+    document.getElementById('endText').textContent = win
+      ? 'You crossed all ' + totalLevels + ' chasms! Final score: ' + score + '.'
+      : 'Out of attempts on chasm ' + level + '. Final score: ' + score + '. Try again!';
+    endScreen.classList.remove('hidden');
+    updateHUD(win ? 'Victory!' : 'Game Over');
+    beep(win ? 880 : 180, 0.5, win ? 'sine' : 'sawtooth');
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  function update(dt){
+    t += dt; flash += dt;
+    windTimer += dt;
+    if (windTimer > 4){ windTimer = 0; setWind(); }
+    if (hook){
+      hook.vy += 620 * dt;
+      hook.vx += wind * dt * 0.8;
+      hook.x += hook.vx * dt; hook.y += hook.vy * dt;
+      var target = platformFor(level);
+      if (hook.x > target.x - 10 && hook.x < target.x + target.w + 10 && hook.y > target.y - 14 && hook.y < target.y + target.h + 20){
+        score += 100 + Math.max(0, 50 - Math.abs(wind));
+        burst(target.x + target.w/2, target.y, '#ffe082');
+        beep(880, 0.25, 'sine');
+        hook = null;
+        if (level >= totalLevels){ updateHUD('Victory!'); gameOver(true); }
+        else {
+          level++; player.x = 90; setWind();
+          updateHUD('Target hit!'); msgEl.textContent = 'Perfect landing! Next chasm — watch the new wind.';
+        }
+        return;
+      }
+      if (hook.y > H + 20 || hook.x < -20 || hook.x > W + 20){
+        hook = null; lives--;
+        beep(160, 0.3, 'sawtooth');
+        if (lives <= 0){ updateHUD('Game Over'); gameOver(false); }
+        else { updateHUD('Missed!'); msgEl.textContent = 'The hook fell into the chasm. ' + lives + ' attempts left.'; }
+      }
+    }
+    particles = particles.filter(function(p){ p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; return p.life > 0; });
+  }
+
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    // Sky, mountains, chasm
+    ctx.fillStyle = '#cfeeff'; ctx.fillRect(0, 0, W, 300);
+    ctx.fillStyle = '#b9d9f2';
+    ctx.beginPath(); ctx.moveTo(0, 300); ctx.lineTo(180, 170); ctx.lineTo(360, 300); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(420, 300); ctx.lineTo(600, 150); ctx.lineTo(760, 300); ctx.closePath(); ctx.fill();
+    // Ice platforms
+    ctx.fillStyle = '#e8f7ff';
+    ctx.fillRect(0, 360, 170, 120);
+    var target = platformFor(level);
+    ctx.fillStyle = (Math.sin(t * 4) > 0 ? '#ffe082' : '#ffd54f');
+    ctx.fillRect(target.x, target.y, target.w, target.h);
+    ctx.fillStyle = '#bfe6ff'; ctx.fillRect(target.x, target.y + target.h, target.w, 90);
+    ctx.fillStyle = '#1b4d73'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('TARGET', target.x + target.w/2, target.y - 8);
+    // Chasm water
+    ctx.fillStyle = '#2f7fb8'; ctx.fillRect(170, 380, target.x - 170, 100);
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    for (var i = 0; i < 5; i++) ctx.fillRect(190 + i * 70, 410 + (i % 2) * 30, 42, 4);
+    // Climber
+    ctx.fillStyle = '#ff5722'; ctx.beginPath(); ctx.arc(player.x, player.y - 18, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#123a5c'; ctx.fillRect(player.x - 9, player.y - 4, 18, 22);
+    // Aim trajectory
+    if (state === 'play' && !hook){
+      ctx.strokeStyle = 'rgba(255,87,34,.9)'; ctx.setLineDash([6, 8]); ctx.lineWidth = 2; ctx.beginPath();
+      var px = player.x, py = player.y, pvx = Math.cos(aim.angle) * aim.power, pvy = Math.sin(aim.angle) * aim.power;
+      ctx.moveTo(px, py);
+      for (var s = 0; s < 30; s++){ pvy += 620 * 0.045; pvx += wind * 0.045 * 0.8; px += pvx * 0.045; py += pvy * 0.045; ctx.lineTo(px, py); }
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#ff5722'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Power ' + Math.round(aim.power), 14, 30);
+    }
+    // Hook + rope
+    if (hook){
+      ctx.strokeStyle = '#37474f'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x, player.y - 10); ctx.lineTo(hook.x, hook.y); ctx.stroke();
+      ctx.fillStyle = '#37474f'; ctx.beginPath(); ctx.arc(hook.x, hook.y, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffcf3d'; ctx.beginPath(); ctx.arc(hook.x, hook.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    // Particles
+    particles.forEach(function(p){ ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 6, 6); });
+    ctx.globalAlpha = 1;
+    // Wind arrow
+    ctx.fillStyle = '#123a5c'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'right';
+    ctx.fillText(wind > 0 ? 'Wind →' : (wind < 0 ? '← Wind' : 'Wind: calm'), W - 16, 30);
+  }
+
+  var last = performance.now();
+  function loop(now){
+    var dt = Math.min(0.033, (now - last) / 1000); last = now;
+    if (state === 'play') update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  updateHUD('Aim!');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
