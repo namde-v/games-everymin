@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 120
-- **Latest game:** 0120 — Ricochet Range
+- **Total games:** 130
+- **Latest game:** 0130 — Pendulum Plunge
 - **Current volume:** 002 (Games 0101 to 0200)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -14,7 +14,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | Volume | Games | Catalog |
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
-| 002 | 0101–0200 (20 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
+| 002 | 0101–0200 (30 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -28,20 +28,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 012
+## Latest batch — Batch 013
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0111 | Kelp Keeper | Arcade / Underwater Collector | [Play](./games/game-0111.html) |
-| 0112 | Mirror Maze | Puzzle / Laser Reflection | [Play](./games/game-0112.html) |
-| 0113 | Vineyard Vintner | Strategy / Harvest Management | [Play](./games/game-0113.html) |
-| 0114 | Beat Bazaar | Rhythm / Percussion Market | [Play](./games/game-0114.html) |
-| 0115 | Comet Catcher | Precision / Orbital Timing | [Play](./games/game-0115.html) |
-| 0116 | Storm Surfer | Arcade / Wave Rider | [Play](./games/game-0116.html) |
-| 0117 | Rune Riddle | Puzzle / Rune Sequence | [Play](./games/game-0117.html) |
-| 0118 | Harbor Master | Strategy / Port Logistics | [Play](./games/game-0118.html) |
-| 0119 | Echo Ensemble | Rhythm / Melody Memory | [Play](./games/game-0119.html) |
-| 0120 | Ricochet Range | Precision / Bouncing Target Shot | [Play](./games/game-0120.html) |
+| 0121 | Tide Turner | Puzzle / Tidal Flow Routing | [Play](./games/game-0121.html) |
+| 0122 | Forge Frenzy | Arcade / Blacksmith Timing | [Play](./games/game-0122.html) |
+| 0123 | Starship Steward | Strategy / Crew Allocation | [Play](./games/game-0123.html) |
+| 0124 | Tempo Temple | Rhythm / Drum Pattern | [Play](./games/game-0124.html) |
+| 0125 | Magnet Miner | Precision / Polarity Swing | [Play](./games/game-0125.html) |
+| 0126 | Shadow Sprinter | Arcade / Stealth Runner | [Play](./games/game-0126.html) |
+| 0127 | Glyph Grader | Puzzle / Symbol Sorting Logic | [Play](./games/game-0127.html) |
+| 0128 | Bakery Baron | Strategy / Bakery Economy | [Play](./games/game-0128.html) |
+| 0129 | Chime Chase | Rhythm / Melody Echo | [Play](./games/game-0129.html) |
+| 0130 | Pendulum Plunge | Precision / Pendulum Drop | [Play](./games/game-0130.html) |
 
 ## Quality standard
 

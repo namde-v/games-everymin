@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Magnet Miner — Precision / Polarity Swing</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #14100c; color: #f5e9d0; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { margin: 10px 0 2px; font-size: 28px; letter-spacing: 1px; color: #ffd166; text-shadow: 2px 2px 0 #000; }
+  p.sub { margin: 0 0 8px; color: #cbb890; font-size: 14px; }
+  #wrap { position: relative; width: 860px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: #2b1d12; border: 3px solid #ffd166; border-radius: 10px; touch-action: none; cursor: pointer; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; width: 860px; max-width: 96vw; margin: 8px 0; }
+  .pill { background: #3a2a1a; border: 2px solid #8a6a3a; border-radius: 20px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill b { color: #ffd166; }
+  #polarity { font-size: 18px; }
+  #controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px; }
+  button { background: #e63946; color: #fff; border: none; border-radius: 10px; padding: 12px 20px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #8f1d28; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.alt { background: #2a9d8f; box-shadow: 0 4px 0 #1a6b62; }
+  button.gold { background: #f4a261; color: #201404; box-shadow: 0 4px 0 #a86a2a; }
+  .overlay { position: absolute; inset: 0; background: rgba(10, 7, 4, 0.92); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffd166; margin: 0 0 10px; font-size: 30px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; color: #efe0c0; }
+  .overlay .big { font-size: 20px; font-weight: bold; color: #fff; }
+  .keys { background: #241a10; border: 1px solid #6b522e; border-radius: 8px; padding: 10px 14px; margin: 10px 0; font-size: 14px; }
+  .legend { font-size: 13px; color: #d8c49a; }
+</style>
+</head>
+<body>
+<h1>🧲 MAGNET MINER</h1>
+<p class="sub">Precision / Polarity Swing — swing, attract, and drop ore into the cart!</p>
+
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Ore: <b id="ore">0 / 12</b></div>
+  <div class="pill">Misses: <b id="misses">0 / 3</b></div>
+  <div class="pill">Polarity: <b id="polarity">N +</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="540"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🧲 MAGNET MINER</h2>
+    <p class="big">Swing the crane. Flip the magnet. Fill the cart!</p>
+    <p><b>How to Play:</b> The magnet crane swings back and forth above the mine floor. Ore chunks sit below, each marked <b>+</b> or <b>−</b>. Your magnet only <b>attracts opposite polarity</b> — flip it until it is opposite to the ore you want, then swing over that ore to grab it.</p>
+    <p>While carrying ore, flip polarity again to <b>repel and drop</b> it. Time the drop so the ore falls into the moving cart. Drop <b>12 ore</b> into the cart to win. <b>3 missed drops</b> end the run.</p>
+    <div class="keys">
+      <b>Space / Click / Tap</b> — Flip polarity (also drops carried ore)<br>
+      <b>← → / A D</b> — Nudge the swing &nbsp;•&nbsp; <b>R</b> — Restart<br>
+      <b>On-screen buttons</b> work with mouse and touch too.
+    </div>
+    <p class="legend">Red ore = +, blue ore = − &nbsp;•&nbsp; Gold bonus ore is worth 50 points &nbsp;•&nbsp; Cart moves — watch its position!</p>
+    <button id="startBtn" class="gold">▶ START MINING</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText" class="big"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ RESTART INSTANTLY</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="flipBtn">⇄ FLIP POLARITY (Space)</button>
+  <button id="leftBtn" class="alt">◀ SWING LEFT</button>
+  <button id="rightBtn" class="alt">SWING RIGHT ▶</button>
+  <button id="muteBtn" class="gold">🔊 SOUND: ON</button>
+</div>
+<p class="legend" style="text-align:center; margin:0 0 16px;">Tip: grab ore near the centre of its swing arc, then wait until the magnet is directly above the cart before flipping to drop.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var oreEl = document.getElementById('ore');
+  var missEl = document.getElementById('misses');
+  var polEl = document.getElementById('polarity');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  // ---- Audio: procedural only, created after user interaction ----
+  var audioCtx = null, soundOn = true;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function soundGrab() { beep(520, 0.12, 'square', 0.10); setTimeout(function(){ beep(780, 0.12, 'square', 0.10); }, 70); }
+  function soundDrop() { beep(300, 0.18, 'triangle', 0.12); }
+  function soundScore() { beep(660, 0.10, 'sine', 0.12); setTimeout(function(){ beep(880, 0.14, 'sine', 0.12); }, 80); }
+  function soundMiss() { beep(180, 0.30, 'sawtooth', 0.10); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'sine', 0.13); }, i * 130); }); }
+  function soundLose() { [400, 300, 200, 140].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'sawtooth', 0.09); }, i * 140); }); }
+
+  // ---- Game state ----
+  var TARGET = 12, MAX_MISSES = 3;
+  var running = false, over = false;
+  var score = 0, collected = 0, misses = 0;
+  var magnetPol = 1; // 1 = N+, -1 = S-
+  var angle = 0, angleVel = 0, swingDir = 1;
+  var pivotX = W / 2, pivotY = 66, armLen = 250;
+  var carried = null, falling = null;
+  var ores = [], particles = [], flash = 0, flashText = '';
+  var cart = { x: 430, w: 120, h: 46, dir: 1, speed: 1.1 };
+  var time = 0, lastTs = 0;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function spawnOre() {
+    var gold = Math.random() < 0.18;
+    var pol = Math.random() < 0.5 ? 1 : -1;
+    ores.push({
+      x: rand(70, W - 70), y: rand(410, 470), r: gold ? 20 : 16,
+      pol: pol, gold: gold, bob: rand(0, Math.PI * 2),
+      colour: gold ? '#ffd166' : (pol === 1 ? '#ef476f' : '#4cc9f0')
+    });
+  }
+
+  function resetGame() {
+    score = 0; collected = 0; misses = 0;
+    magnetPol = 1; angle = 0; angleVel = 0; swingDir = 1;
+    carried = null; falling = null; ores = []; particles = [];
+    cart.x = W / 2; cart.dir = 1;
+    for (var i = 0; i < 6; i++) spawnOre();
+    over = false; running = true;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    setStatus('Swinging — flip polarity to match an ore!');
+    updateHud();
+  }
+
+  function setStatus(s) { statusEl.textContent = s; }
+  function updateHud() {
+    scoreEl.textContent = score;
+    oreEl.textContent = collected + ' / ' + TARGET;
+    missEl.textContent = misses + ' / ' + MAX_MISSES;
+    polEl.textContent = magnetPol === 1 ? 'N +' : 'S −';
+    polEl.style.color = magnetPol === 1 ? '#ff8fa3' : '#7dd3fc';
+  }
+
+  function burst(x, y, colour, n) {
+    for (var i = 0; i < (n || 12); i++) {
+      particles.push({ x: x, y: y, vx: rand(-2.5, 2.5), vy: rand(-3.5, -0.5), life: rand(20, 45), colour: colour });
+    }
+  }
+
+  function flipPolarity() {
+    if (!running || over) return;
+    ensureAudio();
+    magnetPol = -magnetPol;
+    beep(magnetPol === 1 ? 440 : 330, 0.10, 'square', 0.10);
+    if (carried) {
+      // Repel: drop the carried ore from the magnet position.
+      var m = magnetPos();
+      falling = { x: m.x, y: m.y + 18, vx: Math.sin(angle) * 2.2, vy: 1, ore: carried, r: carried.r };
+      carried = null;
+      soundDrop();
+      setStatus('Ore dropped — will it land in the cart?');
+    } else {
+      setStatus(magnetPol === 1 ? 'Magnet is N + — attracts − ore' : 'Magnet is S − — attracts + ore');
+    }
+    updateHud();
+  }
+
+  function magnetPos() {
+    return { x: pivotX + Math.sin(angle) * armLen, y: pivotY + Math.cos(angle) * armLen };
+  }
+
+  function endGame(win) {
+    over = true; running = false;
+    endScreen.classList.remove('hidden');
+    if (win) {
+      endTitle.textContent = '🏆 YOU WIN!';
+      endText.textContent = 'The cart is full — a master Magnet Miner!';
+      soundWin();
+    } else {
+      endTitle.textContent = '💥 GAME OVER';
+      endText.textContent = 'Three missed drops ended the run. Try again!';
+      soundLose();
+    }
+    endScore.textContent = 'Final score: ' + score + '  •  Ore delivered: ' + collected + ' / ' + TARGET;
+    setStatus(win ? 'You win!' : 'Game over');
+  }
+
+  function update(dt) {
+    time += dt;
+    // Pendulum: natural swing plus player nudge.
+    angleVel += (-0.00045 * angle) * dt * 16;
+    angle += angleVel * dt * 0.9 + swingDir * 0.011 * dt;
+    if (angle > 1.05) { angle = 1.05; swingDir = -1; }
+    if (angle < -1.05) { angle = -1.05; swingDir = 1; }
+    angleVel *= 0.995;
+
+    // Cart patrols the floor.
+    cart.x += cart.dir * cart.speed * dt;
+    if (cart.x - cart.w / 2 < 20) { cart.x = 20 + cart.w / 2; cart.dir = 1; }
+    if (cart.x + cart.w / 2 > W - 20) { cart.x = W - 20 - cart.w / 2; cart.dir = -1; }
+
+    // Bob ores gently.
+    for (var i = 0; i < ores.length; i++) {
+      ores[i].bob += 0.03 * dt;
+      ores[i].y += Math.sin(ores[i].bob) * 0.12;
+    }
+
+    var m = magnetPos();
+
+    // Repulsion: same-polarity ore near the magnet gets pushed away.
+    for (var j = 0; j < ores.length; j++) {
+      var o = ores[j];
+      var dx = o.x - m.x, dy = o.y - m.y, d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 95 && o.pol === magnetPol) {
+        o.x += (dx / (d || 1)) * 1.4;
+        o.y += (dy / (d || 1)) * 0.6;
+        o.x = Math.max(45, Math.min(W - 45, o.x));
+      }
+      // Attraction: opposite polarity within reach sticks.
+      if (!carried && !falling && d < 58 && o.pol === -magnetPol) {
+        carried = o;
+        ores.splice(j, 1);
+        burst(m.x, m.y + 18, o.colour, 14);
+        soundGrab();
+        setStatus('Carrying ore! Flip polarity above the cart to drop it.');
+        updateHud();
+        break;
+      }
+    }
+
+    // Carried ore follows the magnet.
+    if (carried) { carried.x = m.x; carried.y = m.y + 26; }
+
+    // Falling ore physics.
+    if (falling) {
+      falling.vy += 0.32 * dt;
+      falling.x += falling.vx * dt;
+      falling.y += falling.vy * dt;
+      if (falling.y >= 470) {
+        var inCart = Math.abs(falling.x - cart.x) < cart.w / 2;
+        if (inCart) {
+          collected++;
+          var pts = falling.ore.gold ? 50 : 25;
+          score += pts;
+          burst(falling.x, 455, falling.ore.colour, 18);
+          flash = 45; flashText = '+' + pts + ' IN THE CART!';
+          soundScore();
+          setStatus('Nice drop! ' + collected + ' / ' + TARGET + ' ore delivered.');
+          if (collected >= TARGET) { updateHud(); falling = null; endGame(true); return; }
+        } else {
+          misses++;
+          burst(falling.x, 475, '#888888', 10);
+          flash = 45; flashText = 'MISSED! ' + misses + ' / ' + MAX_MISSES;
+          soundMiss();
+          setStatus('Missed the cart! ' + misses + ' / ' + MAX_MISSES + ' misses.');
+          spawnOre();
+          if (misses >= MAX_MISSES) { updateHud(); falling = null; endGame(false); return; }
+        }
+        falling = null;
+        if (ores.length < 6) spawnOre();
+        if (ores.length < 5) spawnOre();
+        updateHud();
+      }
+    }
+
+    for (var k = particles.length - 1; k >= 0; k--) {
+      var p = particles[k];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--;
+      if (p.life <= 0) particles.splice(k, 1);
+    }
+    if (flash > 0) flash--;
+  }
+
+  function drawOre(o) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.fillStyle = o.colour;
+    ctx.beginPath();
+    ctx.moveTo(-o.r, -o.r * 0.4);
+    ctx.lineTo(-o.r * 0.3, -o.r);
+    ctx.lineTo(o.r, -o.r * 0.3);
+    ctx.lineTo(o.r * 0.6, o.r * 0.8);
+    ctx.lineTo(-o.r * 0.7, o.r * 0.9);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold ' + Math.round(o.r) + 'px Arial';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(o.pol === 1 ? '+' : '−', 0, 1);
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky / mine backdrop.
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#3d2a1a'); grad.addColorStop(0.55, '#2b1d12'); grad.addColorStop(1, '#1c120a');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // Rock strata lines.
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 2;
+    for (var yy = 130; yy < 400; yy += 55) { ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(W, yy + 12); ctx.stroke(); }
+    // Floor.
+    ctx.fillStyle = '#4a2f1a'; ctx.fillRect(0, 480, W, 60);
+    ctx.fillStyle = '#5d3d22'; ctx.fillRect(0, 480, W, 8);
+    // Target zone hint under cart path.
+    ctx.fillStyle = 'rgba(255,209,102,0.12)'; ctx.fillRect(20, 470, W - 40, 10);
+
+    // Cart.
+    ctx.save();
+    ctx.translate(cart.x, 470);
+    ctx.fillStyle = '#8d6e63'; ctx.fillRect(-cart.w / 2, -10, cart.w, 46);
+    ctx.fillStyle = '#6d4c41'; ctx.fillRect(-cart.w / 2, -10, cart.w, 10);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('CART', 0, 22);
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(-cart.w / 2 + 22, 40, 12, 0, Math.PI * 2); ctx.arc(cart.w / 2 - 22, 40, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // Ores on the floor.
+    for (var i = 0; i < ores.length; i++) drawOre(ores[i]);
+    // Falling ore.
+    if (falling) drawOre({ x: falling.x, y: falling.y, r: falling.r, pol: falling.ore.pol, colour: falling.ore.colour });
+
+    // Crane: gantry, cable, magnet.
+    var m = magnetPos();
+    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.moveTo(pivotX - 110, pivotY - 26); ctx.lineTo(pivotX + 110, pivotY - 26); ctx.stroke();
+    ctx.fillStyle = '#5d3d22'; ctx.fillRect(pivotX - 120, pivotY - 34, 240, 14);
+    ctx.strokeStyle = '#d8c49a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(m.x, m.y); ctx.stroke();
+    // Magnet body.
+    ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(angle * 0.4);
+    ctx.fillStyle = magnetPol === 1 ? '#ef476f' : '#118ab2';
+    ctx.beginPath(); ctx.arc(0, 0, 26, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-26, 0, 12, 16); ctx.fillRect(14, 0, 12, 16);
+    ctx.fillStyle = '#111'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(magnetPol === 1 ? 'N+' : 'S−', 0, 5);
+    ctx.restore();
+    // Carried ore hangs below magnet.
+    if (carried) drawOre(carried);
+
+    // Particles.
+    for (var p = 0; p < particles.length; p++) {
+      var pt = particles[p];
+      ctx.globalAlpha = Math.max(0, pt.life / 45);
+      ctx.fillStyle = pt.colour; ctx.fillRect(pt.x - 3, pt.y - 3, 6, 6);
+    }
+    ctx.globalAlpha = 1;
+
+    // Flash message.
+    if (flash > 0) {
+      ctx.fillStyle = flashText.indexOf('MISS') >= 0 ? '#ff6b6b' : '#ffd166';
+      ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(flashText, W / 2, 150);
+    }
+    // Swing guide.
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = '14px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Magnet polarity: ' + (magnetPol === 1 ? 'N +  (attracts − ore)' : 'S −  (attracts + ore)'), W / 2, 30);
+    if (!running && !over) {
+      ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.font = 'bold 20px Arial';
+      ctx.fillText('Press START to begin mining', W / 2, 210);
+    }
+  }
+
+  function loop(ts) {
+    var dt = 1;
+    if (lastTs) dt = Math.min(3, (ts - lastTs) / 16.7);
+    lastTs = ts;
+    if (running && !over) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input: keyboard, mouse, touch ----
+  function startOrFlip(e) {
+    if (e) { e.preventDefault(); }
+    ensureAudio();
+    if (!running && !over) { resetGame(); return; }
+    if (over) { resetGame(); return; }
+    flipPolarity();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function () { ensureAudio(); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function () { ensureAudio(); resetGame(); });
+  document.getElementById('flipBtn').addEventListener('click', function () { ensureAudio(); if (!running) { resetGame(); } else { flipPolarity(); } });
+  document.getElementById('muteBtn').addEventListener('click', function (e) {
+    soundOn = !soundOn; ensureAudio();
+    e.target.textContent = soundOn ? '🔊 SOUND: ON' : '🔇 SOUND: OFF';
+  });
+
+  var leftHeld = false, rightHeld = false;
+  document.getElementById('leftBtn').addEventListener('click', function () { swingDir = -1; angleVel -= 0.02; });
+  document.getElementById('rightBtn').addEventListener('click', function () { swingDir = 1; angleVel += 0.02; });
+
+  canvas.addEventListener('click', startOrFlip);
+  canvas.addEventListener('touchstart', startOrFlip, { passive: false });
+  canvas.addEventListener('mousedown', function (e) { e.preventDefault(); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); startOrFlip(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { swingDir = -1; angleVel -= 0.025; }
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { swingDir = 1; angleVel += 0.025; }
+    else if (e.key === 'r' || e.key === 'R') { ensureAudio(); resetGame(); }
+  });
+  document.addEventListener('touchstart', function () { ensureAudio(); }, { passive: true });
+
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

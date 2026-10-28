@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pendulum Plunge</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0e1420; font-family: "Segoe UI", system-ui, sans-serif; color: #eef2ff; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; gap: 8px; }
+  h1 { font-size: clamp(26px, 5vw, 44px); letter-spacing: 1px; color: #ffd166; text-shadow: 0 2px 0 #000; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: min(760px, 96vw); }
+  .pill { background: #1c2740; border: 2px solid #3b4f7a; border-radius: 999px; padding: 6px 14px; font-weight: 700; font-size: 15px; }
+  .pill b { color: #ffd166; }
+  #gameBox { position: relative; width: min(760px, 96vw); aspect-ratio: 760 / 520; background: #16213a; border: 3px solid #3b4f7a; border-radius: 14px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(8, 12, 24, 0.86); text-align: center; padding: 20px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: clamp(26px, 5vw, 40px); color: #ffd166; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 16px; color: #dbe4ff; }
+  .overlay .howto { background: #1c2740; border: 1px solid #3b4f7a; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 15px; }
+  button { background: #ffd166; color: #1a1200; border: none; border-radius: 999px; padding: 14px 30px; font-size: 19px; font-weight: 800; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  button.secondary { background: #5aa9ff; box-shadow: 0 4px 0 #2a5fa8; color: #04101f; }
+  #msg { min-height: 24px; font-weight: 700; color: #7dff9b; font-size: 17px; text-align: center; }
+  #controls { font-size: 13px; color: #9fb0d8; text-align: center; }
+  @media (max-width: 520px) { .pill { font-size: 13px; padding: 5px 10px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#127769; PENDULUM PLUNGE</h1>
+  <div id="hud">
+    <div class="pill">Score: <b id="score">0</b> / <b id="target">150</b></div>
+    <div class="pill">Misses: <b id="misses">0</b> / 3</div>
+    <div class="pill">Round: <b id="round">1</b></div>
+    <div class="pill">Status: <b id="status">Ready</b></div>
+    <div class="pill">Best: <b id="best">0</b></div>
+  </div>
+  <div id="gameBox">
+    <canvas id="cv" width="760" height="520"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Pendulum Plunge</h2>
+      <p>A plunger swings from the ceiling. Time your release and drop it dead-center on the moving targets below!</p>
+      <div class="howto">
+        <strong>How to Play</strong><br>
+        &#8226; <b>Space</b>, <b>click</b>, or <b>tap</b> to release the plunger.<br>
+        &#8226; Land on a target: center = 25 pts, inner ring = 15, outer = 10.<br>
+        &#8226; Targets move faster and shrink in later rounds.<br>
+        &#8226; Miss a target (or drop off the floor) and you lose a life.<br>
+        &#8226; <b>3 misses</b> ends the run. Reach <b>150 points</b> to win!<br>
+        &#8226; Bonus: hit 3 targets in a row for a +10 streak bonus.
+      </div>
+      <button id="startBtn">▶ Start Game</button>
+      <p>Keyboard: Space to drop &nbsp;|&nbsp; R to restart &nbsp;|&nbsp; P to pause</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">Game Over</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">↻ Play Again</button>
+    </div>
+    <div id="pauseScreen" class="overlay hidden">
+      <h2>Paused</h2>
+      <p>Press P or tap Resume to keep plunging.</p>
+      <button id="resumeBtn" class="secondary">Resume</button>
+    </div>
+  </div>
+  <div id="msg"></div>
+  <div id="controls">Space / Click / Tap = Release &nbsp;•&nbsp; R = Restart &nbsp;•&nbsp; P = Pause &nbsp;•&nbsp; The pendulum only swings while playing.</div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var cv = document.getElementById("cv");
+  var ctx = cv.getContext("2d");
+  var W = 760, H = 520;
+  var scoreEl = document.getElementById("score");
+  var missesEl = document.getElementById("misses");
+  var roundEl = document.getElementById("round");
+  var statusEl = document.getElementById("status");
+  var bestEl = document.getElementById("best");
+  var msgEl = document.getElementById("msg");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var pauseScreen = document.getElementById("pauseScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+
+  var state = "title"; // title | playing | paused | over | win
+  var score = 0, misses = 0, round = 1, streak = 0, drops = 0, hits = 0;
+  var best = 0;
+  var WIN_SCORE = 150;
+  var MAX_MISSES = 3;
+
+  // Pendulum state
+  var pivotX = W / 2, pivotY = 46, ropeLen = 190;
+  var angle = -0.9, angleVel = 0;
+  var swingSpeed = 1.15;
+  var plunger = null; // {x, y, vy, active}
+  var particles = [];
+  var floaters = [];
+  var flash = 0, flashColor = "#ffffff";
+  var shake = 0;
+
+  // Targets: array of {x, y, r, vx, dir}
+  var targets = [];
+  var targetY = 452;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function makeTargets() {
+    targets = [];
+    var count = round === 1 ? 3 : (round === 2 ? 3 : 4);
+    var baseR = Math.max(26, 52 - (round - 1) * 7);
+    var speed = 0.9 + (round - 1) * 0.55;
+    for (var i = 0; i < count; i++) {
+      var r = baseR * rand(0.9, 1.1);
+      targets.push({
+        x: rand(90, W - 90),
+        y: targetY + rand(-6, 6),
+        r: r,
+        vx: (Math.random() < 0.5 ? -1 : 1) * speed * rand(0.8, 1.25),
+        hue: [205, 45, 160, 280][i % 4]
+      });
+    }
+  }
+
+  // ---- Procedural Web Audio (created only after user gesture) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || "sine";
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.18, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+  function soundDrop() { tone(420, 0.12, "triangle", 0.15, 180); }
+  function soundHit(points) {
+    if (points >= 25) { tone(660, 0.1, "sine", 0.2); setTimeout(function () { tone(880, 0.16, "sine", 0.2); }, 70); }
+    else if (points >= 15) { tone(560, 0.14, "sine", 0.2); }
+    else { tone(440, 0.14, "sine", 0.18); }
+  }
+  function soundMiss() { tone(220, 0.3, "sawtooth", 0.12, 90); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.25, "triangle", 0.2); }, i * 130); }); }
+  function soundLose() { [330, 262, 196, 131].forEach(function (f, i) { setTimeout(function () { tone(f, 0.28, "triangle", 0.15); }, i * 150); }); }
+
+  function setMsg(t, color) {
+    msgEl.textContent = t;
+    msgEl.style.color = color || "#7dff9b";
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    missesEl.textContent = misses;
+    roundEl.textContent = round;
+    statusEl.textContent = status || (state === "playing" ? "Swinging..." : state);
+    bestEl.textContent = Math.max(best, score);
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: rand(-3.5, 3.5), vy: rand(-4.5, -0.5), life: rand(20, 45), color: color });
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; misses = 0; round = 1; streak = 0; drops = 0; hits = 0;
+    plunger = null; particles = []; floaters = [];
+    angle = -0.9; angleVel = 0;
+    makeTargets();
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    pauseScreen.classList.add("hidden");
+    setMsg("Watch the swing... release at the perfect moment!", "#7dff9b");
+    updateHUD("Swinging...");
+    tone(523, 0.12, "sine", 0.15);
+  }
+
+  function endGame(won) {
+    state = won ? "win" : "over";
+    if (score > best) best = score;
+    endTitle.textContent = won ? "🎉 YOU WIN!" : "💥 GAME OVER";
+    var acc = drops ? Math.round((hits / drops) * 100) : 0;
+    endText.textContent = (won ? "You plunged your way to victory! " : "The targets got away this time. ") +
+      "Final score: " + score + " | Rounds reached: " + round + " | Accuracy: " + acc + "% (" + hits + "/" + drops + ") | Best: " + best;
+    endScreen.classList.remove("hidden");
+    updateHUD(won ? "You Win!" : "Game Over");
+    if (won) soundWin(); else soundLose();
+  }
+
+  function release() {
+    if (state !== "playing") return;
+    if (plunger) return; // one plunger at a time
+    ensureAudio();
+    var px = pivotX + Math.sin(angle) * ropeLen;
+    var py = pivotY + Math.cos(angle) * ropeLen;
+    plunger = { x: px, y: py, vy: 2, active: true };
+    drops++;
+    soundDrop();
+    setMsg("Plunging...", "#ffd166");
+    updateHUD("Plunging...");
+  }
+
+  function registerHit(t, pts, label) {
+    score += pts;
+    hits++;
+    streak++;
+    var bonus = 0;
+    if (streak >= 3) { bonus = 10; score += bonus; }
+    burst(t.x, t.y, "#ffd166", 26);
+    floaters.push({ x: t.x, y: t.y - t.r - 10, text: "+" + pts + (bonus ? " +10 STREAK!" : ""), life: 70 });
+    flash = 6; flashColor = "#ffd166";
+    soundHit(pts);
+    setMsg(label + "! +" + pts + (bonus ? " (+10 streak bonus!)" : "") + " — Streak: " + streak, "#7dff9b");
+    if (score >= WIN_SCORE) { updateHUD("You Win!"); endGame(true); return; }
+    // Replace the hit target with a fresh one (slightly faster as round progresses)
+    var idx = targets.indexOf(t);
+    if (idx >= 0) {
+      var baseR = Math.max(26, 52 - (round - 1) * 7);
+      var speed = 0.9 + (round - 1) * 0.55;
+      targets[idx] = { x: rand(90, W - 90), y: targetY + rand(-6, 6), r: baseR * rand(0.9, 1.1), vx: (Math.random() < 0.5 ? -1 : 1) * speed * rand(0.9, 1.3), hue: t.hue };
+    }
+    // Every 4 hits, advance the round
+    if (hits > 0 && hits % 4 === 0) {
+      round++;
+      makeTargets();
+      setMsg("Round " + round + "! Targets are faster and smaller!", "#5aa9ff");
+      tone(784, 0.18, "triangle", 0.18);
+    }
+    updateHUD("Swinging...");
+  }
+
+  function registerMiss() {
+    misses++;
+    streak = 0;
+    shake = 8;
+    soundMiss();
+    setMsg("Miss! Lives left: " + (MAX_MISSES - misses), "#ff7d7d");
+    updateHUD("Swinging...");
+    if (misses >= MAX_MISSES) { endGame(false); }
+  }
+
+  function update(dt) {
+    // Pendulum physics: simple damped oscillation driven toward a steady swing
+    if (state === "playing" && !plunger) {
+      angleVel += (-Math.sin(angle) * 0.0016 * dt * 16) ;
+      angleVel *= 0.995;
+      // Keep the swing lively: nudge velocity toward target amplitude
+      var targetAmp = 0.95;
+      if (Math.abs(angle) < targetAmp && Math.abs(angleVel) < 0.02) {
+        angleVel += (angle > 0 ? -1 : 1) * -0.0004 * dt * 16 * Math.sign(angle || 1) * -1;
+      }
+      angle += angleVel * dt * 0.9 + Math.sin(Date.now() / 500 * swingSpeed) * 0.0004 * dt;
+      // Simpler robust swing: override with sinusoidal motion for readability
+      angle = Math.sin(Date.now() / 620) * 0.95;
+    }
+    // Targets move and bounce off walls
+    for (var i = 0; i < targets.length; i++) {
+      var t = targets[i];
+      t.x += t.vx * dt * 0.9;
+      if (t.x - t.r < 10) { t.x = 10 + t.r; t.vx = Math.abs(t.vx); }
+      if (t.x + t.r > W - 10) { t.x = W - 10 - t.r; t.vx = -Math.abs(t.vx); }
+    }
+    // Plunger falling
+    if (plunger) {
+      plunger.vy += 0.55 * dt * 0.9;
+      plunger.y += plunger.vy * dt * 0.9;
+      // Check target hits
+      for (var j = 0; j < targets.length; j++) {
+        var tg = targets[j];
+        var dx = plunger.x - tg.x, dy = plunger.y - tg.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= tg.r + 10) {
+          var pts, label;
+          if (dist <= tg.r * 0.35) { pts = 25; label = "BULLSEYE"; }
+          else if (dist <= tg.r * 0.7) { pts = 15; label = "Great hit"; }
+          else { pts = 10; label = "Hit"; }
+          plunger = null;
+          registerHit(tg, pts, label);
+          return;
+        }
+      }
+      if (plunger.y > H - 8) { plunger = null; registerMiss(); }
+    }
+    // Particles
+    for (var k = particles.length - 1; k >= 0; k--) {
+      var p = particles[k];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--;
+      if (p.life <= 0) particles.splice(k, 1);
+    }
+    for (var f = floaters.length - 1; f >= 0; f--) {
+      floaters[f].y -= 0.8; floaters[f].life--;
+      if (floaters[f].life <= 0) floaters.splice(f, 1);
+    }
+    if (flash > 0) flash--;
+    if (shake > 0) shake--;
+  }
+
+  function drawTarget(t) {
+    ctx.save();
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath(); ctx.ellipse(t.x, t.y + t.r + 6, t.r * 0.9, 8, 0, 0, Math.PI * 2); ctx.fill();
+    // rings: outer, middle, bullseye
+    var rings = [
+      { r: t.r, c: "hsl(" + t.hue + ", 80%, 55%)" },
+      { r: t.r * 0.68, c: "#f4f6ff" },
+      { r: t.r * 0.38, c: "hsl(" + t.hue + ", 80%, 55%)" },
+      { r: t.r * 0.16, c: "#ffd166" }
+    ];
+    for (var i = 0; i < rings.length; i++) {
+      ctx.fillStyle = rings[i].c;
+      ctx.beginPath(); ctx.arc(t.x, t.y, rings[i].r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake) * 0.5, rand(-shake, shake) * 0.5);
+    // sky gradient backdrop
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#1b2a4a"); g.addColorStop(0.6, "#16213a"); g.addColorStop(1, "#0f1a2e");
+    ctx.fillStyle = g; ctx.fillRect(-20, -20, W + 40, H + 40);
+    // decorative stars / dots
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    for (var s = 0; s < 24; s++) {
+      var sx = (s * 137) % W, sy = (s * 89) % 220 + 20;
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    // ceiling mount
+    ctx.fillStyle = "#0a0f1e"; ctx.fillRect(pivotX - 70, 0, 140, 26);
+    ctx.fillStyle = "#3b4f7a"; ctx.fillRect(pivotX - 70, 22, 140, 5);
+    ctx.fillStyle = "#ffd166";
+    ctx.beginPath(); ctx.arc(pivotX, pivotY, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(pivotX, pivotY, 10, 0, Math.PI * 2); ctx.stroke();
+    // floor
+    ctx.fillStyle = "#24365e"; ctx.fillRect(0, H - 34, W, 34);
+    ctx.fillStyle = "#3b4f7a"; ctx.fillRect(0, H - 34, W, 4);
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    for (var fx = 0; fx < W; fx += 76) ctx.fillRect(fx, H - 30, 38, 30);
+
+    // targets
+    for (var i = 0; i < targets.length; i++) drawTarget(targets[i]);
+
+    // pendulum rope + plunger (only when not falling separately)
+    var px, py;
+    if (plunger) { px = plunger.x; py = plunger.y; }
+    else {
+      px = pivotX + Math.sin(angle) * ropeLen;
+      py = pivotY + Math.cos(angle) * ropeLen;
+    }
+    if (!plunger) {
+      ctx.strokeStyle = "#c8d2ee"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(px, py); ctx.stroke();
+    }
+    // plunger: cup + handle
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.fillStyle = "#e94f4f";
+    ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(16, 0); ctx.lineTo(12, 18); ctx.lineTo(-12, 18); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#8b2b2b";
+    ctx.beginPath(); ctx.ellipse(0, 19, 14, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#8a5a2b"; ctx.fillRect(-3, -26, 6, 28);
+    ctx.restore();
+
+    // aim guide: faint vertical dotted line from plunger
+    if (state === "playing" && !plunger) {
+      ctx.strokeStyle = "rgba(255,209,102,0.35)"; ctx.lineWidth = 2; ctx.setLineDash([4, 8]);
+      ctx.beginPath(); ctx.moveTo(px, py + 24); ctx.lineTo(px, H - 34); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // particles
+    for (var k = 0; k < particles.length; k++) {
+      var p = particles[k];
+      ctx.globalAlpha = Math.max(0, p.life / 45);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+    }
+    ctx.globalAlpha = 1;
+    // floating score text
+    ctx.textAlign = "center"; ctx.font = "bold 18px sans-serif";
+    for (var f2 = 0; f2 < floaters.length; f2++) {
+      var fl = floaters[f2];
+      ctx.globalAlpha = Math.max(0, fl.life / 70);
+      ctx.fillStyle = "#ffd166";
+      ctx.fillText(fl.text, fl.x, fl.y);
+    }
+    ctx.globalAlpha = 1;
+    // flash overlay
+    if (flash > 0) {
+      ctx.globalAlpha = flash / 12;
+      ctx.fillStyle = flashColor;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = Math.min(3, (now - last) / 16.67);
+    last = now;
+    if (state === "playing") update(dt);
+    else if (state === "title") { angle = Math.sin(now / 620) * 0.95; if (targets.length === 0) makeTargets(); }
+    draw();
+  }
+  requestAnimationFrame(loop);
+
+  // ---- Input: keyboard + mouse + touch ----
+  document.getElementById("startBtn").addEventListener("click", function () { startGame(); });
+  document.getElementById("restartBtn").addEventListener("click", function () { startGame(); });
+  document.getElementById("resumeBtn").addEventListener("click", function () {
+    pauseScreen.classList.add("hidden"); state = "playing"; updateHUD("Swinging...");
+  });
+  cv.addEventListener("click", function () {
+    if (state === "playing") release();
+  });
+  cv.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    if (state === "playing") release();
+  }, { passive: false });
+  document.addEventListener("keydown", function (e) {
+    if (e.code === "Space" || e.code === "Enter") {
+      e.preventDefault();
+      if (state === "title") startGame();
+      else if (state === "playing") release();
+      else if (state === "over" || state === "win") startGame();
+    } else if (e.code === "KeyR") {
+      if (state !== "title") startGame();
+    } else if (e.code === "KeyP") {
+      if (state === "playing") { state = "paused"; pauseScreen.classList.remove("hidden"); updateHUD("Paused"); }
+      else if (state === "paused") { state = "playing"; pauseScreen.classList.add("hidden"); updateHUD("Swinging..."); }
+    }
+  });
+  // Initial idle targets behind the title screen
+  makeTargets();
+  updateHUD("Ready");
+})();
+</script>
+</body>
+</html>

@@ -25,8 +25,20 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0119 | Echo Ensemble | Rhythm / Melody Memory | Click/tap instruments, 1-4 keys, touch tap | [Play](./../games/game-0119.html) |
 | 0120 | Ricochet Range | Precision / Bouncing Target Shot | Mouse/touch drag aim, Space fire, Arrow Keys | [Play](./../games/game-0120.html) |
 
+| 0121 | Tide Turner | Puzzle / Tidal Flow Routing | Click/tap tiles rotate, Arrow Keys select, Space rotate | [Play](./../games/game-0121.html) |
+| 0122 | Forge Frenzy | Arcade / Blacksmith Timing | A/S/D/J/K keys, Space, click/tap anvil | [Play](./../games/game-0122.html) |
+| 0123 | Starship Steward | Strategy / Crew Allocation | Click/tap stations, 1-4 assign crew, N next event | [Play](./../games/game-0123.html) |
+| 0124 | Tempo Temple | Rhythm / Drum Pattern | D/F/J/K, mouse click lanes, touch tap lanes | [Play](./../games/game-0124.html) |
+| 0125 | Magnet Miner | Precision / Polarity Swing | Space / click / tap toggle and release, Arrow Keys | [Play](./../games/game-0125.html) |
+| 0126 | Shadow Sprinter | Arcade / Stealth Runner | Arrow Keys / WASD move, Space dash, touch tap | [Play](./../games/game-0126.html) |
+| 0127 | Glyph Grader | Puzzle / Symbol Sorting Logic | Click/tap glyphs, Arrow Keys, Enter sort | [Play](./../games/game-0127.html) |
+| 0128 | Bakery Baron | Strategy / Bakery Economy | Click/tap shop actions, 1-4 actions, N next day | [Play](./../games/game-0128.html) |
+| 0129 | Chime Chase | Rhythm / Melody Echo | Click/tap bells, 1-4 keys, touch tap | [Play](./../games/game-0129.html) |
+| 0130 | Pendulum Plunge | Precision / Pendulum Drop | Space / click / tap release, Arrow Keys | [Play](./../games/game-0130.html) |
+
 ## Batch notes
 
 - Batch 011: 10 games, produced in one cycle. Volume 002 opened at game 0101.
 - Batch 012: 10 games, produced in one cycle.
+- Batch 013: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

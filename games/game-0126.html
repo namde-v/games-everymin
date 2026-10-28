@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Shadow Sprinter</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #05060f; color: #e8ecff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; letter-spacing: 2px; color: #9fd8ff; text-shadow: 0 0 14px #3b82f6; margin: 6px 0 2px; }
+  p.sub { color: #9aa3c0; font-size: 13px; margin-bottom: 10px; }
+  #wrap { position: relative; width: min(920px, 96vw); }
+  canvas { width: 100%; height: auto; display: block; background: #0b1026; border: 2px solid #33406e; border-radius: 10px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .pill { background: #141b38; border: 1px solid #33406e; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .pill.warn { color: #ffb020; border-color: #ffb020; }
+  .pill.danger { color: #ff5a5a; border-color: #ff5a5a; }
+  #barWrap { width: 100%; height: 14px; background: #1a2247; border-radius: 999px; overflow: hidden; border: 1px solid #33406e; }
+  #stealthBar { height: 100%; width: 100%; background: linear-gradient(90deg, #38bdf8, #22c55e); transition: width .15s; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(3, 5, 18, 0.88); border-radius: 10px; padding: 20px; }
+  #overlay h2 { font-size: 30px; margin-bottom: 8px; color: #ffffff; }
+  #overlay p { max-width: 560px; color: #c3cade; line-height: 1.55; font-size: 15px; margin: 4px 0; }
+  #overlay .keys { background: #141b38; border: 1px solid #33406e; border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 14px; }
+  button { cursor: pointer; border: 0; border-radius: 10px; padding: 13px 26px; font-size: 17px; font-weight: bold; background: #2563eb; color: #fff; margin: 6px; }
+  button:hover { background: #3b82f6; }
+  button.secondary { background: #33406e; }
+  #touch { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+  #touch button { padding: 16px 22px; font-size: 18px; background: #1e2a55; }
+  #touch button:active { background: #2563eb; }
+  .hidden { display: none !important; }
+  #msg { min-height: 20px; color: #ffd166; font-weight: bold; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>SHADOW SPRINTER</h1>
+<p class="sub">Dash between shadows. Light is your enemy. Reach the glowing exit.</p>
+<div id="wrap">
+  <canvas id="game" width="920" height="460"></canvas>
+  <div id="overlay">
+    <h2 id="ovTitle">SHADOW SPRINTER</h2>
+    <p id="ovText">Sprint through the night city, but stay out of the lamplight. Run in light and your stealth drains — guards will spot you!</p>
+    <div class="keys" id="howTo">
+      <b>How to Play:</b><br>
+      Move: Arrow keys / A D (or W S to crouch-hop) &nbsp;|&nbsp; Dash: Space<br>
+      Mouse: click DASH or tap the on-screen buttons &nbsp;|&nbsp; Touch: use the buttons below<br>
+      Stay in dark shadow patches to recover stealth. Reach the golden EXIT door.<br>
+      Spotted 3 times and the run ends. Clear all 3 levels to win!
+    </div>
+    <button id="startBtn">Start Run</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+  </div>
+</div>
+<div id="hud">
+  <div class="pill" id="scorePill">Score: 0</div>
+  <div class="pill" id="levelPill">Level: 1 / 3</div>
+  <div class="pill" id="livesPill">Spotted: 0 / 3</div>
+  <div class="pill" id="statusPill">Status: Hidden</div>
+  <div class="pill" id="dashPill">Dash: Ready</div>
+</div>
+<div id="barWrap"><div id="stealthBar"></div></div>
+<div id="msg">Stealth 100% — stay in the shadows!</div>
+<div id="touch">
+  <button id="btnLeft" type="button">&#9664; Left</button>
+  <button id="btnDash" type="button">DASH</button>
+  <button id="btnRight" type="button">Right &#9654;</button>
+  <button id="btnJump" type="button">Hop</button>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var ovTitle = document.getElementById('ovTitle');
+  var ovText = document.getElementById('ovText');
+  var startBtn = document.getElementById('startBtn');
+  var howBtn = document.getElementById('howBtn');
+  var howTo = document.getElementById('howTo');
+  var scorePill = document.getElementById('scorePill');
+  var levelPill = document.getElementById('levelPill');
+  var livesPill = document.getElementById('livesPill');
+  var statusPill = document.getElementById('statusPill');
+  var dashPill = document.getElementById('dashPill');
+  var stealthBar = document.getElementById('stealthBar');
+  var msgEl = document.getElementById('msg');
+
+  var W = canvas.width, H = canvas.height, GROUND = 400;
+  var state = 'title'; // title, playing, won, over
+  var score = 0, level = 1, spotted = 0, stealth = 100, detect = 0;
+  var keys = {};
+  var player, camX, levelLen, shadows, lamps, coins, exitX, dashCd, dashTime, particles;
+  var audioCtx = null, muted = false;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    if (muted) return;
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + (dur || 0.15));
+    o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + (dur || 0.15));
+  }
+  function sfxDash() { beep(220, 0.18, 'sawtooth', 0.08); beep(440, 0.12, 'sine', 0.06); }
+  function sfxCoin() { beep(880, 0.1, 'square', 0.08); setTimeout(function(){ beep(1320, 0.12, 'square', 0.07); }, 70); }
+  function sfxSpot() { beep(140, 0.35, 'sawtooth', 0.14); }
+  function sfxWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'triangle', 0.12); }, i * 130); }); }
+
+  function buildLevel(n) {
+    levelLen = 2200 + n * 700;
+    exitX = levelLen - 120;
+    player = { x: 60, y: GROUND - 46, w: 30, h: 46, vx: 0, vy: 0, onGround: true, facing: 1 };
+    camX = 0; dashCd = 0; dashTime = 0; detect = 0; particles = [];
+    shadows = []; lamps = []; coins = [];
+    var x = 180;
+    while (x < levelLen - 300) {
+      var sw = 150 + Math.floor(Math.random() * 140);
+      shadows.push({ x: x, w: sw });
+      x += sw + 170 + Math.floor(Math.random() * 140);
+    }
+    // Lamplight pools sit in the gaps between shadows, sweeping slightly.
+    for (var i = 0; i < shadows.length; i++) {
+      var s = shadows[i];
+      var lx = s.x + s.w + 40 + Math.random() * 60;
+      if (lx < exitX - 80) lamps.push({ x: lx, w: 110 + Math.random() * 40, phase: Math.random() * 6.28, speed: 0.6 + Math.random() * 0.7 });
+    }
+    for (var c = 0; c < 14; c++) {
+      coins.push({ x: 260 + c * ((levelLen - 600) / 14) + Math.random() * 60, y: GROUND - 90 - Math.random() * 90, taken: false });
+    }
+  }
+
+  function inShadow(px) {
+    for (var i = 0; i < shadows.length; i++) {
+      if (px >= shadows[i].x && px <= shadows[i].x + shadows[i].w) return true;
+    }
+    return px < 170; // starting alley is dark
+  }
+  function inLight(px, t) {
+    for (var i = 0; i < lamps.length; i++) {
+      var l = lamps[i];
+      var cx = l.x + Math.sin(t * l.speed + l.phase) * 28;
+      if (px >= cx && px <= cx + l.w) return true;
+    }
+    return false;
+  }
+
+  function startGame() {
+    audio();
+    score = 0; level = 1; spotted = 0; stealth = 100;
+    buildLevel(level);
+    state = 'playing';
+    overlay.classList.add('hidden');
+    msgEl.textContent = 'Level 1 — dash from shadow to shadow!';
+    beep(523, 0.15, 'triangle', 0.1);
+  }
+  function showEnd(won) {
+    state = won ? 'won' : 'over';
+    ovTitle.textContent = won ? 'YOU ESCAPED!' : 'CAUGHT!';
+    ovText.textContent = won
+      ? 'You slipped through all 3 levels unseen. Final score: ' + score + '. A true shadow legend!'
+      : 'Spotted 3 times. The guards caught up with you. Final score: ' + score + '. Try a sneakier route!';
+    startBtn.textContent = 'Restart Run';
+    overlay.classList.remove('hidden');
+    if (won) sfxWin(); else sfxSpot();
+  }
+  function onSpotted() {
+    spotted++;
+    stealth = 100; detect = 0;
+    sfxSpot();
+    player.x = 60; player.vx = 0; player.vy = 0; camX = 0;
+    if (spotted >= 3) { showEnd(false); }
+    else { msgEl.textContent = 'SPOTTED! ' + spotted + ' / 3 — back to the start alley. Stay in shadow!'; }
+  }
+  function nextLevel() {
+    score += 250 + Math.round(stealth) * 2;
+    sfxCoin();
+    if (level >= 3) { showEnd(true); return; }
+    level++;
+    stealth = 100; detect = 0;
+    buildLevel(level);
+    msgEl.textContent = 'Level ' + level + ' — longer streets, sharper lights. Go!';
+  }
+
+  function doDash() {
+    if (state !== 'playing' || dashCd > 0) return;
+    dashCd = 1.4; dashTime = 0.22;
+    player.vx = player.facing * 620;
+    sfxDash();
+    for (var i = 0; i < 10; i++) particles.push({ x: player.x + Math.random() * 30, y: player.y + Math.random() * 40, vx: -player.facing * 80, vy: Math.random() * 40 - 20, life: 0.4 });
+    msgEl.textContent = 'DASH! You blur through the light.';
+  }
+
+  function update(dt, t) {
+    if (state !== 'playing') return;
+    var left = keys['arrowleft'] || keys['a'];
+    var right = keys['arrowright'] || keys['d'];
+    var speed = 260;
+    if (dashTime > 0) { dashTime -= dt; }
+    else {
+      if (left) { player.vx = -speed; player.facing = -1; }
+      else if (right) { player.vx = speed; player.facing = 1; }
+      else { player.vx *= 0.82; if (Math.abs(player.vx) < 8) player.vx = 0; }
+    }
+    if ((keys['arrowup'] || keys['w'] || keys[' ']) && player.onGround && dashTime <= 0) {
+      // Space is dash; W / Up hops. Handled below for space separately.
+    }
+    if ((keys['arrowup'] || keys['w']) && player.onGround) { player.vy = -430; player.onGround = false; }
+    if (dashCd > 0) dashCd -= dt;
+    player.vy += 1300 * dt;
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+    if (player.y >= GROUND - player.h) { player.y = GROUND - player.h; player.vy = 0; player.onGround = true; }
+    if (player.x < 10) player.x = 10;
+    if (player.x > levelLen - 40) player.x = levelLen - 40;
+    camX = Math.max(0, Math.min(levelLen - W, player.x - 260));
+    // Stealth logic
+    var cx = player.x + player.w / 2;
+    var shadow = inShadow(cx), light = inLight(cx, t);
+    if (light && !shadow) {
+      stealth -= 26 * dt;
+      detect += 34 * dt;
+      if (detect > 0) msgEl.textContent = 'IN THE LIGHT! Detection rising — get to shadow!';
+    } else if (shadow) {
+      stealth = Math.min(100, stealth + 18 * dt);
+      detect = Math.max(0, detect - 60 * dt);
+    } else {
+      detect = Math.max(0, detect - 25 * dt);
+    }
+    if (stealth <= 0 || detect >= 100) { onSpotted(); return; }
+    // Coins
+    for (var i = 0; i < coins.length; i++) {
+      var c = coins[i];
+      if (!c.taken && Math.abs(c.x - cx) < 32 && Math.abs(c.y - (player.y + 20)) < 46) {
+        c.taken = true; score += 50; sfxCoin();
+      }
+    }
+    // Distance score
+    score += Math.max(0, player.vx * dt * 0.02);
+    // Particles
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx * dt; particles[p].y += particles[p].vy * dt; particles[p].life -= dt;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    // Exit
+    if (player.x + player.w >= exitX) { nextLevel(); }
+  }
+
+  function draw(t) {
+    ctx.clearRect(0, 0, W, H);
+    // Sky and skyline
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#070b22'); grad.addColorStop(1, '#1a1440');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#f4f1c8';
+    ctx.beginPath(); ctx.arc(800, 60, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0d1430';
+    for (var b = 0; b < 14; b++) {
+      var bx = (b * 170 - camX * 0.4) % (W + 170); if (bx < -170) bx += W + 170;
+      ctx.fillRect(bx, 120 + (b % 3) * 40, 120, GROUND - 120 - (b % 3) * 40);
+      ctx.fillStyle = '#ffe98a';
+      for (var wy = 0; wy < 4; wy++) for (var wx = 0; wx < 3; wx++) {
+        if ((b + wy + wx) % 3 === 0) ctx.fillRect(bx + 14 + wx * 34, 140 + (b % 3) * 40 + wy * 44, 12, 14);
+      }
+      ctx.fillStyle = '#0d1430';
+    }
+    // Ground
+    ctx.fillStyle = '#232a4a'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#2f3866'; ctx.fillRect(0, GROUND, W, 6);
+    // Shadows and light pools (world space)
+    for (var i = 0; i < shadows.length; i++) {
+      var s = shadows[i];
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fillRect(s.x - camX, GROUND - 6, s.w, 10);
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.10)';
+      ctx.fillRect(s.x - camX, 60, s.w, GROUND - 60);
+    }
+    for (var j = 0; j < lamps.length; j++) {
+      var l = lamps[j];
+      var cx = l.x + Math.sin(t * l.speed + l.phase) * 28;
+      var lg = ctx.createLinearGradient(cx - camX, 0, cx + l.w - camX, 0);
+      lg.addColorStop(0, 'rgba(255, 214, 90, 0)');
+      lg.addColorStop(0.5, 'rgba(255, 214, 90, 0.42)');
+      lg.addColorStop(1, 'rgba(255, 214, 90, 0)');
+      ctx.fillStyle = lg;
+      ctx.beginPath();
+      ctx.moveTo(cx - 14 - camX, 120); ctx.lineTo(cx + l.w + 14 - camX, 120);
+      ctx.lineTo(cx + l.w - camX, GROUND); ctx.lineTo(cx - camX, GROUND);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffd65a';
+      ctx.fillRect(cx + l.w / 2 - 4 - camX, 118, 8, 26);
+    }
+    // Coins
+    coins.forEach(function (c) {
+      if (c.taken) return;
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(c.x - camX, c.y + Math.sin(t * 3 + c.x) * 4, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7a4a00'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('$', c.x - camX, c.y + 4 + Math.sin(t * 3 + c.x) * 4);
+    });
+    // Exit door
+    ctx.fillStyle = '#22c55e';
+    ctx.fillRect(exitX - camX, GROUND - 110, 66, 110);
+    ctx.fillStyle = '#052e16'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('EXIT', exitX + 33 - camX, GROUND - 52);
+    ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
+    ctx.fillRect(exitX - 20 - camX, GROUND - 120, 106, 120);
+    // Player
+    var px = player.x - camX, py = player.y;
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(px - 2, py - 2, player.w + 4, player.h + 4);
+    ctx.fillStyle = dashTime > 0 ? '#7dd3fc' : '#e2e8f0';
+    ctx.fillRect(px, py, player.w, player.h);
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(px + (player.facing > 0 ? 16 : 4), py + 8, 10, 8); // eyes mask
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(px + 4, py + player.h - 12, player.w - 8, 6); // scarf
+    // Particles
+    particles.forEach(function (pt) {
+      ctx.fillStyle = 'rgba(125, 211, 252, 0.8)';
+      ctx.fillRect(pt.x - camX, pt.y, 6, 6);
+    });
+    // Vignette when detected
+    if (detect > 25) {
+      ctx.fillStyle = 'rgba(255, 60, 60, ' + (detect / 420) + ')';
+      ctx.fillRect(0, 0, W, 26); ctx.fillRect(0, H - 26, W, 26);
+    }
+    // HUD in canvas footer
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, H - 30, W, 30);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Stealth: ' + Math.max(0, Math.round(stealth)) + '%   Detection: ' + Math.round(detect) + '%', 12, H - 9);
+    ctx.textAlign = 'right';
+    ctx.fillText('Level ' + level + ' / 3', W - 12, H - 9);
+  }
+
+  function refreshHud() {
+    scorePill.textContent = 'Score: ' + Math.round(score);
+    levelPill.textContent = 'Level: ' + level + ' / 3';
+    livesPill.textContent = 'Spotted: ' + spotted + ' / 3';
+    livesPill.className = 'pill' + (spotted >= 2 ? ' danger' : spotted >= 1 ? ' warn' : '');
+    var cx = player ? player.x + player.w / 2 : 0;
+    var status = state !== 'playing' ? (state === 'won' ? 'Escaped!' : state === 'over' ? 'Caught' : 'Ready') :
+      (player && inLight(cx, performance.now() / 1000) && !inShadow(cx) ? 'EXPOSED!' : 'Hidden');
+    statusPill.textContent = 'Status: ' + status;
+    statusPill.className = 'pill' + (status === 'EXPOSED!' ? ' danger' : '');
+    dashPill.textContent = 'Dash: ' + (dashCd > 0 ? Math.ceil(dashCd * 10) / 10 + 's' : 'Ready');
+    stealthBar.style.width = Math.max(0, stealth) + '%';
+    stealthBar.style.background = stealth > 55 ? 'linear-gradient(90deg,#38bdf8,#22c55e)' : stealth > 25 ? 'linear-gradient(90deg,#facc15,#fb923c)' : 'linear-gradient(90deg,#ef4444,#f97316)';
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000); last = now;
+    var t = now / 1000;
+    update(dt, t);
+    draw(t);
+    refreshHud();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // Input: keyboard, mouse, touch
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === ' ' || k === 'spacebar') { e.preventDefault(); if (state === 'playing') doDash(); }
+    if (k === 'enter' && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+  canvas.addEventListener('click', function () { audio(); if (state === 'playing') doDash(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); audio(); if (state === 'playing') doDash(); }, { passive: false });
+  startBtn.addEventListener('click', function () { startGame(); });
+  howBtn.addEventListener('click', function () {
+    audio();
+    howTo.classList.toggle('hidden');
+    ovText.textContent = howTo.classList.contains('hidden')
+      ? 'Tap Start to begin your night run.'
+      : 'Move with arrows / WASD, dash with Space, hop with W / Up. Hide in shadows, grab coins, reach EXIT. 3 spots = game over.';
+  });
+  function hold(btn, key) {
+    btn.addEventListener('mousedown', function () { keys[key] = true; audio(); });
+    btn.addEventListener('mouseup', function () { keys[key] = false; });
+    btn.addEventListener('mouseleave', function () { keys[key] = false; });
+    btn.addEventListener('touchstart', function (e) { e.preventDefault(); keys[key] = true; audio(); }, { passive: false });
+    btn.addEventListener('touchend', function (e) { e.preventDefault(); keys[key] = false; }, { passive: false });
+  }
+  hold(document.getElementById('btnLeft'), 'arrowleft');
+  hold(document.getElementById('btnRight'), 'arrowright');
+  hold(document.getElementById('btnJump'), 'arrowup');
+  var dashBtn = document.getElementById('btnDash');
+  dashBtn.addEventListener('click', function () { audio(); doDash(); });
+  dashBtn.addEventListener('touchstart', function (e) { e.preventDefault(); audio(); doDash(); }, { passive: false });
+  buildLevel(1);
+})();
+</script>
+</body>
+</html>
