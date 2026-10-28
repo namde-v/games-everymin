@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Rune Runner</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#14101f;color:#f5e9c8;font-family:Georgia,serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:12px}
+  #wrap{width:min(760px,100%);background:#241b3a;border:3px solid #c9a86a;border-radius:16px;padding:14px;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  h1{font-size:34px;text-align:center;letter-spacing:3px;color:#ffd76a;text-shadow:0 2px 0 #7a4a12}
+  p.tag{text-align:center;color:#cbb8e8;margin:4px 0 10px}
+  #hud{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;background:#120e20;border:1px solid #6b5a9e;border-radius:10px;padding:9px 12px;font-weight:bold}
+  #hud span{white-space:nowrap}
+  #wordBox{text-align:center;background:#2d2148;border:1px solid #8d78c2;border-radius:10px;padding:10px;margin:10px 0}
+  #wordBox .label{font-size:12px;letter-spacing:2px;color:#b8a8e8;text-transform:uppercase}
+  #target{font-size:38px;letter-spacing:10px;font-weight:bold;color:#fff}
+  #target b{color:#ffd76a}
+  #target s{color:#7d729e;text-decoration:none;opacity:.65}
+  #target i{color:#ff7a7a;font-style:normal}
+  canvas{display:block;width:100%;height:360px;background:#1b1430;border:2px solid #6b5a9e;border-radius:12px;touch-action:none}
+  #msg{text-align:center;min-height:26px;margin:8px 0;font-weight:bold;color:#ffe28a}
+  .btns{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+  button{background:#ffd76a;color:#2a1a08;border:0;border-radius:999px;padding:12px 22px;font-size:17px;font-weight:bold;cursor:pointer;box-shadow:0 4px 0 #9a6a1d}
+  button:active{transform:translateY(3px);box-shadow:none}
+  button.secondary{background:#4b3a78;color:#fff;box-shadow:0 4px 0 #241b3f}
+  #help{display:none;background:#120e20;border-radius:10px;padding:12px;margin-top:10px;line-height:1.6;font-size:15px}
+  #help.show{display:block}
+  .lanes{display:flex;justify-content:center;gap:10px;margin-top:10px}
+  .lanes button{padding:10px 16px}
+  @media(max-width:520px){h1{font-size:27px}#target{font-size:30px;letter-spacing:6px}canvas{height:300px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>✦ RUNE RUNNER ✦</h1>
+  <p class="tag">Sprint through ancient ruins. Grab runes in the right order to spell every word!</p>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Word: <span id="wordNum">1 / 4</span></span>
+    <span>Lives: <span id="lives">♥♥♥</span></span>
+    <span>Status: <span id="status">Title</span></span>
+  </div>
+  <div id="wordBox">
+    <div class="label">Spell this word — collect its runes in order</div>
+    <div id="target">RUNE</div>
+    <div id="nextLetter">Next rune: R</div>
+  </div>
+  <canvas id="game" width="720" height="360"></canvas>
+  <div id="msg">Press Start, then run! Collect runes in order. Dodge stone blocks.</div>
+  <div class="btns">
+    <button id="startBtn">▶ Start Run</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <button id="restartBtn" class="secondary">↻ Restart</button>
+  </div>
+  <div id="help">
+    <strong>How to Play:</strong> You run automatically. Move between the three lanes with
+    <strong>← →</strong> or <strong>A / D</strong>, jump with <strong>↑ / Space / W</strong>.
+    On touch, swipe left / right to change lanes and swipe up (or tap) to jump.
+    Mouse users can click the ◀ ▶ lane buttons or click the canvas to jump.
+    Each floating rune carries a letter. Take only the <em>next</em> letter of the target word:
+    grabbing the wrong letter, or hitting a stone block, costs a life. Spell all four words —
+    RUNE, GOLD, TEMPLE, MYSTIC — to win. Lose 3 lives and the run ends.
+    Correct runes are worth 100 points, word bonuses are worth 250.
+  </div>
+  <div class="lanes">
+    <button id="leftBtn">◀ Lane</button>
+    <button id="jumpBtn">⤒ Jump</button>
+    <button id="rightBtn">Lane ▶</button>
+  </div>
+</div>
+<script>
+(function(){
+  var cv=document.getElementById('game'), ctx=cv.getContext('2d');
+  var scoreEl=document.getElementById('score'), livesEl=document.getElementById('lives'),
+      statusEl=document.getElementById('status'), msgEl=document.getElementById('msg'),
+      targetEl=document.getElementById('target'), nextEl=document.getElementById('nextLetter'),
+      wordNumEl=document.getElementById('wordNum');
+  var WORDS=['RUNE','GOLD','TEMPLE','MYSTIC'];
+  var state='title', score=0, lives=3, wordIdx=0, letterIdx=0, frame=0;
+  var lane=1, targetLane=1, jumpY=0, vy=0, jumping=false;
+  var runes=[], blocks=[], particles=[];
+  var lanesX=[150,360,570], groundY=292;
+  var audioCtx=null;
+  function audio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return audioCtx; }
+  function beep(freq,dur,type,vol){
+    var ac=audio(); if(!ac) return;
+    var o=ac.createOscillator(), g=ac.createGain();
+    o.type=type||'sine'; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||0.12,ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
+  }
+  function sfx(kind){
+    if(kind==='good'){ beep(660,0.12,'sine',0.14); setTimeout(function(){beep(880,0.16,'sine',0.14);},80); }
+    else if(kind==='bad'){ beep(160,0.25,'sawtooth',0.12); }
+    else if(kind==='win'){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){beep(f,0.25,'triangle',0.15);},i*130); }); }
+    else if(kind==='jump'){ beep(330,0.12,'triangle',0.10); }
+  }
+  function word(){ return WORDS[wordIdx]; }
+  function renderWord(){
+    var w=word(), html='';
+    for(var i=0;i<w.length;i++){
+      if(i<letterIdx) html+='<s>'+w[i]+'</s>';
+      else if(i===letterIdx) html+='<b>'+w[i]+'</b>';
+      else html+='<i>'+w[i]+'</i>';
+    }
+    targetEl.innerHTML=html;
+    nextEl.textContent='Next rune: '+w[letterIdx]+'  •  Letters done: '+letterIdx+' / '+w.length;
+    wordNumEl.textContent=(wordIdx+1)+' / '+WORDS.length;
+  }
+  function setLives(){ livesEl.textContent='♥'.repeat(Math.max(0,lives))+'♡'.repeat(Math.max(0,3-lives)); }
+  function setStatus(s){ statusEl.textContent=s; }
+  function spawn(){
+    // Alternate runes and blocks so the path stays readable and fair.
+    if(frame%55===0){
+      var need=word()[letterIdx];
+      var letters=[need];
+      var pool='ABCDEFGHJKLMNOPQRSTUVWXYZ';
+      while(letters.length<3){ var c=pool[Math.floor(Math.random()*pool.length)]; if(letters.indexOf(c)<0) letters.push(c); }
+      var usedLane=Math.floor(Math.random()*3);
+      letters.forEach(function(ch,i){
+        var l=(usedLane+i)%3;
+        runes.push({x:760+i*18,y:190+Math.random()*35,lane:l,ch:ch,got:false,bob:Math.random()*6});
+      });
+    }
+    if(frame%78===0){
+      var bl=Math.floor(Math.random()*3);
+      blocks.push({x:760,lane:bl,w:52,h:44});
+    }
+  }
+  function loseLife(reason){
+    lives--; score=Math.max(0,score-25); setLives(); sfx('bad');
+    msgEl.textContent=reason+'  •  Lives left: '+lives;
+    particles.push({x:lanesX[lane],y:groundY-70,txt:'-1 ♥',life:40});
+    if(lives<=0){ endGame(false); }
+  }
+  function endGame(won){
+    state=won?'win':'over';
+    setStatus(won?'YOU WIN!':'Game Over');
+    if(won){ sfx('win'); msgEl.textContent='🏆 YOU WIN! You spelled every word. Score: '+score+'. Press Restart to run again!'; }
+    else { msgEl.textContent='💀 GAME OVER — the ruins got you. Score: '+score+'. Press Restart to try again!'; }
+  }
+  function reset(){
+    score=0; lives=3; wordIdx=0; letterIdx=0; frame=0; lane=1; targetLane=1;
+    jumpY=0; vy=0; jumping=false; runes=[]; blocks=[]; particles=[];
+    scoreEl.textContent='0'; setLives(); renderWord(); setStatus('Ready');
+    msgEl.textContent='Ready! Collect the runes in order and dodge the blocks.';
+  }
+  function start(){ audio(); reset(); state='playing'; setStatus('Running…'); msgEl.textContent='Run! Next rune: '+word()[0]; sfx('good'); }
+  function move(dir){ if(state!=='playing') return; targetLane=Math.max(0,Math.min(2,targetLane+dir)); }
+  function jump(){ if(state!=='playing'||jumping) return; jumping=true; vy=-13; sfx('jump'); }
+  function update(){
+    frame++;
+    var px=lanesX[lane];
+    lane += (targetLane-lane)*0.25;
+    if(Math.abs(targetLane-lane)<0.05) lane=targetLane;
+    if(jumping){ jumpY+=vy; vy+=0.8; if(jumpY>=0){ jumpY=0; vy=0; jumping=false; } }
+    spawn();
+    runes.forEach(function(r){ r.x-=5.2; r.bob+=0.08; });
+    blocks.forEach(function(b){ b.x-=5.2; });
+    // Rune pickup: player must be in the same lane and not jumping over a low rune is allowed only if close.
+    runes=runes.filter(function(r){
+      if(!r.got && Math.abs(r.x-px)<42 && r.lane===Math.round(lane) && jumpY>-70){
+        r.got=true;
+        if(r.ch===word()[letterIdx]){
+          score+=100; letterIdx++; sfx('good');
+          msgEl.textContent='Nice! '+r.ch+' collected. Score +100.';
+          particles.push({x:r.x,y:r.y,txt:'+100',life:35});
+          if(letterIdx>=word().length){
+            score+=250; msgEl.textContent='Word complete: '+word()+'! Bonus +250.';
+            wordIdx++; letterIdx=0;
+            if(wordIdx>=WORDS.length){ scoreEl.textContent=score; targetEl.textContent='ALL DONE!'; nextEl.textContent='Every word spelled — you win!'; endGame(true); return false; }
+          }
+          renderWord();
+        } else {
+          loseLife('Wrong rune! You grabbed '+r.ch+' but needed '+word()[letterIdx]+'.');
+        }
+        return false;
+      }
+      return r.x>-60;
+    });
+    blocks=blocks.filter(function(b){
+      if(Math.abs(b.x-px)<44 && b.lane===Math.round(lane) && jumpY>-42){
+        loseLife('Ouch! You hit a stone block.');
+        return false;
+      }
+      return b.x>-80;
+    });
+    particles.forEach(function(p){ p.y-=1.4; p.life--; });
+    particles=particles.filter(function(p){ return p.life>0; });
+    scoreEl.textContent=score;
+  }
+  function draw(){
+    ctx.clearRect(0,0,720,360);
+    // Sky, moon, ruins backdrop
+    var g=ctx.createLinearGradient(0,0,0,360); g.addColorStop(0,'#2b2148'); g.addColorStop(1,'#171027');
+    ctx.fillStyle=g; ctx.fillRect(0,0,720,360);
+    ctx.fillStyle='#ffd76a'; ctx.beginPath(); ctx.arc(640,52,26,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#3b2c63';
+    ctx.fillRect(0,150,90,150); ctx.fillRect(120,180,70,120); ctx.fillRect(560,165,90,135); ctx.fillRect(660,190,60,110);
+    ctx.fillStyle='#241b3a'; ctx.fillRect(0,groundY,720,68);
+    ctx.strokeStyle='#6b5a9e'; ctx.lineWidth=2;
+    lanesX.forEach(function(x){ ctx.beginPath(); ctx.moveTo(x,groundY+8); ctx.lineTo(x,360); ctx.stroke(); });
+    // Runes
+    runes.forEach(function(r){
+      var y=r.y+Math.sin(r.bob)*6;
+      ctx.fillStyle='#ffd76a'; ctx.beginPath(); ctx.arc(r.x,y,22,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#2a1a08'; ctx.font='bold 22px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(r.ch,r.x,y);
+    });
+    // Blocks
+    blocks.forEach(function(b){
+      ctx.fillStyle='#8a7a5c'; ctx.fillRect(b.x-26,groundY-b.h,52,b.h);
+      ctx.fillStyle='#5e523e'; ctx.fillRect(b.x-26,groundY-b.h,52,8);
+      ctx.fillStyle='#fff'; ctx.font='bold 20px Georgia'; ctx.textAlign='center'; ctx.fillText('▓',b.x,groundY-b.h/2);
+    });
+    // Player: hooded runner
+    var px=lanesX[Math.round(lane)], py=groundY+jumpY;
+    ctx.fillStyle='#ff9a3c'; ctx.beginPath(); ctx.arc(px,py-72,18,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#7a2d8a'; ctx.fillRect(px-14,py-56,28,38);
+    ctx.fillStyle='#222'; ctx.fillRect(px-12,py-18,10,20); ctx.fillRect(px+2,py-18,10,20);
+    ctx.fillStyle='#ffd76a'; ctx.font='bold 14px Georgia'; ctx.textAlign='center';
+    ctx.fillText('✦',px,py-68);
+    particles.forEach(function(p){ ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia'; ctx.fillText(p.txt,p.x,p.y); });
+    if(state==='title'){
+      ctx.fillStyle='rgba(10,6,24,0.72)'; ctx.fillRect(0,0,720,360);
+      ctx.fillStyle='#ffd76a'; ctx.font='bold 38px Georgia'; ctx.textAlign='center';
+      ctx.fillText('RUNE RUNNER',360,150);
+      ctx.fillStyle='#fff'; ctx.font='20px Georgia';
+      ctx.fillText('Spell the words. Dodge the stones.',360,190);
+      ctx.fillText('Press Start Run to begin.',360,220);
+    }
+    if(state==='win'){
+      ctx.fillStyle='rgba(20,50,20,0.72)'; ctx.fillRect(0,0,720,360);
+      ctx.fillStyle='#ffd76a'; ctx.font='bold 40px Georgia'; ctx.textAlign='center';
+      ctx.fillText('🏆 YOU WIN!',360,170);
+      ctx.fillStyle='#fff'; ctx.font='22px Georgia'; ctx.fillText('Every word spelled! Score: '+score,360,210);
+    }
+    if(state==='over'){
+      ctx.fillStyle='rgba(50,10,10,0.72)'; ctx.fillRect(0,0,720,360);
+      ctx.fillStyle='#ff7a7a'; ctx.font='bold 40px Georgia'; ctx.textAlign='center';
+      ctx.fillText('GAME OVER',360,170);
+      ctx.fillStyle='#fff'; ctx.font='22px Georgia'; ctx.fillText('Score: '+score+' — press Restart.',360,210);
+    }
+  }
+  function loop(){ if(state==='playing') update(); draw(); requestAnimationFrame(loop); }
+  document.getElementById('startBtn').addEventListener('click',start);
+  document.getElementById('restartBtn').addEventListener('click',start);
+  document.getElementById('howBtn').addEventListener('click',function(){ document.getElementById('help').classList.toggle('show'); });
+  document.getElementById('leftBtn').addEventListener('click',function(){ move(-1); });
+  document.getElementById('rightBtn').addEventListener('click',function(){ move(1); });
+  document.getElementById('jumpBtn').addEventListener('click',jump);
+  cv.addEventListener('click',function(e){ if(state==='title') start(); else jump(); });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') move(-1);
+    else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') move(1);
+    else if(e.key==='ArrowUp'||e.key===' '||e.key==='w'||e.key==='W'){ e.preventDefault(); if(state==='title') start(); else jump(); }
+    else if(e.key==='Enter'){ if(state!=='playing') start(); }
+  });
+  var tx=0, ty=0;
+  cv.addEventListener('touchstart',function(e){ var t=e.touches[0]; tx=t.clientX; ty=t.clientY; },{passive:true});
+  cv.addEventListener('touchend',function(e){
+    var t=e.changedTouches[0], dx=t.clientX-tx, dy=t.clientY-ty;
+    if(state==='title'){ start(); return; }
+    if(Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>24) move(dx>0?1:-1);
+    else if(dy<-24 || Math.abs(dx)<=24) jump();
+  },{passive:true});
+  document.addEventListener('touchstart',function(){ audio(); },{passive:true,once:true});
+  reset(); setStatus('Title'); loop();
+})();
+</script>
+</body>
+</html>

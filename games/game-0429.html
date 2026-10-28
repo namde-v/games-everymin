@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Solar Shepherd</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a2b1a; font-family: Verdana, Geneva, sans-serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 8px; }
+  h1 { color: #ffe066; font-size: 26px; letter-spacing: 1px; margin-bottom: 6px; text-shadow: 2px 2px 0 #3a2a00; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 860px; margin-bottom: 6px; }
+  .pill { background: #fff8dc; border: 2px solid #6b4f1d; border-radius: 999px; padding: 5px 12px; font-size: 14px; font-weight: bold; color: #333; }
+  .pill.warn { background: #ffd6d6; color: #8b0000; }
+  .pill.good { background: #d6ffd6; color: #145214; }
+  #stage { position: relative; width: 100%; max-width: 860px; aspect-ratio: 860 / 520; }
+  canvas { display: block; width: 100%; height: 100%; background: #7ec850; border: 4px solid #4a2f0d; border-radius: 14px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(10, 25, 10, 0.82); color: #fff; text-align: center; border-radius: 14px; padding: 18px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffe066; }
+  .overlay p { font-size: 15px; line-height: 1.5; max-width: 560px; }
+  .overlay .how { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.35); border-radius: 10px; padding: 10px 14px; font-size: 14px; text-align: left; }
+  button { font-size: 18px; font-weight: bold; padding: 12px 26px; border-radius: 999px; border: 3px solid #6b4f1d; background: #ffd93d; color: #3a2a00; cursor: pointer; }
+  button:hover, button:active { background: #ffe066; transform: scale(1.03); }
+  button.small { font-size: 14px; padding: 8px 18px; background: #fff; }
+  #hint { color: #eaffea; font-size: 13px; margin-top: 6px; text-align: center; }
+  #barkBtn { position: absolute; right: 10px; bottom: 10px; z-index: 5; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>☀️ Solar Shepherd 🐑</h1>
+  <div id="hud">
+    <span class="pill good" id="pennedPill">Penned: 0 / 8</span>
+    <span class="pill" id="lostPill">Lost to shadows: 0 / 3</span>
+    <span class="pill" id="timePill">Daylight: 120s</span>
+    <span class="pill" id="statusPill">Status: Ready</span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="860" height="520"></canvas>
+    <button id="barkBtn" class="small" type="button">🐕 Bark!</button>
+    <div class="overlay" id="titleScreen">
+      <h2>☀️ Solar Shepherd</h2>
+      <p>Herd every wandering solar sheep into the glowing sun pens before nightfall. Your shepherd dog guides them — sheep shy away from the dog, so drive them from behind!</p>
+      <div class="how">
+        <strong>How to Play</strong><br>
+        • Move the dog: <b>WASD / Arrow keys</b>, or <b>click / tap and drag</b> on the field.<br>
+        • Press <b>Space</b> or the Bark button: a short bark nudges nearby sheep away from the dog.<br>
+        • Push sheep into a golden pen. A penned sheep glows and stays put.<br>
+        • Beware creeping shadow blobs from the dark edges — a sheep touched by shadow is lost.<br>
+        • Win: pen all 8 sheep. Lose: 3 sheep lost, or night falls first.
+      </div>
+      <button id="startBtn" type="button">▶ Start Herding</button>
+      <p>Keyboard, mouse and touch all work. Sound starts only after you press Start.</p>
+    </div>
+    <div class="overlay hidden" id="endScreen">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn" type="button">↻ Play Again</button>
+    </div>
+  </div>
+  <div id="hint">Tip: do not chase sheep head-on — get behind them and steer them toward the nearest golden pen.</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var pennedPill = document.getElementById('pennedPill');
+  var lostPill = document.getElementById('lostPill');
+  var timePill = document.getElementById('timePill');
+  var statusPill = document.getElementById('statusPill');
+
+  var state = 'title'; // title | playing | won | over
+  var keys = {};
+  var target = null;
+  var dog = { x: 430, y: 430, vx: 0, vy: 0, r: 18, speed: 4.2 };
+  var sheep = [];
+  var pens = [
+    { x: 120, y: 110, r: 62 },
+    { x: 740, y: 110, r: 62 },
+    { x: 430, y: 90, r: 52 }
+  ];
+  var shadows = [];
+  var particles = [];
+  var penned = 0, lost = 0, timeLeft = 120, lastTime = 0, elapsed = 0;
+  var barkCooldown = 0, barkRing = 0, sunPulse = 0, grassSeed = 12345;
+  var audioCtx = null;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx || state === 'title') return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundBark() { tone(300, 0.12, 'square', 0.10, 140); setTimeout(function () { tone(420, 0.10, 'square', 0.08, 200); }, 60); }
+  function soundPen() { tone(523, 0.18, 'sine', 0.14); setTimeout(function () { tone(784, 0.25, 'sine', 0.14); }, 110); }
+  function soundLost() { tone(220, 0.35, 'sawtooth', 0.12, 70); }
+  function soundWin() { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, 'triangle', 0.14); }, i * 140); }); }
+  function soundBaa() { tone(500 + Math.random() * 120, 0.15, 'triangle', 0.05, 380); }
+
+  function resetGame() {
+    dog.x = 430; dog.y = 430; dog.vx = 0; dog.vy = 0;
+    sheep = []; shadows = []; particles = [];
+    penned = 0; lost = 0; timeLeft = 120; elapsed = 0; barkCooldown = 0; barkRing = 0;
+    var starts = [
+      { x: 200, y: 300 }, { x: 330, y: 250 }, { x: 520, y: 280 }, { x: 650, y: 320 },
+      { x: 250, y: 420 }, { x: 600, y: 430 }, { x: 430, y: 350 }, { x: 150, y: 200 }
+    ];
+    for (var i = 0; i < 8; i++) {
+      sheep.push({ x: starts[i].x, y: starts[i].y, vx: 0, vy: 0, r: 16, penned: false, lost: false, wander: rand(0, Math.PI * 2), baa: rand(3, 9), glow: rand(0, 6) });
+    }
+    updateHUD('Herding!');
+  }
+
+  function updateHUD(status) {
+    pennedPill.textContent = 'Penned: ' + penned + ' / 8';
+    lostPill.textContent = 'Lost to shadows: ' + lost + ' / 3';
+    timePill.textContent = 'Daylight: ' + Math.max(0, Math.ceil(timeLeft)) + 's';
+    if (status) statusPill.textContent = 'Status: ' + status;
+    timePill.className = 'pill' + (timeLeft < 30 ? ' warn' : '');
+    lostPill.className = 'pill' + (lost >= 2 ? ' warn' : '');
+  }
+
+  function spawnShadow() {
+    var side = Math.floor(rand(0, 4));
+    var s = { r: rand(20, 30), speed: rand(0.35, 0.7) };
+    if (side === 0) { s.x = -30; s.y = rand(60, H - 60); s.vx = s.speed; s.vy = rand(-0.2, 0.2); }
+    else if (side === 1) { s.x = W + 30; s.y = rand(60, H - 60); s.vx = -s.speed; s.vy = rand(-0.2, 0.2); }
+    else if (side === 2) { s.x = rand(60, W - 60); s.y = -30; s.vx = rand(-0.2, 0.2); s.vy = s.speed; }
+    else { s.x = rand(60, W - 60); s.y = H + 30; s.vx = rand(-0.2, 0.2); s.vy = -s.speed; }
+    shadows.push(s);
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) {
+      particles.push({ x: x, y: y, vx: rand(-2.5, 2.5), vy: rand(-2.5, 2.5), life: rand(20, 45), color: color });
+    }
+  }
+
+  function doBark() {
+    if (state !== 'playing' || barkCooldown > 0) return;
+    barkCooldown = 25; barkRing = 26; soundBark();
+    sheep.forEach(function (s) {
+      if (s.penned || s.lost) return;
+      var d = dist(s, dog);
+      if (d < 150 && d > 1) {
+        var push = 3.2 * (1 - d / 160);
+        s.vx += ((s.x - dog.x) / d) * push;
+        s.vy += ((s.y - dog.y) / d) * push;
+      }
+    });
+  }
+
+  function endGame(won, reason) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '☀️ You Win!' : '🌑 Game Over';
+    endText.textContent = won
+      ? 'All 8 solar sheep are safe in the sun pens with ' + Math.ceil(timeLeft) + ' seconds of daylight to spare. Brilliant shepherding!'
+      : reason;
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'All sheep safe!' : 'Game over');
+    if (won) soundWin(); else soundLost();
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    elapsed += dt;
+    timeLeft -= dt;
+    sunPulse += 0.05;
+    if (barkCooldown > 0) barkCooldown--;
+    if (barkRing > 0) barkRing--;
+
+    // Dog movement: keyboard wins, otherwise pointer target.
+    var mx = 0, my = 0;
+    if (keys['arrowleft'] || keys['a']) mx -= 1;
+    if (keys['arrowright'] || keys['d']) mx += 1;
+    if (keys['arrowup'] || keys['w']) my -= 1;
+    if (keys['arrowdown'] || keys['s']) my += 1;
+    if (mx !== 0 || my !== 0) {
+      var len = Math.sqrt(mx * mx + my * my);
+      dog.vx = (mx / len) * dog.speed; dog.vy = (my / len) * dog.speed; target = null;
+    } else if (target) {
+      var dx = target.x - dog.x, dy = target.y - dog.y, d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 8) { dog.vx = 0; dog.vy = 0; }
+      else { dog.vx = (dx / d) * dog.speed; dog.vy = (dy / d) * dog.speed; }
+    } else { dog.vx *= 0.7; dog.vy *= 0.7; }
+    dog.x = Math.max(20, Math.min(W - 20, dog.x + dog.vx));
+    dog.y = Math.max(20, Math.min(H - 20, dog.y + dog.vy));
+
+    // Shadows drift in more often as night approaches.
+    var spawnChance = timeLeft > 60 ? 0.002 : (timeLeft > 30 ? 0.005 : 0.009);
+    if (Math.random() < spawnChance && shadows.length < 7) spawnShadow();
+    shadows.forEach(function (sh) { sh.x += sh.vx; sh.y += sh.vy; });
+
+    // Sheep behaviour: wander, flock lightly, flee the dog, seek safety away from shadows.
+    sheep.forEach(function (s) {
+      if (s.penned || s.lost) return;
+      s.glow += 0.05; s.baa -= dt;
+      if (s.baa <= 0 && Math.random() < 0.3) { soundBaa(); s.baa = rand(4, 10); }
+      if (Math.random() < 0.02) s.wander += rand(-0.7, 0.7);
+      s.vx += Math.cos(s.wander) * 0.06;
+      s.vy += Math.sin(s.wander) * 0.06;
+      // Gentle flocking toward the nearest other free sheep.
+      var near = null, nd = 1e9;
+      sheep.forEach(function (o) {
+        if (o === s || o.penned || o.lost) return;
+        var dd = dist(s, o);
+        if (dd < nd) { nd = dd; near = o; }
+      });
+      if (near && nd > 70 && nd < 220) { s.vx += ((near.x - s.x) / nd) * 0.05; s.vy += ((near.y - s.y) / nd) * 0.05; }
+      // Flee the dog — this is the herding force.
+      var dd = dist(s, dog);
+      if (dd < 110 && dd > 1) {
+        var strength = 0.22 * (1 - dd / 120);
+        s.vx += ((s.x - dog.x) / dd) * strength;
+        s.vy += ((s.y - dog.y) / dd) * strength;
+      }
+      // Flee shadows, but a slow sheep can still be caught.
+      shadows.forEach(function (sh) {
+        var sd = dist(s, sh);
+        if (sd < 90 && sd > 1) { s.vx += ((s.x - sh.x) / sd) * 0.18; s.vy += ((s.y - sh.y) / sd) * 0.18; }
+      });
+      // Damping and speed cap.
+      s.vx *= 0.96; s.vy *= 0.96;
+      var sp = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
+      if (sp > 2.4) { s.vx = (s.vx / sp) * 2.4; s.vy = (s.vy / sp) * 2.4; }
+      s.x = Math.max(18, Math.min(W - 18, s.x + s.vx));
+      s.y = Math.max(18, Math.min(H - 18, s.y + s.vy));
+
+      // Pen check.
+      pens.forEach(function (p) {
+        if (!s.penned && dist(s, p) < p.r - 8) {
+          s.penned = true; penned++;
+          burst(s.x, s.y, '#ffd93d', 20); soundPen();
+          updateHUD('Sheep penned! ' + penned + ' / 8');
+        }
+      });
+      // Shadow catch check.
+      shadows.forEach(function (sh) {
+        if (!s.penned && !s.lost && dist(s, sh) < sh.r + 6) {
+          s.lost = true; lost++;
+          burst(s.x, s.y, '#3a3a5a', 18); soundLost();
+          updateHUD('A sheep was lost to the shadows!');
+        }
+      });
+    });
+
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    shadows = shadows.filter(function (sh) { return sh.x > -60 && sh.x < W + 60 && sh.y > -60 && sh.y < H + 60; });
+
+    updateHUD();
+    if (penned >= 8) { endGame(true); return; }
+    if (lost >= 3) { endGame(false, 'Three sheep were swallowed by shadows. The flock is scattered — try again, and keep them away from the dark edges.'); return; }
+    if (timeLeft <= 0) { endGame(false, 'Night has fallen with ' + (8 - penned) + ' sheep still out in the field. Herd faster and use bark to hurry stragglers.'); }
+  }
+
+  function drawGrass() {
+    // Deterministic-ish tufts so the field reads as pasture, not flat colour.
+    ctx.fillStyle = '#7ec850';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#6db844';
+    for (var i = 0; i < 70; i++) {
+      var gx = ((i * 137) % W), gy = ((i * 89) % H);
+      ctx.beginPath(); ctx.arc(gx + 10, gy + 12, 9, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = '#a5d86e';
+    for (var j = 0; j < 40; j++) {
+      var fx = ((j * 211 + 40) % W), fy = ((j * 151 + 30) % H);
+      ctx.fillRect(fx, fy, 3, 8);
+    }
+  }
+
+  function drawSheep(s) {
+    if (s.lost) return;
+    var pulse = 1 + Math.sin(s.glow) * 0.12;
+    ctx.save(); ctx.translate(s.x, s.y);
+    // Solar halo.
+    ctx.fillStyle = 'rgba(255, 217, 61, 0.35)';
+    ctx.beginPath(); ctx.arc(0, 0, 26 * pulse, 0, Math.PI * 2); ctx.fill();
+    // Wool body.
+    ctx.fillStyle = s.penned ? '#fff6c9' : '#ffffff';
+    ctx.strokeStyle = '#8a7a4a'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(-9, -6, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(9, -6, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(-6, 9, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(7, 9, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Face.
+    ctx.fillStyle = '#3a2a1a';
+    ctx.beginPath(); ctx.arc(0, -2, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-2.5, -4, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(2.5, -4, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    drawGrass();
+    // Day sky tint darkens as time runs out.
+    var darkness = timeLeft < 30 ? (30 - Math.max(0, timeLeft)) / 30 * 0.28 : 0;
+    // Sun pens.
+    pens.forEach(function (p) {
+      var pr = p.r + Math.sin(sunPulse + p.x) * 3;
+      ctx.fillStyle = 'rgba(255, 217, 61, 0.45)';
+      ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffe98a'; ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r - 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#8a5a00'; ctx.font = 'bold 13px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('SUN PEN', p.x, p.y + 4);
+    });
+    // Shadows.
+    shadows.forEach(function (sh) {
+      ctx.fillStyle = 'rgba(30, 20, 60, 0.88)';
+      ctx.beginPath(); ctx.arc(sh.x, sh.y, sh.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(90, 70, 160, 0.5)';
+      ctx.beginPath(); ctx.arc(sh.x - 6, sh.y - 5, sh.r * 0.5, 0, Math.PI * 2); ctx.fill();
+    });
+    // Particles.
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 45);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x, p.y, 5, 5);
+      ctx.globalAlpha = 1;
+    });
+    // Dog.
+    ctx.save(); ctx.translate(dog.x, dog.y);
+    ctx.fillStyle = '#8b5a2b';
+    ctx.beginPath(); ctx.arc(0, 0, 17, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5d3a17';
+    ctx.beginPath(); ctx.arc(-11, -10, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(11, -10, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2b1a08';
+    ctx.beginPath(); ctx.arc(0, -2, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-3, -4, 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(3, -4, 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff6b6b';
+    ctx.beginPath(); ctx.arc(0, 12, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    if (barkRing > 0) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(dog.x, dog.y, 150 - barkRing * 4, 0, Math.PI * 2); ctx.stroke();
+    }
+    sheep.forEach(drawSheep);
+    // Nightfall vignette.
+    if (darkness > 0) {
+      ctx.fillStyle = 'rgba(10, 10, 50, ' + darkness.toFixed(2) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and herd the flock home.', W / 2, H / 2 + 120);
+    }
+  }
+
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime) / 1000);
+    lastTime = ts;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Herding!');
+  }
+
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('barkBtn').addEventListener('click', function () { initAudio(); doBark(); });
+
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === ' ' || k === 'spacebar') { e.preventDefault(); initAudio(); doBark(); }
+    if ((k === 'enter') && (state === 'title' || state === 'won' || state === 'over')) startGame();
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].indexOf(k) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+  canvas.addEventListener('mousedown', function (e) { if (state === 'playing') target = canvasPos(e); });
+  canvas.addEventListener('mousemove', function (e) { if (e.buttons === 1 && state === 'playing') target = canvasPos(e); });
+  canvas.addEventListener('mouseup', function () { target = null; });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (state === 'playing') target = canvasPos(e); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); if (state === 'playing') target = canvasPos(e); }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); target = null; }, { passive: false });
+
+  resetGame();
+  state = 'title';
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

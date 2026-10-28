@@ -27,7 +27,19 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0419 | Ivory Inventor | Puzzle / Clockwork Chain Reaction | Mouse/touch place parts, Keys 1/2/3 select, R rotate | [Play](./../games/game-0419.html) |
 | 0420 | Jade Juggler | Rhythm / Precision Juggling | Keys D/F/J/K catch, mouse/touch tap zones | [Play](./../games/game-0420.html) |
 
+| 0421 | Kelp Captain | Strategy / Kelp Farm Simulation | Mouse/touch click plots, Arrow Keys move, Space use tool, Keys 1-4 switch tool | [Play](./../games/game-0421.html) |
+| 0422 | Lightning Locksmith | Puzzle / Circuit Lock Picking | Mouse/touch click tiles, Arrow Keys select, Space rotate | [Play](./../games/game-0422.html) |
+| 0423 | Comet Cutter | Arcade / Asteroid Mining Dash | Arrow Keys/WASD thrust, Space drill, mouse/touch drag | [Play](./../games/game-0423.html) |
+| 0424 | Night Navigator | Puzzle / Constellation Pathfinding | Mouse/touch click stars, Arrow Keys/WASD move cursor, Enter select | [Play](./../games/game-0424.html) |
+| 0425 | Opal Outpost | Strategy / Supply Route Trading | Mouse/touch click routes, Arrow Keys select, Enter confirm | [Play](./../games/game-0425.html) |
+| 0426 | Prism Piper | Rhythm / Melody Memory Sequence | Keys 1-5 play pipes, mouse/touch tap pipes | [Play](./../games/game-0426.html) |
+| 0427 | Quarry Quester | Action / Digging Platformer | Arrow Keys/WASD dig and move, Space jump, mouse/touch swipe | [Play](./../games/game-0427.html) |
+| 0428 | Rune Runner | Arcade / Word Rune Collector | Arrow Keys switch lanes, Space jump, mouse/touch swipe | [Play](./../games/game-0428.html) |
+| 0429 | Solar Shepherd | Strategy / Herding Simulation | Arrow Keys/WASD move shepherd, mouse/touch drag guide | [Play](./../games/game-0429.html) |
+| 0430 | Timber Trapper | Action / Trap Setting Defense | Mouse/touch place traps, Keys 1/2/3 select trap | [Play](./../games/game-0430.html) |
+
 ## Batch notes
 
 - Batch 041: 10 games, produced in one cycle (0401–0410). Volume 005 opened at game 0401.
 - Batch 042: 10 games, produced in one cycle (0411–0420).
+- Batch 043: 10 games, produced in one cycle (0421–0430).

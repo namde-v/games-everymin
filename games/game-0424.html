@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Night Navigator</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#050816;color:#eaf2ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+  .wrap{width:min(920px,100%)}
+  h1{font-size:clamp(28px,5vw,44px);letter-spacing:.04em;text-align:center;text-shadow:0 0 18px #5aa2ff}
+  .sub{text-align:center;color:#a9c3e8;margin:6px 0 12px}
+  #hud{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;background:#0d1730;border:1px solid #2a3f6e;border-radius:12px;padding:10px 12px;margin-bottom:10px;font-weight:700}
+  #hud span{white-space:nowrap}
+  #hud .bad{color:#ff7a7a}
+  #hud .good{color:#7dffb0}
+  .stage{position:relative;background:radial-gradient(circle at 30% 20%,#16265a 0,#070d24 55%,#02040e 100%);border:1px solid #2a3f6e;border-radius:16px;overflow:hidden}
+  canvas{display:block;width:100%;height:560px;touch-action:none;cursor:crosshair}
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(2,6,20,.82);padding:20px;text-align:center}
+  .overlay.hidden{display:none}
+  .card{max-width:620px;background:#0d1730;border:1px solid #35548f;border-radius:16px;padding:24px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  .card h2{font-size:30px;margin-bottom:10px}
+  .card p{color:#c6d6f2;line-height:1.55;margin:8px 0}
+  .card ul{text-align:left;color:#c6d6f2;line-height:1.6;margin:10px auto;padding-left:20px;max-width:520px}
+  button{background:#ffd166;color:#171006;border:0;border-radius:999px;padding:13px 22px;font-size:17px;font-weight:900;cursor:pointer;margin:10px 6px 0}
+  button.secondary{background:#24365f;color:#fff}
+  button:active{transform:scale(.97)}
+  .legend{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;color:#a9c3e8;font-size:13px;margin-top:10px}
+  .key{background:#1c2f5a;border:1px solid #3a548a;border-radius:6px;padding:2px 7px;color:#fff;font-weight:700}
+  #msg{text-align:center;min-height:22px;margin-top:8px;color:#ffd166;font-weight:700}
+  #progress{display:flex;gap:6px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+  .dot{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#1c2f5a;border:1px solid #46639e;font-size:13px}
+  .dot.done{background:#1f9d62;border-color:#7dffb0;color:#fff}
+  .dot.now{outline:3px solid #ffd166}
+  @media(max-width:600px){canvas{height:480px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🌌 Night Navigator</h1>
+  <p class="sub">Chart a route across the sky — one constellation at a time.</p>
+  <div id="hud" aria-live="polite">
+    <span>Score: <b id="score">0</b></span>
+    <span>Constellation: <b id="constName">—</b></span>
+    <span>Links: <b id="links">0</b></span>
+    <span>Errors: <b id="errors">0</b> / 6</span>
+    <span>Time: <b id="time">240</b>s</span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div class="stage">
+    <canvas id="game" width="900" height="560"></canvas>
+    <div id="titleScreen" class="overlay">
+      <div class="card">
+        <h2>Night Navigator</h2>
+        <p><strong>How to Play:</strong> The night sky hides four constellations. Connect the stars of the current constellation in the correct order to chart its route.</p>
+        <ul>
+          <li>The <b>next correct star pulses gold</b> only after you find the first star — use shape, spacing and trial-and-error to discover each route.</li>
+          <li>Click or tap a star to link it. A wrong link costs an error and breaks the current route.</li>
+          <li>Finish all 4 constellations before the timer ends. 6 errors ends the voyage.</li>
+          <li>Keyboard: Arrow keys / WASD move the sky cursor, Enter or Space selects, R restarts.</li>
+        </ul>
+        <p>Score: +100 per correct link, +250 per completed constellation, +50 time bonus per second left on a win.</p>
+        <button id="startBtn" type="button">▶ Start Voyage</button>
+        <button id="howBtn" class="secondary" type="button">How to Play</button>
+        <div id="howText" style="display:none"><p>Tip: completed constellations stay lit in green. The faint nebula stars are decoys — linking one is an error, so watch the pulse and the route shape. Press Start when you are ready; sound begins only after you press Start.</p></div>
+      </div>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <div class="card">
+        <h2 id="endTitle">Voyage Complete</h2>
+        <p id="endText"></p>
+        <p id="endScore"></p>
+        <button id="restartBtn" type="button">↻ Restart Instantly</button>
+        <button id="menuBtn" class="secondary" type="button">Title Screen</button>
+      </div>
+    </div>
+  </div>
+  <div id="progress" aria-label="Constellation progress"></div>
+  <div class="legend"><span><span class="key">Mouse / Touch</span> tap a star</span><span><span class="key">Arrows / WASD</span> move cursor</span><span><span class="key">Enter</span> select</span><span><span class="key">R</span> restart</span></div>
+  <div id="msg">Press Start to begin charting the sky.</div>
+</div>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var scoreEl=document.getElementById('score'), nameEl=document.getElementById('constName'), linksEl=document.getElementById('links'), errEl=document.getElementById('errors'), timeEl=document.getElementById('time'), statusEl=document.getElementById('status'), msgEl=document.getElementById('msg'), progressEl=document.getElementById('progress');
+  var titleScreen=document.getElementById('titleScreen'), endScreen=document.getElementById('endScreen'), endTitle=document.getElementById('endTitle'), endText=document.getElementById('endText'), endScore=document.getElementById('endScore');
+  var audioCtx=null, started=false, over=false, lastTime=0, timeLeft=240, timerAcc=0;
+  var score=0, errors=0, totalLinks=0, current=0, route=[], cursor={x:450,y:280}, flash=null, flashTime=0, twinkle=0;
+
+  // Constellations: each is a named route of points in canvas space.
+  // Routes are deliberately different shapes: arc, zig-zag, loop and long traverse.
+  var constellations=[
+    {name:'The Sail', color:'#7dd3fc', points:[[120,390],[210,300],[310,240],[430,210],[560,250],[660,330]]},
+    {name:'The Arrow', color:'#fda4af', points:[[700,130],[600,210],[490,190],[390,280],[300,360],[180,430]]},
+    {name:'The Crown', color:'#fde68a', points:[[240,130],[340,90],[450,120],[530,190],[450,250],[340,230]]},
+    {name:'The River', color:'#86efac', points:[[110,110],[240,170],[360,140],[500,210],[620,180],[760,260],[810,390]]}
+  ];
+  // Decoys: stars that are never part of any route.
+  var decoys=[[90,250],[410,430],[590,420],[770,90],[160,520],[520,330],[680,500],[330,500],[840,180],[50,80],[250,30],[620,40]];
+  var stars=[];
+  constellations.forEach(function(c,ci){
+    c.points.forEach(function(p,pi){ stars.push({x:p[0],y:p[1],c:ci,i:pi,r:11}); });
+  });
+  decoys.forEach(function(p){ stars.push({x:p[0],y:p[1],c:-1,i:-1,r:9}); });
+
+  function audio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); } return audioCtx; }
+  function beep(freq,dur,type,vol){
+    var ac=audio(); if(!ac) return;
+    var o=ac.createOscillator(), g=ac.createGain();
+    o.type=type||'sine'; o.frequency.value=freq; g.gain.value=vol||0.08;
+    o.connect(g); g.connect(ac.destination);
+    o.start(); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur);
+    o.stop(ac.currentTime+dur);
+  }
+  function sound(kind){
+    if(kind==='good'){ beep(660,0.14,'sine',0.09); setTimeout(function(){beep(880,0.18,'sine',0.08);},70); }
+    else if(kind==='bad'){ beep(180,0.25,'sawtooth',0.06); }
+    else if(kind==='win'){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){beep(f,0.25,'triangle',0.09);},i*120); }); }
+    else if(kind==='lose'){ [400,300,200,140].forEach(function(f,i){ setTimeout(function(){beep(f,0.22,'sawtooth',0.06);},i*130); }); }
+  }
+
+  function currentConst(){ return constellations[current]; }
+  function expectedStar(){
+    if(route.length===0) return null; // first star must be discovered by the player
+    var c=currentConst(); var nextIndex=route.length;
+    if(nextIndex>=c.points.length) return null;
+    var p=c.points[nextIndex]; return {x:p[0],y:p[1]};
+  }
+  function renderProgress(){
+    progressEl.innerHTML='';
+    constellations.forEach(function(c,i){
+      var d=document.createElement('div'); d.className='dot'+(i<current?' done':(i===current?' now':'')); d.textContent=i<current?'✓':(i+1); d.title=c.name; progressEl.appendChild(d);
+    });
+  }
+  function updateHud(){
+    scoreEl.textContent=score; nameEl.textContent=over?'—':currentConst().name;
+    linksEl.textContent=totalLinks; errEl.textContent=errors; timeEl.textContent=Math.max(0,Math.ceil(timeLeft));
+    statusEl.textContent=over?'Finished':(started?'Navigating':'Ready');
+    renderProgress();
+  }
+  function setMsg(t){ msgEl.textContent=t; }
+  function findStar(x,y){
+    var best=null, bestD=34;
+    stars.forEach(function(s){ var d=Math.hypot(s.x-x,s.y-y); if(d<bestD){bestD=d;best=s;} });
+    return best;
+  }
+  function fail(msg){
+    errors++; flash={kind:'bad',t:0}; sound('bad');
+    route=[]; setMsg(msg+' Route broken — find the first star of '+currentConst().name+' again.');
+    if(errors>=6){ endGame(false,'Too many wrong links. The sky map is lost in cloud.'); }
+    updateHud();
+  }
+  function selectStar(s){
+    if(!started||over||!s) return;
+    var c=currentConst();
+    if(s.c===-1){ fail('That is a decoy star.'); return; }
+    if(s.c!==current){ fail('That star belongs to another constellation.'); return; }
+    if(route.length===0){
+      // Only the true first star starts a route, but guessing it is free:
+      // a wrong first-star tap is only a hint, not an error, so discovering
+      // each constellation's start cannot by itself exhaust the error budget.
+      if(s.i!==0){ setMsg('Not the first star of '+c.name+' — try another bright star.'); return; }
+      route=[s]; sound('good'); setMsg('Good start! Now find the next star of '+c.name+'.');
+    } else {
+      if(s.i!==route.length){ fail('Wrong next star in the sequence.'); return; }
+      route.push(s); score+=100; totalLinks++; sound('good');
+      if(route.length===c.points.length){
+        score+=250; totalLinks++;
+        setMsg(c.name+' completed! +250 bonus.');
+        current++; route=[];
+        if(current>=constellations.length){ endGame(true,'Every constellation is charted. The route home is clear!'); return; }
+        setMsg('Now chart '+currentConst().name+'. Find its first star.');
+      } else {
+        setMsg('Link '+route.length+' of '+c.points.length+' for '+c.name+' complete.');
+      }
+    }
+    updateHud();
+  }
+  function endGame(win, text){
+    over=true; statusEl.textContent='Finished';
+    if(win){ score+=Math.max(0,Math.round(timeLeft))*50; sound('win'); endTitle.textContent='⭐ Voyage Complete — You Win!'; }
+    else { sound('lose'); endTitle.textContent='☁️ Game Over'; }
+    endText.textContent=text;
+    endScore.textContent='Final score: '+score+' • Constellations: '+Math.min(current,constellations.length)+' / 4 • Errors: '+errors;
+    endScreen.classList.remove('hidden'); updateHud();
+  }
+  function reset(){
+    score=0; errors=0; totalLinks=0; current=0; route=[]; timeLeft=240; over=false; started=false; timerAcc=0;
+    cursor={x:450,y:280}; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+    setMsg('Press Start to begin charting the sky.'); updateHud();
+  }
+  function startGame(){
+    audio(); started=true; over=false; score=0; errors=0; totalLinks=0; current=0; route=[]; timeLeft=240; timerAcc=0;
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    setMsg('Find the first star of The Sail.'); updateHud(); beep(523,0.2,'triangle',0.08);
+  }
+
+  function toCanvas(e){
+    var r=canvas.getBoundingClientRect();
+    var cx=(e.clientX!==undefined?e.clientX:(e.touches&&e.touches[0]?e.touches[0].clientX:0));
+    var cy=(e.clientY!==undefined?e.clientY:(e.touches&&e.touches[0]?e.touches[0].clientY:0));
+    return {x:(cx-r.left)*(canvas.width/r.width), y:(cy-r.top)*(canvas.height/r.height)};
+  }
+  canvas.addEventListener('click', function(e){ var p=toCanvas(e); cursor=p; selectStar(findStar(p.x,p.y)); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); var p=toCanvas(e); cursor=p; selectStar(findStar(p.x,p.y)); }, {passive:false});
+  canvas.addEventListener('mousemove', function(e){ cursor=toCanvas(e); });
+  document.addEventListener('keydown', function(e){
+    var k=e.key.toLowerCase();
+    if(k==='r'){ reset(); startGame(); return; }
+    if(!started||over) return;
+    var step=22;
+    if(k==='arrowleft'||k==='a') cursor.x=Math.max(10,cursor.x-step);
+    else if(k==='arrowright'||k==='d') cursor.x=Math.min(890,cursor.x+step);
+    else if(k==='arrowup'||k==='w') cursor.y=Math.max(10,cursor.y-step);
+    else if(k==='arrowdown'||k==='s') cursor.y=Math.min(550,cursor.y+step);
+    else if(k==='enter'||k===' '){ e.preventDefault(); selectStar(findStar(cursor.x,cursor.y)); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', reset);
+  document.getElementById('howBtn').addEventListener('click', function(){ var t=document.getElementById('howText'); t.style.display=t.style.display==='none'?'block':'none'; });
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // background stars
+    for(var i=0;i<90;i++){
+      var bx=(i*97)%900, by=(i*57)%560;
+      ctx.globalAlpha=0.25+0.25*Math.sin(twinkle+i);
+      ctx.fillStyle='#cfe4ff'; ctx.beginPath(); ctx.arc(bx,by,1.4,0,Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    // completed routes
+    for(var ci=0;ci<current;ci++){
+      var cc=constellations[ci]; ctx.strokeStyle='#34d399'; ctx.lineWidth=3; ctx.beginPath();
+      cc.points.forEach(function(p,pi){ if(pi===0) ctx.moveTo(p[0],p[1]); else ctx.lineTo(p[0],p[1]); }); ctx.stroke();
+    }
+    // current route
+    if(started && !over && route.length>1){
+      ctx.strokeStyle='#ffd166'; ctx.lineWidth=3; ctx.beginPath();
+      route.forEach(function(s,idx){ if(idx===0) ctx.moveTo(s.x,s.y); else ctx.lineTo(s.x,s.y); }); ctx.stroke();
+    }
+    // stars
+    stars.forEach(function(s){
+      var isDone=s.c!==-1 && s.c<current;
+      var isRoute=route.indexOf(s)!==-1;
+      var exp=expectedStar();
+      var isNext=started && !over && exp && s.c===current && Math.abs(s.x-exp.x)<1 && Math.abs(s.y-exp.y)<1;
+      var pulse=isNext? (1+0.35*Math.sin(twinkle*4)) : 1;
+      ctx.fillStyle=isDone?'#34d399':(isRoute?'#ffd166':(s.c===-1?'#8ea6cc':'#eaf2ff'));
+      ctx.beginPath(); ctx.arc(s.x,s.y,s.r*pulse,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=isNext?'#ffd166':'rgba(255,255,255,.35)'; ctx.lineWidth=isNext?3:1; ctx.stroke();
+      if(isRoute){ ctx.fillStyle='#0b1226'; ctx.font='bold 11px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(route.indexOf(s)+1),s.x,s.y); }
+    });
+    // keyboard cursor
+    if(started && !over){
+      ctx.strokeStyle='#ffd166'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(cursor.x,cursor.y,20,0,Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cursor.x-26,cursor.y); ctx.lineTo(cursor.x-14,cursor.y); ctx.moveTo(cursor.x+14,cursor.y); ctx.lineTo(cursor.x+26,cursor.y); ctx.moveTo(cursor.x,cursor.y-26); ctx.lineTo(cursor.x,cursor.y-14); ctx.moveTo(cursor.x,cursor.y+14); ctx.lineTo(cursor.x,cursor.y+26); ctx.stroke();
+    }
+    // faint constellation name labels for completed / current
+    ctx.font='700 13px system-ui'; ctx.textAlign='left';
+    constellations.forEach(function(c,idx){
+      if(idx<=current){ ctx.fillStyle=idx<current?'#34d399':'#ffd166'; ctx.fillText(c.name, c.points[0][0]+16, c.points[0][1]-14); }
+    });
+  }
+  function loop(ts){
+    requestAnimationFrame(loop);
+    var dt=lastTime?Math.min(0.1,(ts-lastTime)/1000):0; lastTime=ts; twinkle+=dt;
+    if(started && !over){
+      timerAcc+=dt;
+      if(timerAcc>=1){ timerAcc-=1; timeLeft-=1; if(timeLeft<=0){ timeLeft=0; endGame(false,'The night ended before the route was finished.'); } updateHud(); }
+    }
+    draw();
+  }
+  updateHud(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

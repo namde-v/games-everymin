@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lightning Locksmith</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; background: #070b1a; color: #eaf2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 12px; }
+  h1 { margin: 6px 0 2px; font-size: 28px; letter-spacing: 1px; color: #ffe066; text-shadow: 0 0 18px rgba(255,224,102,.55); text-align: center; }
+  p.tag { margin: 0 0 10px; color: #9fb6e8; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 8px 0; width: 100%; max-width: 560px; }
+  .pill { background: #131e3d; border: 1px solid #2a3f74; border-radius: 999px; padding: 7px 12px; font-weight: 700; font-size: 14px; }
+  .pill b { color: #ffe066; }
+  #wrap { position: relative; width: 100%; max-width: 560px; }
+  canvas { display: block; width: 100%; height: auto; background: #0b1330; border: 2px solid #2a3f74; border-radius: 14px; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; background: rgba(4,8,22,.92); border-radius: 14px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0 0 8px; font-size: 30px; color: #ffe066; }
+  .overlay p { max-width: 430px; line-height: 1.55; color: #cdd9f5; }
+  .overlay ul { text-align: left; color: #cdd9f5; line-height: 1.6; }
+  button { background: #ffd23f; color: #111827; border: 0; border-radius: 12px; padding: 13px 22px; font-size: 17px; font-weight: 800; cursor: pointer; margin: 6px; box-shadow: 0 4px 0 #b8930a; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #22355f; color: #fff; box-shadow: 0 4px 0 #101f3f; }
+  #msg { min-height: 24px; font-weight: 700; color: #7ef0b2; text-align: center; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+  .hint { color: #8fa3cc; font-size: 13px; text-align: center; max-width: 560px; line-height: 1.5; }
+  .big { font-size: 52px; margin: 0; }
+</style>
+</head>
+<body>
+<h1>⚡ Lightning Locksmith</h1>
+<p class="tag">Route the current. Pick every lock before your moves run out.</p>
+
+<div id="hud" aria-label="Game status">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Level: <b id="level">1 / 5</b></div>
+  <div class="pill">Moves left: <b id="moves">22</b></div>
+  <div class="pill">Locks: <b id="locks">0 / 1</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="600" height="500"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="big">🔌⚡🔒</div>
+    <h2>Lightning Locksmith</h2>
+    <p><strong>How to Play</strong></p>
+    <ul>
+      <li>Tap, click, or use arrow keys + Space to select and rotate a circuit tile.</li>
+      <li>Each rotation costs <strong>1 move</strong>. Source and lock tiles never rotate.</li>
+      <li>Connect a glowing path from the yellow lightning source to <strong>every</strong> lock on the board.</li>
+      <li>Finish the level before moves run out. Clear all 5 levels to WIN.</li>
+      <li>Straight, elbow, T and cross tiles carry current only where their wires point.</li>
+    </ul>
+    <button id="startBtn" type="button">▶ Start Game</button>
+    <button id="howBtn" type="button" class="secondary">How to Play Again</button>
+    <p class="hint">Keyboard: Arrows move the cursor, Space / Enter rotates, R restarts.<br>Mouse and touch work on every tile.</p>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <div class="big">🏆⚡</div>
+    <h2>YOU WIN!</h2>
+    <p id="winText">Master Locksmith! Every lock is open and the city hums with power.</p>
+    <button id="winRestart" type="button">↻ Play Again</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <div class="big">💥🔒</div>
+    <h2>GAME OVER</h2>
+    <p id="overText">Out of moves. The current fizzled before the last lock opened.</p>
+    <button id="overRestart" type="button">↻ Try Again</button>
+  </div>
+</div>
+
+<div id="msg">Press Start to begin.</div>
+<div id="controls">
+  <button id="restartBtn" type="button" class="secondary">↻ Restart</button>
+  <button id="soundBtn" type="button" class="secondary">🔊 Sound: On</button>
+</div>
+<p class="hint">Tip: start from the source and follow one wire at a time. A tile glows blue when current reaches it. A lock turns gold when it is powered.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 6, ROWS = 5, W = 600, H = 500, TW = 100, TH = 100;
+  var scoreEl = document.getElementById('score');
+  var levelEl = document.getElementById('level');
+  var movesEl = document.getElementById('moves');
+  var locksEl = document.getElementById('locks');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  // Directions as bit masks: N=1, E=2, S=4, W=8
+  var N = 1, E = 2, S = 4, Wd = 8;
+  var DX = { 1: 0, 2: 1, 4: 0, 8: -1 };
+  var DY = { 1: -1, 2: 0, 4: 1, 8: 0 };
+  var OPP = { 1: 4, 2: 8, 4: 1, 8: 2 };
+  var DIRS = [1, 2, 4, 8];
+
+  function rotateMask(mask) {
+    var out = 0;
+    if (mask & N) out |= E;
+    if (mask & E) out |= S;
+    if (mask & S) out |= Wd;
+    if (mask & Wd) out |= N;
+    return out;
+  }
+  function maskFromRot(base, rot) {
+    var m = base;
+    for (var i = 0; i < rot; i++) m = rotateMask(m);
+    return m;
+  }
+  function typeForMask(mask) {
+    if (mask === (N | S) || mask === (E | Wd)) return 'straight';
+    if (mask === (N | E | S | Wd)) return 'cross';
+    var count = 0, d;
+    for (var i = 0; i < DIRS.length; i++) if (mask & DIRS[i]) count++;
+    if (count === 3) return 'tee';
+    if (count === 2) return 'elbow';
+    return 'empty';
+  }
+
+  // Level definitions: source row, lock rows, move limit.
+  var LEVELS = [
+    { sourceRow: 2, lockRows: [0], moves: 22 },
+    { sourceRow: 2, lockRows: [4], moves: 22 },
+    { sourceRow: 2, lockRows: [0, 4], moves: 26 },
+    { sourceRow: 2, lockRows: [0, 4], moves: 26 },
+    { sourceRow: 2, lockRows: [0, 4], moves: 28 }
+  ];
+
+  var state = {
+    started: false, over: false, won: false, sound: true,
+    levelIndex: 0, score: 0, moves: 22, grid: [], locks: [],
+    source: null, cursor: { x: 1, y: 2 }, powered: {}, selected: null
+  };
+
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!state.sound || !audioCtx) return;
+    var t = audioCtx.currentTime + (when || 0);
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function zapSound() {
+    if (!state.sound || !audioCtx) return;
+    var t = audioCtx.currentTime;
+    var o = audioCtx.createOscillator(); var g = audioCtx.createGain();
+    o.type = 'sawtooth'; o.frequency.setValueAtTime(900, t);
+    o.frequency.exponentialRampToValueAtTime(120, t + 0.18);
+    g.gain.setValueAtTime(0.10, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t + 0.22);
+  }
+  function winSound() { [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 'triangle', 0.14, i * 0.12); }); }
+  function loseSound() { [392, 330, 262, 196].forEach(function (f, i) { tone(f, 0.25, 'sawtooth', 0.08, i * 0.14); }); }
+
+  function buildLevel(index) {
+    var def = LEVELS[index];
+    var grid = [];
+    for (var y = 0; y < ROWS; y++) {
+      grid[y] = [];
+      for (var x = 0; x < COLS; x++) grid[y][x] = { kind: 'empty', base: 0, rot: 0, mask: 0, fixed: false };
+    }
+    // Build a tree: trunk east from source, then branches to each lock.
+    var sr = def.sourceRow;
+    var pathMask = {};
+    function key(x, y) { return x + ',' + y; }
+    function addConn(x, y, dir) {
+      var k = key(x, y);
+      pathMask[k] = (pathMask[k] || 0) | dir;
+    }
+    function segment(x1, y1, x2, y2) {
+      var x = x1, y = y1;
+      while (x !== x2 || y !== y2) {
+        var nx = x, ny = y;
+        if (x < x2) nx++; else if (x > x2) nx--;
+        else if (y < y2) ny++; else if (y > y2) ny--;
+        var dir = (nx > x) ? E : (nx < x) ? Wd : (ny > y) ? S : N;
+        addConn(x, y, dir); addConn(nx, ny, OPP[dir]);
+        x = nx; y = ny;
+      }
+    }
+    // Trunk to junction column 3.
+    segment(0, sr, 3, sr);
+    def.lockRows.forEach(function (lr) {
+      segment(3, sr, 3, lr);
+      segment(3, lr, 5, lr);
+    });
+    // Source and locks are fixed.
+    grid[sr][0] = { kind: 'source', base: E, rot: 0, mask: E, fixed: true };
+    def.lockRows.forEach(function (lr) {
+      grid[lr][5] = { kind: 'lock', base: Wd, rot: 0, mask: Wd, fixed: true };
+    });
+    // Path cells get their solution mask and type.
+    Object.keys(pathMask).forEach(function (k) {
+      var parts = k.split(','); var x = +parts[0], y = +parts[1];
+      if (grid[y][x].fixed) return;
+      var mask = pathMask[k];
+      var kind = typeForMask(mask);
+      var base = mask, rot = 0;
+      // Find a base + rotation that reproduces the mask.
+      var bases = { straight: [N | S, E | Wd], elbow: [N | E, E | S, S | Wd, Wd | N], tee: [N | E | S, E | S | Wd, S | Wd | N, Wd | N | E], cross: [N | E | S | Wd] };
+      var found = false;
+      (bases[kind] || [mask]).forEach(function (b) {
+        for (var r = 0; r < 4 && !found; r++) { if (maskFromRot(b, r) === mask) { base = b; rot = r; found = true; } }
+      });
+      grid[y][x] = { kind: kind, base: base, rot: rot, mask: mask, fixed: false, solutionRot: rot };
+    });
+    // Fill the rest with distractors.
+    var kinds = ['straight', 'elbow', 'tee', 'cross', 'empty'];
+    var kindBases = { straight: N | S, elbow: N | E, tee: N | E | S, cross: N | E | S | Wd, empty: 0 };
+    for (var yy = 0; yy < ROWS; yy++) {
+      for (var xx = 0; xx < COLS; xx++) {
+        var cell = grid[yy][xx];
+        if (cell.fixed || cell.solutionRot !== undefined) continue;
+        var kind = kinds[Math.floor(Math.random() * kinds.length)];
+        grid[yy][xx] = { kind: kind, base: kindBases[kind], rot: Math.floor(Math.random() * 4), mask: 0, fixed: false };
+        grid[yy][xx].mask = maskFromRot(grid[yy][xx].base, grid[yy][xx].rot);
+      }
+    }
+    // Scramble rotatable tiles until the board is not already solved.
+    function scramble() {
+      for (var y2 = 0; y2 < ROWS; y2++) {
+        for (var x2 = 0; x2 < COLS; x2++) {
+          var c = grid[y2][x2];
+          if (c.fixed) continue;
+          if (c.solutionRot !== undefined) {
+            var shift = 1 + Math.floor(Math.random() * 3);
+            c.rot = (c.solutionRot + shift) % 4;
+          } else {
+            c.rot = Math.floor(Math.random() * 4);
+          }
+          c.mask = maskFromRot(c.base, c.rot);
+        }
+      }
+    }
+    scramble();
+    state.grid = grid;
+    state.source = { x: 0, y: sr };
+    state.locks = def.lockRows.map(function (lr) { return { x: 5, y: lr }; });
+    state.moves = def.moves;
+    state.cursor = { x: 1, y: sr };
+    computePower();
+    var tries = 0;
+    while (allLocksPowered() && tries < 20) { scramble(); computePower(); tries++; }
+  }
+
+  function computePower() {
+    var powered = {};
+    var queue = [];
+    if (!state.source) return;
+    var sk = state.source.x + ',' + state.source.y;
+    powered[sk] = true; queue.push(state.source);
+    while (queue.length) {
+      var cur = queue.shift();
+      var cell = state.grid[cur.y][cur.x];
+      DIRS.forEach(function (dir) {
+        if (!(cell.mask & dir)) return;
+        var nx = cur.x + DX[dir], ny = cur.y + DY[dir];
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return;
+        var next = state.grid[ny][nx];
+        if (!(next.mask & OPP[dir])) return;
+        var nk = nx + ',' + ny;
+        if (!powered[nk]) { powered[nk] = true; queue.push({ x: nx, y: ny }); }
+      });
+    }
+    state.powered = powered;
+  }
+  function poweredCount() {
+    return state.locks.filter(function (l) { return state.powered[l.x + ',' + l.y]; }).length;
+  }
+  function allLocksPowered() { return state.locks.length > 0 && poweredCount() === state.locks.length; }
+
+  function updateHud(status) {
+    scoreEl.textContent = state.score;
+    levelEl.textContent = (state.levelIndex + 1) + ' / ' + LEVELS.length;
+    movesEl.textContent = state.moves;
+    locksEl.textContent = poweredCount() + ' / ' + state.locks.length;
+    statusEl.textContent = status || (state.started ? 'Playing' : 'Ready');
+  }
+
+  function rotateCell(x, y) {
+    if (!state.started || state.over || state.won) return;
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
+    var cell = state.grid[y][x];
+    if (cell.fixed) { msgEl.textContent = 'That tile is fixed — rotate a wire tile instead.'; tone(180, 0.1, 'square', 0.06); return; }
+    if (state.moves <= 0) return;
+    cell.rot = (cell.rot + 1) % 4;
+    cell.mask = maskFromRot(cell.base, cell.rot);
+    state.moves--;
+    zapSound();
+    computePower();
+    state.cursor = { x: x, y: y };
+    checkEnd();
+    updateHud();
+  }
+
+  function checkEnd() {
+    if (allLocksPowered()) {
+      var bonus = 100 + state.moves * 10;
+      state.score += bonus;
+      if (state.levelIndex >= LEVELS.length - 1) {
+        state.won = true; state.over = true;
+        winScreen.classList.remove('hidden');
+        document.getElementById('winText').textContent = 'Master Locksmith! Final score: ' + state.score + ' points. Every lock is open.';
+        winSound(); updateHud('WIN!');
+        msgEl.textContent = 'All locks open — you win!';
+      } else {
+        msgEl.textContent = 'Lock picked! +' + bonus + ' points. Next level…';
+        winSound();
+        state.levelIndex++;
+        setTimeout(function () { if (!state.over) { buildLevel(state.levelIndex); updateHud(); msgEl.textContent = 'Level ' + (state.levelIndex + 1) + ': power every lock!'; } }, 900);
+      }
+      return;
+    }
+    if (state.moves <= 0) {
+      state.over = true;
+      overScreen.classList.remove('hidden');
+      document.getElementById('overText').textContent = 'Out of moves on level ' + (state.levelIndex + 1) + '. Final score: ' + state.score + '.';
+      loseSound(); updateHud('Game Over');
+      msgEl.textContent = 'Game over — press Restart to try again.';
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    state.started = true; state.over = false; state.won = false;
+    state.levelIndex = 0; state.score = 0;
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+    buildLevel(0);
+    updateHud('Playing');
+    msgEl.textContent = 'Level 1: rotate tiles to light every lock!';
+    tone(523, 0.15, 'triangle', 0.12); tone(784, 0.2, 'triangle', 0.12, 0.12);
+  }
+
+  function cellFromEvent(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var clientX = evt.clientX, clientY = evt.clientY;
+    if (evt.touches && evt.touches.length) { clientX = evt.touches[0].clientX; clientY = evt.touches[0].clientY; }
+    var x = Math.floor((clientX - rect.left) / rect.width * COLS);
+    var y = Math.floor((clientY - rect.top) / rect.height * ROWS);
+    return { x: x, y: y };
+  }
+
+  canvas.addEventListener('click', function (evt) {
+    if (!state.started) return;
+    var c = cellFromEvent(evt);
+    rotateCell(c.x, c.y);
+  });
+  canvas.addEventListener('touchstart', function (evt) {
+    evt.preventDefault();
+    if (!state.started) return;
+    var c = cellFromEvent(evt);
+    rotateCell(c.x, c.y);
+  }, { passive: false });
+  canvas.addEventListener('mousemove', function (evt) {
+    var c = cellFromEvent(evt);
+    if (c.x >= 0 && c.x < COLS && c.y >= 0 && c.y < ROWS) state.cursor = c;
+  });
+
+  document.addEventListener('keydown', function (evt) {
+    if (!state.started || state.over) {
+      if (evt.key === 'Enter' && !state.started) startGame();
+      if ((evt.key === 'r' || evt.key === 'R') && state.over) startGame();
+      return;
+    }
+    var c = state.cursor;
+    if (evt.key === 'ArrowLeft') c.x = Math.max(0, c.x - 1);
+    else if (evt.key === 'ArrowRight') c.x = Math.min(COLS - 1, c.x + 1);
+    else if (evt.key === 'ArrowUp') c.y = Math.max(0, c.y - 1);
+    else if (evt.key === 'ArrowDown') c.y = Math.min(ROWS - 1, c.y + 1);
+    else if (evt.key === ' ' || evt.key === 'Enter') { evt.preventDefault(); rotateCell(c.x, c.y); }
+    else if (evt.key === 'r' || evt.key === 'R') startGame();
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestart').addEventListener('click', startGame);
+  document.getElementById('overRestart').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function () {
+    msgEl.textContent = 'Rotate wire tiles so current flows from source to every lock before moves run out.';
+    tone(660, 0.12, 'triangle', 0.1);
+  });
+  document.getElementById('soundBtn').addEventListener('click', function (evt) {
+    state.sound = !state.sound;
+    evt.target.textContent = state.sound ? '🔊 Sound: On' : '🔇 Sound: Off';
+    if (state.sound) ensureAudio();
+  });
+
+  function drawTile(x, y, cell, time) {
+    var px = x * TW, py = y * TH;
+    var isPowered = !!state.powered[x + ',' + y];
+    var isCursor = state.started && !state.over && state.cursor.x === x && state.cursor.y === y;
+    ctx.fillStyle = isPowered ? '#122a55' : '#0e1834';
+    ctx.fillRect(px + 2, py + 2, TW - 4, TH - 4);
+    ctx.strokeStyle = isCursor ? '#ffe066' : '#24365f';
+    ctx.lineWidth = isCursor ? 4 : 1;
+    ctx.strokeRect(px + 2, py + 2, TW - 4, TH - 4);
+    var cx = px + TW / 2, cy = py + TH / 2;
+    ctx.strokeStyle = isPowered ? '#ffe066' : '#4a6bb5';
+    ctx.lineWidth = isPowered ? 7 : 5;
+    ctx.lineCap = 'round';
+    ctx.shadowColor = isPowered ? '#ffd23f' : 'transparent';
+    ctx.shadowBlur = isPowered ? 14 : 0;
+    ctx.beginPath();
+    if (cell.mask & N) { ctx.moveTo(cx, cy); ctx.lineTo(cx, py + 6); }
+    if (cell.mask & E) { ctx.moveTo(cx, cy); ctx.lineTo(px + TW - 6, cy); }
+    if (cell.mask & S) { ctx.moveTo(cx, cy); ctx.lineTo(cx, py + TH - 6); }
+    if (cell.mask & Wd) { ctx.moveTo(cx, cy); ctx.lineTo(px + 6, cy); }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    if (cell.kind === 'source') {
+      ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.arc(cx, cy, 24, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#111827'; ctx.font = 'bold 26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⚡', cx, cy + 1);
+      ctx.fillStyle = '#ffe066'; ctx.font = 'bold 11px sans-serif'; ctx.fillText('SOURCE', cx, py + TH - 12);
+    } else if (cell.kind === 'lock') {
+      ctx.fillStyle = isPowered ? '#ffd23f' : '#7a5b12';
+      ctx.beginPath(); ctx.arc(cx, cy, 24, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = isPowered ? '#111827' : '#ffe9a8'; ctx.font = 'bold 26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(isPowered ? '🔓' : '🔒', cx, cy + 1);
+      ctx.fillStyle = isPowered ? '#ffe066' : '#9fb6e8'; ctx.font = 'bold 11px sans-serif'; ctx.fillText('LOCK', cx, py + TH - 12);
+    } else if (cell.kind !== 'empty') {
+      ctx.fillStyle = isPowered ? '#ffe066' : '#33487e';
+      ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2); ctx.fill();
+    }
+    if (isPowered) {
+      var pulse = 0.5 + 0.5 * Math.sin(time / 180 + x + y);
+      ctx.fillStyle = 'rgba(255,224,102,' + (0.12 + pulse * 0.12) + ')';
+      ctx.fillRect(px + 2, py + 2, TW - 4, TH - 4);
+    }
+  }
+
+  function draw(time) {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0b1330'; ctx.fillRect(0, 0, W, H);
+    if (state.grid.length) {
+      for (var y = 0; y < ROWS; y++) {
+        for (var x = 0; x < COLS; x++) drawTile(x, y, state.grid[y][x], time);
+      }
+    } else {
+      ctx.fillStyle = '#9fb6e8'; ctx.font = '20px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to power the board', W / 2, H / 2);
+    }
+    if (state.started && !state.over) {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillRect(state.cursor.x * TW, state.cursor.y * TH, TW, 3);
+    }
+    requestAnimationFrame(draw);
+  }
+
+  buildLevel(0);
+  state.started = false;
+  state.grid = [];
+  updateHud('Ready');
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

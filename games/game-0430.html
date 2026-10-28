@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Timber Trapper</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#12251a;color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px}
+h1{font-size:28px;letter-spacing:1px;color:#ffd166;margin:6px 0 2px;text-shadow:2px 2px 0 #1a3a24}
+.sub{color:#cfe8d0;font-size:13px;margin-bottom:8px}
+#hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:920px;margin-bottom:8px}
+.pill{background:#1e3d2a;border:2px solid #3f7a4e;border-radius:20px;padding:6px 12px;font-weight:bold;font-size:14px}
+.pill b{color:#ffd166}
+#wrap{position:relative;width:100%;max-width:920px}
+canvas{display:block;width:100%;height:auto;background:#2e6b34;border:4px solid #7a4a22;border-radius:12px;touch-action:none;cursor:crosshair}
+.overlay{position:absolute;inset:0;background:rgba(10,25,14,.92);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:10px}
+.overlay.hidden{display:none}
+.overlay h2{font-size:34px;color:#ffd166}
+.overlay p{max-width:560px;line-height:1.5;color:#e8f5e9;font-size:15px}
+button{background:#ffb703;color:#222;border:0;border-radius:10px;padding:12px 22px;font-size:17px;font-weight:bold;cursor:pointer;box-shadow:0 4px 0 #a66a00}
+button:hover{background:#ffd166}
+button:active{transform:translateY(2px);box-shadow:0 2px 0 #a66a00}
+#toolbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px;width:100%;max-width:920px}
+.trapbtn{background:#244d31;color:#fff;border:2px solid #5aa469;border-radius:10px;padding:10px 12px;font-size:14px;cursor:pointer}
+.trapbtn.sel{background:#ffd166;color:#222;border-color:#fff;font-weight:bold}
+.trapbtn small{display:block;font-weight:normal;opacity:.9}
+#msg{margin-top:8px;min-height:20px;color:#ffd166;font-weight:bold;text-align:center}
+.how{background:#1e3d2a;border:1px solid #5aa469;border-radius:10px;padding:12px;text-align:left;max-width:580px;font-size:14px;line-height:1.55}
+.how b{color:#ffd166}
+kbd{background:#000;padding:1px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>🪵 Timber Trapper</h1>
+<div class="sub">Set traps along the forest trail. Stop every critter before it reaches the cabin!</div>
+<div id="hud">
+<div class="pill">Wave: <b id="wave">0 / 8</b></div>
+<div class="pill">Score: <b id="score">0</b></div>
+<div class="pill">Cabin ❤️: <b id="lives">10</b></div>
+<div class="pill">Gold: <b id="gold">120</b></div>
+<div class="pill">Status: <b id="status">Build traps!</b></div>
+</div>
+<div id="wrap">
+<canvas id="game" width="900" height="560"></canvas>
+<div id="title" class="overlay">
+<h2>Timber Trapper</h2>
+<p>The critters are marching down the forest trail toward your cabin. Lay snares, spikes and log traps in the grass beside the trail — then send the wave!</p>
+<div class="how"><b>How to Play:</b><br>
+• Pick a trap below (or press <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>), then tap / click the grass near the trail to place it.<br>
+• Press <kbd>Space</kbd> or <b>Send Wave</b> to start the next wave. Traps fire automatically when critters wander into range.<br>
+• Snare slows critters, Spike deals sharp damage, Log Drop smashes a wide area.<br>
+• Earn gold for each critter stopped. Survive all 8 waves to WIN. If 10 critters reach the cabin, it is Game Over.<br>
+• <kbd>R</kbd> restarts instantly. <kbd>P</kbd> pauses.</div>
+<button id="startBtn">▶ Start Game</button>
+</div>
+<div id="end" class="overlay hidden">
+<h2 id="endTitle">You Win!</h2>
+<p id="endText"></p>
+<button id="restartBtn">↻ Play Again</button>
+</div>
+</div>
+<div id="toolbar">
+<button class="trapbtn sel" data-trap="snare">🪢 Snare — 25g<small>Slows critters</small></button>
+<button class="trapbtn" data-trap="spike">🔱 Spike — 40g<small>Fast damage</small></button>
+<button class="trapbtn" data-trap="log">🪵 Log Drop — 70g<small>Big area smash</small></button>
+<button id="waveBtn">🌊 Send Wave (Space)</button>
+<button id="pauseBtn">⏸ Pause (P)</button>
+</div>
+<div id="msg">Pick a trap, then click or tap the grass beside the trail.</div>
+<script>
+const cv=document.getElementById('game'),ctx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+let audioCtx=null;
+function beep(f,d=0.12,type='square',v=0.08){
+  if(!audioCtx) return;
+  try{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type;o.frequency.value=f;g.gain.value=v;o.connect(g);g.connect(audioCtx.destination);o.start();g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.stop(audioCtx.currentTime+d);}catch(e){}
+}
+function initAudio(){if(!audioCtx){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}} if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();}
+const PATH=[{x:-20,y:90},{x:180,y:90},{x:180,y:260},{x:420,y:260},{x:420,y:110},{x:660,y:110},{x:660,y:400},{x:880,y:400}];
+const CABIN={x:830,y:400};
+let traps=[],critters=[],particles=[],gold=120,score=0,lives=10,wave=0,totalWaves=8,selected='snare',running=false,paused=false,over=false,spawnQueue=[],spawnTimer=0,waveActive=false,frame=0;
+const COST={snare:25,spike:40,log:70};
+const TRAPDEF={snare:{range:70,dmg:4,cool:28,slow:0.45},spike:{range:60,dmg:16,cool:38,slow:0},log:{range:90,dmg:34,cool:70,slow:0.2}};
+const TYPES={squirrel:{hp:22,speed:1.7,score:20,gold:12,color:'#c98a4b',r:11,label:'🐿'},raccoon:{hp:48,speed:1.15,score:35,gold:20,color:'#8a8a96',r:15,label:'🦝'},boar:{hp:95,speed:0.8,score:60,gold:32,color:'#7a5a3a',r:19,label:'🐗'},fox:{hp:65,speed:1.45,score:50,gold:26,color:'#e07a2c',r:15,label:'🦊'}};
+function distToPath(x,y){let m=999;for(let i=0;i<PATH.length-1;i++){const a=PATH[i],b=PATH[i+1];const dx=b.x-a.x,dy=b.y-a.y;const L=dx*dx+dy*dy;let t=L?((x-a.x)*dx+(y-a.y)*dy)/L:0;t=Math.max(0,Math.min(1,t));const px=a.x+t*dx,py=a.y+t*dy;m=Math.min(m,Math.hypot(x-px,y-py));}return m;}
+function updateHUD(){$('wave').textContent=wave+' / '+totalWaves;$('score').textContent=score;$('lives').textContent=lives;$('gold').textContent=gold;$('status').textContent=over?'Game Over':(waveActive?'Wave '+wave+' in progress!':(wave===0?'Build traps!':'Ready — send wave '+(wave+1)));}
+function setMsg(t){$('msg').textContent=t;}
+function placeTrap(x,y){
+  if(over||paused) return;
+  if(distToPath(x,y)<38){setMsg('Too close to the trail centre — place traps in the grass beside it!');beep(140,0.15,'sawtooth');return;}
+  if(x>760&&y>330){setMsg('That is the cabin! Guard it, do not trap it.');return;}
+  const c=COST[selected];
+  if(gold<c){setMsg('Not enough gold! Stop critters to earn more.');beep(140,0.2,'sawtooth');return;}
+  if(traps.some(t=>Math.hypot(t.x-x,t.y-y)<28)){setMsg('A trap is already there.');return;}
+  gold-=c;traps.push({x,y,kind:selected,cool:0});beep(520,0.12,'triangle',0.12);setMsg(selected.toUpperCase()+' trap set! Press Space to send a wave.');updateHUD();
+}
+function startWave(){
+  if(over||waveActive) return;
+  if(wave>=totalWaves) return;
+  wave++;waveActive=true;spawnQueue=[];
+  const n=5+wave*2;
+  const pool=wave<2?['squirrel']:wave<4?['squirrel','raccoon']:wave<6?['squirrel','raccoon','fox']:['squirrel','raccoon','fox','boar'];
+  for(let i=0;i<n;i++) spawnQueue.push(pool[Math.floor(Math.random()*pool.length)]);
+  spawnTimer=0;setMsg('Wave '+wave+' incoming!');beep(330,0.2,'square',0.1);updateHUD();
+}
+function spawnCritter(kind){
+  const d=TYPES[kind];const hp=d.hp+wave*4;
+  critters.push({kind,x:PATH[0].x,y:PATH[0].y,seg:0,t:0,hp,max:hp,speed:d.speed*(0.95+Math.random()*0.2),slow:0,slowT:0,score:d.score,gold:d.gold,color:d.color,r:d.r,label:d.label});
+}
+function burst(x,y,col,n=10){for(let i=0;i<n;i++)particles.push({x,y,vx:(Math.random()-0.5)*4,vy:(Math.random()-0.5)*4,life:22,col});}
+function endGame(win){
+  over=true;running=false;waveActive=false;
+  $('endTitle').textContent=win?'🏆 YOU WIN!':'💥 GAME OVER';
+  $('endText').textContent=win?('The cabin is safe! You survived all '+totalWaves+' waves. Final score: '+score+'.'):('The cabin was overrun on wave '+wave+'. Final score: '+score+'. Try a new trap layout!');
+  $('end').classList.remove('hidden');updateHUD();beep(win?880:160,0.5,win?'triangle':'sawtooth',0.12);
+}
+function resetGame(){
+  traps=[];critters=[];particles=[];gold=120;score=0;lives=10;wave=0;over=false;paused=false;waveActive=false;spawnQueue=[];
+  $('end').classList.add('hidden');$('title').classList.add('hidden');running=true;updateHUD();setMsg('Pick a trap, then click or tap the grass beside the trail.');
+}
+function stepCritter(c){
+  const speed=c.speed*(c.slowT>0?c.slow:1);
+  if(c.slowT>0)c.slowT--;
+  let remain=speed;
+  while(remain>0&&c.seg<PATH.length-1){
+    const a=PATH[c.seg],b=PATH[c.seg+1];const dx=b.x-a.x,dy=b.y-a.y;const len=Math.hypot(dx,dy);
+    const step=Math.min(remain,len-c.t);c.t+=step;remain-=step;
+    c.x=a.x+dx*(c.t/len);c.y=a.y+dy*(c.t/len);
+    if(c.t>=len){c.seg++;c.t=0;}
+  }
+  return c.seg>=PATH.length-1;
+}
+function update(){
+  if(!running||paused||over) return;
+  frame++;
+  if(waveActive){
+    if(spawnQueue.length&&spawnTimer<=0){spawnCritter(spawnQueue.shift());spawnTimer=55;}
+    if(spawnTimer>0)spawnTimer--;
+    for(const t of traps){if(t.cool>0)t.cool--;const def=TRAPDEF[t.kind];if(t.cool<=0){const target=critters.find(c=>Math.hypot(c.x-t.x,c.y-t.y)<def.range);if(target){t.cool=def.cool;if(t.kind==='log'){for(const c of critters){if(Math.hypot(c.x-t.x,c.y-t.y)<def.range){c.hp-=def.dmg;c.slow=0.6;c.slowT=40;burst(c.x,c.y,'#ffd166',6);}}beep(180,0.25,'sawtooth',0.12);}else{target.hp-=def.dmg;if(def.slow){target.slow=def.slow;target.slowT=50;}burst(target.x,target.y,'#ff6b6b',6);beep(700,0.08,'square',0.06);}}}}
+    for(let i=critters.length-1;i>=0;i--){const c=critters[i];const reached=stepCritter(c);if(c.hp<=0){score+=c.score;gold+=c.gold;burst(c.x,c.y,'#ffd166',12);critters.splice(i,1);beep(900,0.1,'triangle',0.08);continue;}if(reached){lives--;burst(CABIN.x,CABIN.y,'#ff4444',14);critters.splice(i,1);beep(180,0.3,'sawtooth',0.12);if(lives<=0){updateHUD();endGame(false);return;}}}
+    if(!spawnQueue.length&&!critters.length){waveActive=false;gold+=25;setMsg('Wave '+wave+' cleared! +25g bonus. Build more traps, then send the next wave.');beep(660,0.2,'triangle',0.1);if(wave>=totalWaves){updateHUD();endGame(true);return;}}
+  }
+  for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx;p.y+=p.vy;p.life--;if(p.life<=0)particles.splice(i,1);}
+  updateHUD();
+}
+function draw(){
+  ctx.clearRect(0,0,900,560);
+  ctx.fillStyle='#2e6b34';ctx.fillRect(0,0,900,560);
+  ctx.fillStyle='#3d8a43';for(let i=0;i<40;i++){const x=(i*173)%900,y=(i*271)%560;ctx.beginPath();ctx.arc(x,y,4,0,7);ctx.fill();}
+  ctx.strokeStyle='#d9b380';ctx.lineWidth=34;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(PATH[0].x,PATH[0].y);for(const p of PATH)ctx.lineTo(p.x,p.y);ctx.stroke();
+  ctx.strokeStyle='#a67c52';ctx.lineWidth=2;ctx.setLineDash([8,10]);ctx.beginPath();ctx.moveTo(PATH[0].x,PATH[0].y);for(const p of PATH)ctx.lineTo(p.x,p.y);ctx.stroke();ctx.setLineDash([]);
+  for(const t of traps){ctx.globalAlpha=0.18;ctx.fillStyle='#ffd166';ctx.beginPath();ctx.arc(t.x,t.y,TRAPDEF[t.kind].range,0,7);ctx.fill();ctx.globalAlpha=1;ctx.font='28px serif';ctx.textAlign='center';ctx.fillText(t.kind==='snare'?'🪢':t.kind==='spike'?'🔱':'🪵',t.x,t.y+10);ctx.fillStyle='#fff';ctx.font='bold 10px Arial';ctx.fillText(t.kind.toUpperCase(),t.x,t.y+26);}
+  ctx.font='44px serif';ctx.textAlign='center';ctx.fillText('🏡',CABIN.x,CABIN.y+16);
+  ctx.fillStyle='#fff';ctx.font='bold 12px Arial';ctx.fillText('CABIN',CABIN.x,CABIN.y+36);
+  for(const c of critters){ctx.font=(c.r*2)+'px serif';ctx.fillText(c.label,c.x,c.y+8);ctx.fillStyle='#000';ctx.fillRect(c.x-18,c.y-c.r-14,36,6);ctx.fillStyle=c.hp>c.max*0.4?'#4ade80':'#ef4444';ctx.fillRect(c.x-18,c.y-c.r-14,36*Math.max(0,c.hp/c.max),6);}
+  for(const p of particles){ctx.fillStyle=p.col;ctx.fillRect(p.x,p.y,4,4);}
+  if(!waveActive&&!over){ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(280,500,340,34);ctx.fillStyle='#fff';ctx.font='bold 15px Arial';ctx.fillText('Click grass to place a trap, then Send Wave',450,522);}
+}
+function loop(){update();draw();requestAnimationFrame(loop);}
+function canvasPos(e){const r=cv.getBoundingClientRect();const cx=(e.touches?e.touches[0].clientX:e.clientX);const cy=(e.touches?e.touches[0].clientY:e.clientY);return{x:(cx-r.left)*900/r.width,y:(cy-r.top)*560/r.height};}
+cv.addEventListener('click',e=>{initAudio();const p=canvasPos(e);placeTrap(p.x,p.y);});
+cv.addEventListener('touchstart',e=>{e.preventDefault();initAudio();const p=canvasPos(e);placeTrap(p.x,p.y);},{passive:false});
+document.addEventListener('keydown',e=>{
+  if(e.key==='1'||e.key==='2'||e.key==='3'){initAudio();selected=['snare','spike','log'][+e.key-1];document.querySelectorAll('.trapbtn').forEach(b=>b.classList.toggle('sel',b.dataset.trap===selected));setMsg(selected+' selected. Click grass to place it.');}
+  if(e.code==='Space'){e.preventDefault();initAudio();if(!running)resetGame();else startWave();}
+  if(e.key==='r'||e.key==='R'){initAudio();resetGame();}
+  if(e.key==='p'||e.key==='P'){paused=!paused;setMsg(paused?'Paused — press P to resume.':'Resumed.');}
+});
+document.querySelectorAll('.trapbtn').forEach(b=>b.addEventListener('click',()=>{initAudio();selected=b.dataset.trap;document.querySelectorAll('.trapbtn').forEach(x=>x.classList.toggle('sel',x===b));}));
+$('waveBtn').addEventListener('click',()=>{initAudio();if(!running)resetGame();else startWave();});
+$('pauseBtn').addEventListener('click',()=>{paused=!paused;setMsg(paused?'Paused.':'Resumed.');});
+$('startBtn').addEventListener('click',()=>{initAudio();resetGame();beep(660,0.2,'triangle',0.1);});
+$('restartBtn').addEventListener('click',()=>{initAudio();resetGame();});
+updateHUD();loop();
+</script>
+</body>
+</html>
