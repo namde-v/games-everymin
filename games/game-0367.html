@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Assembly Archon</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #10141c; color: #e8ecf4; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 26px; letter-spacing: 2px; margin: 6px 0 2px; color: #ffd166; text-shadow: 0 2px 0 #000; }
+  .sub { font-size: 13px; color: #9fb3d1; margin-bottom: 8px; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { display: block; width: 100%; height: auto; background: #1b2333; border: 3px solid #3a4a66; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(10,14,22,0.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd166; }
+  .overlay p { max-width: 560px; font-size: 15px; line-height: 1.55; color: #cdd8ea; }
+  .overlay .howto { background: #222f47; border: 1px solid #3a4a66; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  .overlay .howto b { color: #7ee0a3; }
+  button { cursor: pointer; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; background: #ffd166; color: #1a1200; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  button.small { padding: 8px 14px; font-size: 14px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 8px 0; font-size: 14px; font-weight: bold; }
+  #hud span { background: #222f47; border: 1px solid #3a4a66; border-radius: 8px; padding: 6px 10px; }
+  #controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 6px; }
+  #controls button { background: #2f6f8f; color: #fff; box-shadow: 0 4px 0 #1d455a; }
+  #msg { min-height: 20px; font-size: 14px; color: #7ee0a3; text-align: center; }
+  .note { font-size: 12px; color: #8fa3c0; text-align: center; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>ASSEMBLY ARCHON</h1>
+<div class="sub">Strategy / Workshop Assembly &mdash; Run the workbench, fill the quota!</div>
+
+<div id="hud">
+  <span id="hudScore">Score: 0</span>
+  <span id="hudDone">Orders Done: 0</span>
+  <span id="hudMissed">Orders Missed: 0</span>
+  <span id="hudQuota">Quota: 0 / 8</span>
+  <span id="hudTime">Time: 0s</span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>ASSEMBLY ARCHON</h2>
+    <p>Customers want gadgets, and they want them NOW. Read each order, grab parts from the bins, and build the gadget in the exact sequence shown before the order timer runs out.</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      &bull; The active order (top, highlighted) shows the part sequence it needs.<br>
+      &bull; <b>Click / tap</b> a part bin, or <b>drag</b> a part onto the assembly line, to add it.<br>
+      &bull; <b>Keys 1&ndash;6</b> add parts, <b>B</b> = backspace (remove last part), <b>R</b> = restock, <b>Enter</b> = ship / start.<br>
+      &bull; A wrong part buzzes and costs points. Stock is limited &mdash; restock when a bin runs low (it takes a few seconds).<br>
+      &bull; Complete a sequence to ship the order and earn points + a time bonus. Expired orders count as missed.<br>
+      &bull; <b>WIN:</b> complete 8 orders. <b>LOSE:</b> miss 3 orders.
+    </div>
+    <button id="startBtn">Start Game</button>
+    <p class="note">Sound starts only after you press Start. Fully offline &mdash; no downloads.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button class="small" id="restockBtn">Restock All (R)</button>
+  <button class="small" id="undoBtn">Undo Last Part (B)</button>
+  <button class="small" id="muteBtn">Sound: On</button>
+</div>
+<div id="msg">Press Start to begin your shift.</div>
+<div class="note">Mouse: click bins or drag parts to the line &middot; Touch: tap or drag &middot; Keyboard: 1&ndash;6, B, R, Enter</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var msgEl = document.getElementById('msg');
+
+  var PARTS = [
+    { id: 0, name: 'Gear',    color: '#f4a261', symbol: 'G', key: '1' },
+    { id: 1, name: 'Circuit', color: '#7ee0a3', symbol: 'C', key: '2' },
+    { id: 2, name: 'Battery', color: '#ffd166', symbol: 'B', key: '3' },
+    { id: 3, name: 'Casing',  color: '#8ecae6', symbol: 'S', key: '4' },
+    { id: 4, name: 'Lens',    color: '#e5989b', symbol: 'L', key: '5' },
+    { id: 5, name: 'Spring',  color: '#c77dff', symbol: 'P', key: '6' }
+  ];
+  var QUOTA = 8, MAX_MISSED = 3, MAX_QUEUE = 3;
+
+  var state = 'title'; // title | playing | over
+  var score = 0, done = 0, missed = 0, elapsed = 0, lastTs = 0;
+  var queue = [], built = [], stock = {}, restockTimer = 0, restockTotal = 0;
+  var flash = '', flashUntil = 0, dragPart = null, dragX = 0, dragY = 0;
+  var audioCtx = null, soundOn = true;
+
+  function initStock() {
+    stock = {};
+    for (var i = 0; i < PARTS.length; i++) stock[PARTS[i].id] = 5;
+  }
+  function randSeq(len) {
+    var s = [], used = {};
+    while (s.length < len) {
+      var p = Math.floor(Math.random() * PARTS.length);
+      if (!used[p] || Math.random() < 0.25) { s.push(p); used[p] = true; }
+    }
+    return s;
+  }
+  function newOrder() {
+    var len = 3 + Math.min(2, Math.floor(done / 3)) + (Math.random() < 0.4 ? 1 : 0);
+    if (len > 5) len = 5;
+    var names = ['Robo-Buddy', 'Turbo Drone', 'Glow Lamp', 'Pocket Radio', 'Mini Rover', 'Chirp Bot', 'Star Compass', 'Zap Blaster', 'Echo Speaker', 'Claw Grabber'];
+    return {
+      name: names[Math.floor(Math.random() * names.length)],
+      seq: randSeq(len),
+      timeLeft: 26 + Math.max(0, 14 - done),
+      maxTime: 26 + Math.max(0, 14 - done)
+    };
+  }
+  function reset() {
+    score = 0; done = 0; missed = 0; elapsed = 0; built = [];
+    restockTimer = 0; restockTotal = 0; flash = ''; dragPart = null;
+    initStock();
+    queue = [newOrder(), newOrder(), newOrder()];
+    updateHUD();
+    setMsg('New shift! Build the highlighted order first.');
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+  function updateHUD() {
+    document.getElementById('hudScore').textContent = 'Score: ' + score;
+    document.getElementById('hudDone').textContent = 'Orders Done: ' + done;
+    document.getElementById('hudMissed').textContent = 'Orders Missed: ' + missed;
+    document.getElementById('hudQuota').textContent = 'Quota: ' + done + ' / ' + QUOTA;
+    document.getElementById('hudTime').textContent = 'Time: ' + Math.floor(elapsed) + 's';
+  }
+
+  // ---------- Procedural audio (created only after user interaction) ----------
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (kind === 'pick') tone(520, 0.08, 'square', 0.10);
+    else if (kind === 'place') tone(660, 0.10, 'triangle', 0.14);
+    else if (kind === 'wrong') tone(140, 0.22, 'sawtooth', 0.14);
+    else if (kind === 'ship') { tone(523, 0.12, 'sine', 0.15); setTimeout(function () { tone(659, 0.12, 'sine', 0.15); }, 110); setTimeout(function () { tone(784, 0.2, 'sine', 0.15); }, 220); }
+    else if (kind === 'miss') { tone(220, 0.3, 'sawtooth', 0.14); setTimeout(function () { tone(160, 0.35, 'sawtooth', 0.12); }, 180); }
+    else if (kind === 'win') { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.25, 'triangle', 0.16); }, i * 150); }); }
+    else if (kind === 'restock') tone(880, 0.12, 'sine', 0.12);
+  }
+
+  // ---------- Game actions ----------
+  function activeOrder() { return queue[0]; }
+  function addPart(id) {
+    if (state !== 'playing') return;
+    var order = activeOrder();
+    if (!order) return;
+    if (stock[id] <= 0) { setMsg(PARTS[id].name + ' is out of stock! Press R to restock.'); sfx('wrong'); return; }
+    stock[id]--;
+    built.push(id);
+    sfx('place');
+    var expected = order.seq[built.length - 1];
+    if (id !== expected) {
+      score = Math.max(0, score - 15);
+      flash = 'Wrong part! Expected ' + PARTS[expected].name + '. -15 pts';
+      flashUntil = Date.now() + 1800;
+      sfx('wrong');
+      built.pop();
+      stock[id]++;
+    } else if (built.length === order.seq.length) {
+      shipOrder();
+    }
+    updateHUD();
+  }
+  function shipOrder() {
+    var order = queue.shift();
+    var bonus = Math.round(order.timeLeft) * 2;
+    score += 100 + bonus;
+    done++;
+    built = [];
+    sfx('ship');
+    setMsg('Shipped ' + order.name + '! +100 pts, time bonus +' + bonus + '.');
+    queue.push(newOrder());
+    if (done >= QUOTA) return endGame(true);
+    updateHUD();
+  }
+  function undoPart() {
+    if (state !== 'playing' || built.length === 0) return;
+    var id = built.pop();
+    stock[id]++;
+    sfx('pick');
+    updateHUD();
+  }
+  function startRestock() {
+    if (state !== 'playing' || restockTimer > 0) return;
+    restockTimer = 4; restockTotal = 4;
+    setMsg('Restocking... parts arrive in 4 seconds.');
+    sfx('restock');
+  }
+  function expireOrder() {
+    var order = queue.shift();
+    missed++;
+    built = [];
+    sfx('miss');
+    setMsg('Order for ' + order.name + ' expired! Missed: ' + missed + ' / ' + MAX_MISSED);
+    queue.push(newOrder());
+    if (missed >= MAX_MISSED) return endGame(false);
+    updateHUD();
+  }
+  function endGame(won) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endTitle.textContent = 'YOU WIN! Quota Filled!';
+      endText.textContent = 'You completed ' + done + ' orders with a score of ' + score + ' in ' + Math.floor(elapsed) + ' seconds. The workshop salutes you, Archon!';
+      sfx('win');
+    } else {
+      endTitle.textContent = 'GAME OVER';
+      endText.textContent = 'Too many orders expired. You completed ' + done + ' of ' + QUOTA + ' orders and scored ' + score + ' points. Try another shift!';
+      sfx('miss');
+    }
+    updateHUD();
+  }
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTs = performance.now();
+    sfx('ship');
+  }
+
+  // ---------- Input: mouse + touch + keyboard ----------
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var x = (evt.clientX !== undefined ? evt.clientX : evt.touches[0].clientX) - r.left;
+    var y = (evt.clientY !== undefined ? evt.clientY : evt.touches[0].clientY) - r.top;
+    return { x: x * (canvas.width / r.width), y: y * (canvas.height / r.height) };
+  }
+  function binAt(x, y) {
+    for (var i = 0; i < PARTS.length; i++) {
+      var bx = 30 + i * 138, by = 400;
+      if (x >= bx && x <= bx + 118 && y >= by && y <= by + 90) return i;
+    }
+    return -1;
+  }
+  function lineHit(x, y) { return x >= 30 && x <= 830 && y >= 300 && y <= 380; }
+
+  canvas.addEventListener('mousedown', function (e) {
+    ensureAudio();
+    var p = canvasPos(e);
+    var b = binAt(p.x, p.y);
+    if (b >= 0) { dragPart = b; dragX = p.x; dragY = p.y; sfx('pick'); }
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    if (dragPart !== null) { var p = canvasPos(e); dragX = p.x; dragY = p.y; }
+  });
+  canvas.addEventListener('mouseup', function (e) {
+    if (dragPart === null) return;
+    var p = canvasPos(e);
+    if (lineHit(p.x, p.y)) addPart(dragPart);
+    else if (binAt(p.x, p.y) === dragPart) addPart(dragPart);
+    dragPart = null;
+  });
+  canvas.addEventListener('mouseleave', function () { dragPart = null; });
+
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio();
+    e.preventDefault();
+    var p = canvasPos(e);
+    var b = binAt(p.x, p.y);
+    if (b >= 0) { dragPart = b; dragX = p.x; dragY = p.y; sfx('pick'); }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    if (dragPart !== null) { var p = canvasPos(e); dragX = p.x; dragY = p.y; }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) {
+    e.preventDefault();
+    if (dragPart === null) return;
+    var t = e.changedTouches[0];
+    var r = canvas.getBoundingClientRect();
+    var x = (t.clientX - r.left) * (canvas.width / r.width);
+    var y = (t.clientY - r.top) * (canvas.height / r.height);
+    if (lineHit(x, y) || binAt(x, y) === dragPart) addPart(dragPart);
+    dragPart = null;
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    if (state === 'over' && e.key === 'Enter') { startGame(); return; }
+    if (state !== 'playing') return;
+    if (e.key >= '1' && e.key <= '6') addPart(parseInt(e.key, 10) - 1);
+    else if (e.key === 'b' || e.key === 'B' || e.key === 'Backspace') undoPart();
+    else if (e.key === 'r' || e.key === 'R') startRestock();
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('restockBtn').addEventListener('click', function () { ensureAudio(); startRestock(); });
+  document.getElementById('undoBtn').addEventListener('click', function () { ensureAudio(); undoPart(); });
+  document.getElementById('muteBtn').addEventListener('click', function (e) {
+    soundOn = !soundOn;
+    e.target.textContent = 'Sound: ' + (soundOn ? 'On' : 'Off');
+  });
+
+  // ---------- Drawing ----------
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function drawPartIcon(part, x, y, size) {
+    ctx.fillStyle = part.color;
+    ctx.beginPath();
+    ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#10141c';
+    ctx.font = 'bold ' + Math.floor(size * 0.55) + 'px Arial';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(part.symbol, x, y + 1);
+  }
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#1b2333';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#e8ecf4'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('ORDER QUEUE  (build the highlighted order)', 30, 34);
+
+    queue.forEach(function (order, qi) {
+      var y = 52 + qi * 74;
+      var active = qi === 0;
+      ctx.fillStyle = active ? '#2c3a55' : '#232e42';
+      ctx.strokeStyle = active ? '#ffd166' : '#3a4a66';
+      ctx.lineWidth = active ? 3 : 1;
+      roundRect(30, y, 800, 62, 10); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#e8ecf4'; ctx.font = 'bold 17px Arial'; ctx.textAlign = 'left';
+      ctx.fillText((active ? '▶ ' : '') + order.name, 44, y + 24);
+      ctx.font = '13px Arial'; ctx.fillStyle = '#9fb3d1';
+      ctx.fillText(active ? 'Needs, in order:' : 'Waiting:', 44, y + 48);
+      order.seq.forEach(function (pid, si) {
+        var px = 210 + si * 62;
+        var doneStep = active && si < built.length;
+        ctx.globalAlpha = doneStep ? 1 : (active ? 0.95 : 0.6);
+        drawPartIcon(PARTS[pid], px, y + 32, 40);
+        if (doneStep) { ctx.strokeStyle = '#7ee0a3'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(px, y + 32, 23, 0, Math.PI * 2); ctx.stroke(); }
+        ctx.globalAlpha = 1;
+        if (si < order.seq.length - 1) { ctx.fillStyle = '#9fb3d1'; ctx.font = 'bold 16px Arial'; ctx.fillText('→', px + 33, y + 33); }
+      });
+      // timer bar
+      var frac = Math.max(0, order.timeLeft / order.maxTime);
+      ctx.fillStyle = '#3a2b2b';
+      roundRect(620, y + 14, 190, 16, 8); ctx.fill();
+      ctx.fillStyle = frac > 0.4 ? '#7ee0a3' : (frac > 0.2 ? '#ffd166' : '#ff6b6b');
+      if (frac > 0) { roundRect(620, y + 14, 190 * frac, 16, 8); ctx.fill(); }
+      ctx.fillStyle = '#e8ecf4'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(order.timeLeft) + 's', 715, y + 46);
+      ctx.textAlign = 'left';
+    });
+
+    // assembly line
+    ctx.fillStyle = '#e8ecf4'; ctx.font = 'bold 20px Arial';
+    ctx.fillText('ASSEMBLY LINE  (drag or click parts here)', 30, 292);
+    ctx.fillStyle = '#232e42'; ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
+    roundRect(30, 300, 800, 80, 10); ctx.fill(); ctx.stroke();
+    if (built.length === 0) {
+      ctx.fillStyle = '#8fa3c0'; ctx.font = '15px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Empty line — add the first part of the highlighted order.', 430, 345);
+      ctx.textAlign = 'left';
+    }
+    built.forEach(function (pid, i) {
+      drawPartIcon(PARTS[pid], 80 + i * 70, 340, 52);
+      ctx.fillStyle = '#cdd8ea'; ctx.font = '12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(PARTS[pid].name, 80 + i * 70, 376);
+      ctx.textAlign = 'left';
+    });
+
+    // part bins
+    ctx.fillStyle = '#e8ecf4'; ctx.font = 'bold 20px Arial';
+    ctx.fillText('PART BINS  (stock)', 30, 398);
+    PARTS.forEach(function (part, i) {
+      var bx = 30 + i * 138, by = 400;
+      ctx.fillStyle = stock[part.id] > 0 ? '#2c3a55' : '#3a2b2b';
+      ctx.strokeStyle = dragPart === part.id ? '#ffd166' : '#3a4a66';
+      ctx.lineWidth = dragPart === part.id ? 3 : 1;
+      roundRect(bx, by, 118, 90, 10); ctx.fill(); ctx.stroke();
+      drawPartIcon(part, bx + 30, by + 30, 40);
+      ctx.fillStyle = '#e8ecf4'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left';
+      ctx.fillText(part.name, bx + 56, by + 26);
+      ctx.font = '13px Arial'; ctx.fillStyle = '#9fb3d1';
+      ctx.fillText('Key ' + part.key, bx + 56, by + 46);
+      ctx.fillStyle = stock[part.id] > 0 ? '#7ee0a3' : '#ff6b6b';
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText('Stock: ' + stock[part.id], bx + 14, by + 74);
+    });
+
+    // restock progress
+    if (restockTimer > 0) {
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Restock truck arriving in ' + Math.ceil(restockTimer) + 's...', 430, 508);
+      ctx.textAlign = 'left';
+    }
+    if (flash && Date.now() < flashUntil) {
+      ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 17px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(flash, 430, 508);
+      ctx.textAlign = 'left';
+    }
+    // dragged part follows pointer
+    if (dragPart !== null) {
+      ctx.globalAlpha = 0.85;
+      drawPartIcon(PARTS[dragPart], dragX, dragY, 52);
+      ctx.globalAlpha = 1;
+    }
+    if (state === 'title') {
+      ctx.fillStyle = '#8fa3c0'; ctx.font = '15px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and run the best workshop in town.', 430, 270);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // ---------- Main loop ----------
+  function loop(ts) {
+    var dt = 0;
+    if (lastTs) dt = Math.min(0.1, (ts - lastTs) / 1000);
+    lastTs = ts;
+    if (state === 'playing') {
+      elapsed += dt;
+      queue.forEach(function (o) { o.timeLeft -= dt; });
+      if (queue[0] && queue[0].timeLeft <= 0) expireOrder();
+      if (restockTimer > 0) {
+        restockTimer -= dt;
+        if (restockTimer <= 0) {
+          for (var i = 0; i < PARTS.length; i++) stock[PARTS[i].id] += 4;
+          setMsg('Restocked! +4 of every part.');
+          sfx('restock');
+        }
+      }
+      if (Math.floor(elapsed) !== Math.floor(elapsed - dt)) updateHUD();
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

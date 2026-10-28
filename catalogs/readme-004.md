@@ -64,6 +64,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0358 | Waltz Waves | Rhythm / Waltz Timing | Space or click/tap and hold, R restart | [Play](./../games/game-0358.html) |
 | 0359 | Orchard Outlaw | Arcade / Fruit Catching | Arrow Keys / mouse move cart, touch drag, R restart | [Play](./../games/game-0359.html) |
 | 0360 | Labyrinth Ledger | Puzzle / Maze Path Planning | Arrow Keys / WASD plan path, mouse/touch tap, Space undo, R restart | [Play](./../games/game-0360.html) |
+| 0361 | Aurora Archer | Arcade / Archery Aim | Mouse/touch drag aim, Arrow Keys adjust angle/power, Space release, R restart | [Play](./../games/game-0361.html) |
+| 0362 | Quarry Quandary | Puzzle / Crate Pushing | Arrow Keys / WASD push crates, mouse/touch swipe or tap to move, Z/Space undo, R restart | [Play](./../games/game-0362.html) |
+| 0363 | Harbor Harbormaster | Strategy / Port Scheduling | Mouse/touch click ship then dock, Keys 1-5 select ship, Q/W/E/R berth, Enter auto-berth, R restart | [Play](./../games/game-0363.html) |
+| 0364 | Syncopation Station | Rhythm / Off-Beat Timing | D/F/J/K rhythm lanes, mouse click pads, touch tap pads, R restart | [Play](./../games/game-0364.html) |
+| 0365 | Tempest Tamer | Arcade / Storm Dodging | Arrow Keys / WASD fly, mouse move steer, touch drag, R restart | [Play](./../games/game-0365.html) |
+| 0366 | Rune Reservoir | Puzzle / Rune Flow | Mouse/touch click tile to rotate, Arrow Keys select, Space rotate, R restart | [Play](./../games/game-0366.html) |
+| 0367 | Assembly Archon | Strategy / Workshop Assembly | Mouse/touch click or drag parts to line, number keys select part, R restock/restart | [Play](./../games/game-0367.html) |
+| 0368 | Pulse Painter | Rhythm / Beat Painting | Keys 1-4 select color, mouse click blobs/palette, touch tap blobs/palette, R restart | [Play](./../games/game-0368.html) |
+| 0369 | Dune Drifter | Arcade / Sandboarding | Arrow Keys / A-D steer, mouse move steer, touch drag, Space/Up/W jump, R restart | [Play](./../games/game-0369.html) |
+| 0370 | Starlight Surveyor | Puzzle / Constellation Connect | Mouse/touch click stars in sequence, Arrow Keys move crosshair, Enter/Space confirm, R restart | [Play](./../games/game-0370.html) |
 
 ## Batch notes
 
@@ -79,3 +89,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 035: 10 games, produced in one cycle (0341–0350). Four initially proposed titles duplicated earlier games and were replaced before production (Mirror Maze→Kaleido Keys, Cipher Lock→Enigma Engine, Harbor Master→Dockside Dynamo, Beat Bounce→Pulse Pogo).
 
 - Batch 036: 10 games, produced in one cycle (0351–0360).
+
+- Batch 037: 10 games, produced in one cycle (0361–0370). Four initially proposed titles duplicated earlier games and were replaced before production (Metronome Mine, Storm Surfer, Glyph Grove, Foundry Foreman, Tempo Tinkerer, Beat Blacksmith — replaced with Syncopation Station, Tempest Tamer, Rune Reservoir, Assembly Archon). Also includes a level-layout fix to game-0360 (Labyrinth Ledger).

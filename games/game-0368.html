@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pulse Painter</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #14101f; color: #f5f0ff; font-family: Georgia, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 12px; }
+  #wrap { width: min(860px, 100%); }
+  h1 { text-align: center; font-size: 42px; letter-spacing: 2px; color: #ffd166; text-shadow: 0 0 18px rgba(255,209,102,.55); margin-bottom: 4px; }
+  .sub { text-align: center; color: #c9b8ff; margin-bottom: 10px; font-size: 15px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; background: #241d3d; border: 2px solid #4b3a8a; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; font-weight: bold; }
+  #hud span { font-size: 16px; }
+  #hud .good { color: #7bf1a8; } #hud .bad { color: #ff7b7b; }
+  #beatbar { height: 14px; background: #241d3d; border: 2px solid #4b3a8a; border-radius: 9px; overflow: hidden; margin-bottom: 10px; }
+  #beatfill { height: 100%; width: 0%; background: linear-gradient(90deg, #ef476f, #ffd166, #06d6a0, #118ab2); transition: width .12s linear; }
+  #stage { position: relative; background: #1e1733; border: 3px solid #4b3a8a; border-radius: 14px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(12,8,26,.88); padding: 24px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 36px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #e6ddff; font-size: 16px; }
+  .overlay .big { font-size: 22px; font-weight: bold; }
+  button { font-family: inherit; font-size: 20px; font-weight: bold; padding: 13px 30px; border: none; border-radius: 999px; background: #ef476f; color: white; cursor: pointer; box-shadow: 0 4px 0 #a32a49; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #a32a49; }
+  button.secondary { background: #118ab2; box-shadow: 0 4px 0 #0a5a75; }
+  #palette { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+  .swatch { width: 56px; height: 56px; border-radius: 50%; border: 4px solid transparent; cursor: pointer; }
+  .swatch.sel { border-color: white; transform: scale(1.12); box-shadow: 0 0 16px rgba(255,255,255,.7); }
+  .keys { font-size: 13px; color: #c9b8ff; text-align: center; margin-top: 8px; }
+  #msg { text-align: center; height: 26px; font-weight: bold; font-size: 18px; margin-top: 6px; color: #ffd166; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>PULSE PAINTER</h1>
+  <p class="sub">Paint to the beat. Splat every blob in its own color before the track ends.</p>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Coverage: <span id="cover">0%</span></span>
+    <span>Target: 70%</span>
+    <span>Combo: <span id="combo">x0</span></span>
+    <span>Time: <span id="time">60s</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="beatbar"><div id="beatfill"></div></div>
+  <div id="stage">
+    <canvas id="game" width="820" height="500"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>PULSE PAINTER</h2>
+      <p class="big">Paint the canvas to 70% before the 60-second track ends.</p>
+      <p><strong>How to Play:</strong> A beat pulses 120 times a minute. Colored paint blobs pop up in rhythm on the canvas. Pick the matching color with keys <strong>1-4</strong> or by tapping a palette color, then tap or click the blob right on the beat to splat it. A perfectly timed splat paints a big clean patch and builds your combo. A mistimed tap smudges gray paint, breaks your combo, and costs 25 points. Missing a blob costs 10 points. Each splat paints part of the canvas — reach 70% coverage to win.</p>
+      <p>Colors: 1 = Coral, 2 = Sun, 3 = Mint, 4 = Sky. You can also click the palette below, or press Space to pause.</p>
+      <button id="startBtn" type="button">Start Painting</button>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText" class="big"></p>
+      <p id="endDetail"></p>
+      <button id="restartBtn" type="button">Play Again</button>
+    </div>
+  </div>
+  <div id="palette" aria-label="Color palette">
+    <div class="swatch sel" data-color="0" style="background:#ef476f" title="Coral (1)"></div>
+    <div class="swatch" data-color="1" style="background:#ffd166" title="Sun (2)"></div>
+    <div class="swatch" data-color="2" style="background:#06d6a0" title="Mint (3)"></div>
+    <div class="swatch" data-color="3" style="background:#118ab2" title="Sky (4)"></div>
+  </div>
+  <p class="keys">Keys 1-4 select color &nbsp;|&nbsp; Click / tap a blob to splat &nbsp;|&nbsp; Space pauses &nbsp;|&nbsp; R restarts after the game ends</p>
+  <div id="msg"></div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var COLORS = ['#ef476f', '#ffd166', '#06d6a0', '#118ab2'];
+  var NAMES = ['Coral', 'Sun', 'Mint', 'Sky'];
+  var BPM = 120, BEAT = 60 / BPM, TRACK = 60, TARGET = 70;
+
+  var state = 'title'; // title | playing | paused | win | over
+  var score = 0, combo = 0, bestCombo = 0, splats = 0, smudges = 0, missed = 0;
+  var selected = 0, blobs = [], splatMarks = [], particles = [];
+  var elapsed = 0, lastTime = 0, nextBeat = 0, beatCount = 0, pulse = 0;
+  var audioCtx = null, master = null;
+
+  var scoreEl = document.getElementById('score');
+  var coverEl = document.getElementById('cover');
+  var comboEl = document.getElementById('combo');
+  var timeEl = document.getElementById('time');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var beatFill = document.getElementById('beatfill');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+
+  // Paint grid: 41 x 25 cells over the canvas area.
+  var COLS = 41, ROWS = 25, CELLW = W / COLS, CELLH = H / ROWS;
+  var grid = [];
+  function resetGrid() {
+    grid = [];
+    for (var i = 0; i < COLS * ROWS; i++) grid.push(-1);
+  }
+  resetGrid();
+
+  function coverage() {
+    var painted = 0;
+    for (var i = 0; i < grid.length; i++) if (grid[i] >= 0) painted++;
+    return Math.round(painted / grid.length * 100);
+  }
+  function paintAt(x, y, colorIdx, radius) {
+    var cx = Math.floor(x / CELLW), cy = Math.floor(y / CELLH);
+    var r = Math.max(1, Math.round(radius / CELLW));
+    for (var gy = cy - r; gy <= cy + r; gy++) {
+      for (var gx = cx - r; gx <= cx + r; gx++) {
+        if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) continue;
+        var dx = gx - cx, dy = gy - cy;
+        if (dx * dx + dy * dy <= r * r + r * 0.5) grid[gy * COLS + gx] = colorIdx;
+      }
+    }
+  }
+  function paintSmudge(x, y) {
+    var cx = Math.floor(x / CELLW), cy = Math.floor(y / CELLH);
+    for (var gy = cy - 1; gy <= cy + 1; gy++) {
+      for (var gx = cx - 1; gx <= cx + 1; gx++) {
+        if (gx >= 0 && gy >= 0 && gx < COLS && gy < ROWS) grid[gy * COLS + gx] = 4;
+      }
+    }
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      master = audioCtx.createGain();
+      master.gain.value = 0.25;
+      master.connect(audioCtx.destination);
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = when || audioCtx.currentTime;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function beatSound(strong) {
+    if (!audioCtx) return;
+    tone(strong ? 220 : 160, 0.12, 'triangle', 0.5);
+    tone(strong ? 440 : 330, 0.08, 'sine', 0.25);
+  }
+  function splatSound(good) {
+    if (!audioCtx) return;
+    if (good) { tone(520, 0.15, 'sine', 0.4); tone(780, 0.2, 'sine', 0.3, audioCtx.currentTime + 0.05); }
+    else { tone(110, 0.25, 'sawtooth', 0.3); tone(90, 0.2, 'square', 0.2); }
+  }
+
+  function setStatus(s) { statusEl.textContent = s; statusEl.className = ''; }
+  function flash(text, good) {
+    msgEl.textContent = text;
+    msgEl.style.color = good ? '#7bf1a8' : '#ff7b7b';
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    coverEl.textContent = coverage() + '%';
+    comboEl.textContent = 'x' + combo;
+    timeEl.textContent = Math.max(0, Math.ceil(TRACK - elapsed)) + 's';
+    beatFill.style.width = Math.min(100, elapsed / TRACK * 100) + '%';
+  }
+  function selectColor(i) {
+    selected = i;
+    var sw = document.querySelectorAll('.swatch');
+    for (var k = 0; k < sw.length; k++) sw[k].classList.toggle('sel', k === i);
+  }
+
+  function spawnBlob() {
+    var color = Math.floor(Math.random() * 4);
+    blobs.push({
+      x: 60 + Math.random() * (W - 120),
+      y: 60 + Math.random() * (H - 120),
+      color: color,
+      born: elapsed,
+      life: 1.6,
+      radius: 34,
+      wobble: Math.random() * Math.PI * 2
+    });
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 16; i++) {
+      var a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 160;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.6, color: color });
+    }
+  }
+
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    endScreen.classList.remove('hidden');
+    document.getElementById('endTitle').textContent = win ? 'You Win! Masterpiece!' : 'Game Over — Track Ended';
+    document.getElementById('endText').textContent = 'Score: ' + score + '  |  Coverage: ' + coverage() + '%  |  Best combo: x' + bestCombo;
+    document.getElementById('endDetail').textContent = win
+      ? 'You painted ' + coverage() + '% of the canvas before the music stopped. Beautiful work, artist!'
+      : 'You reached only ' + coverage() + '% — you needed ' + TARGET + '%. Listen for the beat and splat on time next round.';
+    setStatus(win ? 'Win!' : 'Game Over');
+    if (audioCtx) { tone(523, 0.3, 'sine', 0.4); tone(659, 0.3, 'sine', 0.4, audioCtx.currentTime + 0.15); tone(784, 0.5, 'sine', 0.4, audioCtx.currentTime + 0.3); }
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; combo = 0; bestCombo = 0; splats = 0; smudges = 0; missed = 0;
+    blobs = []; splatMarks = []; particles = [];
+    resetGrid(); elapsed = 0; beatCount = 0; nextBeat = 0; pulse = 0;
+    selected = 0; selectColor(0);
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    setStatus('Painting!');
+    flash('On the beat! Splat the blobs!', true);
+    lastTime = performance.now();
+    spawnBlob();
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  function handleTap(evt) {
+    if (state !== 'playing') return;
+    evt.preventDefault();
+    ensureAudio();
+    var p = canvasPos(evt);
+    var hit = null, hitIdx = -1;
+    for (var i = blobs.length - 1; i >= 0; i--) {
+      var b = blobs[i];
+      var d = Math.hypot(p.x - b.x, p.y - b.y);
+      if (d <= b.radius + 14) { hit = b; hitIdx = i; break; }
+    }
+    if (!hit) { flash('No blob there — aim for a blob!', false); return; }
+    var age = elapsed - hit.born;
+    var onBeat = Math.abs((elapsed % BEAT) - 0) < 0.22 || Math.abs((elapsed % BEAT) - BEAT) < 0.22;
+    var colorMatch = (selected === hit.color);
+    blobs.splice(hitIdx, 1);
+    if (colorMatch && onBeat) {
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      var pts = 50 + combo * 10;
+      score += pts; splats++;
+      paintAt(hit.x, hit.y, hit.color, 62);
+      splatMarks.push({ x: hit.x, y: hit.y, color: COLORS[hit.color], life: 1.2, r: 46 });
+      burst(hit.x, hit.y, COLORS[hit.color]);
+      splatSound(true);
+      flash('PERFECT SPLAT! +' + pts + ' (' + NAMES[hit.color] + ')', true);
+    } else {
+      combo = 0; smudges++;
+      score = Math.max(0, score - 25);
+      paintSmudge(hit.x, hit.y);
+      splatMarks.push({ x: hit.x, y: hit.y, color: '#8a8a9e', life: 1.0, r: 30 });
+      splatSound(false);
+      if (!colorMatch) flash('Wrong color! That blob was ' + NAMES[hit.color] + '. Smudge! -25', false);
+      else flash('Off beat! Smudge! -25 — tap right on the pulse', false);
+    }
+    updateHUD();
+    if (coverage() >= TARGET) endGame(true);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  canvas.addEventListener('mousedown', handleTap);
+  canvas.addEventListener('touchstart', handleTap, { passive: false });
+  canvas.addEventListener('click', function (e) { if (state === 'playing') e.preventDefault(); });
+  document.querySelectorAll('.swatch').forEach(function (sw) {
+    sw.addEventListener('click', function () { ensureAudio(); selectColor(parseInt(sw.getAttribute('data-color'), 10)); });
+    sw.addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); selectColor(parseInt(sw.getAttribute('data-color'), 10)); }, { passive: false });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key >= '1' && e.key <= '4') { ensureAudio(); selectColor(parseInt(e.key, 10) - 1); }
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (state === 'playing') { state = 'paused'; setStatus('Paused'); flash('Paused — press Space to resume', true); }
+      else if (state === 'paused') { state = 'playing'; setStatus('Painting!'); lastTime = performance.now(); }
+    }
+    if ((e.key === 'r' || e.key === 'R') && (state === 'win' || state === 'over')) startGame();
+    if (e.key === 'Enter' && state === 'title') startGame();
+  });
+  document.addEventListener('keyup', function () { /* keeps keyboard focus responsive */ });
+
+  function drawBackground() {
+    ctx.fillStyle = '#221a3d';
+    ctx.fillRect(0, 0, W, H);
+    for (var i = 0; i < grid.length; i++) {
+      if (grid[i] >= 0) {
+        var gx = i % COLS, gy = Math.floor(i / COLS);
+        ctx.fillStyle = grid[i] === 4 ? '#8a8a9e' : COLORS[grid[i]];
+        ctx.fillRect(gx * CELLW, gy * CELLH, CELLW + 1, CELLH + 1);
+      }
+    }
+    // faint target frame: the whole canvas is the picture to fill
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+  }
+  function drawBlobs(dt) {
+    for (var i = 0; i < blobs.length; i++) {
+      var b = blobs[i];
+      var age = elapsed - b.born;
+      var remain = 1 - age / b.life;
+      var beatPhase = (elapsed % BEAT) / BEAT;
+      var scale = 1 + Math.sin(beatPhase * Math.PI * 2) * 0.06 + pulse * 0.25;
+      var r = b.radius * scale * (0.55 + remain * 0.45);
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, r + 10, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS[b.color];
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'white';
+      ctx.stroke();
+      // shrinking timing ring: splat while the ring is close to the blob
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, r + remain * 42, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.25 + remain * 0.6).toFixed(2) + ')';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 15px Verdana, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(NAMES[b.color], b.x, b.y + 5);
+    }
+  }
+  function drawMarks(dt) {
+    for (var i = splatMarks.length - 1; i >= 0; i--) {
+      var m = splatMarks[i];
+      m.life -= dt;
+      if (m.life <= 0) { splatMarks.splice(i, 1); continue; }
+      ctx.globalAlpha = Math.min(1, m.life);
+      ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+      ctx.fillStyle = m.color; ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var p = particles[j];
+      p.life -= dt;
+      if (p.life <= 0) { particles.splice(j, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 120 * dt;
+      ctx.globalAlpha = Math.max(0, p.life / 0.6);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+      ctx.globalAlpha = 1;
+    }
+  }
+  function drawBeatPulse() {
+    var beatPhase = (elapsed % BEAT) / BEAT;
+    var a = 1 - beatPhase;
+    ctx.strokeStyle = 'rgba(255,209,102,' + (a * 0.5).toFixed(2) + ')';
+    ctx.lineWidth = 3 + a * 4;
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, 40 + beatPhase * 260, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    if (state === 'playing') {
+      elapsed += dt;
+      pulse = Math.max(0, pulse - dt * 4);
+      while (nextBeat <= elapsed) {
+        beatCount++;
+        pulse = 1;
+        beatSound(beatCount % 4 === 1);
+        nextBeat += BEAT;
+        if (beatCount % 2 === 0) spawnBlob();
+      }
+      for (var i = blobs.length - 1; i >= 0; i--) {
+        if (elapsed - blobs[i].born > blobs[i].life) {
+          blobs.splice(i, 1);
+          missed++; combo = 0;
+          score = Math.max(0, score - 10);
+          flash('Blob faded away! -10', false);
+        }
+      }
+      if (elapsed >= TRACK) { updateHUD(); if (coverage() >= TARGET) endGame(true); else endGame(false); }
+      updateHUD();
+    }
+    drawBackground();
+    drawMarks(dt);
+    if (state === 'playing') { drawBeatPulse(); drawBlobs(dt); }
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'white'; ctx.font = 'bold 36px Verdana, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED', W / 2, H / 2);
+    }
+  }
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Starlight Surveyor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #050816;
+    color: #eaf2ff;
+    font-family: Georgia, "Times New Roman", serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px;
+  }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #ffe9a3; text-shadow: 0 0 14px #7aa8ff; margin: 6px 0 2px; text-align: center; }
+  .tag { color: #9fb8e8; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(96vw, 860px); }
+  canvas {
+    width: 100%; height: auto; display: block; aspect-ratio: 860 / 560;
+    background: radial-gradient(circle at 50% 30%, #16224d 0%, #050816 62%);
+    border: 2px solid #3d5a9e; border-radius: 14px; touch-action: none; cursor: crosshair;
+  }
+  #hud {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between;
+    width: min(96vw, 860px); margin: 10px 0; font-size: 15px;
+  }
+  #hud div { background: #12203f; border: 1px solid #3d5a9e; border-radius: 8px; padding: 7px 11px; }
+  #hud b { color: #ffe9a3; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; background: rgba(3, 6, 20, 0.88); border-radius: 14px; padding: 22px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffe9a3; font-size: 32px; margin-bottom: 10px; }
+  .overlay p { max-width: 620px; line-height: 1.55; color: #d7e3ff; margin: 6px 0; }
+  .overlay .small { font-size: 14px; color: #9fb8e8; }
+  button {
+    margin-top: 16px; font-size: 19px; font-weight: bold; color: #071022; background: #ffd76a;
+    border: 0; border-radius: 10px; padding: 12px 26px; cursor: pointer; box-shadow: 0 0 18px rgba(255, 215, 106, 0.45);
+  }
+  button:hover, button:focus { background: #fff0b3; outline: 3px solid #7aa8ff; }
+  #status { min-height: 22px; margin-top: 8px; font-weight: bold; color: #ffd76a; text-align: center; }
+  .keys { background: #0c1833; border: 1px solid #2d4a82; border-radius: 8px; padding: 10px 14px; margin-top: 12px; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>✦ STARLIGHT SURVEYOR ✦</h1>
+<div class="tag">Map the night sky, one constellation at a time.</div>
+
+<div id="hud">
+  <div>Constellation: <b id="hudConst">—</b></div>
+  <div>Progress: <b id="hudProg">0 / 4</b></div>
+  <div>Stars linked: <b id="hudStars">0</b></div>
+  <div>Mistakes: <b id="hudMist">0 / 5</b></div>
+  <div>Score: <b id="hudScore">0</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Starlight Surveyor</h2>
+    <p><b>How to Play:</b> A faint dotted outline shows tonight's target constellation. Connect its stars <b>in the correct sequence</b> — the next star glows gold and pulses. Click or tap a star, or move the crosshair with the <b>Arrow Keys</b> and press <b>Enter / Space</b> to confirm it.</p>
+    <p>Connecting the wrong star counts as a mistake. You may make at most <b>5 mistakes</b>. Finish all <b>4 constellations</b> to win and become a Master Surveyor.</p>
+    <p class="small">Tip: follow the shape, not just the brightest star. Each constellation has its own pattern — a crown, a hunter's bow, a river, and a great sail.</p>
+    <button id="startBtn" type="button">▶ Start Survey</button>
+    <div class="keys">Mouse / Touch: click a star &nbsp;•&nbsp; Keyboard: Arrow Keys + Enter / Space &nbsp;•&nbsp; R: Restart</div>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>🏆 Master Surveyor!</h2>
+    <p id="winText">You charted every constellation in the night sky.</p>
+    <p>Final score: <b id="winScore">0</b> &nbsp;•&nbsp; Mistakes: <b id="winMist">0</b></p>
+    <button id="winRestartBtn" type="button">↻ Survey Again</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <h2>🌑 Survey Lost in the Dark</h2>
+    <p id="overText">Too many wrong connections, and the stars faded from view.</p>
+    <p>Constellations completed: <b id="overProg">0</b> &nbsp;•&nbsp; Score: <b id="overScore">0</b></p>
+    <button id="overRestartBtn" type="button">↻ Try Again</button>
+  </div>
+</div>
+
+<div id="status" aria-live="polite">Press Start Survey to begin.</div>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var titleScreen = document.getElementById("titleScreen");
+  var winScreen = document.getElementById("winScreen");
+  var overScreen = document.getElementById("overScreen");
+  var statusEl = document.getElementById("status");
+
+  var CONSTELLATIONS = [
+    { name: "The Northern Crown", stars: [[150,140],[250,95],[360,85],[470,105],[570,160],[640,250]], order: [0,1,2,3,4,5] },
+    { name: "The Hunter's Bow", stars: [[180,380],[260,300],[350,260],[440,300],[530,360],[620,300],[700,220]], order: [0,1,2,3,4,5,6] },
+    { name: "The Winding River", stars: [[140,450],[230,410],[300,470],[390,420],[470,470],[560,410],[650,450],[730,390]], order: [0,1,2,3,4,5,6,7] },
+    { name: "The Great Sail", stars: [[200,160],[330,130],[460,150],[580,210],[500,330],[360,360],[260,290]], order: [0,1,2,3,4,5,6,0] }
+  ];
+
+  var state = "title"; // title | playing | win | over
+  var constIndex = 0, linked = [], mistakes = 0, score = 0, totalLinked = 0;
+  var cursor = { x: 430, y: 280 };
+  var flash = 0, flashColor = "#ff5a5a", shakeUntil = 0, lastTime = 0;
+  var backgroundStars = [];
+  for (var i = 0; i < 130; i++) {
+    backgroundStars.push({ x: Math.random() * 860, y: Math.random() * 560, r: Math.random() * 1.6 + 0.4, p: Math.random() * Math.PI * 2 });
+  }
+
+  // ---- Procedural audio, created only after a user gesture ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundGood() { tone(660, 0.14, "sine", 0.14); setTimeout(function () { tone(880, 0.18, "sine", 0.12); }, 90); }
+  function soundBad() { tone(160, 0.25, "sawtooth", 0.10); }
+  function soundWin() { [523, 659, 784, 1046].forEach(function (f, k) { setTimeout(function () { tone(f, 0.3, "triangle", 0.14); }, k * 130); }); }
+
+  function current() { return CONSTELLATIONS[constIndex]; }
+  function nextStarIndex() {
+    var c = current();
+    return linked.length < c.order.length ? c.order[linked.length] : -1;
+  }
+  function updateHud() {
+    var c = CONSTELLATIONS[Math.min(constIndex, CONSTELLATIONS.length - 1)];
+    document.getElementById("hudConst").textContent = state === "title" ? "—" : c.name;
+    document.getElementById("hudProg").textContent = constIndex + " / " + CONSTELLATIONS.length;
+    document.getElementById("hudStars").textContent = totalLinked;
+    document.getElementById("hudMist").textContent = mistakes + " / 5";
+    document.getElementById("hudScore").textContent = score;
+  }
+  function setStatus(msg) { statusEl.textContent = msg; }
+
+  function startGame() {
+    ensureAudio();
+    constIndex = 0; linked = []; mistakes = 0; score = 0; totalLinked = 0;
+    cursor = { x: 430, y: 280 };
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    winScreen.classList.add("hidden");
+    overScreen.classList.add("hidden");
+    var c = current();
+    cursor.x = c.stars[0][0]; cursor.y = c.stars[0][1];
+    setStatus("Constellation 1: " + c.name + " — connect the glowing gold star first.");
+    tone(440, 0.15, "triangle", 0.12);
+    updateHud();
+  }
+
+  function advanceConstellation() {
+    score += 150;
+    constIndex++;
+    linked = [];
+    if (constIndex >= CONSTELLATIONS.length) {
+      state = "win";
+      document.getElementById("winScore").textContent = score;
+      document.getElementById("winMist").textContent = mistakes;
+      document.getElementById("winText").textContent = "You charted all 4 constellations with " + mistakes + " mistake(s). The sky is yours.";
+      winScreen.classList.remove("hidden");
+      setStatus("Victory! You are a Master Surveyor.");
+      soundWin();
+    } else {
+      var c = current();
+      cursor.x = c.stars[0][0]; cursor.y = c.stars[0][1];
+      setStatus("Constellation complete! Next: " + c.name + ".");
+      tone(880, 0.2, "triangle", 0.12);
+    }
+    updateHud();
+  }
+
+  function gameOver() {
+    state = "over";
+    document.getElementById("overProg").textContent = constIndex + " / " + CONSTELLATIONS.length;
+    document.getElementById("overScore").textContent = score;
+    overScreen.classList.remove("hidden");
+    setStatus("Game over — the stars faded after 5 mistakes.");
+    updateHud();
+  }
+
+  function tryStar(idx) {
+    if (state !== "playing") return;
+    var expected = nextStarIndex();
+    if (idx === expected) {
+      linked.push(idx);
+      totalLinked++;
+      score += 25;
+      flash = 10; flashColor = "#ffd76a";
+      soundGood();
+      var c = current();
+      if (linked.length >= c.order.length) {
+        setStatus("Constellation complete! +150 bonus.");
+        advanceConstellation();
+      } else {
+        setStatus("Linked! Next star glows gold. Stars linked: " + totalLinked + ".");
+      }
+    } else {
+      mistakes++;
+      flash = 12; flashColor = "#ff5a5a";
+      shakeUntil = Date.now() + 300;
+      soundBad();
+      setStatus("Wrong star! That was not next in the sequence. Mistakes: " + mistakes + " / 5.");
+      if (mistakes >= 5) { gameOver(); }
+    }
+    updateHud();
+  }
+
+  function starAtPoint(px, py) {
+    var c = current(), best = -1, bestD = 34;
+    for (var i = 0; i < c.stars.length; i++) {
+      var dx = c.stars[i][0] - px, dy = c.stars[i][1] - py;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  function canvasPoint(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = evt.clientX !== undefined ? evt.clientX : (evt.touches && evt.touches[0].clientX);
+    var cy = evt.clientY !== undefined ? evt.clientY : (evt.touches && evt.touches[0].clientY);
+    return { x: (cx - rect.left) * (canvas.width / rect.width), y: (cy - rect.top) * (canvas.height / rect.height) };
+  }
+
+  canvas.addEventListener("click", function (evt) {
+    ensureAudio();
+    if (state !== "playing") return;
+    var p = canvasPoint(evt);
+    cursor.x = p.x; cursor.y = p.y;
+    var idx = starAtPoint(p.x, p.y);
+    if (idx >= 0) tryStar(idx);
+  });
+
+  canvas.addEventListener("touchstart", function (evt) {
+    evt.preventDefault();
+    ensureAudio();
+    if (state !== "playing") return;
+    var p = canvasPoint(evt);
+    cursor.x = p.x; cursor.y = p.y;
+    var idx = starAtPoint(p.x, p.y);
+    if (idx >= 0) tryStar(idx);
+  }, { passive: false });
+
+  document.addEventListener("keydown", function (evt) {
+    if (evt.key === "r" || evt.key === "R") { if (state === "playing" || state === "win" || state === "over") startGame(); return; }
+    if (state !== "playing") return;
+    var step = evt.shiftKey ? 40 : 18;
+    if (evt.key === "ArrowLeft") { cursor.x = Math.max(10, cursor.x - step); evt.preventDefault(); }
+    else if (evt.key === "ArrowRight") { cursor.x = Math.min(850, cursor.x + step); evt.preventDefault(); }
+    else if (evt.key === "ArrowUp") { cursor.y = Math.max(10, cursor.y - step); evt.preventDefault(); }
+    else if (evt.key === "ArrowDown") { cursor.y = Math.min(550, cursor.y + step); evt.preventDefault(); }
+    else if (evt.key === "Enter" || evt.key === " ") {
+      evt.preventDefault();
+      ensureAudio();
+      var idx = starAtPoint(cursor.x, cursor.y);
+      if (idx >= 0) tryStar(idx);
+      else setStatus("Move the crosshair closer to a star, then confirm.");
+    }
+  });
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("winRestartBtn").addEventListener("click", startGame);
+  document.getElementById("overRestartBtn").addEventListener("click", startGame);
+
+  function draw(now) {
+    var t = now / 1000;
+    ctx.clearRect(0, 0, 860, 560);
+    var shakeX = 0, shakeY = 0;
+    if (Date.now() < shakeUntil) { shakeX = (Math.random() - 0.5) * 8; shakeY = (Math.random() - 0.5) * 8; }
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    // Twinkling background stars
+    backgroundStars.forEach(function (s) {
+      var a = 0.35 + 0.4 * (0.5 + 0.5 * Math.sin(t * 1.7 + s.p));
+      ctx.globalAlpha = a; ctx.fillStyle = "#cdd9ff";
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    if (state !== "title") {
+      var c = current();
+      // Faint dotted target outline, in correct sequence order
+      ctx.strokeStyle = "rgba(160,185,255,0.45)"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 7]);
+      ctx.beginPath();
+      c.order.forEach(function (si, k) {
+        var p = c.stars[si];
+        if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+      });
+      ctx.stroke(); ctx.setLineDash([]);
+      // Completed links
+      if (linked.length > 1) {
+        ctx.strokeStyle = "#ffd76a"; ctx.lineWidth = 3; ctx.beginPath();
+        linked.forEach(function (si, k) {
+          var p = c.stars[si];
+          if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+        });
+        ctx.stroke();
+      }
+      // Stars
+      var next = nextStarIndex();
+      c.stars.forEach(function (p, i) {
+        var isLinked = linked.indexOf(i) >= 0;
+        var isNext = i === next && state === "playing";
+        var pulse = isNext ? 1 + 0.35 * Math.sin(t * 5) : 1;
+        ctx.fillStyle = isLinked ? "#ffd76a" : (isNext ? "#ffe9a3" : "#eaf2ff");
+        ctx.shadowColor = isNext ? "#ffd76a" : "#7aa8ff";
+        ctx.shadowBlur = isNext ? 22 : 8;
+        ctx.beginPath(); ctx.arc(p[0], p[1], (isLinked ? 9 : 11) * pulse, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#071022"; ctx.font = "bold 11px Georgia, serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(i + 1), p[0], p[1]);
+        if (isNext) {
+          ctx.strokeStyle = "rgba(255,215,106,0.9)"; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(p[0], p[1], 22 * pulse, 0, Math.PI * 2); ctx.stroke();
+        }
+      });
+      // Crosshair cursor
+      if (state === "playing") {
+        ctx.strokeStyle = "#7dffb0"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cursor.x, cursor.y, 14, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cursor.x - 20, cursor.y); ctx.lineTo(cursor.x - 8, cursor.y);
+        ctx.moveTo(cursor.x + 8, cursor.y); ctx.lineTo(cursor.x + 20, cursor.y);
+        ctx.moveTo(cursor.x, cursor.y - 20); ctx.lineTo(cursor.x, cursor.y - 8);
+        ctx.moveTo(cursor.x, cursor.y + 8); ctx.lineTo(cursor.x, cursor.y + 20);
+        ctx.stroke();
+      }
+      // Constellation label
+      ctx.fillStyle = "#eaf2ff"; ctx.font = "bold 20px Georgia, serif"; ctx.textAlign = "left";
+      ctx.fillText(c.name, 20, 32);
+      ctx.font = "14px Georgia, serif"; ctx.fillStyle = "#9fb8e8";
+      ctx.fillText("Follow the dotted outline in order — the gold star is next.", 20, 54);
+    } else {
+      ctx.fillStyle = "#eaf2ff"; ctx.font = "bold 26px Georgia, serif"; ctx.textAlign = "center";
+      ctx.fillText("The sky is waiting to be mapped.", 430, 280);
+    }
+    if (flash > 0) {
+      flash--;
+      ctx.fillStyle = flashColor; ctx.globalAlpha = 0.12;
+      ctx.fillRect(0, 0, 860, 560); ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+    requestAnimationFrame(draw);
+  }
+
+  updateHud();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
