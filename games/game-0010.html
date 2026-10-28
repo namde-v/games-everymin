@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Skyline Leap</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0b1020;color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;padding:12px}
+  #wrap{width:100%;max-width:980px}
+  h1{margin:4px 0 8px;text-align:center;letter-spacing:2px}
+  #hud{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;background:#16203a;border:2px solid #3b4a7a;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-weight:bold}
+  #hud span{background:#0f1830;padding:4px 8px;border-radius:6px}
+  #status{color:#ffd94d}
+  canvas{display:block;width:100%;height:auto;background:#87a8d8;border:3px solid #3b4a7a;border-radius:12px;touch-action:none}
+  #overlay{position:relative;margin-top:-540px}
+  .panel{position:absolute;left:50%;top:130px;transform:translateX(-50%);width:min(620px,92%);background:rgba(8,14,32,.92);border:2px solid #ffd94d;border-radius:14px;padding:20px;text-align:center;z-index:5}
+  .panel h2{margin:0 0 8px;font-size:34px;color:#ffd94d}
+  .panel p{line-height:1.55;margin:8px 0}
+  .panel ul{text-align:left;line-height:1.6}
+  button{cursor:pointer;background:#ffd94d;color:#141414;border:0;border-radius:10px;padding:12px 22px;font-size:18px;font-weight:bold;margin-top:10px}
+  button:active{transform:scale(.97)}
+  #touch{display:flex;gap:10px;justify-content:space-between;margin-top:10px;user-select:none;-webkit-user-select:none}
+  .tbtn{flex:1;max-width:180px;background:#24365f;border:2px solid #5b74b8;color:#fff;border-radius:12px;padding:14px 0;text-align:center;font-size:18px;font-weight:bold;touch-action:none}
+  .tbtn.jump{background:#c94f6d;border-color:#ff8fa3}
+  .hint{text-align:center;opacity:.8;font-size:13px;margin-top:8px}
+  @media (max-width:600px){.panel{top:30px}.panel h2{font-size:26px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>SKYLINE LEAP</h1>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Stars: <b id="stars">0</b></span>
+    <span>Lives: <b id="lives">3</b></span>
+    <span>Level: <b id="level">1 / 3</b></span>
+    <span>Time: <b id="time">0:00</b></span>
+    <span id="status">Title</span>
+  </div>
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="overlay">
+    <div class="panel" id="panel">
+      <h2 id="panelTitle">SKYLINE LEAP</h2>
+      <p id="panelText">Run across the rooftops, grab every star, dodge the spikes, and reach the flag before you fall.</p>
+      <ul>
+        <li><b>Move:</b> Arrow Keys / A D, or the on-screen Left and Right buttons</li>
+        <li><b>Jump:</b> Space / W / Up Arrow, or the Jump button — jump again in mid-air for a double-jump</li>
+        <li><b>Forgiving jumps:</b> Coyote time lets you jump briefly after leaving a ledge</li>
+        <li><b>Goal:</b> Reach the flag on Level 3 to win. Spikes and falls cost a life. You have 3 lives.</li>
+      </ul>
+      <button id="startBtn" type="button">Start Game</button>
+      <p class="hint">Tip: Hold a direction while jumping to clear wide gaps. Land on moving rooftops in Level 3.</p>
+    </div>
+  </div>
+  <div id="touch">
+    <div class="tbtn" id="btnLeft">◀ LEFT</div>
+    <div class="tbtn jump" id="btnJump">▲ JUMP</div>
+    <div class="tbtn" id="btnRight">RIGHT ▶</div>
+  </div>
+  <p class="hint">Keyboard, mouse and touch supported. Press R to restart instantly. Click the canvas to jump.</p>
+</div>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var W=960,H=540;
+  var scoreEl=document.getElementById('score'),starsEl=document.getElementById('stars'),livesEl=document.getElementById('lives'),levelEl=document.getElementById('level'),timeEl=document.getElementById('time'),statusEl=document.getElementById('status');
+  var panel=document.getElementById('panel'),panelTitle=document.getElementById('panelTitle'),panelText=document.getElementById('panelText'),startBtn=document.getElementById('startBtn');
+
+  // Audio: procedural Web Audio, created only after a user gesture.
+  var audioCtx=null;
+  function ensureAudio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx&&audioCtx.state==='suspended'){ audioCtx.resume(); } }
+  function tone(freq,dur,type,vol,slide){
+    if(!audioCtx) return;
+    var o=audioCtx.createOscillator(),g=audioCtx.createGain(),t=audioCtx.currentTime;
+    o.type=type||'square'; o.frequency.setValueAtTime(freq,t);
+    if(slide) o.frequency.exponentialRampToValueAtTime(slide,t+dur);
+    g.gain.setValueAtTime(vol||0.12,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t+dur);
+  }
+  function sJump(){ tone(300,0.18,'square',0.10,620); }
+  function sDouble(){ tone(420,0.18,'square',0.10,760); }
+  function sCoin(){ tone(880,0.10,'sine',0.14); setTimeout(function(){ tone(1320,0.14,'sine',0.12); },70); }
+  function sDeath(){ tone(320,0.35,'sawtooth',0.14,80); }
+  function sWin(){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ tone(f,0.22,'triangle',0.14); },i*130); }); }
+
+  // Levels: platforms are rooftops. y increases downwards.
+  function P(x,y,w,move){ return {x:x,y:y,w:w,h:28,move:move||null,vx:move?1.2:0}; }
+  function S(x,y){ return {x:x,y:y,taken:false}; }
+  function K(x,y){ return {x:x,y:y,w:34,h:20}; }
+  var LEVELS=[
+    { name:'Sunset Roofs', world:2360, sky:['#ff9a5a','#ffd94d','#3a2a6b'], plat:[P(0,460,330),P(390,430,180),P(630,390,160),P(850,440,200),P(1110,400,160),P(1330,360,180),P(1570,420,160),P(1790,380,200),P(2050,440,310)],
+      stars:[S(450,360),S(700,320),S(1180,330),S(1420,290),S(1880,310),S(2150,370)],
+      spikes:[K(920,420),K(1400,340),K(1650,400)], flag:{x:2260,y:400} },
+    { name:'Neon Night', world:2680, sky:['#0b1020','#233a7a','#ff5a8a'], plat:[P(0,470,280),P(340,420,150),P(550,370,150),P(770,430,170),P(1000,380,150),P(1210,330,170),P(1440,400,150),P(1650,350,180),P(1890,410,150),P(2100,360,170),P(2330,430,350)],
+      stars:[S(400,350),S(620,300),S(1070,310),S(1290,260),S(1720,280),S(1970,340),S(2180,290)],
+      spikes:[K(830,410),K(1280,310),K(1500,380),K(1960,390)], flag:{x:2560,y:390} },
+    { name:'Dawn Towers', world:2900, sky:['#7ec8e3','#ffe9a8','#5a3a8a'], plat:[P(0,470,280),P(340,430,150),P(550,380,150),P(770,440,170),P(1000,390,160),P(1240,340,170),P(1480,410,150,{min:1480,max:1680}),P(1780,360,170),P(2010,420,150),P(2220,370,170),P(2450,430,450)],
+      stars:[S(410,360),S(620,310),S(1070,320),S(1320,270),S(1850,290),S(2090,350),S(2300,300)],
+      spikes:[K(840,420),K(1310,320),K(2080,400)], flag:{x:2780,y:390} }
+  ];
+
+  var state='title', levelIndex=0, score=0, starsTotal=0, lives=3, elapsed=0, lastTime=0;
+  var player, camX=0, keys={left:false,right:false}, jumpQueued=false;
+  var level, platCopy, starCopy, spikeCopy;
+
+  function loadLevel(i){
+    level=LEVELS[i];
+    platCopy=level.plat.map(function(p){ return {x:p.x,y:p.y,w:p.w,h:p.h,move:p.move,vx:p.vx||0}; });
+    starCopy=level.stars.map(function(s){ return {x:s.x,y:s.y,taken:false}; });
+    spikeCopy=level.spikes.map(function(s){ return {x:s.x,y:s.y,w:s.w,h:s.h}; });
+    player={x:30,y:380,w:28,h:42,vx:0,vy:0,onGround:false,coyote:0,airJumps:0,standing:null,face:1};
+    camX=0;
+  }
+  function resetGame(){
+    levelIndex=0; score=0; starsTotal=0; lives=3; elapsed=0; loadLevel(0); updateHUD('Playing');
+  }
+  function startGame(){
+    ensureAudio(); resetGame(); state='playing'; panel.style.display='none'; updateHUD('Playing');
+  }
+  function showPanel(title,text,btn){
+    panelTitle.textContent=title; panelText.textContent=text; startBtn.textContent=btn; panel.style.display='block';
+  }
+  function loseLife(reason){
+    sDeath(); lives--; updateHUD(reason);
+    if(lives<=0){ state='gameover'; showPanel('GAME OVER','You ran out of lives. Score: '+score+'. Stars: '+starsTotal+'. Try the rooftops again.','Restart'); }
+    else { loadLevel(levelIndex); updateHUD(reason); }
+  }
+  function nextLevel(){
+    sWin(); score+=500;
+    if(levelIndex>=LEVELS.length-1){ state='win'; updateHUD('You Win'); showPanel('YOU WIN','You reached the final flag. Final score: '+score+'. Stars: '+starsTotal+'. Time: '+fmtTime(elapsed)+'.','Play Again'); }
+    else { levelIndex++; loadLevel(levelIndex); updateHUD('Level '+(levelIndex+1)+' — '+LEVELS[levelIndex].name); }
+  }
+  function fmtTime(s){ var m=Math.floor(s/60), r=Math.floor(s%60); return m+':'+(r<10?'0':'')+r; }
+  function updateHUD(status){
+    scoreEl.textContent=score; starsEl.textContent=starsTotal; livesEl.textContent=lives;
+    levelEl.textContent=(levelIndex+1)+' / '+LEVELS.length; timeEl.textContent=fmtTime(elapsed);
+    if(status) statusEl.textContent=status;
+  }
+
+  function tryJump(){
+    if(state!=='playing') return;
+    if(player.onGround||player.coyote>0){ player.vy=-14.8; player.onGround=false; player.coyote=0; player.airJumps=0; sJump(); }
+    else if(player.airJumps<1){ player.vy=-14.0; player.airJumps++; sDouble(); }
+  }
+  function queueJump(){ jumpQueued=true; }
+
+  // Keyboard listeners
+  window.addEventListener('keydown',function(e){
+    if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') keys.left=true;
+    if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') keys.right=true;
+    if(e.key===' '||e.key==='ArrowUp'||e.key==='w'||e.key==='W'){ if(!e.repeat) queueJump(); e.preventDefault(); }
+    if(e.key==='Enter'&&(state==='title'||state==='gameover'||state==='win')) startGame();
+    if(e.key==='r'||e.key==='R'){ if(state==='playing'||state==='gameover'||state==='win') startGame(); }
+  });
+  window.addEventListener('keyup',function(e){
+    if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') keys.left=false;
+    if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') keys.right=false;
+  });
+  // Mouse and touch listeners
+  startBtn.addEventListener('click',function(){ startGame(); });
+  canvas.addEventListener('pointerdown',function(){ if(state==='playing') queueJump(); });
+  function bindTouch(id,down,up){
+    var el=document.getElementById(id);
+    el.addEventListener('pointerdown',function(e){ e.preventDefault(); down(); });
+    el.addEventListener('pointerup',function(){ if(up) up(); });
+    el.addEventListener('pointerleave',function(){ if(up) up(); });
+    el.addEventListener('pointercancel',function(){ if(up) up(); });
+  }
+  bindTouch('btnLeft',function(){ keys.left=true; },function(){ keys.left=false; });
+  bindTouch('btnRight',function(){ keys.right=true; },function(){ keys.right=false; });
+  bindTouch('btnJump',function(){ queueJump(); },null);
+
+  function overlap(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
+
+  function update(){
+    if(state!=='playing') return;
+    elapsed+=1/60;
+    // Moving platforms
+    platCopy.forEach(function(p){
+      if(!p.move) return;
+      var old=p.x; p.x+=p.vx;
+      if(p.x<p.move.min){ p.x=p.move.min; p.vx=1.2; }
+      if(p.x>p.move.max){ p.x=p.move.max; p.vx=-1.2; }
+      if(player.standing===p){ player.x+=(p.x-old); }
+    });
+    var speed=5.4;
+    if(keys.left){ player.vx=-speed; player.face=-1; }
+    else if(keys.right){ player.vx=speed; player.face=1; }
+    else player.vx=0;
+    if(jumpQueued){ tryJump(); jumpQueued=false; }
+    player.vy=Math.min(player.vy+0.62,18);
+    player.x+=player.vx;
+    if(player.x<0) player.x=0;
+    if(player.x>level.world-player.w) player.x=level.world-player.w;
+    // Horizontal collision is soft: platforms are roofs, so resolve vertical first for a platformer feel.
+    player.y+=player.vy;
+    var wasGround=player.onGround; player.onGround=false; player.standing=null;
+    platCopy.forEach(function(p){
+      if(player.x+player.w>p.x+4 && player.x<p.x+p.w-4 && player.y+player.h>p.y && player.y+player.h<p.y+26 && player.vy>=0){
+        player.y=p.y-player.h; player.vy=0; player.onGround=true; player.standing=p; player.airJumps=0;
+      }
+    });
+    if(player.onGround) player.coyote=0.12; else if(wasGround) player.coyote=0.12; else player.coyote=Math.max(0,player.coyote-1/60);
+    // Stars
+    starCopy.forEach(function(s){
+      if(!s.taken && overlap({x:player.x,y:player.y,w:player.w,h:player.h},{x:s.x-14,y:s.y-14,w:28,h:28})){
+        s.taken=true; starsTotal++; score+=100; sCoin(); updateHUD('Star collected');
+      }
+    });
+    // Spikes
+    var hit=false;
+    spikeCopy.forEach(function(s){ if(overlap({x:player.x+4,y:player.y+6,w:player.w-8,h:player.h-6},s)) hit=true; });
+    if(hit){ loseLife('Hit a spike'); return; }
+    // Fall
+    if(player.y>H+120){ loseLife('Fell off the roof'); return; }
+    // Flag
+    if(overlap({x:player.x,y:player.y,w:player.w,h:player.h},{x:level.flag.x,y:level.flag.y-70,w:34,h:90})){
+      nextLevel(); return;
+    }
+    camX=Math.max(0,Math.min(level.world-W,player.x-320));
+    updateHUD();
+  }
+
+  function draw(){
+    var sky=level?level.sky:['#ff9a5a','#ffd94d','#3a2a6b'];
+    var g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,sky[0]); g.addColorStop(0.6,sky[1]); g.addColorStop(1,sky[2]);
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    // Distant skyline, parallax
+    ctx.fillStyle='rgba(20,24,48,0.55)';
+    for(var i=0;i<14;i++){ var bx=(i*210-camX*0.25)%(level?level.world:2400); if(bx<0) bx+=2400; var bh=120+((i*37)%110); ctx.fillRect(bx,380-bh,120,bh); }
+    ctx.save(); ctx.translate(-camX,0);
+    // Platforms: rooftops with lit windows
+    platCopy.forEach(function(p){
+      ctx.fillStyle='#2b2f4a'; ctx.fillRect(p.x,p.y,p.w,140);
+      ctx.fillStyle='#ff5a5a'; ctx.fillRect(p.x-4,p.y-8,p.w+8,14);
+      ctx.fillStyle='#ffd94d';
+      for(var wx=p.x+14;wx<p.x+p.w-20;wx+=34){ ctx.fillRect(wx,p.y+28,14,18); }
+      ctx.fillStyle='rgba(255,255,255,0.18)'; ctx.fillRect(p.x,p.y+4,p.w,4);
+    });
+    // Stars
+    starCopy.forEach(function(s){
+      if(s.taken) return;
+      ctx.fillStyle='#ffe94d'; ctx.beginPath();
+      for(var a=0;a<5;a++){ var ang=-Math.PI/2+a*2*Math.PI/5, ang2=ang+Math.PI/5; var r1=13,r2=6;
+        ctx.lineTo(s.x+Math.cos(ang)*r1,s.y+Math.sin(ang)*r1); ctx.lineTo(s.x+Math.cos(ang2)*r2,s.y+Math.sin(ang2)*r2); }
+      ctx.closePath(); ctx.fill();
+    });
+    // Spikes
+    ctx.fillStyle='#e8e8f0';
+    spikeCopy.forEach(function(s){ ctx.beginPath(); ctx.moveTo(s.x,s.y+s.h); ctx.lineTo(s.x+s.w/2,s.y); ctx.lineTo(s.x+s.w,s.y+s.h); ctx.closePath(); ctx.fill(); });
+    // Flag
+    var f=level.flag; ctx.strokeStyle='#fff'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(f.x,f.y-70); ctx.lineTo(f.x,f.y+20); ctx.stroke();
+    ctx.fillStyle='#22d67a'; ctx.beginPath(); ctx.moveTo(f.x,f.y-70); ctx.lineTo(f.x+36,f.y-56); ctx.lineTo(f.x,f.y-42); ctx.closePath(); ctx.fill();
+    // Player: runner with cape
+    ctx.fillStyle='#ff4d6d'; ctx.fillRect(player.x,player.y,player.w,player.h);
+    ctx.fillStyle='#1f2a44'; ctx.fillRect(player.x+4,player.y+8,20,10);
+    ctx.fillStyle='#ffd94d'; ctx.fillRect(player.x+ (player.face>0?18:2),player.y+14,8,6);
+    ctx.fillStyle='#222'; ctx.fillRect(player.x+4,player.y+player.h-8,9,8); ctx.fillRect(player.x+15,player.y+player.h-8,9,8);
+    ctx.restore();
+    // Level name banner
+    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(12,12,300,28);
+    ctx.fillStyle='#fff'; ctx.font='bold 16px Arial'; ctx.fillText(level?level.name:'Skyline Leap',20,31);
+    if(state==='playing'){ ctx.fillStyle='#fff'; ctx.font='bold 15px Arial'; ctx.fillText('Reach the green flag',W-230,31); }
+  }
+
+  // Game loop via requestAnimationFrame
+  function loop(t){
+    requestAnimationFrame(loop);
+    update();
+    draw();
+  }
+  loadLevel(0);
+  updateHUD('Title');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

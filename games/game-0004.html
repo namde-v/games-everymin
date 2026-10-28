@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Pulse Tap — Rhythm Beat Timing</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:#0b0714;color:#fff;font-family:Arial,Helvetica,sans-serif;overflow:hidden;height:100%}
+  #wrap{width:100%;max-width:520px;margin:0 auto;height:100dvh;display:flex;flex-direction:column;background:radial-gradient(circle at 50% 0%,#2a1250 0%,#0b0714 55%)}
+  header{padding:10px 12px 6px;display:flex;justify-content:space-between;align-items:center}
+  header h1{font-size:20px;margin:0;letter-spacing:2px;color:#ffe066;text-shadow:0 0 12px #ff4fd8}
+  header h1 span{color:#4ff2ff}
+  #hud{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:0 10px 8px;text-align:center;font-size:13px}
+  #hud div{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:6px 2px}
+  #hud b{display:block;font-size:17px;color:#ffe066}
+  #barWrap{margin:0 10px 8px;height:12px;background:rgba(255,255,255,.12);border-radius:99px;overflow:hidden;border:1px solid rgba(255,255,255,.2)}
+  #bar{height:100%;width:0%;background:linear-gradient(90deg,#ff4fd8,#4ff2ff,#ffe066)}
+  #stage{position:relative;flex:1;min-height:0;margin:0 10px 10px;border-radius:16px;overflow:hidden;border:2px solid rgba(255,255,255,.22);background:#120a24}
+  canvas{display:block;width:100%;height:100%;touch-action:none;cursor:pointer}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px;background:rgba(5,2,14,.88);z-index:5}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:42px;margin:0 0 6px;color:#ffe066;text-shadow:0 0 18px #ff4fd8;letter-spacing:3px}
+  .overlay h2 em{font-style:normal;color:#4ff2ff}
+  .overlay p{max-width:420px;line-height:1.55;color:#e8e0ff;margin:8px 0}
+  .keys{display:flex;gap:8px;margin:12px 0}
+  .keys span{width:44px;height:44px;line-height:44px;border-radius:10px;background:#241245;border:1px solid #7a5cff;font-weight:bold;font-size:18px;box-shadow:0 4px 0 #120a24}
+  button{border:0;border-radius:999px;padding:14px 30px;font-size:18px;font-weight:bold;cursor:pointer;color:#14051f;background:linear-gradient(90deg,#ffe066,#ff4fd8);box-shadow:0 6px 24px rgba(255,79,216,.45)}
+  button:active{transform:translateY(2px)}
+  button.secondary{background:#2c2150;color:#fff;border:1px solid #7a5cff;box-shadow:none;margin-top:10px}
+  .small{font-size:12px;color:#bdb2e6}
+  #status{color:#4ff2ff;font-weight:bold}
+  #judge{font-size:15px;min-height:20px;color:#ffe066}
+  .laneLabel{font-size:11px;letter-spacing:1px;color:#cfc4ff}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header><h1>PULSE <span>TAP</span></h1><div id="status">READY</div></header>
+  <div id="hud">
+    <div>Score<b id="score">0</b></div>
+    <div>Combo<b id="combo">0</b></div>
+    <div>Accuracy<b id="acc">100%</b></div>
+    <div>Perfect<b id="perfect">0</b></div>
+    <div>Good / Miss<b id="goodmiss">0 / 0</b></div>
+    <div>Health<b id="health">100</b></div>
+  </div>
+  <div id="barWrap"><div id="bar"></div></div>
+  <div id="stage">
+    <canvas id="game" width="480" height="620"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>PULSE <em>TAP</em></h2>
+      <p><b>Tap the beat. Don't miss the pulse.</b><br>Notes fall down 4 glowing lanes. Hit each note exactly when it crosses the bright beat line.</p>
+      <div class="keys"><span>D</span><span>F</span><span>J</span><span>K</span></div>
+      <p><b>How to play:</b> Press D / F / J / K for lanes 1-4, or tap / click a lane on touch and mouse. Perfect = within 50 ms, Good = within 120 ms. Build combos, protect your health, and survive the full song.</p>
+      <p class="small">Procedural music is generated live in your browser. No downloads, no network needed. Sound starts only after you press Start.</p>
+      <button id="startBtn" type="button">▶ START SONG</button>
+      <p id="judge"></p>
+      <p class="small">Song: about 72 seconds &middot; BPM 124 &middot; Difficulty rises in the second half</p>
+    </div>
+    <div class="overlay hidden" id="endScreen">
+      <h2 id="endTitle">SONG COMPLETE</h2>
+      <p id="endText"></p>
+      <p id="endStats"></p>
+      <button id="restartBtn" type="button">↻ PLAY AGAIN</button>
+      <button id="menuBtn" class="secondary" type="button">Back to Title</button>
+    </div>
+  </div>
+  <p style="text-align:center;margin:0 0 10px" class="laneLabel">LANES: D &nbsp; F &nbsp; J &nbsp; K &nbsp;|&nbsp; TAP A LANE TO HIT</p>
+</div>
+<script>
+(function(){
+  'use strict';
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var W=480,H=620;
+  var HIT_Y=540, LEAD=1.55, BPM=124, BEAT=60/BPM, DURATION=72;
+  var LANE_COLORS=['#ff4fd8','#ffe066','#4ff2ff','#7cff6b'];
+  var LANE_KEYS=['d','f','j','k'];
+  var scoreEl=document.getElementById('score'), comboEl=document.getElementById('combo');
+  var accEl=document.getElementById('acc'), perfectEl=document.getElementById('perfect');
+  var goodMissEl=document.getElementById('goodmiss'), healthEl=document.getElementById('health');
+  var barEl=document.getElementById('bar'), statusEl=document.getElementById('status');
+  var titleScreen=document.getElementById('titleScreen'), endScreen=document.getElementById('endScreen');
+  var endTitle=document.getElementById('endTitle'), endText=document.getElementById('endText'), endStats=document.getElementById('endStats');
+  var judgeEl=document.getElementById('judge');
+  var state='title', startTime=0, songTime=0, lastTime=0, rafId=0;
+  var notes=[], melody=[], nextMelody=0, judgeText='', judgeAt=0;
+  var score=0, combo=0, maxCombo=0, perfect=0, good=0, miss=0, health=100, laneFlash=[0,0,0,0];
+  var audioCtx=null, master=null, musicGain=null;
+  // Deterministic chart: a seedable shuffle keeps every run fair and distinct.
+  function seeded(n){ var x=Math.sin(n*127.1+311.7)*43758.5453; return x-Math.floor(x); }
+  function buildChart(){
+    notes=[]; melody=[];
+    var scale=[261.63,293.66,329.63,392.00,440.00,523.25,587.33,659.25];
+    var totalBeats=Math.floor(DURATION/BEAT);
+    for(var i=0;i<totalBeats;i++){
+      var t=i*BEAT;
+      var lane=Math.floor(seeded(i*3+1)*4);
+      var pitch=scale[Math.floor(seeded(i*7+2)*scale.length)];
+      notes.push({time:t,lane:lane,hit:false,judged:false});
+      melody.push({time:t,freq:pitch,type:'triangle'});
+      if(i>totalBeats*0.45 && i%2===0){
+        var lane2=(lane+1+Math.floor(seeded(i*11+5)*3))%4;
+        notes.push({time:t+BEAT/2,lane:lane2,hit:false,judged:false});
+        melody.push({time:t+BEAT/2,freq:pitch*1.5,type:'sine'});
+      }
+      if(i%8===0){ melody.push({time:t,freq:65.41,type:'sine'}); }
+    }
+    notes.sort(function(a,b){return a.time-b.time;});
+    melody.sort(function(a,b){return a.time-b.time;});
+  }
+  function ensureAudio(){
+    if(audioCtx) return;
+    var AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC) return;
+    audioCtx=new AC();
+    master=audioCtx.createGain(); master.gain.value=0.9; master.connect(audioCtx.destination);
+    musicGain=audioCtx.createGain(); musicGain.gain.value=0.35; musicGain.connect(master);
+  }
+  function tone(freq,dur,type,vol,when){
+    if(!audioCtx) return;
+    var t=when||audioCtx.currentTime;
+    var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type=type||'sine'; o.frequency.setValueAtTime(freq,t);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(vol||0.2,t+0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.05);
+  }
+  function hitSound(kind){
+    if(kind==='perfect'){ tone(880,0.14,'sine',0.35); tone(1320,0.10,'triangle',0.18); }
+    else if(kind==='good'){ tone(660,0.12,'triangle',0.25); }
+    else { tone(110,0.22,'sawtooth',0.22); tone(82,0.22,'square',0.12); }
+  }
+  function setStatus(s){ statusEl.textContent=s; }
+  function accuracy(){
+    var total=perfect+good+miss;
+    if(!total) return 100;
+    return Math.round(((perfect*1+good*0.6)/total)*100);
+  }
+  function updateHud(){
+    scoreEl.textContent=score; comboEl.textContent=combo;
+    accEl.textContent=accuracy()+'%'; perfectEl.textContent=perfect;
+    goodMissEl.textContent=good+' / '+miss; healthEl.textContent=Math.max(0,Math.round(health));
+    barEl.style.width=Math.min(100,(songTime/DURATION)*100)+'%';
+  }
+  function showJudge(text,color){
+    judgeText=text; judgeAt=songTime;
+    judgeEl.textContent=text; judgeEl.style.color=color;
+  }
+  function endGame(win){
+    state='over'; cancelAnimationFrame(rafId);
+    var acc=accuracy();
+    var rank=acc>=95?'S':acc>=85?'A':acc>=75?'B':'C';
+    endTitle.textContent=win?'SONG COMPLETE!':'GAME OVER';
+    endText.textContent=win?('You survived the full song. Rank '+rank+' — a pulse-perfect run!'):('Your health ran out. Rank '+rank+' — the beat got away this time.');
+    endStats.textContent='Score: '+score+' | Max combo: '+maxCombo+' | Perfect: '+perfect+' | Good: '+good+' | Miss: '+miss+' | Accuracy: '+acc+'%';
+    endScreen.classList.remove('hidden'); setStatus(win?'WIN':'GAME OVER');
+  }
+  function reset(){
+    buildChart(); score=0; combo=0; maxCombo=0; perfect=0; good=0; miss=0; health=100;
+    songTime=0; nextMelody=0; laneFlash=[0,0,0,0]; judgeText=''; judgeEl.textContent='';
+    endScreen.classList.add('hidden'); updateHud(); setStatus('PLAYING');
+  }
+  function start(){
+    ensureAudio();
+    if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+    reset(); titleScreen.classList.add('hidden'); state='playing'; lastTime=performance.now();
+    tone(523,0.3,'triangle',0.25); tone(784,0.3,'sine',0.2);
+    rafId=requestAnimationFrame(loop);
+  }
+  function judgeLane(lane){
+    if(state!=='playing') return;
+    laneFlash[lane]=1;
+    var best=null,bestDiff=999;
+    for(var i=0;i<notes.length;i++){
+      var n=notes[i];
+      if(n.judged||n.lane!==lane) continue;
+      var d=Math.abs(n.time-songTime);
+      if(d<bestDiff){ bestDiff=d; best=n; }
+    }
+    if(!best||bestDiff>0.15){
+      combo=0; health=Math.max(0,health-2); updateHud(); showJudge('MISS','#ff5a5a'); hitSound('miss'); return;
+    }
+    best.judged=true; best.hit=true;
+    if(bestDiff<=0.05){ perfect++; score+=300+combo*5; combo++; health=Math.min(100,health+2); showJudge('PERFECT!','#ffe066'); hitSound('perfect'); }
+    else { good++; score+=150+combo*3; combo++; health=Math.min(100,health+1); showJudge('GOOD','#4ff2ff'); hitSound('good'); }
+    if(combo>maxCombo) maxCombo=combo;
+    updateHud();
+  }
+  function laneFromX(clientX){
+    var r=canvas.getBoundingClientRect();
+    var x=(clientX-r.left)/r.width*W;
+    return Math.max(0,Math.min(3,Math.floor(x/(W/4))));
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#120a24'; ctx.fillRect(0,0,W,H);
+    for(var lane=0;lane<4;lane++){
+      var x=lane*(W/4);
+      ctx.fillStyle=lane%2?'#171033':'#1d1240'; ctx.fillRect(x,0,W/4,H);
+      if(laneFlash[lane]>0.05){
+        ctx.fillStyle=LANE_COLORS[lane]; ctx.globalAlpha=laneFlash[lane]*0.22; ctx.fillRect(x,0,W/4,H); ctx.globalAlpha=1;
+        laneFlash[lane]*=0.88;
+      }
+      ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+      ctx.fillStyle=LANE_COLORS[lane]; ctx.font='bold 15px Arial'; ctx.textAlign='center';
+      ctx.fillText(LANE_KEYS[lane].toUpperCase(),x+W/8,28);
+    }
+    // beat line
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,HIT_Y-3,W,6);
+    ctx.fillStyle='rgba(255,224,102,.25)'; ctx.fillRect(0,HIT_Y-28,W,56);
+    // falling notes
+    for(var i=0;i<notes.length;i++){
+      var n=notes[i];
+      if(n.judged) continue;
+      var dt=n.time-songTime;
+      if(dt>LEAD||dt<-0.2) continue;
+      var y=HIT_Y-((dt/LEAD)*(HIT_Y-50))-0;
+      y=Math.max(40,Math.min(HIT_Y+30,y));
+      var nx=n.lane*(W/4)+8, nw=W/4-16, nh=34;
+      ctx.fillStyle=LANE_COLORS[n.lane];
+      ctx.shadowColor=LANE_COLORS[n.lane]; ctx.shadowBlur=16;
+      ctx.beginPath(); ctx.roundRect(nx,y-nh/2,nw,nh,10); ctx.fill(); ctx.shadowBlur=0;
+      ctx.fillStyle='#14051f'; ctx.font='bold 16px Arial'; ctx.fillText('♪',nx+nw/2,y+6);
+    }
+    // judgement + progress text on canvas
+    ctx.textAlign='center'; ctx.fillStyle='#ffffff'; ctx.font='bold 22px Arial';
+    if(judgeText && songTime-judgeAt<0.7){ ctx.fillText(judgeText,W/2,110); }
+    ctx.font='13px Arial'; ctx.fillStyle='#cfc4ff';
+    ctx.fillText('Time '+Math.floor(songTime)+'s / '+Math.floor(DURATION)+'s',W/2,H-16);
+  }
+  function loop(now){
+    if(state!=='playing') return;
+    var dt=Math.min(0.1,(now-lastTime)/1000); lastTime=now; songTime+=dt;
+    // schedule procedural melody just ahead of playhead
+    while(nextMelody<melody.length && melody[nextMelody].time<=songTime+0.05){
+      var m=melody[nextMelody];
+      tone(m.freq,0.22,m.type,0.16);
+      nextMelody++;
+    }
+    // misses for notes that passed the line
+    for(var i=0;i<notes.length;i++){
+      var n=notes[i];
+      if(!n.judged && n.time<songTime-0.15){
+        n.judged=true; miss++; combo=0; health-=8; showJudge('MISS','#ff5a5a'); hitSound('miss');
+        if(health<=0){ updateHud(); draw(); endGame(false); return; }
+      }
+    }
+    updateHud(); draw();
+    if(songTime>=DURATION){ endGame(true); return; }
+    rafId=requestAnimationFrame(loop);
+  }
+  document.getElementById('startBtn').addEventListener('click',start);
+  document.getElementById('restartBtn').addEventListener('click',function(){ endScreen.classList.add('hidden'); start(); });
+  document.getElementById('menuBtn').addEventListener('click',function(){
+    endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); state='title'; setStatus('READY'); draw();
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.repeat) return;
+    var k=e.key.toLowerCase();
+    var idx=LANE_KEYS.indexOf(k);
+    if(idx>=0){ e.preventDefault(); judgeLane(idx); }
+    if((k==='enter'||k===' ') && state==='title'){ e.preventDefault(); start(); }
+    if((k==='enter'||k===' ') && state==='over'){ e.preventDefault(); endScreen.classList.add('hidden'); start(); }
+  });
+  canvas.addEventListener('pointerdown',function(e){
+    e.preventDefault(); judgeLane(laneFromX(e.clientX));
+  });
+  canvas.addEventListener('mousedown',function(e){ judgeLane(laneFromX(e.clientX)); });
+  canvas.addEventListener('touchstart',function(e){ e.preventDefault(); if(e.touches && e.touches[0]) judgeLane(laneFromX(e.touches[0].clientX)); },{passive:false});
+  buildChart(); updateHud(); draw();
+})();
+</script>
+</body>
+</html>

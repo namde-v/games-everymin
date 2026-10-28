@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Gem Cascade - Sliding Match Puzzle</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0f1226;color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{margin:6px 0 2px;font-size:34px;letter-spacing:1px;text-align:center}
+.sub{color:#aab2ff;text-align:center;margin-bottom:10px}
+#wrap{width:min(520px,96vw);position:relative}
+#hud{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+.stat{background:#1c2148;border:1px solid #3a4190;border-radius:12px;padding:8px;text-align:center}
+.stat b{display:block;font-size:20px}
+.stat span{font-size:11px;color:#c6cbff;text-transform:uppercase;letter-spacing:.5px}
+#status{grid-column:1/-1;background:#252b5e;padding:8px;border-radius:10px;text-align:center;font-weight:bold}
+#board{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;background:#14173a;padding:8px;border-radius:16px;border:2px solid #3a4190;touch-action:manipulation}
+.cell{aspect-ratio:1;border:none;border-radius:12px;font-size:26px;cursor:pointer;color:#fff;text-shadow:0 2px 3px rgba(0,0,0,.6);box-shadow:inset 0 -4px 0 rgba(0,0,0,.25),0 3px 0 rgba(0,0,0,.3);transition:transform .12s,outline .12s}
+.cell:active{transform:scale(.94)}
+.cell.sel{outline:4px solid #fff;transform:scale(1.08);z-index:2}
+.cell.cur{outline:3px dashed #ffe066}
+.cell.pop{animation:pop .28s ease}
+@keyframes pop{50%{transform:scale(1.25) rotate(8deg);opacity:.4}}
+.t0{background:#e6395a}.t1{background:#2f7de1}.t2{background:#1fae6a}.t3{background:#e8a020}.t4{background:#8b5cf6}.t5{background:#0ea5b7}
+#btns{display:flex;gap:8px;justify-content:center;margin:12px 0;flex-wrap:wrap}
+button{border:none;border-radius:999px;padding:11px 18px;font-weight:bold;cursor:pointer;background:#ffd166;color:#1a1230}
+button.secondary{background:#2b3168;color:#fff;border:1px solid #565ec9}
+#help{background:#171a3d;border:1px solid #333a7d;border-radius:12px;padding:12px;font-size:14px;line-height:1.55}
+#fx{position:fixed;inset:0;pointer-events:none;z-index:5}
+#overlay{position:fixed;inset:0;background:rgba(5,7,25,.92);display:flex;align-items:center;justify-content:center;z-index:10;padding:20px}
+#overlay.hidden{display:none}
+.card{background:#1d2150;border:2px solid #4a52b8;border-radius:20px;padding:26px;max-width:520px;text-align:center}
+.card h2{font-size:42px;margin:0 0 8px}
+.card p{line-height:1.6;color:#d5d9ff}
+.big{font-size:20px;padding:14px 26px;background:#ffd166}
+@media(max-width:480px){h1{font-size:28px}.cell{font-size:20px}}
+</style>
+</head>
+<body>
+<canvas id="fx" width="800" height="500"></canvas>
+<div id="wrap">
+<h1>💎 Gem Cascade</h1>
+<div class="sub">Swap. Match. Cascade. Beat the target before moves or time run out.</div>
+<div id="hud">
+<div class="stat"><b id="score">0</b><span>Score</span></div>
+<div class="stat"><b id="target">1000</b><span>Target</span></div>
+<div class="stat"><b id="level">1</b><span>Level</span></div>
+<div class="stat"><b id="moves">25</b><span>Moves Left</span></div>
+<div class="stat"><b id="time">120</b><span>Seconds Left</span></div>
+<div class="stat"><b id="combo">x1</b><span>Combo</span></div>
+<div id="status">Press Start to play</div>
+</div>
+<div id="board" role="grid" aria-label="Gem board"></div>
+<div id="btns">
+<button id="hintBtn" class="secondary">Hint</button>
+<button id="shuffleBtn" class="secondary">Shuffle Board</button>
+<button id="soundBtn" class="secondary">Sound: On</button>
+<button id="restartBtn" class="secondary">Restart</button>
+</div>
+<div id="help"><b>How to play:</b> Click or tap a gem, then click an adjacent gem to swap them. Make a row or column of 3 or more matching gems to clear them. Cleared gems fall, new gems drop in, and cascades score extra. Keyboard: Arrow keys move the glowing cursor. Press Enter or Space to select a gem, then an Arrow key to swap in that direction, or Enter on an adjacent gem. Reach the target score to win the level. If moves or time run out first, it is game over.</div>
+</div>
+<div id="overlay">
+<div class="card">
+<h2>💎 Gem Cascade</h2>
+<p id="overlayText"><b>A sliding match puzzle.</b><br>Swap adjacent gems, match 3 or more, chain cascades, and beat the target before your moves or time run out.<br><br>Mouse / touch: tap two adjacent gems.<br>Keyboard: arrows move the cursor, Enter selects, arrows swap.</p>
+<button id="startBtn" class="big">▶ Start Game</button>
+<p style="font-size:13px">Level 1 target: 1000 points &bull; 25 moves &bull; 120 seconds</p>
+</div>
+</div>
+<script>
+const ROWS=8, COLS=8, TYPES=6;
+const SYMBOLS=['◆','●','▲','■','★','♥'];
+const NAMES=['Ruby','Sapphire','Emerald','Amber','Amethyst','Teal'];
+let grid=[], score=0, level=1, target=1000, moves=25, timeLeft=120, combo=1;
+let selected=null, cursor={r:0,c:0}, playing=false, busy=false, lastTime=0, soundOn=true;
+let particles=[], audioCtx=null;
+const boardEl=document.getElementById('board');
+const scoreEl=document.getElementById('score'), targetEl=document.getElementById('target');
+const levelEl=document.getElementById('level'), movesEl=document.getElementById('moves');
+const timeEl=document.getElementById('time'), comboEl=document.getElementById('combo');
+const statusEl=document.getElementById('status'), overlay=document.getElementById('overlay');
+const overlayText=document.getElementById('overlayText'), startBtn=document.getElementById('startBtn');
+const fx=document.getElementById('fx'), fctx=fx.getContext('2d');
+function initAudio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }
+function tone(freq,dur,type,vol,delay){
+  if(!soundOn||!audioCtx) return;
+  const t=audioCtx.currentTime+(delay||0), o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.type=type||'sine'; o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(vol||0.12,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t+dur+0.02);
+}
+function sSwap(){ tone(240,0.08,'triangle',0.12); tone(360,0.08,'triangle',0.1,0.06); }
+function sMatch(c){ tone(520+c*60,0.12,'sine',0.14); tone(660+c*60,0.12,'sine',0.12,0.07); tone(880,0.16,'sine',0.1,0.14); }
+function sBad(){ tone(140,0.18,'sawtooth',0.1); }
+function sWin(){ [523,659,784,1046].forEach((f,i)=>tone(f,0.22,'sine',0.14,i*0.12)); }
+function sLose(){ [330,262,196,131].forEach((f,i)=>tone(f,0.25,'sawtooth',0.08,i*0.14)); }
+function randType(){ return Math.floor(Math.random()*TYPES); }
+function createsMatch(r,c,val,arr){
+  if(c>=2 && arr[r][c-1]===val && arr[r][c-2]===val) return true;
+  if(r>=2 && arr[r-1][c]===val && arr[r-2][c]===val) return true;
+  return false;
+}
+function newBoard(){
+  grid=[];
+  for(let r=0;r<ROWS;r++){ grid[r]=[]; for(let c=0;c<COLS;c++){ let v; do{ v=randType(); }while(createsMatch(r,c,v,grid)); grid[r][c]=v; } }
+  while(!hasPossibleMove()) shuffleBoard(true);
+}
+function shuffleBoard(silent){
+  let flat=grid.flat();
+  for(let i=flat.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [flat[i],flat[j]]=[flat[j],flat[i]]; }
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) grid[r][c]=flat[r*COLS+c];
+  // Remove accidental starting matches by re-rolling those cells
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) if(createsMatch(r,c,grid[r][c],grid)) grid[r][c]=randType();
+  if(!silent) render();
+}
+function render(){
+  boardEl.innerHTML='';
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const b=document.createElement('button');
+    b.className='cell t'+grid[r][c]+(selected&&selected.r===r&&selected.c===c?' sel':'')+(cursor.r===r&&cursor.c===c?' cur':'');
+    b.textContent=SYMBOLS[grid[r][c]];
+    b.setAttribute('aria-label',NAMES[grid[r][c]]+' row '+(r+1)+' column '+(c+1));
+    b.dataset.r=r; b.dataset.c=c;
+    boardEl.appendChild(b);
+  }
+  scoreEl.textContent=score; targetEl.textContent=target; levelEl.textContent=level;
+  movesEl.textContent=moves; timeEl.textContent=Math.ceil(timeLeft); comboEl.textContent='x'+combo;
+}
+function updateStatus(msg){ statusEl.textContent=msg; }
+function findMatches(){
+  const set=new Set();
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const v=grid[r][c]; if(v===null) continue;
+    if(c+2<COLS && grid[r][c+1]===v && grid[r][c+2]===v){ let k=c; while(k<COLS && grid[r][k]===v){ set.add(r+','+k); k++; } }
+    if(r+2<ROWS && grid[r+1][c]===v && grid[r+2][c]===v){ let k=r; while(k<ROWS && grid[k][c]===v){ set.add(k+','+c); k++; } }
+  }
+  return [...set].map(s=>s.split(',').map(Number));
+}
+function collapseAndRefill(){
+  for(let c=0;c<COLS;c++){
+    let write=ROWS-1;
+    for(let r=ROWS-1;r>=0;r--){ if(grid[r][c]!==null){ grid[write][c]=grid[r][c]; if(write!==r) grid[r][c]=null; write--; } }
+    for(let r=write;r>=0;r--) grid[r][c]=randType();
+  }
+}
+function burst(r,c){
+  const colors=['#ff5a7a','#4aa3ff','#2ee07a','#ffc93c','#b07bff','#2dd4e6'];
+  for(let i=0;i<10;i++) particles.push({x:Math.random()*fx.width,y:Math.random()*fx.height,vx:(Math.random()-0.5)*4,vy:-Math.random()*3,life:40,color:colors[grid[r]?grid[r][c]||0:0]});
+}
+function resolveBoard(cb){
+  const matches=findMatches();
+  if(matches.length===0){ combo=1; render(); if(cb) cb(); return; }
+  const gained=matches.length*10*combo;
+  score+=gained; sMatch(Math.min(combo,5));
+  matches.forEach(([r,c])=>burst(r,c));
+  updateStatus('Matched '+matches.length+' gems! +'+gained+' points. Combo x'+combo);
+  matches.forEach(([r,c])=>{ grid[r][c]=null; });
+  render();
+  setTimeout(()=>{
+    collapseAndRefill(); combo++;
+    render();
+    setTimeout(()=>resolveBoard(cb),220);
+  },260);
+}
+function hasPossibleMove(){
+  const dirs=[[0,1],[1,0]];
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) for(const [dr,dc] of dirs){
+    const r2=r+dr,c2=c+dc; if(r2>=ROWS||c2>=COLS) continue;
+    [grid[r][c],grid[r2][c2]]=[grid[r2][c2],grid[r][c]];
+    const ok=findMatches().length>0;
+    [grid[r][c],grid[r2][c2]]=[grid[r2][c2],grid[r][c]];
+    if(ok) return true;
+  }
+  return false;
+}
+function findHint(){
+  const dirs=[[0,1],[1,0]];
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) for(const [dr,dc] of dirs){
+    const r2=r+dr,c2=c+dc; if(r2>=ROWS||c2>=COLS) continue;
+    [grid[r][c],grid[r2][c2]]=[grid[r2][c2],grid[r][c]];
+    const ok=findMatches().length>0;
+    [grid[r][c],grid[r2][c2]]=[grid[r2][c2],grid[r][c]];
+    if(ok) return {r,c,r2,c2};
+  }
+  return null;
+}
+function endLevel(won){
+  playing=false; busy=true;
+  if(won){ sWin(); overlayText.innerHTML='<h3>🎉 Level '+level+' Complete!</h3><p>You scored <b>'+score+'</b> points and reached the target of '+target+'.</p><p>Next level gets a higher target. Ready?</p>'; }
+  else { sLose(); overlayText.innerHTML='<h3>💔 Game Over</h3><p>Final score: <b>'+score+'</b> &bull; Level '+level+' &bull; Target was '+target+'.</p><p>Try again — a fresh board and fresh moves are waiting.</p>'; }
+  startBtn.textContent=won?'▶ Next Level':'↻ Play Again';
+  overlay.classList.remove('hidden');
+}
+function startGame(resetAll){
+  initAudio();
+  if(resetAll||!playing && score===0){ /* keep level progression handled below */ }
+  if(startBtn.textContent.includes('Play Again')||startBtn.textContent.includes('Start')){
+    if(overlayText.innerHTML.includes('Game Over')){ score=0; level=1; }
+  }
+  if(!playing && document.getElementById('overlay').classList.contains('hidden')===false && score>0 && overlayText.innerHTML.includes('Complete')){
+    level++; // next level after win
+  }
+  target=800+(level-1)*600; moves=25; timeLeft=120; combo=1;
+  if(level===1 && score===0){ /* first run */ }
+  // If this is a restart after game over, score was reset above
+  newBoard(); selected=null; cursor={r:0,c:0}; playing=true; busy=false;
+  overlay.classList.add('hidden'); lastTime=performance.now();
+  updateStatus('Level '+level+': reach '+target+' points!');
+  render(); requestAnimationFrame(gameLoop);
+}
+function restartAll(){ score=0; level=1; startBtn.textContent='▶ Start Game'; startGame(true); }
+function trySwap(r1,c1,r2,c2){
+  if(!playing||busy) return;
+  if(Math.abs(r1-r2)+Math.abs(c1-c2)!==1) return;
+  busy=true; moves--; sSwap();
+  [grid[r1][c1],grid[r2][c2]]=[grid[r2][c2],grid[r1][c1]];
+  render();
+  setTimeout(()=>{
+    if(findMatches().length===0){
+      [grid[r1][c1],grid[r2][c2]]=[grid[r2][c2],grid[r1][c1]]; sBad();
+      updateStatus('No match — swapped back. Try another pair.'); busy=false; render(); return;
+    }
+    combo=1;
+    resolveBoard(()=>{
+      busy=false; render();
+      if(score>=target){ endLevel(true); return; }
+      if(moves<=0){ endLevel(false); return; }
+      if(!hasPossibleMove()){ shuffleBoard(); updateStatus('No moves left on board — shuffled!'); }
+    });
+  },220);
+}
+function chooseCell(r,c){
+  if(!playing||busy) return;
+  cursor={r,c};
+  if(!selected){ selected={r,c}; render(); return; }
+  if(selected.r===r&&selected.c===c){ selected=null; render(); return; }
+  const a=selected; selected=null;
+  if(Math.abs(a.r-r)+Math.abs(a.c-c)===1) trySwap(a.r,a.c,r,c);
+  else { selected={r,c}; render(); }
+}
+boardEl.addEventListener('pointerdown',e=>{
+  const b=e.target.closest('.cell'); if(!b) return; initAudio(); chooseCell(+b.dataset.r,+b.dataset.c);
+});
+boardEl.addEventListener('touchstart',e=>{ e.preventDefault(); },{passive:false});
+boardEl.addEventListener('click',e=>{
+  const b=e.target.closest('.cell'); if(!b) return;
+  // pointerdown already handled most cases; click is a fallback for assistive input
+  if(e.detail===0) chooseCell(+b.dataset.r,+b.dataset.c);
+});
+document.addEventListener('keydown',e=>{
+  if(!playing && (e.key==='Enter'||e.key===' ')){ startGame(false); return; }
+  if(!playing) return;
+  if(e.key==='r'||e.key==='R'){ restartAll(); return; }
+  const dirs={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]};
+  if(dirs[e.key]){
+    e.preventDefault();
+    const [dr,dc]=dirs[e.key];
+    if(selected){
+      const r2=selected.r+dr,c2=selected.c+dc;
+      if(r2>=0&&r2<ROWS&&c2>=0&&c2<COLS){ const a=selected; selected=null; trySwap(a.r,a.c,r2,c2); }
+      cursor={r:selected?selected.r:cursor.r,c:selected?selected.c:cursor.c};
+    } else {
+      cursor.r=Math.max(0,Math.min(ROWS-1,cursor.r+dr));
+      cursor.c=Math.max(0,Math.min(COLS-1,cursor.c+dc));
+      render();
+    }
+    return;
+  }
+  if(e.key==='Enter'||e.key===' '){
+    e.preventDefault(); initAudio();
+    if(!selected){ selected={...cursor}; render(); }
+    else {
+      const a=selected; selected=null;
+      if(Math.abs(a.r-cursor.r)+Math.abs(a.c-cursor.c)===1) trySwap(a.r,a.c,cursor.r,cursor.c);
+      else if(a.r===cursor.r&&a.c===cursor.c) render();
+      else { selected={...cursor}; render(); }
+    }
+  }
+});
+document.getElementById('hintBtn').addEventListener('click',()=>{
+  if(!playing) return; initAudio();
+  const h=findHint();
+  if(h){ updateStatus('Hint: swap row '+(h.r+1)+', col '+(h.c+1)+' with its neighbour.'); selected={r:h.r,c:h.c}; cursor={r:h.r,c:h.c}; render(); }
+  else { shuffleBoard(); updateStatus('No hint found — board shuffled.'); }
+});
+document.getElementById('shuffleBtn').addEventListener('click',()=>{ if(playing&&!busy){ shuffleBoard(); updateStatus('Board shuffled.'); } });
+document.getElementById('soundBtn').addEventListener('click',e=>{ soundOn=!soundOn; e.target.textContent='Sound: '+(soundOn?'On':'Off'); if(soundOn) initAudio(); });
+document.getElementById('restartBtn').addEventListener('click',restartAll);
+startBtn.addEventListener('click',()=>{
+  if(startBtn.textContent.includes('Play Again')){ score=0; level=1; }
+  else if(startBtn.textContent.includes('Next Level')){ level++; }
+  target=800+(level-1)*600; moves=25; timeLeft=120; combo=1;
+  newBoard(); selected=null; cursor={r:0,c:0}; playing=true; busy=false; initAudio();
+  overlay.classList.add('hidden'); lastTime=performance.now(); updateStatus('Level '+level+': reach '+target+' points!'); render(); requestAnimationFrame(gameLoop);
+});
+function gameLoop(now){
+  if(!playing) return;
+  const dt=(now-lastTime)/1000; lastTime=now;
+  if(!busy){ timeLeft-=dt; timeEl.textContent=Math.ceil(Math.max(0,timeLeft)); if(timeLeft<=0){ endLevel(false); return; } }
+  // Particle FX on canvas
+  fctx.clearRect(0,0,fx.width,fx.height);
+  particles=particles.filter(p=>p.life>0);
+  particles.forEach(p=>{ p.x+=p.vx; p.y+=p.vy; p.vy+=0.12; p.life--; fctx.fillStyle=p.color; fctx.globalAlpha=Math.max(0,p.life/40); fctx.fillRect(p.x,p.y,5,5); });
+  fctx.globalAlpha=1;
+  requestAnimationFrame(gameLoop);
+}
+newBoard(); render(); updateStatus('Press Start to play');
+</script>
+</body>
+</html>

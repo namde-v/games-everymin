@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slingshot Summit</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#16233a;color:#f4f1e8;font-family:Georgia,serif;display:flex;justify-content:center;padding:16px}
+  #wrap{width:min(980px,100%)}
+  h1{margin:4px 0 8px;text-align:center;letter-spacing:2px;color:#ffd166;text-shadow:0 2px 0 #7a3b00}
+  #hud{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;background:#24365c;border:2px solid #ffd166;border-radius:10px;padding:10px 14px;font-weight:bold}
+  #hud span{color:#ffd166}
+  #status{color:#a8e6a1}
+  canvas{display:block;width:100%;height:auto;background:#87b5d6;border:3px solid #2b2118;border-radius:12px;margin-top:12px;touch-action:none;cursor:crosshair}
+  .panel{background:#fff8e6;color:#222;border:3px solid #7a3b00;border-radius:14px;padding:18px 22px;text-align:center;margin-top:12px}
+  .panel h2{margin-top:0;color:#7a3b00}
+  button{background:#e76f51;color:#fff;border:0;border-radius:10px;padding:13px 26px;font-size:18px;font-weight:bold;cursor:pointer;box-shadow:0 4px 0 #8a2f1a}
+  button:hover{background:#f28463}
+  button:active{transform:translateY(3px);box-shadow:none}
+  .keys{background:#f0e2c0;border-radius:8px;padding:10px;text-align:left;line-height:1.6}
+  .small{font-size:14px;color:#555}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>SLINGSHOT SUMMIT</h1>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Level: <span id="level">1 / 4</span></div>
+    <div>Shots Left: <span id="shots">3</span></div>
+    <div>Wind: <span id="wind">0.0</span></div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="960" height="540"></canvas>
+
+  <div id="titleScreen" class="panel">
+    <h2>Climb Higher With Every Perfect Shot</h2>
+    <p>Knock every summit target off its ledge before you run out of stones. Wind will push your stone sideways, so aim a little into the wind.</p>
+    <div class="keys">
+      <strong>How to Play:</strong><br>
+      1. Drag back from the slingshot with your mouse or finger to aim. Watch the dotted flight path.<br>
+      2. Release to launch. Gravity pulls the stone down, wind pushes it sideways.<br>
+      3. Hit a target hard enough to knock it off its platform. A target that falls to the ground counts.<br>
+      4. Clear all targets to climb to the next summit. No shots left with targets standing means Game Over.<br>
+      <strong>Keyboard:</strong> Arrow keys adjust aim, Space launches, R restarts, Enter starts.
+    </div>
+    <p><button id="startBtn" type="button">Start Climbing</button></p>
+    <p class="small">4 levels &middot; Limited stones &middot; Changing wind &middot; Fully offline</p>
+  </div>
+
+  <div id="endScreen" class="panel" hidden>
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText">Try again.</p>
+    <p><button id="restartBtn" type="button">Restart Game</button></p>
+  </div>
+
+  <p class="small" style="text-align:center;color:#cbd5e1">Tip: Long drags fly farther. Short, high arcs are best for targets tucked behind a ledge. Aim into a headwind.</p>
+</div>
+
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var scoreEl=document.getElementById('score');
+  var levelEl=document.getElementById('level');
+  var shotsEl=document.getElementById('shots');
+  var windEl=document.getElementById('wind');
+  var statusEl=document.getElementById('status');
+  var titleScreen=document.getElementById('titleScreen');
+  var endScreen=document.getElementById('endScreen');
+  var endTitle=document.getElementById('endTitle');
+  var endText=document.getElementById('endText');
+  var startBtn=document.getElementById('startBtn');
+  var restartBtn=document.getElementById('restartBtn');
+
+  var anchor={x:130,y:400};
+  var groundY=495;
+  var state='title';
+  var score=0, levelIndex=0, shotsLeft=0, wind=0;
+  var dragging=false, dragX=anchor.x, dragY=anchor.y;
+  var keyAim={dx:-55,dy:-45};
+  var usingKeys=false;
+  var projectile=null;
+  var targets=[], platforms=[];
+  var audioCtx=null, particles=[];
+  var messageTimer=0;
+
+  var LEVELS=[
+    {name:'Meadow Ledge', shots:3, windBase:0.4,
+     platforms:[{x:590,y:430,w:240,h:22},{x:730,y:330,w:170,h:22}],
+     targets:[{x:650,y:405,r:20},{x:760,y:405,r:20},{x:800,y:305,r:20}]},
+    {name:'Pine Ridge', shots:4, windBase:-1.4,
+     platforms:[{x:540,y:430,w:190,h:22},{x:690,y:340,w:180,h:22},{x:810,y:250,w:120,h:22}],
+     targets:[{x:600,y:405,r:20},{x:750,y:315,r:20},{x:870,y:225,r:20},{x:680,y:405,r:18}]},
+    {name:'Rocky Pass', shots:4, windBase:1.8,
+     platforms:[{x:520,y:440,w:170,h:22},{x:660,y:350,w:170,h:22},{x:800,y:270,w:160,h:22}],
+     targets:[{x:580,y:415,r:20},{x:720,y:325,r:20},{x:860,y:245,r:20},{x:620,y:415,r:18}]},
+    {name:'Summit Peak', shots:5, windBase:-0.6,
+     platforms:[{x:500,y:440,w:160,h:22},{x:640,y:350,w:160,h:22},{x:780,y:260,w:160,h:22},{x:880,y:360,w:80,h:22}],
+     targets:[{x:560,y:415,r:20},{x:700,y:325,r:20},{x:840,y:235,r:20},{x:920,y:335,r:18},{x:600,y:415,r:18}]}
+  ];
+
+  function setStatus(t){ statusEl.textContent=t; }
+  function updateHUD(){
+    scoreEl.textContent=score;
+    levelEl.textContent=(levelIndex+1)+' / '+LEVELS.length+' - '+LEVELS[levelIndex].name;
+    shotsEl.textContent=shotsLeft;
+    windEl.textContent=(wind>=0?'+':'')+wind.toFixed(1)+(wind>0.5?' (right)':wind<-0.5?' (left)':' (calm)');
+  }
+  function ensureAudio(){
+    if(!audioCtx){
+      try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+    }
+    if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+  }
+  function tone(freq,endFreq,dur,type,vol){
+    if(!audioCtx) return;
+    var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type=type||'sine'; o.frequency.setValueAtTime(freq,audioCtx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(Math.max(20,endFreq),audioCtx.currentTime+dur);
+    g.gain.setValueAtTime(vol||0.18,audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+  }
+  function playLaunch(){ tone(420,90,0.35,'triangle',0.25); }
+  function playHit(){ tone(180,60,0.18,'square',0.22); tone(90,40,0.22,'sine',0.2); }
+  function playSuccess(){ tone(523,523,0.15,'sine',0.2); setTimeout(function(){tone(659,659,0.15,'sine',0.2);},130); setTimeout(function(){tone(784,784,0.28,'sine',0.22);},260); }
+  function playFail(){ tone(220,70,0.6,'sawtooth',0.18); }
+
+  function loadLevel(idx){
+    levelIndex=idx;
+    var L=LEVELS[idx];
+    shotsLeft=L.shots;
+    wind=L.windBase+(Math.random()*2-1);
+    platforms=L.platforms.map(function(p){return {x:p.x,y:p.y,w:p.w,h:p.h};});
+    targets=L.targets.map(function(t,i){return {x:t.x,y:t.y,r:t.r,down:false,knocked:false,vx:0,vy:0,rot:0,homeX:t.x,homeY:t.y,seed:i};});
+    projectile=null; dragging=false; usingKeys=false;
+    keyAim={dx:-55,dy:-45};
+    dragX=anchor.x+keyAim.dx; dragY=anchor.y+keyAim.dy;
+    setStatus('Aim and launch');
+    updateHUD();
+  }
+  function startGame(){
+    ensureAudio();
+    score=0; titleScreen.hidden=true; endScreen.hidden=true; state='aim';
+    loadLevel(0); setStatus('Aim and launch');
+  }
+  function restartGame(){ startGame(); }
+  function showEnd(win){
+    state=win?'win':'gameover';
+    endScreen.hidden=false;
+    if(win){ endTitle.textContent='Summit Conquered!'; endText.textContent='You cleared all 4 summits with a final score of '+score+'. Brilliant launching!'; playSuccess(); }
+    else { endTitle.textContent='Game Over'; endText.textContent='Out of stones with targets still standing. Final score: '+score+'. Try a higher arc or aim into the wind.'; playFail(); }
+    setStatus(win?'You won!':'Game over');
+  }
+  function endShot(){
+    projectile=null;
+    if(targets.every(function(t){return t.down;})){
+      // level already handled in target check, keep safety
+      return;
+    }
+    if(shotsLeft<=0){
+      showEnd(false); return;
+    }
+    wind=LEVELS[levelIndex].windBase+(Math.random()*2-1);
+    state='aim'; setStatus('Aim and launch'); updateHUD();
+  }
+  function launch(){
+    if(state!=='aim') return;
+    var vx,vy;
+    if(usingKeys){ vx=-keyAim.dx*0.24; vy=-keyAim.dy*0.24; }
+    else { vx=(anchor.x-dragX)*0.24; vy=(anchor.y-dragY)*0.24; }
+    var speed=Math.sqrt(vx*vx+vy*vy);
+    if(speed<3){ setStatus('Drag farther for more power'); return; }
+    if(speed>26){ var s=26/speed; vx*=s; vy*=s; }
+    projectile={x:anchor.x,y:anchor.y,vx:vx,vy:vy,r:13,rest:0};
+    shotsLeft--; state='fly'; dragging=false; playLaunch(); setStatus('Stone in flight');
+    updateHUD();
+  }
+  function spawnParticles(x,y,color){
+    for(var i=0;i<14;i++){ particles.push({x:x,y:y,vx:(Math.random()-0.5)*6,vy:(Math.random()-0.7)*6,life:30,color:color}); }
+  }
+  function stepTargets(){
+    targets.forEach(function(t){
+      if(t.knocked && !t.down){
+        t.vy+=0.32; t.x+=t.vx; t.y+=t.vy; t.rot+=t.vx*0.02;
+        if(t.y>groundY+20 || t.x<-30 || t.x>990){
+          t.down=true; score+=100; spawnParticles(Math.min(940,Math.max(20,t.x)),Math.min(490,t.y),'#ffd166'); playHit();
+          setStatus('Target down! +100');
+          if(targets.every(function(x){return x.down;})){
+            score+=shotsLeft*50;
+            setStatus('Level clear! Bonus '+(shotsLeft*50));
+            playSuccess(); updateHUD();
+            setTimeout(function(){
+              if(levelIndex+1>=LEVELS.length){ showEnd(true); }
+              else { loadLevel(levelIndex+1); state='aim'; }
+            },1400);
+          }
+          updateHUD();
+        }
+      }
+    });
+  }
+  function stepProjectile(){
+    if(!projectile) return;
+    var p=projectile;
+    p.vy+=0.32; p.vx+=wind*0.012;
+    p.x+=p.vx; p.y+=p.vy;
+    // platform bounce
+    platforms.forEach(function(pl){
+      if(p.x>pl.x && p.x<pl.x+pl.w && p.y+p.r>pl.y && p.y<pl.y+pl.h && p.vy>0){
+        p.y=pl.y-p.r; p.vy*=-0.42; p.vx*=0.82;
+      }
+    });
+    // target hits
+    targets.forEach(function(t){
+      if(!t.knocked){
+        var dx=p.x-t.x, dy=p.y-t.y, d=Math.sqrt(dx*dx+dy*dy);
+        if(d < p.r+t.r){
+          t.knocked=true; t.vx=p.vx*0.55+2; t.vy=-4; playHit(); spawnParticles(t.x,t.y,'#ff9f1c');
+          p.vx*=0.35; p.vy*=0.35;
+        }
+      }
+    });
+    if(p.y+p.r>=groundY){
+      p.y=groundY-p.r;
+      if(Math.abs(p.vy)>2){ p.vy*=-0.38; p.vx*=0.75; spawnParticles(p.x,groundY,'#c9b18a'); }
+      else { p.rest++; if(p.rest>20) endShot(); }
+    }
+    if(p.x<-40 || p.x>1000 || p.y>620){ endShot(); }
+  }
+  function drawBackground(){
+    var g=ctx.createLinearGradient(0,0,0,540);
+    g.addColorStop(0,'#7ec8f2'); g.addColorStop(0.65,'#cfeaf7'); g.addColorStop(1,'#f7e3b0');
+    ctx.fillStyle=g; ctx.fillRect(0,0,960,540);
+    ctx.fillStyle='rgba(255,255,255,0.9)';
+    [[120,80],[350,60],[700,90]].forEach(function(c){
+      ctx.beginPath(); ctx.arc(c[0],c[1],28,0,Math.PI*2); ctx.arc(c[0]+30,c[1]+6,22,0,Math.PI*2); ctx.arc(c[0]-32,c[1]+8,20,0,Math.PI*2); ctx.fill();
+    });
+    // distant mountains
+    ctx.fillStyle='#7a8ba0';
+    ctx.beginPath(); ctx.moveTo(0,495); ctx.lineTo(180,260); ctx.lineTo(360,495); ctx.lineTo(520,300); ctx.lineTo(700,495); ctx.lineTo(860,240); ctx.lineTo(960,495); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#ffffff';
+    [[180,260],[520,300],[860,240]].forEach(function(m){
+      ctx.beginPath(); ctx.moveTo(m[0]-28,m[1]+42); ctx.lineTo(m[0],m[1]); ctx.lineTo(m[0]+28,m[1]+42); ctx.closePath(); ctx.fill();
+    });
+    // ground
+    ctx.fillStyle='#6b8e4e'; ctx.fillRect(0,495,960,45);
+    ctx.fillStyle='#8a6b42'; ctx.fillRect(0,495,960,8);
+  }
+  function drawPlatforms(){
+    platforms.forEach(function(p){
+      ctx.fillStyle='#8d6e4a'; ctx.fillRect(p.x,p.y,p.w,p.h);
+      ctx.fillStyle='#a8875e'; ctx.fillRect(p.x,p.y,p.w,6);
+      ctx.fillStyle='#5d4630'; ctx.fillRect(p.x,p.y+p.h-5,p.w,5);
+    });
+  }
+  function drawTargets(){
+    targets.forEach(function(t){
+      if(t.down) return;
+      ctx.save(); ctx.translate(t.x,t.y); ctx.rotate(t.rot||0);
+      ctx.fillStyle='#e63946'; ctx.beginPath(); ctx.arc(0,0,t.r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#ffd166'; ctx.beginPath(); ctx.arc(0,-4,t.r*0.55,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(-6,-2,3,0,Math.PI*2); ctx.arc(6,-2,3,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#222'; ctx.beginPath(); ctx.arc(0,5,7,0.15*Math.PI,0.85*Math.PI); ctx.stroke();
+      ctx.restore();
+      // little flag above standing targets
+      if(!t.knocked){
+        ctx.strokeStyle='#333'; ctx.beginPath(); ctx.moveTo(t.x,t.y-t.r); ctx.lineTo(t.x,t.y-t.r-18); ctx.stroke();
+        ctx.fillStyle='#ffd166'; ctx.beginPath(); ctx.moveTo(t.x,t.y-t.r-18); ctx.lineTo(t.x+14,t.y-t.r-13); ctx.lineTo(t.x,t.y-t.r-8); ctx.closePath(); ctx.fill();
+      }
+    });
+  }
+  function drawSlingshot(){
+    ctx.strokeStyle='#5d3a1a'; ctx.lineWidth=9; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(anchor.x-6,groundY); ctx.lineTo(anchor.x-6,anchor.y+22); ctx.lineTo(anchor.x,anchor.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(anchor.x+6,groundY); ctx.lineTo(anchor.x+6,anchor.y+22); ctx.lineTo(anchor.x,anchor.y); ctx.stroke();
+    var px,py;
+    if(state==='aim' && (dragging||usingKeys)){
+      px=usingKeys?anchor.x+keyAim.dx:dragX; py=usingKeys?anchor.y+keyAim.dy:dragY;
+    } else { px=anchor.x; py=anchor.y; }
+    if(state==='aim'){
+      ctx.strokeStyle='#222'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(anchor.x-14,anchor.y-18); ctx.lineTo(px,py); ctx.lineTo(anchor.x+14,anchor.y-18); ctx.stroke();
+      ctx.fillStyle='#8d99ae'; ctx.beginPath(); ctx.arc(px,py,13,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#2b2d42'; ctx.beginPath(); ctx.arc(px,py,9,0,Math.PI*2); ctx.fill();
+    }
+    ctx.fillStyle='#e76f51'; ctx.beginPath(); ctx.arc(anchor.x,anchor.y,6,0,Math.PI*2); ctx.fill();
+  }
+  function drawTrajectory(){
+    if(state!=='aim' || (!dragging && !usingKeys)) return;
+    var sx=anchor.x, sy=anchor.y, vx,vy;
+    if(usingKeys){ vx=-keyAim.dx*0.24; vy=-keyAim.dy*0.24; } else { vx=(anchor.x-dragX)*0.24; vy=(anchor.y-dragY)*0.24; }
+    ctx.fillStyle='rgba(20,20,20,0.75)';
+    for(var i=0;i<26;i++){
+      vy+=0.32; vx+=wind*0.012; sx+=vx; sy+=vy;
+      if(sy>groundY) break;
+      if(i%2===0){ ctx.beginPath(); ctx.arc(sx,sy,4,0,Math.PI*2); ctx.fill(); }
+    }
+  }
+  function drawParticles(){
+    particles=particles.filter(function(p){return p.life>0;});
+    particles.forEach(function(p){ p.x+=p.vx; p.y+=p.vy; p.vy+=0.15; p.life--; ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fill(); });
+  }
+  function drawWind(){
+    ctx.fillStyle='#222'; ctx.font='bold 16px Georgia';
+    ctx.fillText('Wind: '+(wind>=0?'+':'')+wind.toFixed(1),760,30);
+    ctx.fillStyle='#e76f51'; ctx.beginPath();
+    if(wind>=0){ ctx.moveTo(860,26); ctx.lineTo(880,20); ctx.lineTo(880,32); }
+    else { ctx.moveTo(880,26); ctx.lineTo(860,20); ctx.lineTo(860,32); }
+    ctx.closePath(); ctx.fill();
+  }
+  function loop(){
+    ctx.clearRect(0,0,960,540);
+    drawBackground(); drawPlatforms(); drawTargets(); drawTrajectory(); drawSlingshot();
+    if(projectile){ ctx.fillStyle='#2b2d42'; ctx.beginPath(); ctx.arc(projectile.x,projectile.y,projectile.r,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#adb5bd'; ctx.beginPath(); ctx.arc(projectile.x-4,projectile.y-4,4,0,Math.PI*2); ctx.fill(); }
+    drawParticles(); drawWind();
+    if(state==='fly'){ stepProjectile(); }
+    stepTargets();
+    requestAnimationFrame(loop);
+  }
+  function pointerPos(e){
+    var r=canvas.getBoundingClientRect();
+    var cx=(e.touches && e.touches[0])?e.touches[0].clientX:e.clientX;
+    var cy=(e.touches && e.touches[0])?e.touches[0].clientY:e.clientY;
+    return {x:(cx-r.left)*960/r.width, y:(cy-r.top)*540/r.height};
+  }
+  function onDown(e){
+    if(state!=='aim') return;
+    ensureAudio(); e.preventDefault();
+    dragging=true; usingKeys=false;
+    var p=pointerPos(e); dragX=p.x; dragY=p.y;
+  }
+  function onMove(e){
+    if(!dragging || state!=='aim') return;
+    e.preventDefault();
+    var p=pointerPos(e);
+    var dx=p.x-anchor.x, dy=p.y-anchor.y, d=Math.sqrt(dx*dx+dy*dy);
+    if(d>140){ dx=dx/d*140; dy=dy/d*140; }
+    dragX=anchor.x+dx; dragY=anchor.y+dy;
+  }
+  function onUp(e){
+    if(!dragging) return;
+    e.preventDefault(); dragging=false; launch();
+  }
+  canvas.addEventListener('mousedown',onDown);
+  window.addEventListener('mousemove',onMove);
+  window.addEventListener('mouseup',onUp);
+  canvas.addEventListener('touchstart',onDown,{passive:false});
+  window.addEventListener('touchmove',onMove,{passive:false});
+  window.addEventListener('touchend',onUp);
+  document.addEventListener('keydown',function(e){
+    if(state==='title' && e.key==='Enter'){ startGame(); return; }
+    if(e.key==='r' || e.key==='R'){ if(state!=='title') restartGame(); return; }
+    if(state!=='aim') return;
+    usingKeys=true; ensureAudio();
+    if(e.key==='ArrowLeft') keyAim.dx-=8;
+    if(e.key==='ArrowRight') keyAim.dx+=8;
+    if(e.key==='ArrowUp') keyAim.dy-=8;
+    if(e.key==='ArrowDown') keyAim.dy+=8;
+    keyAim.dx=Math.max(-140,Math.min(40,keyAim.dx));
+    keyAim.dy=Math.max(-140,Math.min(40,keyAim.dy));
+    if(e.key===' '){ e.preventDefault(); launch(); }
+  });
+  startBtn.addEventListener('click',startGame);
+  restartBtn.addEventListener('click',restartGame);
+  loadLevel(0); updateHUD(); setStatus('Press Start');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Starfall Vanguard</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#050814;color:#eaf2ff;font-family:Arial,Helvetica,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+  .wrap{width:min(860px,100%)}
+  h1{margin:6px 0 2px;text-align:center;letter-spacing:2px;font-size:34px;color:#7dd3fc;text-shadow:0 0 18px #0ea5e9}
+  .tag{text-align:center;color:#a5b4fc;margin:0 0 10px}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;background:#0b1226;border:1px solid #24365e;border-radius:10px;padding:9px 12px;font-weight:bold}
+  #hud span{color:#fde68a}
+  #status{color:#86efac !important}
+  canvas{display:block;width:100%;height:auto;background:#020617;border:1px solid #24365e;border-radius:12px;margin-top:10px;touch-action:none}
+  .overlay{position:relative}
+  .panel{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(2,6,23,.82);border-radius:12px;padding:20px}
+  .panel.hidden{display:none}
+  .panel h2{font-size:32px;margin:0 0 8px;color:#facc15}
+  .panel p{max-width:560px;line-height:1.55;margin:6px 0;color:#dbeafe}
+  .keys{background:#111c38;border:1px solid #334155;border-radius:8px;padding:10px 14px;margin:10px 0}
+  button{cursor:pointer;border:0;border-radius:999px;padding:13px 26px;font-size:18px;font-weight:bold;background:#f59e0b;color:#111827;box-shadow:0 6px 0 #92400e}
+  button:active{transform:translateY(4px);box-shadow:0 2px 0 #92400e}
+  button.secondary{background:#38bdf8;box-shadow:0 6px 0 #075985}
+  .small{font-size:13px;color:#94a3b8;margin-top:10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>STARFALL VANGUARD</h1>
+  <p class="tag">Hold the line above a falling starfield. Break the swarm, wave by wave.</p>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">♥♥♥</span></div>
+    <div>Wave: <span id="wave">1</span></div>
+    <div>Status: <span id="status">Ready</span></div>
+    <div>Best: <span id="best">0</span></div>
+  </div>
+  <div class="overlay">
+    <canvas id="game" width="840" height="560" aria-label="Starfall Vanguard game canvas"></canvas>
+    <div class="panel" id="titlePanel">
+      <h2>STARFALL VANGUARD</h2>
+      <p>You are the last Vanguard pilot. Asteroids are falling, drone fighters are hunting, and every wave is faster than the last. Survive all five waves to win.</p>
+      <div class="keys">
+        <b>How to Play</b><br>
+        Move: Arrow Keys / WASD, or drag with mouse / touch<br>
+        Shoot: Space, mouse click, or hold touch<br>
+        Dodge enemy fire, grab glowing cores for bonus points, and do not let an asteroid hit you.
+      </div>
+      <div class="row">
+        <button id="startBtn" type="button">▶ START MISSION</button>
+        <button id="soundBtn" class="secondary" type="button">Sound: ON</button>
+      </div>
+      <p class="small">Tip: Keep moving sideways. Enemies telegraph their shots with a short flash before firing.</p>
+    </div>
+    <div class="panel hidden" id="endPanel">
+      <h2 id="endTitle">GAME OVER</h2>
+      <p id="endText"></p>
+      <p>Final Score: <b id="finalScore">0</b> &nbsp;|&nbsp; Wave reached: <b id="finalWave">1</b></p>
+      <div class="row">
+        <button id="restartBtn" type="button">↻ RESTART</button>
+        <button id="menuBtn" class="secondary" type="button">Back to Title</button>
+      </div>
+      <p class="small">Press R to restart instantly.</p>
+    </div>
+  </div>
+  <p class="small" style="text-align:center">Fully offline. No downloads, no accounts, no network play — just open this file and fly.</p>
+</div>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var W=canvas.width,H=canvas.height;
+  var scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),
+      waveEl=document.getElementById('wave'),statusEl=document.getElementById('status'),
+      bestEl=document.getElementById('best'),titlePanel=document.getElementById('titlePanel'),
+      endPanel=document.getElementById('endPanel'),endTitle=document.getElementById('endTitle'),
+      endText=document.getElementById('endText'),finalScore=document.getElementById('finalScore'),
+      finalWave=document.getElementById('finalWave');
+  var state='title',score=0,best=0,lives=3,wave=1,frame=0,lastTime=0,shootCooldown=0,waveTimer=0,spawned=0,toSpawn=0,invuln=0;
+  var keys={},pointer={x:W/2,y:H-90,down:false,active:false};
+  var player={x:W/2,y:H-90,vx:0,vy:0,r:16,alive:true};
+  var bullets=[],enemyBullets=[],asteroids=[],enemies=[],particles=[],pickups=[],stars=[],shotsFired=0;
+  for(var i=0;i<110;i++){stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+0.4,v:Math.random()*1.2+0.3});}
+  var audioCtx=null,soundOn=true,melodyTimer=null,melodyStep=0;
+  var melody=[440,523,659,523,392,440,523,659,784,659,523,392];
+  function initAudio(){
+    if(audioCtx) return;
+    try{
+      var AC=window.AudioContext||window.webkitAudioContext;
+      audioCtx=new AC();
+      if(melodyTimer) clearInterval(melodyTimer);
+      melodyTimer=setInterval(function(){
+        if(state!=='playing'||!soundOn) return;
+        melodyStep=(melodyStep+1)%melody.length;
+        tone(melody[melodyStep],0.14,0.035,'sine');
+      },260);
+    }catch(e){}
+  }
+  function tone(freq,dur,vol,type){
+    if(!audioCtx||!soundOn) return;
+    try{
+      var o=audioCtx.createOscillator(),g=audioCtx.createGain();
+      o.type=type||'square';o.frequency.value=freq;
+      g.gain.setValueAtTime(vol,audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+      o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function noise(dur,vol){
+    if(!audioCtx||!soundOn) return;
+    try{
+      var len=Math.floor(audioCtx.sampleRate*dur),buf=audioCtx.createBuffer(1,len,audioCtx.sampleRate),d=buf.getChannelData(0);
+      for(var i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
+      var src=audioCtx.createBufferSource(),g=audioCtx.createGain();
+      src.buffer=buf;g.gain.value=vol;src.connect(g);g.connect(audioCtx.destination);src.start();
+    }catch(e){}
+  }
+  function sShoot(){tone(880+Math.random()*120,0.08,0.05,'square');}
+  function sHit(){tone(220,0.12,0.08,'sawtooth');noise(0.15,0.10);}
+  function sExplode(){noise(0.35,0.16);tone(90,0.3,0.10,'sawtooth');}
+  function sPickup(){tone(660,0.08,0.07,'sine');setTimeout(function(){tone(990,0.12,0.07,'sine');},70);}
+  function updateHud(){
+    scoreEl.textContent=score;
+    livesEl.textContent=lives>0?('♥'.repeat(lives)):'—';
+    waveEl.textContent=wave;bestEl.textContent=best;
+  }
+  function setStatus(t){statusEl.textContent=t;}
+  function burst(x,y,color,n,speed){
+    for(var i=0;i<n;i++){
+      var a=Math.random()*Math.PI*2,v=Math.random()*speed+0.6;
+      particles.push({x:x,y:y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:26+Math.random()*18,color:color});
+    }
+  }
+  function makeAsteroid(x,y,r,speed){
+    var pts=[];
+    for(var i=0;i<9;i++) pts.push(0.72+Math.random()*0.45);
+    return {x:x,y:y,r:r,vx:(Math.random()-0.5)*1.1,vy:speed,rot:Math.random()*Math.PI*2,vr:(Math.random()-0.5)*0.05,pts:pts,hp:Math.ceil(r/16)};
+  }
+  function startWave(n){
+    wave=n;waveEl.textContent=n;toSpawn=6+n*3;spawned=0;waveTimer=0;
+    setStatus('Wave '+n+' incoming');
+  }
+  function spawnWaveContent(){
+    if(spawned>=toSpawn) return;
+    waveTimer++;
+    var interval=Math.max(28,72-wave*6);
+    if(waveTimer%interval!==0) return;
+    spawned++;
+    if(wave>=2 && spawned%4===0){
+      enemies.push({x:60+Math.random()*(W-120),y:-30,vy:0.9+wave*0.12,vx:1.4,phase:Math.random()*6.28,flash:0,fire:90+Math.random()*60,r:18,hp:2});
+    } else {
+      var r=14+Math.random()*22;
+      asteroids.push(makeAsteroid(30+Math.random()*(W-60),-40,r,1.0+wave*0.22+Math.random()*0.7));
+    }
+  }
+  function resetGame(){
+    score=0;lives=3;wave=1;bullets=[];enemyBullets=[];asteroids=[];enemies=[];particles=[];pickups=[];
+    player.x=W/2;player.y=H-90;player.vx=0;player.vy=0;player.alive=true;invuln=90;shotsFired=0;
+    startWave(1);updateHud();
+  }
+  function startGame(){
+    initAudio();
+    if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume();
+    resetGame();state='playing';
+    titlePanel.classList.add('hidden');endPanel.classList.add('hidden');
+    setStatus('Wave 1 — Good luck, Vanguard');
+    lastTime=performance.now();requestAnimationFrame(loop);
+  }
+  function endGame(won){
+    state=won?'won':'over';
+    if(score>best) best=score;
+    endTitle.textContent=won?'MISSION COMPLETE — YOU WIN':'GAME OVER';
+    endText.textContent=won?'All five waves are cleared. The starfield is safe, Vanguard.':'Your Vanguard fell, but the score remains. Fly again and push further.';
+    finalScore.textContent=score;finalWave.textContent=wave;
+    endPanel.classList.remove('hidden');updateHud();
+    if(won){tone(523,0.2,0.08,'sine');tone(659,0.2,0.08,'sine');tone(784,0.35,0.08,'sine');}
+    else sExplode();
+  }
+  function showTitle(){
+    state='title';titlePanel.classList.remove('hidden');endPanel.classList.add('hidden');setStatus('Ready');
+  }
+  function playerShoot(){
+    if(shootCooldown>0||!player.alive) return;
+    shootCooldown=9;
+    bullets.push({x:player.x-7,y:player.y-18,vx:0,vy:-11});
+    bullets.push({x:player.x+7,y:player.y-18,vx:0,vy:-11});
+    shotsFired++;sShoot();
+  }
+  function damagePlayer(){
+    if(invuln>0||!player.alive) return;
+    lives--;invuln=110;burst(player.x,player.y,'#f97316',26,4);sHit();
+    if(lives<=0){player.alive=false;burst(player.x,player.y,'#ef4444',50,5);sExplode();setTimeout(function(){endGame(false);},650);}
+    updateHud();
+  }
+  function dist(a,b){var dx=a.x-b.x,dy=a.y-b.y;return Math.sqrt(dx*dx+dy*dy);}
+  function update(){
+    frame++;
+    for(var s=0;s<stars.length;s++){stars[s].y+=stars[s].v;if(stars[s].y>H){stars[s].y=-4;stars[s].x=Math.random()*W;}}
+    if(shootCooldown>0) shootCooldown--;
+    if(invuln>0) invuln--;
+    var speed=5.2,ax=0,ay=0;
+    if(keys['arrowleft']||keys['a']) ax-=1;
+    if(keys['arrowright']||keys['d']) ax+=1;
+    if(keys['arrowup']||keys['w']) ay-=1;
+    if(keys['arrowdown']||keys['s']) ay+=1;
+    if(pointer.active){
+      var dx=pointer.x-player.x,dy=pointer.y-player.y;
+      if(Math.abs(dx)>4) player.vx=dx*0.14; else player.vx*=0.7;
+      if(Math.abs(dy)>4) player.vy=dy*0.14; else player.vy*=0.7;
+    } else {
+      player.vx+=ax*0.9;player.vy+=ay*0.9;player.vx*=0.86;player.vy*=0.86;
+    }
+    player.vx=Math.max(-speed,Math.min(speed,player.vx));
+    player.vy=Math.max(-speed,Math.min(speed,player.vy));
+    player.x=Math.max(20,Math.min(W-20,player.x+player.vx));
+    player.y=Math.max(60,Math.min(H-24,player.y+player.vy));
+    if(keys[' ']) playerShoot();
+    if(pointer.down) playerShoot();
+    spawnWaveContent();
+    for(var i=bullets.length-1;i>=0;i--){
+      bullets[i].y+=bullets[i].vy;
+      if(bullets[i].y<-20) bullets.splice(i,1);
+    }
+    for(i=enemyBullets.length-1;i>=0;i--){
+      enemyBullets[i].y+=enemyBullets[i].vy;enemyBullets[i].x+=enemyBullets[i].vx||0;
+      if(enemyBullets[i].y>H+20||enemyBullets[i].x<-20||enemyBullets[i].x>W+20) enemyBullets.splice(i,1);
+      else if(player.alive&&dist(enemyBullets[i],player)<player.r+5){enemyBullets.splice(i,1);damagePlayer();}
+    }
+    for(i=asteroids.length-1;i>=0;i--){
+      var a=asteroids[i];a.x+=a.vx;a.y+=a.vy;a.rot+=a.vr;
+      if(a.x<20||a.x>W-20) a.vx*=-1;
+      if(a.y>H+50){asteroids.splice(i,1);continue;}
+      for(var j=bullets.length-1;j>=0;j--){
+        if(dist(bullets[j],a)<a.r+5){
+          bullets.splice(j,1);a.hp--;
+          burst(bullets[j]?0:a.x,a.y,'#fbbf24',6,2);
+          if(a.hp<=0){
+            score+=a.r>24?40:25;burst(a.x,a.y,'#fb923c',22,4);sExplode();
+            if(Math.random()<0.28) pickups.push({x:a.x,y:a.y,vy:1.4,r:10});
+            if(a.r>24){asteroids.push(makeAsteroid(a.x-14,a.y,14,1.6));asteroids.push(makeAsteroid(a.x+14,a.y,14,1.6));}
+            asteroids.splice(i,1);
+          } else sHit();
+          break;
+        }
+      }
+      if(i<asteroids.length && player.alive&&dist(a,player)<a.r+player.r-4){asteroids.splice(i,1);burst(a.x,a.y,'#f97316',24,4);damagePlayer();}
+    }
+    for(i=enemies.length-1;i>=0;i--){
+      var e=enemies[i];e.phase+=0.04;e.y+=e.vy;e.x+=Math.sin(e.phase)*1.5;e.fire--;
+      if(e.flash>0) e.flash--;
+      if(e.fire===22) e.flash=22;
+      if(e.fire<=0){e.fire=120+Math.random()*70;enemyBullets.push({x:e.x,y:e.y+18,vx:0,vy:3.4+wave*0.2});tone(330,0.1,0.04,'sawtooth');}
+      if(e.y>H+40){enemies.splice(i,1);continue;}
+      for(j=bullets.length-1;j>=0;j--){
+        if(dist(bullets[j],e)<e.r+6){
+          bullets.splice(j,1);e.hp--;burst(e.x,e.y,'#f472b6',10,3);
+          if(e.hp<=0){score+=100;burst(e.x,e.y,'#e879f9',30,5);sExplode();if(Math.random()<0.5) pickups.push({x:e.x,y:e.y,vy:1.4,r:10});enemies.splice(i,1);}
+          else sHit();
+          break;
+        }
+      }
+      if(i<enemies.length && player.alive&&dist(e,player)<e.r+player.r-4){enemies.splice(i,1);damagePlayer();}
+    }
+    for(i=pickups.length-1;i>=0;i--){
+      pickups[i].y+=pickups[i].vy;
+      if(pickups[i].y>H+20){pickups.splice(i,1);continue;}
+      if(player.alive&&dist(pickups[i],player)<player.r+12){score+=50;pickups.splice(i,1);sPickup();setStatus('Core collected +50');}
+    }
+    for(i=particles.length-1;i>=0;i--){
+      particles[i].x+=particles[i].vx;particles[i].y+=particles[i].vy;particles[i].life--;
+      if(particles[i].life<=0) particles.splice(i,1);
+    }
+    if(spawned>=toSpawn&&asteroids.length===0&&enemies.length===0&&state==='playing'){
+      if(wave>=5){endGame(true);}
+      else{score+=150;setStatus('Wave '+wave+' cleared +150');startWave(wave+1);}
+    }
+    updateHud();
+  }
+  function drawShip(){
+    if(!player.alive) return;
+    ctx.save();ctx.translate(player.x,player.y);
+    if(invuln>0&&Math.floor(frame/6)%2===0) ctx.globalAlpha=0.35;
+    ctx.fillStyle='#38bdf8';ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(14,16);ctx.lineTo(0,8);ctx.lineTo(-14,16);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#facc15';ctx.beginPath();ctx.arc(0,-2,5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#f97316';ctx.beginPath();ctx.moveTo(-6,16);ctx.lineTo(0,26+Math.random()*8);ctx.lineTo(6,16);ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#020617';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#e2e8f0';
+    for(var i=0;i<stars.length;i++){ctx.globalAlpha=0.4+stars[i].s*0.2;ctx.fillRect(stars[i].x,stars[i].y,stars[i].s,stars[i].s);}
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#facc15';
+    for(i=0;i<pickups.length;i++){ctx.beginPath();ctx.arc(pickups[i].x,pickups[i].y,10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#111827';ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.fillText('+',pickups[i].x,pickups[i].y+4);ctx.fillStyle='#facc15';}
+    ctx.strokeStyle='#f97316';ctx.lineWidth=2;
+    for(i=0;i<asteroids.length;i++){
+      var a=asteroids[i];ctx.save();ctx.translate(a.x,a.y);ctx.rotate(a.rot);ctx.beginPath();
+      for(var k=0;k<a.pts.length;k++){var ang=k/a.pts.length*Math.PI*2,rr=a.r*a.pts[k];if(k===0) ctx.moveTo(Math.cos(ang)*rr,Math.sin(ang)*rr);else ctx.lineTo(Math.cos(ang)*rr,Math.sin(ang)*rr);}
+      ctx.closePath();ctx.stroke();ctx.fillStyle='rgba(249,115,22,.18)';ctx.fill();ctx.restore();
+    }
+    for(i=0;i<enemies.length;i++){
+      var e=enemies[i];ctx.save();ctx.translate(e.x,e.y);
+      ctx.fillStyle=e.flash>0?'#fda4af':'#e879f9';ctx.beginPath();ctx.moveTo(0,18);ctx.lineTo(18,-10);ctx.lineTo(0,-4);ctx.lineTo(-18,-10);ctx.closePath();ctx.fill();
+      ctx.fillStyle='#111827';ctx.beginPath();ctx.arc(0,0,6,0,Math.PI*2);ctx.fill();ctx.restore();
+    }
+    ctx.fillStyle='#fde047';
+    for(i=0;i<bullets.length;i++){ctx.fillRect(bullets[i].x-2,bullets[i].y-10,4,14);}
+    ctx.fillStyle='#fb7185';
+    for(i=0;i<enemyBullets.length;i++){ctx.beginPath();ctx.arc(enemyBullets[i].x,enemyBullets[i].y,5,0,Math.PI*2);ctx.fill();}
+    for(i=0;i<particles.length;i++){ctx.globalAlpha=Math.max(0,particles[i].life/40);ctx.fillStyle=particles[i].color;ctx.fillRect(particles[i].x,particles[i].y,4,4);}
+    ctx.globalAlpha=1;drawShip();
+    if(state==='playing'&&waveTimer<90){ctx.fillStyle='#e0f2fe';ctx.font='bold 28px Arial';ctx.textAlign='center';ctx.fillText('WAVE '+wave,W/2,70);}
+  }
+  function loop(now){
+    if(state!=='playing') return;
+    update();draw();requestAnimationFrame(loop);
+  }
+  function canvasPos(e){
+    var r=canvas.getBoundingClientRect();
+    return {x:(e.clientX-r.left)*(W/r.width),y:(e.clientY-r.top)*(H/r.height)};
+  }
+  document.getElementById('startBtn').addEventListener('click',startGame);
+  document.getElementById('restartBtn').addEventListener('click',startGame);
+  document.getElementById('menuBtn').addEventListener('click',showTitle);
+  document.getElementById('soundBtn').addEventListener('click',function(){
+    soundOn=!soundOn;this.textContent='Sound: '+(soundOn?'ON':'OFF');if(soundOn) initAudio();
+  });
+  document.addEventListener('keydown',function(e){
+    var k=e.key.toLowerCase();keys[k]=true;
+    if(k===' '){e.preventDefault();if(state==='playing') playerShoot();}
+    if(k==='r'&&(state==='over'||state==='won')) startGame();
+    if(k==='enter'&&state==='title') startGame();
+  });
+  document.addEventListener('keyup',function(e){keys[e.key.toLowerCase()]=false;});
+  canvas.addEventListener('pointerdown',function(e){
+    var p=canvasPos(e);pointer.x=p.x;pointer.y=p.y;pointer.down=true;pointer.active=true;
+    if(state==='playing') playerShoot();
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove',function(e){
+    if(!pointer.down) return;var p=canvasPos(e);pointer.x=p.x;pointer.y=p.y;
+  });
+  function pointerUp(){pointer.down=false;pointer.active=false;}
+  canvas.addEventListener('pointerup',pointerUp);
+  canvas.addEventListener('pointercancel',pointerUp);
+  canvas.addEventListener('click',function(){if(state==='playing') playerShoot();});
+  draw();updateHud();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Mirror Maze - Laser Reflection Puzzle</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #0b1020; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 14px; }
+  h1 { margin: 6px 0 2px; font-size: 30px; letter-spacing: 1px; color: #7df9ff; text-shadow: 0 0 14px rgba(125,249,255,.6); }
+  .sub { color: #aab8d6; font-size: 14px; margin-bottom: 10px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 6px 0 10px; width: 100%; max-width: 580px; }
+  .pill { background: #16213e; border: 1px solid #2a3f6e; border-radius: 20px; padding: 7px 12px; font-size: 14px; font-weight: bold; }
+  .pill span { color: #ffd166; }
+  #status { min-height: 22px; font-size: 14px; color: #ffd166; text-align: center; margin-bottom: 6px; }
+  #wrap { position: relative; width: min(92vw, 560px); }
+  canvas { width: 100%; height: auto; display: block; background: #0e1730; border: 3px solid #2a3f6e; border-radius: 14px; box-shadow: 0 0 0 4px #0b1020, 0 10px 30px rgba(0,0,0,.5); touch-action: manipulation; cursor: pointer; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+  button { background: #1f9d8a; color: white; border: none; border-radius: 10px; padding: 12px 18px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 3px 0 #14685a; }
+  button:active { transform: translateY(2px); box-shadow: none; }
+  button.secondary { background: #33415e; box-shadow: 0 3px 0 #1e2a44; }
+  button.warn { background: #e63946; box-shadow: 0 3px 0 #9e2430; }
+  .help { max-width: 580px; background: #121e38; border: 1px solid #2a3f6e; border-radius: 12px; padding: 12px 14px; font-size: 14px; line-height: 1.55; color: #cbd8f0; margin-top: 12px; }
+  .help b { color: #fff; }
+  .overlay { position: absolute; inset: 0; background: rgba(5,10,25,.92); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 5; }
+  .overlay h2 { font-size: 34px; margin: 0 0 8px; color: #7df9ff; }
+  .overlay p { color: #cbd8f0; line-height: 1.6; max-width: 420px; }
+  .hidden { display: none !important; }
+  #stars { font-size: 28px; letter-spacing: 6px; color: #ffd166; margin: 8px 0; }
+</style>
+</head>
+<body>
+<h1>MIRROR MAZE</h1>
+<div class="sub">Puzzle / Laser Reflection &mdash; rotate mirrors, guide the beam, light every target</div>
+
+<div id="hud">
+  <div class="pill">Puzzle: <span id="puzzleNum">1 / 3</span></div>
+  <div class="pill">Rotations: <span id="rotations">0</span> (Par <span id="par">1</span>)</div>
+  <div class="pill">Targets: <span id="targetsHud">0 / 2</span></div>
+  <div class="pill">Selected: <span id="selectedHud">-</span></div>
+</div>
+<div id="status">Rotate a mirror, then fire the laser.</div>
+
+<div id="wrap">
+  <canvas id="game" width="560" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>MIRROR MAZE</h2>
+    <p><b>How to play:</b><br>
+    Click or tap a mirror to rotate it between / and \.<br>
+    Use Arrow Keys to move the yellow cursor, Space to rotate the selected mirror.<br>
+    Press <b>Fire Laser</b> (or F) to shoot the beam from the green emitter.<br>
+    The beam bounces off mirrors, passes through targets, and stops at walls.<br>
+    Light <b>every target</b> in as few rotations as possible to beat par.</p>
+    <button id="startBtn" style="font-size:20px; padding:14px 28px;">▶ START GAME</button>
+    <p style="font-size:13px; color:#8ea2c4;">No downloads. No network. Keyboard, mouse and touch supported.</p>
+  </div>
+  <div id="winScreen" class="overlay hidden">
+    <h2 id="winTitle">PUZZLE SOLVED!</h2>
+    <div id="stars">★★★</div>
+    <p id="winText"></p>
+    <div class="controls">
+      <button id="nextBtn">Next Puzzle ▶</button>
+      <button id="replayBtn" class="secondary">↻ Replay Puzzle</button>
+    </div>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="fireBtn">⚡ FIRE LASER (F)</button>
+  <button id="restartBtn" class="warn">↻ RESTART (R)</button>
+  <button id="soundBtn" class="secondary">🔊 Sound: ON</button>
+</div>
+
+<div class="help">
+  <b>Controls:</b> Mouse / Touch &mdash; click a mirror to rotate it &nbsp;|&nbsp; Arrow Keys &mdash; move cursor &nbsp;|&nbsp; Space &mdash; rotate selected &nbsp;|&nbsp; F &mdash; fire &nbsp;|&nbsp; R &mdash; restart<br>
+  <b>Mirror rules:</b> A / mirror sends East&rarr;North, North&rarr;East, West&rarr;South, South&rarr;West. A \ mirror sends East&rarr;South, South&rarr;East, West&rarr;North, North&rarr;West.<br>
+  <b>Tip:</b> Targets do not block the beam. Walls do. Plan the path backwards from the last target.
+</div>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var SIZE = 7, CELL = 80;
+  var puzzles = [
+    {
+      name: 'First Reflection',
+      emitter: {x:0, y:3},
+      mirrors: [{x:3, y:3, o:'/'}],
+      targets: [{x:2, y:3}, {x:3, y:6}],
+      blockers: [{x:5, y:3}],
+      par: 1
+    },
+    {
+      name: 'Double Bend',
+      emitter: {x:0, y:1},
+      mirrors: [{x:3, y:1, o:'/'}, {x:3, y:4, o:'/'}],
+      targets: [{x:2, y:1}, {x:3, y:3}, {x:5, y:4}],
+      blockers: [{x:6, y:1}, {x:3, y:6}],
+      par: 2
+    },
+    {
+      name: 'Zigzag Finale',
+      emitter: {x:0, y:2},
+      mirrors: [{x:2, y:2, o:'/'}, {x:2, y:5, o:'/'}, {x:5, y:5, o:'\\'}],
+      targets: [{x:1, y:2}, {x:2, y:4}, {x:4, y:5}, {x:5, y:3}, {x:5, y:1}],
+      blockers: [{x:6, y:2}, {x:0, y:5}],
+      par: 3
+    }
+  ];
+
+  var puzzleIndex = 0, mirrors = [], rotations = 0, started = false;
+  var cursor = {x:3, y:3}, beamPath = [], beamShown = 0, beamAnimating = false, lastTime = 0;
+  var hitSet = {}, soundOn = true, audioCtx = null, winShown = false;
+
+  function clonePuzzle(p) {
+    return {
+      name: p.name, emitter: {x:p.emitter.x, y:p.emitter.y},
+      mirrors: p.mirrors.map(function(m){ return {x:m.x, y:m.y, o:m.o}; }),
+      targets: p.targets.slice(), blockers: p.blockers.slice(), par: p.par
+    };
+  }
+  var current = clonePuzzle(puzzles[0]);
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!soundOn || !audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sRotate() { tone(520, 0.07, 'square', 0.08); tone(780, 0.06, 'square', 0.06); }
+  function sLaser() { tone(200, 0.35, 'sawtooth', 0.08, 1200); }
+  function sHit() { tone(880, 0.12, 'sine', 0.14); setTimeout(function(){ tone(1320, 0.14, 'sine', 0.12); }, 70); }
+  function sWin() { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.22, 'triangle', 0.14); }, i*130); }); }
+  function sFail() { tone(180, 0.25, 'sawtooth', 0.08, 90); }
+
+  function setStatus(t) { document.getElementById('status').textContent = t; }
+  function keyOf(x,y) { return x + ',' + y; }
+  function findMirror(x,y) {
+    for (var i=0;i<mirrors.length;i++) if (mirrors[i].x===x && mirrors[i].y===y) return mirrors[i];
+    return null;
+  }
+  function isTarget(x,y) {
+    for (var i=0;i<current.targets.length;i++) if (current.targets[i].x===x && current.targets[i].y===y) return true;
+    return false;
+  }
+  function isBlocker(x,y) {
+    for (var i=0;i<current.blockers.length;i++) if (current.blockers[i].x===x && current.blockers[i].y===y) return true;
+    return false;
+  }
+
+  function loadPuzzle(idx) {
+    puzzleIndex = idx; current = clonePuzzle(puzzles[idx]); mirrors = current.mirrors;
+    rotations = 0; beamPath = []; beamShown = 0; beamAnimating = false; hitSet = {}; winShown = false;
+    cursor = mirrors.length ? {x: mirrors[0].x, y: mirrors[0].y} : {x:3, y:3};
+    document.getElementById('winScreen').classList.add('hidden');
+    updateHud(); setStatus('Puzzle ' + (idx+1) + ': ' + current.name + ' - rotate mirrors, then fire.');
+  }
+  function updateHud() {
+    document.getElementById('puzzleNum').textContent = (puzzleIndex+1) + ' / ' + puzzles.length;
+    document.getElementById('rotations').textContent = rotations;
+    document.getElementById('par').textContent = current.par;
+    var hitCount = 0; for (var k in hitSet) hitCount++;
+    document.getElementById('targetsHud').textContent = hitCount + ' / ' + current.targets.length;
+    var m = findMirror(cursor.x, cursor.y);
+    document.getElementById('selectedHud').textContent = m ? ('Mirror ' + m.o + ' at ' + (cursor.x+1) + ',' + (cursor.y+1)) : ((cursor.x+1) + ',' + (cursor.y+1));
+  }
+  function rotateAt(x,y) {
+    var m = findMirror(x,y);
+    if (!m) return false;
+    ensureAudio();
+    m.o = (m.o === '/') ? '\\' : '/';
+    rotations++; beamPath = []; beamShown = 0; hitSet = {};
+    sRotate(); updateHud(); setStatus('Rotated mirror at ' + (x+1) + ',' + (y+1) + ' to ' + m.o + '. Rotations: ' + rotations + ' (par ' + current.par + ').');
+    return true;
+  }
+  function reflect(dir, o) {
+    // dir: 0=E,1=S,2=W,3=N
+    if (o === '/') return [3,2,1,0][dir];
+    return [1,0,3,2][dir];
+  }
+  function computePath() {
+    var dirs = [[1,0],[0,1],[-1,0],[0,-1]];
+    var x = current.emitter.x, y = current.emitter.y, dir = 0, path = [];
+    path.push({x:x, y:y});
+    for (var step=0; step<60; step++) {
+      x += dirs[dir][0]; y += dirs[dir][1];
+      if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) break;
+      path.push({x:x, y:y});
+      if (isBlocker(x,y)) break;
+      var m = findMirror(x,y);
+      if (m) dir = reflect(dir, m.o);
+    }
+    return path;
+  }
+  function fire() {
+    if (!started || winShown) return;
+    ensureAudio(); sLaser();
+    beamPath = computePath(); beamShown = 0; beamAnimating = true; hitSet = {};
+    beamPath.forEach(function(p){ if (isTarget(p.x,p.y)) hitSet[keyOf(p.x,p.y)] = true; });
+    setStatus('Laser fired! Watch the beam...');
+  }
+  function finishBeam() {
+    beamAnimating = false; updateHud();
+    var hitCount = 0; for (var k in hitSet) hitCount++;
+    if (hitCount >= current.targets.length) {
+      winShown = true; sWin();
+      var stars = rotations <= current.par ? '★★★' : (rotations <= current.par + 2 ? '★★☆' : '★☆☆');
+      document.getElementById('stars').textContent = stars;
+      document.getElementById('winTitle').textContent = (puzzleIndex === puzzles.length-1) ? 'ALL PUZZLES COMPLETE!' : 'PUZZLE SOLVED!';
+      document.getElementById('winText').textContent = current.name + ' solved in ' + rotations + ' rotations (par ' + current.par + '). Targets: ' + hitCount + ' / ' + current.targets.length + '.';
+      document.getElementById('nextBtn').textContent = (puzzleIndex === puzzles.length-1) ? '↻ Play Again From Start' : 'Next Puzzle ▶';
+      document.getElementById('winScreen').classList.remove('hidden');
+      setStatus('Solved! ' + stars);
+    } else {
+      sFail(); setStatus('Only ' + hitCount + ' / ' + current.targets.length + ' targets hit. Rotate a mirror and fire again.');
+    }
+  }
+  function restart() {
+    loadPuzzle(puzzleIndex);
+    setStatus('Restarted puzzle ' + (puzzleIndex+1) + '. Good luck!');
+  }
+
+  function cx(x) { return x * CELL + CELL/2; }
+  function cy(y) { return y * CELL + CELL/2; }
+  function draw() {
+    ctx.clearRect(0,0,560,560);
+    for (var y=0;y<SIZE;y++) for (var x=0;x<SIZE;x++) {
+      ctx.fillStyle = ((x+y)%2===0) ? '#111d3a' : '#0e1730';
+      ctx.fillRect(x*CELL, y*CELL, CELL, CELL);
+      ctx.strokeStyle = '#22335f'; ctx.strokeRect(x*CELL+0.5, y*CELL+0.5, CELL, CELL);
+    }
+    // cursor
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.strokeRect(cursor.x*CELL+4, cursor.y*CELL+4, CELL-8, CELL-8); ctx.lineWidth = 1;
+    // blockers
+    current.blockers.forEach(function(b){
+      ctx.fillStyle = '#3a2b2b'; ctx.fillRect(b.x*CELL+8, b.y*CELL+8, CELL-16, CELL-16);
+      ctx.fillStyle = '#e63946'; ctx.font = 'bold 28px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('✕', cx(b.x), cy(b.y));
+    });
+    // targets
+    current.targets.forEach(function(t){
+      var hit = !!hitSet[keyOf(t.x,t.y)];
+      ctx.fillStyle = hit ? '#ffd166' : '#ff4d6d';
+      ctx.shadowColor = hit ? '#ffd166' : '#ff4d6d'; ctx.shadowBlur = hit ? 18 : 8;
+      ctx.beginPath();
+      ctx.moveTo(cx(t.x), cy(t.y)-24); ctx.lineTo(cx(t.x)+24, cy(t.y)); ctx.lineTo(cx(t.x), cy(t.y)+24); ctx.lineTo(cx(t.x)-24, cy(t.y)); ctx.closePath(); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#0b1020'; ctx.font = 'bold 20px Arial'; ctx.fillText('◉', cx(t.x), cy(t.y));
+    });
+    // emitter
+    var e = current.emitter;
+    ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(cx(e.x), cy(e.y), 26, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0b1020'; ctx.font = 'bold 26px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('▶', cx(e.x)+2, cy(e.y));
+    // mirrors
+    mirrors.forEach(function(m){
+      ctx.strokeStyle = '#dfe9ff'; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.beginPath();
+      if (m.o === '/') { ctx.moveTo(m.x*CELL+14, (m.y+1)*CELL-14); ctx.lineTo((m.x+1)*CELL-14, m.y*CELL+14); }
+      else { ctx.moveTo(m.x*CELL+14, m.y*CELL+14); ctx.lineTo((m.x+1)*CELL-14, (m.y+1)*CELL-14); }
+      ctx.stroke(); ctx.lineWidth = 1;
+      ctx.fillStyle = '#7df9ff'; ctx.font = 'bold 18px Arial'; ctx.fillText(m.o, cx(m.x), cy(m.y)-28);
+    });
+    // beam
+    if (beamPath.length > 1) {
+      var n = Math.min(beamShown, beamPath.length);
+      ctx.strokeStyle = '#ff2d55'; ctx.lineWidth = 6; ctx.shadowColor = '#ff2d55'; ctx.shadowBlur = 14; ctx.beginPath();
+      ctx.moveTo(cx(beamPath[0].x), cy(beamPath[0].y));
+      for (var i=1;i<n;i++) ctx.lineTo(cx(beamPath[i].x), cy(beamPath[i].y));
+      ctx.stroke(); ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#ffe66d'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(cx(beamPath[0].x), cy(beamPath[0].y));
+      for (var j=1;j<n;j++) ctx.lineTo(cx(beamPath[j].x), cy(beamPath[j].y));
+      ctx.stroke();
+    }
+  }
+  function loop(ts) {
+    if (beamAnimating) {
+      var elapsed = ts - lastTime;
+      if (elapsed > 90) {
+        beamShown++; lastTime = ts;
+        if (beamShown >= beamPath.length) {
+          beamShown = beamPath.length;
+          // play hit sounds for targets in order
+          if (Object.keys(hitSet).length) sHit();
+          setTimeout(finishBeam, 350);
+          beamAnimating = false;
+        }
+      }
+    }
+    draw(); requestAnimationFrame(loop);
+  }
+
+  // events
+  document.getElementById('startBtn').addEventListener('click', function(){
+    ensureAudio(); started = true;
+    document.getElementById('titleScreen').classList.add('hidden');
+    tone(523, 0.15, 'triangle', 0.12); setStatus('Puzzle 1: First Reflection - click a mirror to rotate it.');
+  });
+  document.getElementById('fireBtn').addEventListener('click', fire);
+  document.getElementById('restartBtn').addEventListener('click', function(){ ensureAudio(); restart(); });
+  document.getElementById('replayBtn').addEventListener('click', function(){ restart(); });
+  document.getElementById('nextBtn').addEventListener('click', function(){
+    ensureAudio();
+    if (puzzleIndex === puzzles.length-1) loadPuzzle(0); else loadPuzzle(puzzleIndex+1);
+  });
+  document.getElementById('soundBtn').addEventListener('click', function(ev){
+    soundOn = !soundOn; ev.target.textContent = soundOn ? '🔊 Sound: ON' : '🔇 Sound: OFF';
+    if (soundOn) ensureAudio();
+  });
+  canvas.addEventListener('click', function(ev){
+    if (!started) return;
+    var r = canvas.getBoundingClientRect();
+    var x = Math.floor((ev.clientX - r.left) / r.width * SIZE);
+    var y = Math.floor((ev.clientY - r.top) / r.height * SIZE);
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return;
+    cursor = {x:x, y:y}; updateHud();
+    rotateAt(x,y);
+  });
+  canvas.addEventListener('touchstart', function(ev){
+    if (!started) return;
+    ev.preventDefault();
+    var t = ev.touches[0], r = canvas.getBoundingClientRect();
+    var x = Math.floor((t.clientX - r.left) / r.width * SIZE);
+    var y = Math.floor((t.clientY - r.top) / r.height * SIZE);
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return;
+    cursor = {x:x, y:y}; updateHud(); rotateAt(x,y);
+  }, {passive:false});
+
+  document.addEventListener('keydown', function(ev){
+    if (!started && (ev.key === 'Enter' || ev.key === ' ')) { document.getElementById('startBtn').click(); return; }
+    if (!started) return;
+    if (ev.key === 'ArrowLeft') { cursor.x = Math.max(0, cursor.x-1); ev.preventDefault(); }
+    else if (ev.key === 'ArrowRight') { cursor.x = Math.min(SIZE-1, cursor.x+1); ev.preventDefault(); }
+    else if (ev.key === 'ArrowUp') { cursor.y = Math.max(0, cursor.y-1); ev.preventDefault(); }
+    else if (ev.key === 'ArrowDown') { cursor.y = Math.min(SIZE-1, cursor.y+1); ev.preventDefault(); }
+    else if (ev.key === ' ') { rotateAt(cursor.x, cursor.y); ev.preventDefault(); }
+    else if (ev.key === 'f' || ev.key === 'F') { fire(); }
+    else if (ev.key === 'r' || ev.key === 'R') { restart(); }
+    else if (ev.key === 'Enter' && winShown) { document.getElementById('nextBtn').click(); }
+    updateHud();
+  });
+
+  loadPuzzle(0);
+  requestAnimationFrame(function(ts){ lastTime = ts; loop(ts); });
+})();
+</script>
+</body>
+</html>

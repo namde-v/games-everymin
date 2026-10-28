@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Dune Dash</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#1a120b;color:#fff2d8;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:14px}
+  h1{margin:4px 0 2px;font-size:34px;letter-spacing:2px;text-transform:uppercase;text-shadow:0 3px 0 #7a3b00}
+  .tag{margin:0 0 10px;color:#ffd98a;font-size:14px}
+  #wrap{position:relative;width:min(920px,96vw)}
+  canvas{display:block;width:100%;height:auto;background:#87ceeb;border:4px solid #3d2105;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.5);touch-action:none}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;margin:10px 0}
+  .pill{background:#2b1a08;border:1px solid #8a5a1e;border-radius:999px;padding:7px 12px;font-weight:bold;font-size:14px}
+  .pill b{color:#ffcf5c}
+  #toast{position:absolute;left:50%;top:58px;transform:translateX(-50%);background:rgba(0,0,0,.72);padding:9px 16px;border-radius:999px;font-weight:bold;display:none;z-index:5;text-align:center}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(20,10,0,.58);border-radius:10px;padding:20px;z-index:4}
+  .overlay h2{font-size:44px;margin:0 0 6px;text-transform:uppercase;letter-spacing:2px}
+  .overlay p{max-width:560px;line-height:1.55;margin:6px 0}
+  button{cursor:pointer;border:0;border-radius:999px;padding:13px 26px;font-size:18px;font-weight:bold;background:#ffb703;color:#2b1600;box-shadow:0 5px 0 #9a5b00}
+  button:active{transform:translateY(3px);box-shadow:0 2px 0 #9a5b00}
+  button.secondary{background:#fff2d8;color:#3d2105;box-shadow:0 5px 0 #9a8a6a}
+  .keys{font-size:13px;color:#ffe9b0}
+  #over{display:none}
+  .stats{font-size:18px;line-height:1.7}
+  @media(max-width:600px){h1{font-size:27px}.overlay h2{font-size:32px}}
+</style>
+</head>
+<body>
+<h1>Dune Dash</h1>
+<p class="tag">An endless desert line runner. Outrun the dunes.</p>
+<div id="wrap">
+  <canvas id="game" width="920" height="430"></canvas>
+  <div id="toast"></div>
+  <div class="overlay" id="title">
+    <h2>Dune Dash</h2>
+    <p><b>How to play:</b> Run as far as you can across the dunes. Jump over cacti, rocks and sand gaps. Slide under swooping vultures. Grab coins for bonus points. The desert gets faster — and darker — the farther you go.</p>
+    <p class="keys">Jump: Space / Up / W / Tap &nbsp;|&nbsp; Slide: Down / S / Swipe Down &nbsp;|&nbsp; Restart: Enter</p>
+    <button id="startBtn">Start Run</button>
+    <p class="keys">Tip: time your jump for gaps — landing in a gap ends the run.</p>
+  </div>
+  <div class="overlay" id="over">
+    <h2>Game Over</h2>
+    <p class="stats" id="finalStats"></p>
+    <p id="milestoneNote"></p>
+    <button id="restartBtn">Restart Instantly</button>
+    <p class="keys">Press Enter to run again.</p>
+  </div>
+</div>
+<div id="hud">
+  <span class="pill">Score: <b id="score">0</b></span>
+  <span class="pill">Distance: <b id="dist">0</b> m</span>
+  <span class="pill">Coins: <b id="coins">0</b></span>
+  <span class="pill">Best: <b id="best">0</b></span>
+  <span class="pill">Status: <b id="status">Ready</b></span>
+</div>
+<p class="keys">Controls: keyboard, mouse click, or touch. Sound starts only after you press Start.</p>
+<script>
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const W=920,H=430,GROUND=350;
+const titleEl=document.getElementById('title');
+const overEl=document.getElementById('over');
+const toastEl=document.getElementById('toast');
+const scoreEl=document.getElementById('score');
+const distEl=document.getElementById('dist');
+const coinsEl=document.getElementById('coins');
+const bestEl=document.getElementById('best');
+const statusEl=document.getElementById('status');
+const finalEl=document.getElementById('finalStats');
+const mileEl=document.getElementById('milestoneNote');
+let state='title';
+let score=0,distance=0,coinCount=0,best=0,milestoneWin=false,nextMilestone=500,toastTimer=0;
+try{best=parseInt(localStorage.getItem('duneDashBest')||'0',10)||0;}catch(e){best=0;}
+bestEl.textContent=best;
+const player={x:120,y:GROUND-58,w:44,h:58,vy:0,grounded:true,sliding:false,slideT:0,falling:false,leg:0};
+let speed=6,obstacles=[],coinsArr=[],gaps=[],spawnT=0,coinT=0,gapT=0,frame=0,scroll=0;
+let audioCtx=null;
+function ensureAudio(){if(!audioCtx){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){audioCtx=null;}}if(audioCtx&&audioCtx.state==='suspended'){audioCtx.resume();}}
+function tone(freq,dur,type,vol,slideTo){if(!audioCtx)return;const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type||'square';o.frequency.setValueAtTime(freq,audioCtx.currentTime);if(slideTo)o.frequency.exponentialRampToValueAtTime(slideTo,audioCtx.currentTime+dur);g.gain.setValueAtTime(vol||0.12,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur);}
+function sJump(){tone(300,0.18,'sine',0.14,720);}
+function sCoin(){tone(880,0.08,'square',0.10);setTimeout(()=>tone(1320,0.14,'square',0.10),70);}
+function sCrash(){tone(180,0.35,'sawtooth',0.16,40);}
+function sMile(){tone(523,0.12,'triangle',0.12);setTimeout(()=>tone(659,0.12,'triangle',0.12),110);setTimeout(()=>tone(784,0.22,'triangle',0.12),220);}
+function showToast(msg,ms){toastEl.textContent=msg;toastEl.style.display='block';toastTimer=ms||1800;}
+function lerp(a,b,t){return a+(b-a)*t;}
+function mix(c1,c2,t){return [lerp(c1[0],c2[0],t),lerp(c1[1],c2[1],t),lerp(c1[2],c2[2],t)];}
+function rgb(c){return 'rgb('+Math.round(c[0])+','+Math.round(c[1])+','+Math.round(c[2])+')';}
+function palette(){
+  const cycle=(distance%3000)/3000;
+  const day=[135,206,235],sunset=[255,150,80],night=[18,24,64],dawn=[255,190,120];
+  if(cycle<0.35)return mix(day,sunset,cycle/0.35);
+  if(cycle<0.55)return mix(sunset,night,(cycle-0.35)/0.20);
+  if(cycle<0.80)return night;
+  return mix(night,dawn,(cycle-0.80)/0.20);
+}
+function isNight(){const c=palette();return c[0]<70;}
+function reset(){
+  score=0;distance=0;coinCount=0;milestoneWin=false;nextMilestone=500;speed=6;
+  obstacles=[];coinsArr=[];gaps=[];spawnT=55;coinT=90;gapT=420;frame=0;
+  player.y=GROUND-58;player.vy=0;player.grounded=true;player.sliding=false;player.slideT=0;player.falling=false;
+  statusEl.textContent='Running';mileEl.textContent='';
+}
+function startGame(){
+  ensureAudio();reset();state='playing';
+  titleEl.style.display='none';overEl.style.display='none';toastEl.style.display='none';
+  showToast('Run!',1200);
+}
+function endGame(reason){
+  if(state!=='playing')return;state='over';sCrash();
+  const finalScore=Math.floor(score);
+  if(finalScore>best){best=finalScore;try{localStorage.setItem('duneDashBest',String(best));}catch(e){}}
+  bestEl.textContent=best;statusEl.textContent='Game Over';
+  finalEl.textContent='Score: '+finalScore+'  |  Distance: '+Math.floor(distance)+' m  |  Coins: '+coinCount+'  |  Best: '+best+'  |  '+reason;
+  mileEl.textContent=milestoneWin?'Milestone Win: you reached 2000 m — Desert Champion!':'Milestone: reach 2000 m to become Desert Champion.';
+  overEl.style.display='flex';
+}
+function doJump(){
+  if(state!=='playing')return;
+  if(player.grounded&&!player.falling){player.vy=-14.5;player.grounded=false;player.sliding=false;sJump();}
+}
+function doSlide(){
+  if(state!=='playing')return;
+  if(player.grounded){player.sliding=true;player.slideT=28;}
+}
+function spawnObstacle(){
+  const r=Math.random();let kind='cactus';
+  if(r<0.45)kind='cactus';else if(r<0.70)kind='rock';else kind='vulture';
+  const y=kind==='vulture'?GROUND-108:GROUND-(kind==='cactus'?64:34);
+  const h=kind==='vulture'?30:(kind==='cactus'?64:34);
+  const w=kind==='vulture'?56:(kind==='cactus'?34:52);
+  obstacles.push({x:W+20,y:y,w:w,h:h,kind:kind,flap:0});
+}
+function spawnCoins(){
+  const baseY=GROUND-130-Math.random()*70;
+  for(let i=0;i<5;i++)coinsArr.push({x:W+40+i*34,y:baseY-Math.abs(i-2)*18,r:12,taken:false});
+}
+function spawnGap(){gaps.push({x:W+20,w:110+Math.random()*70});}
+function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+function playerRect(){const h=player.sliding?30:58;return {x:player.x,y:GROUND-h,w:44,h:h};}
+function update(){
+  frame++;scroll+=speed;
+  distance+=speed*0.12;score=distance+coinCount*50;
+  speed=6+Math.min(9,distance/350);
+  if(distance>=nextMilestone){
+    showToast(nextMilestone+' m!',1600);sMile();
+    if(nextMilestone>=2000)milestoneWin=true;
+    nextMilestone+=500;
+  }
+  if(toastTimer>0){toastTimer-=16;if(toastTimer<=0)toastEl.style.display='none';}
+  if(player.slideT>0){player.slideT--;if(player.slideT===0)player.sliding=false;}
+  if(!player.grounded){
+    player.vy+=0.72;player.y+=player.vy;
+    if(player.y>=GROUND-58){player.y=GROUND-58;player.vy=0;player.grounded=true;}
+  }
+  player.leg+=speed*0.04;
+  spawnT--;if(spawnT<=0){spawnObstacle();spawnT=62+Math.random()*55-Math.min(25,distance/250);}
+  coinT--;if(coinT<=0){spawnCoins();coinT=150+Math.random()*140;}
+  gapT--;if(gapT<=0){spawnGap();gapT=520+Math.random()*320;}
+  for(const o of obstacles){o.x-=speed;o.flap+=0.25;}
+  obstacles=obstacles.filter(o=>o.x+o.w>-20);
+  for(const c of coinsArr){c.x-=speed;}
+  coinsArr=coinsArr.filter(c=>!c.taken&&c.x>-30);
+  for(const g of gaps){g.x-=speed;}
+  gaps=gaps.filter(g=>g.x+g.w>-20);
+  const pr=playerRect();
+  const overGap=gaps.some(g=>player.x+22>g.x&&player.x+22<g.x+g.w);
+  if(overGap&&player.grounded&&!player.falling){
+    player.falling=true;statusEl.textContent='Falling!';
+  }
+  if(player.falling){
+    player.vy+=0.7;player.y+=player.vy;
+    if(player.y>H+40){endGame('Fell into a sand gap.');return;}
+  }
+  for(const o of obstacles){
+    const box={x:o.x,y:o.y,w:o.w,h:o.h};
+    if(rectsOverlap(pr,box)){endGame(o.kind==='vulture'?'Hit by a vulture.':o.kind==='cactus'?'Hit a cactus.':'Hit a rock.');return;}
+  }
+  for(const c of coinsArr){
+    const dx=(player.x+22)-c.x,dy=(GROUND-30)-c.y;
+    if(Math.abs(dx)<38&&Math.abs(dy)<42){c.taken=true;coinCount++;sCoin();}
+  }
+  scoreEl.textContent=Math.floor(score);distEl.textContent=Math.floor(distance);coinsEl.textContent=coinCount;
+  if(milestoneWin)statusEl.textContent='Milestone Win!';
+}
+function drawDunes(){
+  const sky=palette();
+  ctx.fillStyle=rgb(sky);ctx.fillRect(0,0,W,H);
+  const night=isNight();
+  if(night){ctx.fillStyle='#e8ecff';ctx.beginPath();ctx.arc(770,70,26,0,Math.PI*2);ctx.fill();ctx.fillStyle=rgb(sky);ctx.beginPath();ctx.arc(760,62,22,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';for(let i=0;i<28;i++){const sx=(i*97)%W,sy=(i*53)%150;ctx.fillRect(sx,sy,2,2);}}
+  else{ctx.fillStyle='#ffdd66';ctx.beginPath();ctx.arc(770,70,34,0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(255,220,120,.35)';ctx.beginPath();ctx.arc(770,70,52,0,Math.PI*2);ctx.fill();}
+  ctx.fillStyle=night?'#2a2a55':'#e8a85c';
+  for(let layer=0;layer<2;layer++){
+    const off=(scroll*(layer===0?0.25:0.55))%240;
+    ctx.beginPath();ctx.moveTo(-off,GROUND);
+    for(let x=-off;x<W+240;x+=240){ctx.quadraticCurveTo(x+60,GROUND-70-layer*35,x+120,GROUND);ctx.quadraticCurveTo(x+180,GROUND-45-layer*25,x+240,GROUND);}
+    ctx.lineTo(W,GROUND);ctx.closePath();ctx.fill();
+  }
+  ctx.fillStyle=night?'#4a3420':'#d99a4e';ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle=night?'#5d4228':'#f2c069';ctx.fillRect(0,GROUND,W,10);
+  for(const g of gaps){ctx.fillStyle=rgb(sky);ctx.fillRect(g.x,GROUND-4,g.w,H-GROUND+8);ctx.fillStyle='#2b1a08';ctx.fillRect(g.x,GROUND-4,4,H-GROUND);ctx.fillRect(g.x+g.w-4,GROUND-4,4,H-GROUND);}
+  ctx.fillStyle='rgba(0,0,0,.12)';
+  for(let i=0;i<30;i++){const x=((i*173-scroll*1.2)%W+W)%W;ctx.fillRect(x,GROUND+24+(i%5)*18,18,3);}
+}
+function drawPlayer(){
+  const h=player.sliding?30:58;const y=player.falling?player.y:GROUND-h;
+  ctx.save();ctx.translate(player.x,y);
+  ctx.fillStyle='#7a3b00';ctx.fillRect(6,h-12,8,12);ctx.fillRect(28,h-12,8,12);
+  ctx.fillStyle='#ff7b00';ctx.fillRect(0,8,44,h-20);
+  ctx.fillStyle='#ffe9b0';ctx.fillRect(30,0,14,16);
+  ctx.fillStyle='#2b1600';ctx.fillRect(38,4,4,4);
+  if(player.sliding){ctx.fillStyle='#ffb703';ctx.fillRect(-4,2,48,8);}
+  else{const legSwing=Math.sin(player.leg)*7;ctx.fillStyle='#3d2105';ctx.fillRect(10,h-10,7,10+legSwing*0.2);}
+  ctx.restore();
+}
+function draw(){
+  drawDunes();
+  for(const c of coinsArr){ctx.fillStyle='#ffd700';ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#a86e00';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#fff3a0';ctx.fillRect(c.x-2,c.y-7,4,14);}
+  for(const o of obstacles){
+    if(o.kind==='cactus'){ctx.fillStyle='#2e8b57';ctx.fillRect(o.x+8,o.y,18,o.h);ctx.fillRect(o.x,o.y+18,12,10);ctx.fillRect(o.x+26,o.y+28,12,10);}
+    else if(o.kind==='rock'){ctx.fillStyle='#7a6a5a';ctx.beginPath();ctx.moveTo(o.x,o.y+o.h);ctx.lineTo(o.x+10,o.y);ctx.lineTo(o.x+38,o.y+4);ctx.lineTo(o.x+o.w,o.y+o.h);ctx.closePath();ctx.fill();}
+    else{ctx.fillStyle='#3a2f4a';ctx.fillRect(o.x,o.y+10,44,16);ctx.fillStyle='#241c33';const wing=Math.sin(o.flap)*8;ctx.beginPath();ctx.moveTo(o.x,o.y+14);ctx.lineTo(o.x-16,o.y+wing);ctx.lineTo(o.x+6,o.y+20);ctx.closePath();ctx.fill();}
+  }
+  drawPlayer();
+  if(state==='title'){ctx.fillStyle='rgba(0,0,0,.25)';ctx.font='bold 18px Arial';ctx.fillText('Press Start to run across the desert',260,400);}
+  if(milestoneWin){ctx.fillStyle='#ffd700';ctx.font='bold 20px Arial';ctx.fillText('MILESTONE WIN: 2000 m reached!',285,38);}
+}
+function loop(){
+  requestAnimationFrame(loop);
+  if(state==='playing')update();
+  else if(toastTimer>0){toastTimer-=16;if(toastTimer<=0)toastEl.style.display='none';}
+  draw();
+}
+document.getElementById('startBtn').addEventListener('click',startGame);
+document.getElementById('restartBtn').addEventListener('click',startGame);
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){e.preventDefault();if(state==='title'||state==='over')startGame();else doJump();}
+  if(e.code==='ArrowDown'||e.code==='KeyS'){e.preventDefault();doSlide();}
+  if(e.code==='Enter'){if(state==='title'||state==='over')startGame();}
+});
+canvas.addEventListener('mousedown',e=>{if(state==='playing')doJump();});
+let touchY=null;
+canvas.addEventListener('touchstart',e=>{e.preventDefault();touchY=e.touches[0].clientY;},{passive:false});
+canvas.addEventListener('touchend',e=>{
+  e.preventDefault();if(state!=='playing')return;
+  const dy=(e.changedTouches[0].clientY-touchY);
+  if(dy>35)doSlide();else doJump();
+},{passive:false});
+loop();
+</script>
+</body>
+</html>
