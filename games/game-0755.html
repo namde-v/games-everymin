@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Paper Plane Glider — Game 0755</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e33; font-family: Arial, Helvetica, sans-serif; color: #fff;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; margin: 8px 0 4px; text-align: center; color: #ffe066; letter-spacing: 1px; }
+  p.sub { color: #bfe3ff; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #hud { width: 100%; max-width: 760px; display: flex; justify-content: space-between; gap: 8px;
+    background: #122f4d; border: 2px solid #3a6ea5; border-radius: 10px; padding: 8px 12px;
+    font-weight: bold; font-size: 15px; flex-wrap: wrap; }
+  #hud span { white-space: nowrap; }
+  #wrap { position: relative; width: 100%; max-width: 760px; margin-top: 10px; }
+  canvas { width: 100%; height: 440px; display: block; background: linear-gradient(#7ec8f7, #cdeffd 60%, #a8e6a1);
+    border: 3px solid #3a6ea5; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; background: rgba(8, 25, 45, 0.78); border-radius: 12px;
+    text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffe066; }
+  .overlay p { max-width: 520px; line-height: 1.55; color: #eaf6ff; font-size: 15px; }
+  .overlay .small { font-size: 13px; color: #bfe3ff; }
+  button { background: #ffb703; color: #1a1a1a; border: none; border-radius: 10px;
+    padding: 13px 28px; font-size: 18px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffd166; }
+  button.secondary { background: #eaf6ff; font-size: 15px; padding: 10px 20px; }
+  #hint { margin-top: 8px; color: #bfe3ff; font-size: 13px; text-align: center; }
+  .keys { background: #122f4d; border-radius: 8px; padding: 10px 14px; font-size: 14px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h1>✈️ Paper Plane Glider</h1>
+<p class="sub">Game 0755 &bull; Precision / Glider Ring Flight &bull; Ride the wind, thread every ring!</p>
+
+<div id="hud">
+  <span>Score: <span id="score">0</span></span>
+  <span>Rings: <span id="rings">0</span> / 15</span>
+  <span>Flights: <span id="lives">3</span></span>
+  <span>Speed: <span id="speed">100</span></span>
+  <span>Status: <span id="status">Ready</span></span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="440"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Paper Plane Glider</h2>
+    <p><strong>How to Play:</strong> Your paper plane launches into a breezy sky. Steer it through
+    15 floating rings before you run out of flights. Climbing costs speed and diving gains it —
+    fly too slowly and you stall! Wind gusts will push you up or down, so correct gently.</p>
+    <div class="keys">
+      ↑ / W or hold mouse / touch &amp; drag — steer &amp; lift &nbsp;•&nbsp;
+      ↓ / S — dive for speed &nbsp;•&nbsp; Space — gentle lift<br>
+      Pass a ring dead-centre for a bonus +25. Miss a ring and you lose a flight.
+    </div>
+    <button id="startBtn">▶ Start Flight</button>
+    <p class="small">Keyboard, mouse and touch all work. Sound starts only after you press Start.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ Restart</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+
+<p id="hint">Tip: stay near the middle of each ring, dive before a long climb, and watch for gust warnings.</p>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var ringsEl = document.getElementById('rings');
+  var livesEl = document.getElementById('lives');
+  var speedEl = document.getElementById('speed');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var state = 'title'; // title | playing | win | over
+  var plane, rings, clouds, particles, gusts;
+  var score, ringsPassed, flights, targetY, keys, frame;
+  var audioCtx = null, muted = false;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundRing(center) {
+    beep(center ? 880 : 660, 0.18, 'sine', 0.14);
+    setTimeout(function () { beep(center ? 1320 : 990, 0.16, 'sine', 0.1); }, 70);
+  }
+  function soundMiss() { beep(180, 0.35, 'sawtooth', 0.1); }
+  function soundGust() { beep(320, 0.25, 'triangle', 0.07); }
+  function soundWin() { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { beep(f, 0.3, 'sine', 0.13); }, i * 130); }); }
+
+  function resetGame() {
+    plane = { x: 130, y: H / 2, vy: 0, speed: 100, angle: 0 };
+    rings = []; clouds = []; particles = []; gusts = [];
+    for (var i = 0; i < 8; i++) {
+      clouds.push({ x: Math.random() * W, y: Math.random() * H * 0.6, s: 20 + Math.random() * 35 });
+    }
+    score = 0; ringsPassed = 0; flights = 3; targetY = H / 2; keys = {}; frame = 0;
+    spawnRing(W + 80);
+    updateHUD('Flying!');
+  }
+
+  function spawnRing(x) {
+    var y = 70 + Math.random() * (H - 140);
+    rings.push({ x: x, y: y, r: 42, passed: false, hue: Math.floor(Math.random() * 360) });
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    ringsEl.textContent = ringsPassed;
+    livesEl.textContent = flights;
+    speedEl.textContent = Math.max(0, Math.round(plane ? plane.speed : 100));
+    if (status) statusEl.textContent = status;
+  }
+
+  function loseFlight(reason) {
+    flights--;
+    soundMiss();
+    for (var i = 0; i < 24; i++) {
+      particles.push({ x: plane.x, y: plane.y, vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, life: 30 });
+    }
+    updateHUD(reason);
+    if (flights <= 0) { endGame(false); return; }
+    // Relaunch from a safe spot with restored speed.
+    plane.y = H / 2; plane.vy = 0; plane.speed = 100; targetY = H / 2;
+    updateHUD('Relaunched — ' + flights + ' flight(s) left');
+  }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 You Win!' : '💥 Game Over';
+    endText.textContent = won
+      ? 'Beautiful flying! You threaded all 15 rings and landed like a champion glider pilot.'
+      : 'Your flights ran out. The sky is still there — fold another plane and try again!';
+    endScore.textContent = 'Final score: ' + score + ' • Rings passed: ' + ringsPassed + ' / 15';
+    statusEl.textContent = won ? 'WIN!' : 'Game Over';
+    endScreen.classList.remove('hidden');
+    if (won) soundWin(); else soundMiss();
+  }
+
+  function startGame() {
+    initAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    beep(440, 0.2, 'sine', 0.12);
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    // Steering: keys override, otherwise ease toward pointer/touch target.
+    var lift = keys['ArrowUp'] || keys['w'] || keys['W'] || keys[' '] || keys['Space'];
+    var dive = keys['ArrowDown'] || keys['s'] || keys['S'];
+    if (lift) { plane.vy -= 0.55; plane.speed -= 0.28; }
+    if (dive) { plane.vy += 0.5; plane.speed += 0.32; }
+    if (!lift && !dive && pointerActive) {
+      plane.vy += (targetY - plane.y) * 0.012;
+    }
+    // Gentle gravity and drag back toward level flight.
+    plane.vy += 0.06;
+    plane.vy *= 0.96;
+    plane.y += plane.vy;
+    plane.speed += (100 - plane.speed) * 0.004;
+    plane.speed = Math.max(20, Math.min(170, plane.speed));
+    plane.angle = Math.max(-0.6, Math.min(0.6, plane.vy * 0.09));
+
+    if (plane.y < 20) { plane.y = 20; plane.vy = Math.abs(plane.vy) * 0.4; }
+    if (plane.y > H - 20) { plane.y = H - 20; plane.vy = -Math.abs(plane.vy) * 0.4; }
+
+    // Wind gusts every few seconds.
+    if (frame % 240 === 0) {
+      var g = (Math.random() - 0.5) * 2.4;
+      gusts.push({ vy: g, life: 120, text: g < 0 ? '↑ Updraft!' : '↓ Downdraft!' });
+      soundGust();
+    }
+    var gustNow = 0;
+    gusts.forEach(function (g) { if (g.life > 0) { gustNow += g.vy * 0.08; g.life--; } });
+    plane.y += gustNow;
+
+    // Stall check: too slow while climbing high.
+    if (plane.speed < 32) {
+      loseFlight('Stalled!');
+      return;
+    }
+
+    // Rings scroll left, faster at higher speed.
+    var scroll = 2.2 + plane.speed * 0.018;
+    rings.forEach(function (r) { r.x -= scroll; });
+    if (rings.length === 0 || rings[rings.length - 1].x < W - 170) spawnRing(W + 60);
+    rings = rings.filter(function (r) { return r.x > -80; });
+
+    rings.forEach(function (r) {
+      if (!r.passed && r.x < plane.x + 14 && r.x > plane.x - 14) {
+        var dy = Math.abs(plane.y - r.y);
+        r.passed = true;
+        if (dy < r.r) {
+          var center = dy < 16;
+          ringsPassed++;
+          score += center ? 125 : 100;
+          soundRing(center);
+          statusEl.textContent = center ? 'Perfect centre! +125' : 'Ring! +100';
+          for (var i = 0; i < 14; i++) {
+            particles.push({ x: r.x, y: r.y, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 26 });
+          }
+          if (ringsPassed >= 15) { endGame(true); return; }
+        } else {
+          loseFlight('Missed a ring!');
+          return;
+        }
+      }
+    });
+
+    // Trail particles and clouds.
+    if (frame % 4 === 0) particles.push({ x: plane.x - 22, y: plane.y, vx: -1.5, vy: 0, life: 18 });
+    clouds.forEach(function (c) { c.x -= 0.4; if (c.x < -80) { c.x = W + 60; c.y = Math.random() * H * 0.6; } });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky, sun, hills.
+    ctx.fillStyle = '#7ec8f7'; ctx.fillRect(0, 0, W, H * 0.62);
+    ctx.fillStyle = '#cdeffd'; ctx.fillRect(0, H * 0.62, W, H * 0.38);
+    ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(660, 55, 32, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#8fd19a'; ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, 360);
+    ctx.quadraticCurveTo(200, 320, 400, 365); ctx.quadraticCurveTo(600, 330, 760, 370);
+    ctx.lineTo(760, H); ctx.closePath(); ctx.fill();
+
+    // Clouds.
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    clouds.forEach(function (c) {
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + c.s * 0.8, c.y - 8, c.s * 0.7, 0, Math.PI * 2);
+      ctx.arc(c.x - c.s * 0.8, c.y + 4, c.s * 0.6, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // Gust banners.
+    ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    gusts.forEach(function (g) {
+      if (g.life > 60) { ctx.fillStyle = '#123'; ctx.fillText(g.text, W / 2, 30); }
+    });
+
+    // Rings.
+    rings.forEach(function (r) {
+      ctx.strokeStyle = 'hsl(' + r.hue + ', 85%, 55%)'; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r - 8, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#123'; ctx.font = 'bold 13px Arial';
+      ctx.fillText('◯', r.x, r.y + 5);
+    });
+
+    // Trail.
+    particles.forEach(function (p) {
+      ctx.fillStyle = 'rgba(255,255,255,' + (p.life / 30) + ')';
+      ctx.fillRect(p.x, p.y, 5, 3);
+    });
+
+    // Paper plane.
+    if (plane) {
+      ctx.save(); ctx.translate(plane.x, plane.y); ctx.rotate(plane.angle);
+      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#334155'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(26, 0); ctx.lineTo(-18, -14); ctx.lineTo(-8, 0); ctx.lineTo(-18, 14);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ffb703'; ctx.beginPath(); ctx.moveTo(26, 0); ctx.lineTo(-8, 0); ctx.lineTo(-2, 8); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      // Speed lines.
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+      for (var i = 0; i < 3; i++) {
+        var yy = plane.y - 12 + i * 12;
+        ctx.beginPath(); ctx.moveTo(plane.x - 34, yy); ctx.lineTo(plane.x - 50 - (plane.speed * 0.08), yy); ctx.stroke();
+      }
+    }
+
+    // Ground line.
+    ctx.fillStyle = '#2f7a3d'; ctx.fillRect(0, H - 8, W, 8);
+  }
+
+  var pointerActive = false;
+  function setTargetFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : null);
+    if (clientY === null) return;
+    targetY = (clientY - rect.top) * (H / rect.height);
+    pointerActive = true;
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+    statusEl.textContent = 'Ready';
+  });
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startGame(); }
+    if ((state === 'win' || state === 'over') && e.key === 'Enter') { startGame(); }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === ' ') e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  canvas.addEventListener('mousedown', function (e) { setTargetFromEvent(e); });
+  canvas.addEventListener('mousemove', function (e) { if (e.buttons) setTargetFromEvent(e); });
+  canvas.addEventListener('click', function (e) { setTargetFromEvent(e); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); setTargetFromEvent(e); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); setTargetFromEvent(e); }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointerActive = false; });
+
+  resetGame();
+  state = 'title';
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

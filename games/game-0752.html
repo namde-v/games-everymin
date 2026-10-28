@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Constellation Connector</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #050814; color: #eaf2ff; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 26px; text-align: center; margin: 6px 0 2px; letter-spacing: 1px; color: #ffe27a; text-shadow: 0 0 14px rgba(255,226,122,.6); }
+  p.tag { text-align: center; color: #aebfe8; font-size: 13px; margin-bottom: 10px; }
+  #hud { width: min(92vw, 640px); display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-weight: 700; font-size: 14px; }
+  #hud span { background: #12214d; border: 1px solid #35508f; padding: 7px 10px; border-radius: 10px; flex: 1; text-align: center; }
+  #wrap { position: relative; width: min(92vw, 640px); aspect-ratio: 4 / 3; }
+  canvas { width: 100%; height: 100%; display: block; background: radial-gradient(circle at 30% 20%, #162a5e 0, #050814 55%, #02030a 100%); border: 2px solid #3b5aa8; border-radius: 14px; touch-action: none; cursor: crosshair; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; background: rgba(2,5,18,.88); border-radius: 14px; }
+  .screen.hidden { display: none; }
+  .screen h2 { font-size: 30px; color: #ffe27a; margin-bottom: 10px; }
+  .screen p { color: #d7e2ff; line-height: 1.55; font-size: 15px; max-width: 440px; }
+  .screen .small { font-size: 13px; color: #aebfe8; margin-top: 10px; }
+  button { margin-top: 16px; padding: 13px 26px; font-size: 17px; font-weight: 800; border: none; border-radius: 999px; background: #ffd84d; color: #14213d; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  button.secondary { background: #5f7fe8; color: #fff; box-shadow: 0 4px 0 #2e4a9e; }
+  #msg { min-height: 22px; margin-top: 8px; font-weight: 700; color: #ffd84d; text-align: center; }
+  #controls { margin-top: 8px; color: #aebfe8; font-size: 12px; text-align: center; line-height: 1.5; }
+  #progress { width: min(92vw, 640px); height: 10px; background: #16224a; border-radius: 99px; margin-top: 8px; overflow: hidden; }
+  #bar { height: 100%; width: 0%; background: #ffd84d; transition: width .3s; }
+</style>
+</head>
+<body>
+<h1>✦ Constellation Connector ✦</h1>
+<p class="tag">Connect the stars in the right order and light up the night sky.</p>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Level: <b id="level">1</b> / 5</span>
+  <span>Lives: <b id="lives">★★★</b></span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="640" height="480"></canvas>
+  <div id="titleScreen" class="screen">
+    <h2>Constellation Connector</h2>
+    <p><b>How to Play:</b> A constellation is hidden among the stars. Tap or click the stars in the correct order, following the clue shown at the top. Each correct star draws a glowing line. A wrong star costs one life. Complete all 5 constellations to win!</p>
+    <p class="small">Keyboard: press 1-9 to pick a numbered star, or use arrow keys + Enter. Mouse and touch also work. No rushing — think before you connect.</p>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Game</button>
+  </div>
+</div>
+<div id="progress"><div id="bar"></div></div>
+<div id="msg">Press Start to begin your journey.</div>
+<div id="controls">Mouse: click stars &nbsp;•&nbsp; Touch: tap stars &nbsp;•&nbsp; Keyboard: 1-9 / arrows + Enter &nbsp;•&nbsp; R: restart</div>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var scoreEl = document.getElementById('score');
+  var levelEl = document.getElementById('level');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var barEl = document.getElementById('bar');
+
+  // Level data: each constellation is a sequence of star indices into its star list.
+  var levels = [
+    { name: 'The Little Dipper', hint: 'Start at the handle tip, sweep to the bowl', stars: [[90,90],[160,150],[240,130],[320,180],[410,130],[480,200],[540,270]], order: [0,1,2,3,4,5,6] },
+    { name: 'The Hunter Belt', hint: 'Find the three bright belt stars in a row', stars: [[80,300],[150,220],[260,260],[330,250],[400,240],[480,300],[560,180],[120,130]], order: [1,2,3,4,5] },
+    { name: 'The Great Swan', hint: 'Follow the long neck, then spread the wings', stars: [[320,60],[300,140],[290,220],[270,300],[180,250],[380,250],[200,380],[420,380]], order: [0,1,2,3,4,2,5,2,6,2,7] },
+    { name: 'The Crown', hint: 'Arc gently from left to right like a tiara', stars: [[110,260],[190,180],[280,140],[370,140],[460,180],[540,260],[320,330]], order: [0,1,2,3,4,5] },
+    { name: 'The Dragon Tail', hint: 'Trace the zig-zag tail, end at the bright head star', stars: [[90,120],[170,190],[240,130],[320,210],[400,140],[470,220],[550,160],[590,300]], order: [0,1,2,3,4,5,6,7] }
+  ];
+
+  var state = 'title'; // title, playing, won, lost
+  var levelIndex = 0, score = 0, lives = 3, step = 0, selected = 0;
+  var twinkle = 0, shake = 0, flashStar = -1, flashTime = 0;
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  function tone(freq, dur, type) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+  function goodSound() { tone(660, .18, 'sine'); setTimeout(function(){ tone(880, .22, 'sine'); }, 90); }
+  function badSound() { tone(160, .25, 'sawtooth'); }
+  function winSound() { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f,.3,'triangle'); }, i*120); }); }
+
+  function current() { return levels[levelIndex]; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    levelEl.textContent = (levelIndex + 1);
+    livesEl.textContent = lives > 0 ? '★'.repeat(lives) + '☆'.repeat(3 - lives) : '☆☆☆';
+    statusEl.textContent = state === 'playing' ? current().name : (state === 'won' ? 'Victory!' : (state === 'lost' ? 'Game Over' : 'Ready'));
+    var total = levels.reduce(function(a,l){ return a + l.order.length; }, 0);
+    var done = 0;
+    for (var i = 0; i < levelIndex; i++) done += levels[i].order.length;
+    done += step;
+    barEl.style.width = Math.round(done / total * 100) + '%';
+  }
+
+  function startGame() {
+    audio();
+    levelIndex = 0; score = 0; lives = 3; step = 0; selected = 0;
+    state = 'playing';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    msgEl.textContent = current().name + ': ' + current().hint;
+    updateHUD(); tone(523, .2, 'triangle');
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'lost';
+    document.getElementById('endTitle').textContent = won ? '★ You Win! ★' : 'Game Over';
+    document.getElementById('endText').textContent = won
+      ? 'You lit up all 5 constellations with a final score of ' + score + '. Brilliant stargazing!'
+      : 'The sky faded before you finished. You reached level ' + (levelIndex + 1) + ' with ' + score + ' points. Try again!';
+    endScreen.classList.remove('hidden');
+    if (won) winSound();
+    updateHUD();
+  }
+
+  function pickStar(idx) {
+    if (state !== 'playing') return;
+    var lv = current();
+    var expected = lv.order[step];
+    if (idx === expected) {
+      step++; score += 50; goodSound();
+      if (step >= lv.order.length) {
+        score += 200;
+        msgEl.textContent = 'Constellation complete! +200 bonus.';
+        setTimeout(function() {
+          levelIndex++;
+          if (levelIndex >= levels.length) { endGame(true); }
+          else { step = 0; selected = 0; msgEl.textContent = current().name + ': ' + current().hint; updateHUD(); }
+        }, 900);
+      } else {
+        msgEl.textContent = 'Correct! ' + (lv.order.length - step) + ' star(s) left in ' + lv.name + '.';
+      }
+    } else {
+      lives--; shake = 10; flashStar = idx; flashTime = 30; badSound();
+      score = Math.max(0, score - 10);
+      msgEl.textContent = 'Wrong star! That was not next. Lives left: ' + lives + '.';
+      if (lives <= 0) { setTimeout(function(){ endGame(false); }, 500); }
+    }
+    updateHUD();
+  }
+
+  function starAt(x, y) {
+    var lv = current(), best = -1, bestD = 1e9;
+    lv.stars.forEach(function(s, i) {
+      var d = Math.hypot(s[0] - x, s[1] - y);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return bestD < 42 ? best : -1;
+  }
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - r.left) * canvas.width / r.width, y: (cy - r.top) * canvas.height / r.height };
+  }
+
+  canvas.addEventListener('mousedown', function(e) { var p = canvasPos(e); var s = starAt(p.x, p.y); if (s >= 0) { selected = s; pickStar(s); } });
+  canvas.addEventListener('mousemove', function(e) { var p = canvasPos(e); var s = starAt(p.x, p.y); if (s >= 0) selected = s; });
+  canvas.addEventListener('click', function(e) { var p = canvasPos(e); var s = starAt(p.x, p.y); if (s >= 0) pickStar(s); });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); var p = canvasPos(e); var s = starAt(p.x, p.y); if (s >= 0) { selected = s; pickStar(s); } }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); var p = canvasPos(e); var s = starAt(p.x, p.y); if (s >= 0) selected = s; }, { passive: false });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') startGame(); return; }
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    if (state !== 'playing') return;
+    var lv = current();
+    if (e.key >= '1' && e.key <= '9') { var n = parseInt(e.key, 10) - 1; if (n < lv.stars.length) { selected = n; pickStar(n); } }
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { selected = (selected + 1) % lv.stars.length; }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { selected = (selected - 1 + lv.stars.length) % lv.stars.length; }
+    else if (e.key === 'Enter' || e.key === ' ') { pickStar(selected); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    twinkle += 0.05;
+    if (shake > 0) shake--;
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+    // Background stars
+    for (var i = 0; i < 90; i++) {
+      var bx = (i * 137) % canvas.width, by = (i * 89) % canvas.height;
+      ctx.globalAlpha = 0.35 + 0.3 * Math.sin(twinkle + i);
+      ctx.fillStyle = '#cdd9ff'; ctx.beginPath(); ctx.arc(bx, by, 1.4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    if (state !== 'title') {
+      var lv = current();
+      // Completed lines
+      ctx.strokeStyle = '#ffd84d'; ctx.lineWidth = 3; ctx.shadowColor = '#ffd84d'; ctx.shadowBlur = 10;
+      ctx.beginPath();
+      for (var k = 0; k < step; k++) {
+        var a = lv.stars[lv.order[k]];
+        if (k === 0) ctx.moveTo(a[0], a[1]); else ctx.lineTo(a[0], a[1]);
+      }
+      ctx.stroke(); ctx.shadowBlur = 0;
+      // Stars
+      lv.stars.forEach(function(s, idx) {
+        var done = lv.order.slice(0, step).indexOf(idx) >= 0;
+        var isNext = state === 'playing' && lv.order[step] === idx;
+        var isSel = selected === idx;
+        var r = done ? 11 : (isNext ? 15 + Math.sin(twinkle * 3) * 2 : 10);
+        ctx.fillStyle = idx === flashStar && flashTime > 0 ? '#ff5a5a' : (done ? '#ffd84d' : (isNext ? '#9be7ff' : '#eaf2ff'));
+        ctx.beginPath(); ctx.arc(s[0], s[1], r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = isSel ? '#ffffff' : '#3b5aa8'; ctx.lineWidth = isSel ? 3 : 1.5;
+        ctx.beginPath(); ctx.arc(s[0], s[1], r + 5, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#050814'; ctx.font = 'bold 12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(idx + 1), s[0], s[1]);
+      });
+      if (flashTime > 0) flashTime--;
+      // Hint bar
+      ctx.fillStyle = 'rgba(5,10,30,.75)'; ctx.fillRect(10, 10, canvas.width - 20, 34);
+      ctx.fillStyle = '#ffe27a'; ctx.font = 'bold 15px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(lv.name + ' — ' + lv.hint, canvas.width / 2, 32);
+    } else {
+      ctx.fillStyle = '#ffe27a'; ctx.font = 'bold 22px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Look up — five constellations await', canvas.width / 2, canvas.height / 2);
+    }
+    ctx.restore();
+    requestAnimationFrame(draw);
+  }
+  updateHUD();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

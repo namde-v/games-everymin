@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Meadow Bee Pollinator</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#1a2f16; font-family:Arial, Helvetica, sans-serif; color:#fff;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:100vh; overflow:hidden; touch-action:none; }
+  h1 { font-size:22px; color:#ffe066; margin:8px 0 4px; text-align:center; }
+  #wrap { position:relative; width:96vw; max-width:720px; }
+  canvas { display:block; width:100%; height:auto; background:#7ec850;
+    border:4px solid #3d6b2e; border-radius:12px; }
+  #hud { display:flex; justify-content:space-between; padding:6px 10px;
+    background:#2c4a22; border-radius:8px; margin-bottom:6px; font-weight:bold; font-size:15px; }
+  #hud span { color:#ffe066; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;
+    background:rgba(20,40,15,0.88); border-radius:12px; padding:20px; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { color:#ffe066; font-size:30px; margin-bottom:10px; }
+  .overlay p { max-width:460px; line-height:1.5; font-size:15px; margin-bottom:10px; }
+  button { background:#ffc93c; color:#3a2400; border:none; border-radius:10px;
+    padding:12px 28px; font-size:18px; font-weight:bold; cursor:pointer; margin-top:8px; }
+  button:hover { background:#ffe066; }
+  .keys { font-size:13px; color:#cfe8b0; }
+</style>
+</head>
+<body>
+<h1>🐝 Meadow Bee Pollinator</h1>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">3</span></div>
+    <div>Pollen: <span id="pollen">0</span>/5</div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="720" height="480"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🐝 Meadow Bee Pollinator</h2>
+    <p><b>How to Play:</b> Flowers bloom in numbered order — visit them in that
+    order to collect pollen. Carry pollen back to the golden hive before the
+    flower wilts! Each hive delivery scores points. Wasps patrol the meadow:
+    touching one costs a life. Deliver <b>5 loads</b> to win before your
+    3 lives run out.</p>
+    <p class="keys">Move: Arrow keys / WASD &nbsp;|&nbsp; Mouse: steer toward cursor
+    &nbsp;|&nbsp; Touch: drag to fly &nbsp;|&nbsp; Space: dash</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var pollenEl = document.getElementById('pollen');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var W = 720, H = 480;
+  var state = 'title'; // title, playing, won, over
+  var score = 0, lives = 3, deliveries = 0, carrying = 0;
+  var keys = {};
+  var mouse = { x: null, y: null, down: false };
+  var touch = { x: null, y: null, active: false };
+  var bee, flowers, wasps, particles, hive;
+  var audioCtx = null, muted = false;
+  var frame = 0, timeLeft = 0, wiltWarn = false;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type) {
+    if (!audioCtx || muted) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+
+  function resetGame() {
+    score = 0; lives = 3; deliveries = 0; carrying = 0;
+    bee = { x: 360, y: 400, vx: 0, vy: 0, angle: -Math.PI / 2, dash: 0, inv: 0 };
+    hive = { x: 360, y: 430 };
+    flowers = [];
+    var spots = [];
+    for (var i = 0; i < 8; i++) {
+      spots.push({ x: rand(60, 660), y: rand(60, 340) });
+    }
+    // Assign bloom order 1..8, shuffled positions
+    for (var i = 0; i < 8; i++) {
+      spots[i].order = i + 1;
+      spots[i].collected = false;
+      spots[i].wilt = 0; // 0..1 wilt progress for the ACTIVE flower only
+      spots[i].petal = ['#ff6b9d', '#ffb347', '#c084fc', '#f472b6', '#facc15', '#fb923c', '#e879f9', '#fdba74'][i];
+      flowers.push(spots[i]);
+    }
+    wasps = [];
+    for (var j = 0; j < 4; j++) {
+      wasps.push({ x: rand(80, 640), y: rand(60, 300), vx: rand(-1, 1) || 1, vy: rand(-0.7, 0.7), t: rand(0, 6) });
+    }
+    particles = [];
+    timeLeft = 0;
+    updateHUD('Fly to flower #1!');
+  }
+
+  function activeFlower() {
+    for (var i = 0; i < flowers.length; i++) if (!flowers[i].collected) return flowers[i];
+    return null;
+  }
+
+  function updateHUD(msg) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    pollenEl.textContent = deliveries;
+    if (msg) statusEl.textContent = msg;
+  }
+
+  function spawnParticles(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: rand(-2, 2), vy: rand(-2, 2), life: 30, color: color });
+    }
+  }
+
+  function loseLife(reason) {
+    if (bee.inv > 0) return;
+    lives--;
+    bee.inv = 90;
+    beep(160, 0.3, 'sawtooth');
+    spawnParticles(bee.x, bee.y, '#ff4444', 14);
+    updateHUD(reason);
+    if (lives <= 0) { endGame(false); }
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '🌻 You Win!' : '💀 Game Over';
+    endText.textContent = won
+      ? 'The meadow is in full bloom! Final score: ' + score + ' with ' + deliveries + ' hive deliveries.'
+      : 'The wasps got the better of you. Final score: ' + score + ' with ' + deliveries + ' hive deliveries.';
+    endScreen.classList.remove('hidden');
+    beep(won ? 880 : 140, 0.5, won ? 'triangle' : 'sawtooth');
+  }
+
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    beep(520, 0.15, 'triangle');
+  }
+
+  function update() {
+    frame++;
+    if (bee.inv > 0) bee.inv--;
+    if (bee.dash > 0) bee.dash--;
+
+    // Movement: keyboard
+    var ax = 0, ay = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) ax += 1;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) ay -= 1;
+    if (keys['ArrowDown'] || keys['s'] || keys['S']) ay += 1;
+
+    // Mouse / touch steering
+    var target = null;
+    if (touch.active && touch.x !== null) target = touch;
+    else if (mouse.down && mouse.x !== null) target = mouse;
+    if (target) {
+      var rect = canvas.getBoundingClientRect();
+      var tx = (target.x - rect.left) * (W / rect.width);
+      var ty = (target.y - rect.top) * (H / rect.height);
+      var dx = tx - bee.x, dy = ty - bee.y, d = Math.hypot(dx, dy);
+      if (d > 8) { ax += dx / d; ay += dy / d; }
+    }
+    var len = Math.hypot(ax, ay);
+    if (len > 0) { ax /= len; ay /= len; bee.angle = Math.atan2(ay, ax); }
+    var speed = bee.dash > 0 ? 5.2 : 3.1;
+    bee.vx += ax * 0.45; bee.vy += ay * 0.45;
+    bee.vx *= 0.88; bee.vy *= 0.88;
+    var vl = Math.hypot(bee.vx, bee.vy);
+    if (vl > speed) { bee.vx = bee.vx / vl * speed; bee.vy = bee.vy / vl * speed; }
+    bee.x += bee.vx; bee.y += bee.vy;
+    bee.x = Math.max(16, Math.min(W - 16, bee.x));
+    bee.y = Math.max(16, Math.min(H - 16, bee.y));
+
+    // Wilt timer on the active flower
+    var act = activeFlower();
+    if (act) {
+      act.wilt += 0.0016; // ~10 seconds of bloom before wilting
+      if (act.wilt >= 1) {
+        // Flower wilts: lose the bloom, reshuffle remaining order
+        act.collected = true; // skipped
+        beep(220, 0.25, 'square');
+        updateHUD('Flower #' + act.order + ' wilted! Go to the next bloom.');
+        // Reassign orders so the next uncollected flower is the target
+        var n = 1;
+        flowers.forEach(function (f) { if (!f.collected) { f.order = n++; f.wilt = 0; } });
+        if (!activeFlower()) { endGame(deliveries >= 5); }
+      }
+    }
+
+    // Flower pickup (must be the active one)
+    if (act && dist(bee, act) < 30) {
+      act.collected = true;
+      carrying = 1;
+      score += 25;
+      beep(660, 0.15, 'triangle'); beep(880, 0.15, 'triangle');
+      spawnParticles(act.x, act.y, '#ffe066', 16);
+      updateHUD('Pollen collected! Return to the hive!');
+    }
+
+    // Hive delivery
+    if (carrying && dist(bee, hive) < 42) {
+      carrying = 0; deliveries++;
+      score += 100;
+      beep(523, 0.12, 'triangle'); beep(659, 0.12, 'triangle'); beep(784, 0.2, 'triangle');
+      spawnParticles(hive.x, hive.y, '#ffc93c', 20);
+      if (deliveries >= 5) { endGame(true); return; }
+      updateHUD('Delivered ' + deliveries + '/5! Next: flower #' + (activeFlower() ? activeFlower().order : '—'));
+    }
+
+    // Wasps patrol and sting
+    wasps.forEach(function (w) {
+      w.t += 0.02;
+      w.x += w.vx + Math.sin(w.t) * 0.6;
+      w.y += w.vy + Math.cos(w.t * 1.3) * 0.6;
+      if (w.x < 20 || w.x > W - 20) w.vx *= -1;
+      if (w.y < 20 || w.y > H - 60) w.vy *= -1;
+      if (dist(bee, w) < 26) loseLife('Stung by a wasp! ' + lives + ' lives left.');
+    });
+
+    // Particles
+    particles = particles.filter(function (p) {
+      p.x += p.vx; p.y += p.vy; p.life--; return p.life > 0;
+    });
+    updateHUD();
+  }
+
+  function drawFlower(f) {
+    if (f.collected) return;
+    var isActive = (activeFlower() === f);
+    var wiltScale = 1 - (isActive ? f.wilt * 0.5 : 0);
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.strokeStyle = '#2c6b1e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 34); ctx.stroke();
+    for (var i = 0; i < 6; i++) {
+      var a = i * Math.PI / 3;
+      ctx.fillStyle = f.petal;
+      ctx.globalAlpha = isActive ? 1 : 0.55;
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(a) * 14 * wiltScale, Math.sin(a) * 14 * wiltScale, 10 * wiltScale, 10 * wiltScale, a, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff176';
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a2f16'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(f.order, 0, 4);
+    if (isActive) {
+      // Bloom timer ring
+      ctx.strokeStyle = '#ff4444'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 0, 26, -Math.PI / 2, -Math.PI / 2 + (1 - f.wilt) * Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawBee() {
+    ctx.save();
+    ctx.translate(bee.x, bee.y);
+    ctx.rotate(bee.angle + Math.PI / 2);
+    if (bee.inv > 0 && Math.floor(frame / 6) % 2 === 0) ctx.globalAlpha = 0.4;
+    // Wings
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    var flap = Math.sin(frame * 0.9) * 6;
+    ctx.beginPath(); ctx.ellipse(-9, -2 + flap * 0.3, 9, 5, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(9, -2 + flap * 0.3, 9, 5, 0.5, 0, Math.PI * 2); ctx.fill();
+    // Body
+    ctx.fillStyle = '#ffc93c';
+    ctx.beginPath(); ctx.ellipse(0, 0, 10, 14, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(-10, -4, 20, 4); ctx.fillRect(-10, 4, 20, 4);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.arc(0, -14, 3, 0, Math.PI * 2); ctx.fill();
+    if (carrying) {
+      ctx.fillStyle = '#ffe066';
+      ctx.beginPath(); ctx.arc(0, 16, 6, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawWasp(w) {
+    ctx.save();
+    ctx.translate(w.x, w.y);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath(); ctx.ellipse(-8, -4, 8, 4, -0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(8, -4, 8, 4, 0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath(); ctx.ellipse(0, 0, 9, 13, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(-9, -3, 18, 3); ctx.fillRect(-9, 4, 18, 3);
+    ctx.restore();
+  }
+
+  function draw() {
+    // Meadow
+    ctx.fillStyle = '#7ec850'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#6db83f';
+    for (var i = 0; i < 12; i++) {
+      ctx.beginPath(); ctx.arc((i * 97) % W, (i * 53) % H, 26, 0, Math.PI * 2); ctx.fill();
+    }
+    // Hive
+    ctx.save();
+    ctx.translate(hive.x, hive.y);
+    ctx.fillStyle = '#d97706';
+    ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath(); ctx.arc(0, -8, 24, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#78350f'; ctx.fillRect(-8, -4, 16, 8);
+    ctx.fillStyle = '#1a2f16'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('HIVE', 0, -34);
+    ctx.restore();
+    if (flowers) flowers.forEach(drawFlower);
+    if (wasps) wasps.forEach(drawWasp);
+    if (bee) drawBee();
+    particles.forEach(function (p) {
+      ctx.globalAlpha = p.life / 30; ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    if (state === 'title' && bee) {
+      ctx.fillStyle = '#1a2f16'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to fly!', W / 2, 60);
+    }
+  }
+
+  function loop() {
+    if (state === 'playing') update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' && state === 'playing') { bee.dash = 12; e.preventDefault(); }
+    if (e.key === 'Enter' && (state === 'title' || state === 'won' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousedown', function (e) { mouse.down = true; mouse.x = e.clientX; mouse.y = e.clientY; initAudio(); });
+  document.addEventListener('mousemove', function (e) { mouse.x = e.clientX; mouse.y = e.clientY; });
+  document.addEventListener('mouseup', function () { mouse.down = false; });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault(); initAudio();
+    var t = e.touches[0]; touch.active = true; touch.x = t.clientX; touch.y = t.clientY;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0]; touch.x = t.clientX; touch.y = t.clientY;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { touch.active = false; });
+  canvas.addEventListener('click', function () { initAudio(); });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  resetGame();
+  state = 'title';
+  loop();
+})();
+</script>
+</body>
+</html>

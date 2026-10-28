@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Ukulele Island Strum — Game 0759</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b2e3a; color: #fff7e6; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; text-align: center; margin: 6px 0 2px; text-shadow: 2px 2px 0 #0a6b5c; }
+  p.sub { text-align: center; opacity: .9; font-size: 14px; margin-bottom: 8px; }
+  #wrap { position: relative; width: min(96vw, 760px); }
+  canvas { display: block; width: 100%; height: 460px; background: linear-gradient(#27b7c9, #ffe9a8 62%, #f4a259); border: 3px solid #fff7e6; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0; font-weight: bold; font-size: 15px; }
+  #hud span { background: #123f4d; border: 1px solid #fff7e6; border-radius: 8px; padding: 6px 10px; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(4, 28, 38, .82); border-radius: 14px; padding: 20px; }
+  #overlay h2 { font-size: 30px; margin-bottom: 10px; }
+  #overlay p { max-width: 520px; line-height: 1.55; margin: 6px 0; font-size: 15px; }
+  button { background: #ffb703; color: #102a2e; border: 0; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 14px; box-shadow: 0 4px 0 #c77f00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #chords { display: flex; justify-content: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .chord { width: 64px; height: 64px; border-radius: 12px; border: 2px solid #fff7e6; background: #173f4d; font-size: 20px; font-weight: bold; color: #fff; cursor: pointer; touch-action: manipulation; }
+  .chord.active { background: #ffb703; color: #102a2e; transform: scale(1.08); }
+  .chord.hit { background: #2ecc71; }
+  #strumBtn { width: min(96vw, 760px); background: #2ecc71; font-size: 20px; }
+  #msg { min-height: 22px; text-align: center; font-weight: bold; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>🌴 Ukulele Island Strum</h1>
+<p class="sub">Game 0759 · Catch the island beat, shape the chord, and strum on time!</p>
+<div id="wrap">
+  <canvas id="game" width="760" height="460"></canvas>
+  <div id="overlay">
+    <h2>Ukulele Island Strum</h2>
+    <p><strong>How to Play:</strong> Chord shapes drift down the island track toward the golden strum line.</p>
+    <p>Tap a chord button (C, G, Am, F) or press <b>1–4</b> to match the chord nearest the line. Then press <b>Space</b>, click, or tap <b>STRUM!</b> exactly as it crosses the line.</p>
+    <p>Perfect strums score 100, good strums 60, early/late strums 25. Miss a chord or strum the wrong chord and you lose a life. Reach <b>1500 points</b> before the song ends to win. You have <b>3 lives</b>.</p>
+    <button id="startBtn" type="button">▶ Start Playing</button>
+  </div>
+</div>
+<div id="hud"><span id="score">Score: 0</span><span id="combo">Combo: 0</span><span id="lives">Lives: ♥♥♥</span><span id="status">Status: Ready</span></div>
+<div id="msg">Choose a chord, then strum on the beat!</div>
+<div id="chords">
+  <button class="chord" data-chord="C" type="button">C<br><small>1</small></button>
+  <button class="chord" data-chord="G" type="button">G<br><small>2</small></button>
+  <button class="chord" data-chord="Am" type="button">Am<br><small>3</small></button>
+  <button class="chord" data-chord="F" type="button">F<br><small>4</small></button>
+</div>
+<button id="strumBtn" type="button">🎵 STRUM! (Space)</button>
+
+<script>
+(function() {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var startBtn = document.getElementById('startBtn');
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var strumBtn = document.getElementById('strumBtn');
+  var chordBtns = Array.prototype.slice.call(document.querySelectorAll('.chord'));
+
+  var CHORDS = {
+    C:  [261.63, 329.63, 392.00],
+    G:  [196.00, 246.94, 392.00],
+    Am: [220.00, 261.63, 329.63],
+    F:  [174.61, 261.63, 349.23]
+  };
+  var CHORD_KEYS = ['C', 'G', 'Am', 'F'];
+  var COLORS = { C: '#ffb703', G: '#2ecc71', Am: '#ff6b6b', F: '#9b5de5' };
+
+  var state = 'title';
+  var score = 0, combo = 0, lives = 3, songTime = 0, spawnTimer = 0;
+  var notes = [], selected = 'C', audioCtx = null, lastTime = 0, totalSpawned = 0;
+  var STRUM_Y = 360, WIN_SCORE = 1500, MAX_NOTES = 30;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function playChord(name, good) {
+    if (!audioCtx) return;
+    var freqs = CHORDS[name];
+    freqs.forEach(function(f, i) {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = i === 0 ? 'triangle' : 'sine';
+      osc.frequency.value = f;
+      gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(good ? 0.22 : 0.08, audioCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.9);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.95);
+    });
+  }
+  function playBuzz() {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.type = 'sawtooth'; osc.frequency.value = 110;
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+  }
+  function selectChord(name) {
+    selected = name;
+    chordBtns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-chord') === name); });
+  }
+  function setStatus(t) { statusEl.textContent = 'Status: ' + t; }
+  function updateHud() {
+    scoreEl.textContent = 'Score: ' + score;
+    comboEl.textContent = 'Combo: ' + combo;
+    livesEl.textContent = 'Lives: ' + '♥'.repeat(Math.max(0, lives));
+  }
+  function spawnNote() {
+    var name = CHORD_KEYS[Math.floor(Math.random() * CHORD_KEYS.length)];
+    var lane = CHORD_KEYS.indexOf(name);
+    notes.push({ chord: name, x: 90 + lane * 145, y: -40, speed: 105 + Math.random() * 35, judged: false });
+    totalSpawned++;
+  }
+  function loseLife(reason) {
+    lives--; combo = 0; playBuzz();
+    msgEl.textContent = reason;
+    if (lives <= 0) endGame(false);
+    updateHud();
+  }
+  function strum() {
+    if (state !== 'playing') return;
+    ensureAudio();
+    var best = null, bestDist = 9999;
+    notes.forEach(function(n) {
+      var d = Math.abs(n.y - STRUM_Y);
+      if (!n.judged && d < bestDist) { bestDist = d; best = n; }
+    });
+    if (!best || bestDist > 78) {
+      msgEl.textContent = 'No chord on the line yet — wait for the beat!';
+      return;
+    }
+    best.judged = true;
+    if (selected !== best.chord) {
+      msgEl.textContent = 'Wrong chord! That was ' + best.chord + ', not ' + selected + '.';
+      loseLife('Wrong chord — try matching the shape on the line.');
+      return;
+    }
+    var pts = bestDist <= 22 ? 100 : (bestDist <= 45 ? 60 : 25);
+    var label = bestDist <= 22 ? 'PERFECT!' : (bestDist <= 45 ? 'Nice strum!' : 'A little early/late.');
+    score += pts; combo++;
+    playChord(best.chord, pts >= 60);
+    msgEl.textContent = label + ' +' + pts + ' for ' + best.chord + ' (combo ' + combo + ')';
+    if (score >= WIN_SCORE) { endGame(true); return; }
+    updateHud();
+  }
+  function startGame() {
+    ensureAudio();
+    score = 0; combo = 0; lives = 3; songTime = 0; spawnTimer = 0;
+    notes = []; totalSpawned = 0; state = 'playing';
+    overlay.style.display = 'none';
+    selectChord('C'); updateHud(); setStatus('Playing — strum on the beat!');
+    msgEl.textContent = 'The song has begun! Match the chord, then strum.';
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    setStatus(won ? 'You Win!' : 'Game Over');
+    overlay.style.display = 'flex';
+    overlay.innerHTML = '<h2>' + (won ? '🏆 Island Star!' : '🌊 Game Over') + '</h2>' +
+      '<p>' + (won ? 'You played the island song beautifully!' : 'The song drifted away — but the island loves a comeback.') + '</p>' +
+      '<p><strong>Final Score: ' + score + '</strong> · Best Combo: ' + combo + ' · Notes played: ' + totalSpawned + '</p>' +
+      '<button id="restartBtn" type="button">↻ Play Again</button>';
+    document.getElementById('restartBtn').addEventListener('click', startGame);
+    updateHud();
+  }
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now;
+    songTime += dt; spawnTimer += dt;
+    if (spawnTimer > 1.15 && totalSpawned < MAX_NOTES) { spawnTimer = 0; spawnNote(); }
+    notes.forEach(function(n) { n.y += n.speed * dt; });
+    notes = notes.filter(function(n) {
+      if (n.y > STRUM_Y + 80 && !n.judged) { n.judged = true; loseLife('Missed a ' + n.chord + ' chord!'); return false; }
+      return n.y < 480;
+    });
+    if (state === 'playing' && totalSpawned >= MAX_NOTES && notes.length === 0) {
+      endGame(score >= WIN_SCORE);
+      if (state === 'over') { /* score below target at song end */ }
+    }
+    draw();
+    if (state === 'playing') requestAnimationFrame(loop);
+  }
+  function draw() {
+    ctx.clearRect(0, 0, 760, 460);
+    ctx.fillStyle = '#f9c74f'; ctx.beginPath(); ctx.arc(670, 62, 38, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.beginPath(); ctx.ellipse(150, 58, 52, 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(195, 50, 40, 15, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.18)';
+    for (var i = 0; i < 4; i++) { ctx.fillRect(75 + i * 145, 0, 115, 460); }
+    ctx.fillStyle = '#ffd60a'; ctx.fillRect(0, STRUM_Y - 4, 760, 8);
+    ctx.fillStyle = '#102a2e'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('▼ STRUM LINE ▼', 380, STRUM_Y - 14);
+    CHORD_KEYS.forEach(function(k, i) {
+      ctx.fillStyle = COLORS[k]; ctx.font = 'bold 18px Arial';
+      ctx.fillText(k, 132 + i * 145, 26);
+    });
+    notes.forEach(function(n) {
+      var cx = n.x + 57;
+      ctx.fillStyle = COLORS[n.chord];
+      ctx.beginPath(); ctx.arc(cx, n.y, 44, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff7e6'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = '#102a2e'; ctx.font = 'bold 24px Arial';
+      ctx.fillText(n.chord, cx, n.y + 8);
+      ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.font = '12px Arial';
+      ctx.fillText('♪', cx, n.y - 30);
+    });
+    ctx.fillStyle = '#102a2e'; ctx.font = 'bold 15px Arial';
+    ctx.fillText('Selected: ' + selected + '  ·  Song: ' + Math.min(MAX_NOTES, totalSpawned) + '/' + MAX_NOTES, 380, 445);
+  }
+  startBtn.addEventListener('click', startGame);
+  strumBtn.addEventListener('click', strum);
+  chordBtns.forEach(function(b) {
+    b.addEventListener('click', function() { selectChord(b.getAttribute('data-chord')); });
+    b.addEventListener('touchstart', function(e) { e.preventDefault(); selectChord(b.getAttribute('data-chord')); }, { passive: false });
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.code === 'Space') { e.preventDefault(); if (state === 'title' || state === 'win' || state === 'over') startGame(); else strum(); }
+    if (e.key === '1') selectChord('C');
+    if (e.key === '2') selectChord('G');
+    if (e.key === '3') selectChord('Am');
+    if (e.key === '4') selectChord('F');
+    if (e.key === 'Enter' && state !== 'playing') startGame();
+  });
+  canvas.addEventListener('mousedown', function(e) { ensureAudio(); var r = canvas.getBoundingClientRect(); var x = (e.clientX - r.left) * 760 / r.width; var lane = Math.floor((x - 75) / 145); if (lane >= 0 && lane < 4) selectChord(CHORD_KEYS[lane]); strum(); });
+  canvas.addEventListener('mousemove', function(e) { var r = canvas.getBoundingClientRect(); var x = (e.clientX - r.left) * 760 / r.width; var lane = Math.floor((x - 75) / 145); if (lane >= 0 && lane < 4) canvas.style.cursor = 'pointer'; });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); ensureAudio(); strum(); }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+  strumBtn.addEventListener('touchstart', function(e) { e.preventDefault(); strum(); }, { passive: false });
+  selectChord('C'); updateHud(); draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glacier Penguin Slide</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b2233;color:#eaf7ff;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+  h1{font-size:26px;margin:6px 0 2px;text-align:center;text-shadow:0 2px 0 #0a4a6b}
+  p.sub{font-size:14px;color:#bfe6f5;text-align:center;margin-bottom:10px}
+  #wrap{position:relative;width:min(92vw,680px)}
+  canvas{display:block;width:100%;height:480px;background:#bfe9f7;border:4px solid #ffffff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.45);touch-action:none}
+  #hud{display:flex;justify-content:space-between;gap:8px;width:min(92vw,680px);margin:8px 0;font-weight:bold}
+  #hud div{background:#123f57;padding:8px 10px;border-radius:10px;flex:1;text-align:center;font-size:15px}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(6,32,48,.82);border-radius:10px;padding:22px;gap:10px}
+  .hidden{display:none}
+  button{background:#ffbf2e;border:3px solid #fff;color:#17202a;font-weight:bold;font-size:18px;padding:12px 22px;border-radius:12px;cursor:pointer}
+  button:hover{background:#ffd766}
+  .how{background:rgba(255,255,255,.12);border-radius:10px;padding:12px;font-size:14px;line-height:1.55;max-width:520px}
+  .keys{font-size:13px;color:#d7f1ff}
+  #msg{font-size:14px;min-height:20px;text-align:center;color:#ffe9a3}
+</style>
+</head>
+<body>
+<h1>🐧 Glacier Penguin Slide</h1>
+<p class="sub">Slide, steer, snack — but don't fall in!</p>
+<div id="hud">
+  <div>Score: <span id="score">0</span></div>
+  <div>Fish: <span id="fish">0</span> / 18</div>
+  <div>Lives: <span id="lives">3</span></div>
+  <div>Level: <span id="level">1</span> &nbsp;|&nbsp; <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="680" height="480"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2 style="font-size:30px">Glacier Penguin Slide</h2>
+    <p>Collect all 18 fish before your lives run out!</p>
+    <div class="how">
+      <b>How to Play</b><br>
+      Your penguin slides on slippery ice: it keeps gliding until it hits a snowbank or you steer it.<br>
+      Steer gently — momentum is real! Grab fish for points, avoid dark crevasses, and dodge sliding ice blocks.<br>
+      Falling into a crevasse or being hit by a block costs a life. Collect every fish to win.
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+    <p class="keys">Arrow keys / WASD to steer &nbsp;•&nbsp; Mouse or touch: drag toward a direction to steer &nbsp;•&nbsp; Press Enter to start</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Game</button>
+  </div>
+</div>
+<p id="msg">Tip: plan your slide — a snowbank is the safest brake.</p>
+<script>
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'), fishEl=document.getElementById('fish'),
+      livesEl=document.getElementById('lives'), levelEl=document.getElementById('level'),
+      statusEl=document.getElementById('status'), msgEl=document.getElementById('msg'),
+      titleScreen=document.getElementById('titleScreen'), endScreen=document.getElementById('endScreen'),
+      endTitle=document.getElementById('endTitle'), endText=document.getElementById('endText');
+let audioCtx=null;
+function audio(){ if(!audioCtx){ try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); return audioCtx; }
+function beep(freq,dur,type,vol){ const a=audio(); if(!a) return; const o=a.createOscillator(), g=a.createGain(); o.type=type||'sine'; o.frequency.value=freq; g.gain.value=vol||0.12; o.connect(g); g.connect(a.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+dur); o.stop(a.currentTime+dur); }
+function sfx(kind){ if(kind==='fish'){beep(880,0.12,'sine',0.15); setTimeout(()=>beep(1320,0.14,'sine',0.12),60);} else if(kind==='hit'){beep(160,0.25,'sawtooth',0.18);} else if(kind==='win'){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,0.22,'triangle',0.15),i*130));} else if(kind==='slide'){beep(300,0.08,'sine',0.04);} }
+
+const W=680,H=480;
+let running=false, over=false, rafId=null;
+let player, fish, banks, crevasses, blocks, keys, steerX, steerY, lastTime;
+function resetGame(){
+  player={x:340,y:400,vx:0,vy:0,r:18};
+  fish=[]; let placed=0, tries=0;
+  while(placed<18 && tries<500){ tries++; const fx=40+Math.random()*600, fy=40+Math.random()*330;
+    if(fish.some(f=>Math.hypot(f.x-fx,f.y-fy)<45)) continue;
+    if(Math.hypot(fx-340,fy-400)<80) continue;
+    fish.push({x:fx,y:fy,taken:false,bob:Math.random()*6}); placed++; }
+  banks=[{x:0,y:0,w:680,h:14},{x:0,y:466,w:680,h:14},{x:0,y:0,w:14,h:480},{x:666,y:0,w:14,h:480},
+         {x:120,y:150,w:130,h:22},{x:430,y:150,w:130,h:22},{x:120,y:300,w:130,h:22},{x:430,y:300,w:130,h:22},
+         {x:290,y:225,w:100,h:22}];
+  crevasses=[{x:200,y:90,w:90,h:26},{x:390,y:360,w:100,h:26},{x:90,y:220,w:70,h:26},{x:520,y:220,w:70,h:26}];
+  blocks=[{x:90,y:90,vx:1.2,vy:0.7,r:20},{x:560,y:90,vx:-1.1,vy:0.8,r:20},{x:330,y:60,vx:0.8,vy:-0.9,r:18}];
+  keys={}; steerX=0; steerY=0;
+  window.__score=0; window.__lives=3; window.__level=1;
+  updateHud('Sliding!');
+}
+function updateHud(status){ scoreEl.textContent=window.__score; fishEl.textContent=fish.filter(f=>f.taken).length; livesEl.textContent=window.__lives; levelEl.textContent=window.__level; if(status) statusEl.textContent=status; }
+function loseLife(reason){
+  window.__lives--; sfx('hit'); msgEl.textContent=reason;
+  player.x=340; player.y=400; player.vx=0; player.vy=0;
+  updateHud('Ouch!');
+  if(window.__lives<=0){ endGame(false); }
+}
+function endGame(won){
+  running=false; over=true; cancelAnimationFrame(rafId);
+  endTitle.textContent=won?'🎉 You Win!':'💙 Game Over';
+  endText.textContent=won?('Brilliant sliding! You collected all 18 fish with a score of '+window.__score+'.'):('The glacier got you this time. Final score: '+window.__score+'. Try another slide!');
+  endScreen.classList.remove('hidden'); if(won) sfx('win'); updateHud(won?'Winner!':'Game Over');
+}
+function startGame(){
+  audio(); resetGame(); titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+  running=true; over=false; lastTime=performance.now(); msgEl.textContent='Slide carefully — momentum matters!';
+  cancelAnimationFrame(rafId); requestAnimationFrame(loop);
+}
+function drawIce(){
+  ctx.fillStyle='#bfe9f7'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,.55)';
+  for(let i=0;i<14;i++){ ctx.beginPath(); ctx.ellipse((i*97)%680, (i*61)%480, 28, 10, 0, 0, Math.PI*2); ctx.fill(); }
+  ctx.fillStyle='#0b3a52';
+  crevasses.forEach(c=>{ ctx.fillRect(c.x,c.y,c.w,c.h); ctx.fillStyle='#071f2e'; ctx.fillRect(c.x+4,c.y+4,c.w-8,c.h-8); ctx.fillStyle='#0b3a52'; });
+  ctx.fillStyle='#ffffff'; ctx.strokeStyle='#7fb8d6'; ctx.lineWidth=2;
+  banks.forEach(b=>{ ctx.fillRect(b.x,b.y,b.w,b.h); ctx.strokeRect(b.x,b.y,b.w,b.h); });
+}
+function drawFish(f,t){ const y=f.y+Math.sin(t/300+f.bob)*3; ctx.fillStyle='#ff7a2e'; ctx.beginPath(); ctx.ellipse(f.x,y,13,7,0,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.moveTo(f.x+12,y); ctx.lineTo(f.x+22,y-6); ctx.lineTo(f.x+22,y+6); ctx.closePath(); ctx.fill(); ctx.fillStyle='#17202a'; ctx.beginPath(); ctx.arc(f.x-6,y-2,2,0,Math.PI*2); ctx.fill(); }
+function drawPenguin(){
+  ctx.save(); ctx.translate(player.x,player.y);
+  ctx.fillStyle='#17202a'; ctx.beginPath(); ctx.ellipse(0,0,18,20,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.ellipse(0,3,11,14,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#17202a'; ctx.beginPath(); ctx.arc(-6,-14,4,0,Math.PI*2); ctx.arc(6,-14,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-6,-15,1.8,0,Math.PI*2); ctx.arc(6,-15,1.8,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ff9f1c'; ctx.beginPath(); ctx.moveTo(-4,-8); ctx.lineTo(4,-8); ctx.lineTo(0,-3); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawBlocks(){ blocks.forEach(b=>{ ctx.fillStyle='#8fd8f2'; ctx.strokeStyle='#fff'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.fillStyle='rgba(255,255,255,.8)'; ctx.beginPath(); ctx.moveTo(b.x-8,b.y-4); ctx.lineTo(b.x+2,b.y-10); ctx.lineTo(b.x+8,b.y+2); ctx.closePath(); ctx.fill(); }); }
+function collideBank(px,py,r){
+  for(const b of banks){ if(px+r>b.x && px-r<b.x+b.w && py+r>b.y && py-r<b.y+b.h) return b; } return null;
+}
+function update(dt){
+  let ax=0, ay=0;
+  if(keys['arrowleft']||keys['a']) ax-=1; if(keys['arrowright']||keys['d']) ax+=1;
+  if(keys['arrowup']||keys['w']) ay-=1; if(keys['arrowdown']||keys['s']) ay+=1;
+  if(steerX||steerY){ ax+=steerX; ay+=steerY; }
+  const len=Math.hypot(ax,ay)||1; if(ax||ay){ player.vx+=ax/len*0.22; player.vy+=ay/len*0.22; }
+  player.vx*=0.985; player.vy*=0.985;
+  const sp=Math.hypot(player.vx,player.vy); if(sp>4.2){ player.vx*=4.2/sp; player.vy*=4.2/sp; }
+  player.x+=player.vx; player.y+=player.vy;
+  const hit=collideBank(player.x,player.y,player.r);
+  if(hit){ player.x-=player.vx; player.y-=player.vy; if(Math.abs(player.vx)>Math.abs(player.vy)) player.vx*=-0.25; else player.vy*=-0.25; if(Math.random()<0.3) sfx('slide'); }
+  for(const c of crevasses){ if(player.x+12>c.x && player.x-12<c.x+c.w && player.y+12>c.y && player.y-12<c.y+c.h){ loseLife('Splash! You slid into a crevasse.'); return; } }
+  blocks.forEach(b=>{ b.x+=b.vx; b.y+=b.vy; if(b.x<34||b.x>646) b.vx*=-1; if(b.y<34||b.y>446) b.vy*=-1;
+    if(Math.hypot(player.x-b.x,player.y-b.y)<player.r+b.r-4){ loseLife('Bonk! A sliding ice block hit you.'); } });
+  fish.forEach(f=>{ if(!f.taken && Math.hypot(player.x-f.x,player.y-f.y)<30){ f.taken=true; window.__score+=100; sfx('fish'); msgEl.textContent='Fish! +100 points'; } });
+  const got=fish.filter(f=>f.taken).length;
+  if(got>=18){ window.__score+=window.__lives*250; endGame(true); return; }
+  if(got>=12 && window.__level<2){ window.__level=2; blocks.forEach(b=>{b.vx*=1.25;b.vy*=1.25;}); updateHud('Level 2 — faster ice!'); }
+  updateHud();
+}
+function loop(now){
+  if(!running) return;
+  const dt=Math.min(32, now-lastTime); lastTime=now;
+  update(dt);
+  if(!running) return;
+  drawIce(); fish.forEach(f=>{ if(!f.taken) drawFish(f,now); }); drawBlocks(); drawPenguin();
+  ctx.fillStyle='#123f57'; ctx.font='bold 13px Arial'; ctx.fillText('Collect all fish • Avoid dark crevasses', 14, 470);
+  rafId=requestAnimationFrame(loop);
+}
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+document.addEventListener('keydown', function(e){ const k=e.key.toLowerCase(); keys[k]=true; if((k==='enter') && (!running)) startGame(); if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault(); });
+document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()]=false; });
+let dragStart=null;
+canvas.addEventListener('mousedown', function(e){ audio(); dragStart={x:e.clientX,y:e.clientY}; });
+canvas.addEventListener('mousemove', function(e){ if(!dragStart) return; const dx=e.clientX-dragStart.x, dy=e.clientY-dragStart.y; const m=Math.hypot(dx,dy); if(m>12){ steerX=dx/m; steerY=dy/m; } });
+canvas.addEventListener('mouseup', function(){ dragStart=null; steerX=0; steerY=0; });
+canvas.addEventListener('click', function(){ audio(); });
+canvas.addEventListener('touchstart', function(e){ audio(); e.preventDefault(); const t=e.touches[0]; dragStart={x:t.clientX,y:t.clientY}; }, {passive:false});
+canvas.addEventListener('touchmove', function(e){ e.preventDefault(); if(!dragStart) return; const t=e.touches[0]; const dx=t.clientX-dragStart.x, dy=t.clientY-dragStart.y; const m=Math.hypot(dx,dy); if(m>12){ steerX=dx/m; steerY=dy/m; } }, {passive:false});
+canvas.addEventListener('touchend', function(){ dragStart=null; steerX=0; steerY=0; });
+resetGame(); drawIce(); fish.forEach(f=>drawFish(f,0)); drawBlocks(); drawPenguin();
+</script>
+</body>
+</html>

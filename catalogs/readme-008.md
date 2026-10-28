@@ -54,3 +54,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0748 | Flamenco Castanet Tempo | Rhythm / Castanet Timing | Keys tap beats, mouse click, touch tap | [Play](./../games/game-0748.html) |
 | 0749 | Windmill Blade Balancer | Precision / Windmill Balance Timing | Arrow Keys adjust, mouse drag, touch drag | [Play](./../games/game-0749.html) |
 | 0750 | Meteor Shower Defender | Arcade / Meteor Defense Shooter | Arrow Keys move, Space shoot, mouse aim, touch tap | [Play](./../games/game-0750.html) |
+| 0751 | Glacier Penguin Slide | Arcade / Penguin Slide Collector | Arrow Keys/WASD slide, mouse/touch drag | [Play](./../games/game-0751.html) |
+| 0752 | Constellation Connector | Puzzle / Star Connection Logic | Mouse/touch tap stars, Arrow Keys select, Space confirm | [Play](./../games/game-0752.html) |
+| 0753 | Desert Oasis Trader | Strategy / Caravan Trading | Mouse/touch buy and sell, Arrow Keys select, Space confirm | [Play](./../games/game-0753.html) |
+| 0754 | Bell Tower Chime Master | Rhythm / Bell Chime Timing | Keys ring bells, mouse click, touch tap | [Play](./../games/game-0754.html) |
+| 0755 | Paper Plane Glider | Precision / Glider Ring Flight | Arrow Keys/WASD steer, Space lift, mouse/touch drag | [Play](./../games/game-0755.html) |
+| 0756 | Meadow Bee Pollinator | Arcade / Pollination Flight | Arrow Keys/WASD fly, mouse move, touch drag | [Play](./../games/game-0756.html) |
+| 0757 | Tile Bridge Builder | Puzzle / Bridge Construction Logic | Mouse/touch place tiles, Arrow Keys select, Space confirm | [Play](./../games/game-0757.html) |
+| 0758 | Bakery Supply Chain | Strategy / Bakery Logistics | Mouse/touch buy and bake, Arrow Keys select, Space confirm | [Play](./../games/game-0758.html) |
+| 0759 | Ukulele Island Strum | Rhythm / Ukulele Strum Timing | Keys play chords, Space strum, mouse/touch tap | [Play](./../games/game-0759.html) |
+| 0760 | Archery Wind Shot | Precision / Wind Archery | Arrow Keys aim, Space shoot, mouse aim, touch tap | [Play](./../games/game-0760.html) |

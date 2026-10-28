@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Bakery Supply Chain — Game 0758</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#2b1d12;color:#fff;font-family:Arial,Helvetica,sans-serif;text-align:center;overflow-x:hidden}
+h1{margin:10px 0 2px;color:#ffd166;font-size:28px} p{margin:6px 12px;line-height:1.45}
+#wrap{max-width:900px;margin:0 auto;padding:10px}
+#hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+.pill{background:#fff3d6;color:#3a2410;border-radius:20px;padding:7px 12px;font-weight:bold;min-width:118px}
+.pill b{color:#b35400}
+canvas{background:#fff8e6;border:4px solid #d9a441;border-radius:14px;width:100%;max-width:860px;height:auto;display:block;margin:8px auto;touch-action:none}
+button{background:#ff7a1a;color:#fff;border:0;border-radius:10px;padding:12px 18px;font-size:17px;font-weight:bold;cursor:pointer;margin:5px}
+button:hover{background:#ff9a3d}button.small{padding:8px 12px;font-size:14px;background:#5a3a1e}
+button:disabled{opacity:.45}
+#screen{position:relative}
+.overlay{position:absolute;inset:0;background:rgba(20,10,4,.92);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+.hidden{display:none!important}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+.card{background:#fff;color:#2b1d12;border-radius:10px;padding:10px;text-align:left;min-width:170px}
+.card b{color:#b35400}.hint{color:#ffe9a8;font-size:14px}
+</style>
+</head>
+<body>
+<div id="wrap">
+<h1>🍞 Bakery Supply Chain</h1>
+<p>Game 0758 — Strategy / Bakery Logistics Manager</p>
+<div id="hud">
+<div class="pill">💰 Gold: <b id="gold">50</b></div>
+<div class="pill">⭐ Reputation: <b id="rep">5</b> / 5</div>
+<div class="pill">📦 Orders Done: <b id="done">0</b> / 12</div>
+<div class="pill">⏰ Day Time: <b id="time">150</b>s</div>
+<div class="pill">🎯 Goal: <b>250 Gold</b></div>
+</div>
+<div id="screen">
+<canvas id="game" width="860" height="460"></canvas>
+<div id="title" class="overlay">
+<h2 style="color:#ffd166;font-size:32px;margin:0">Bakery Supply Chain</h2>
+<p><b>Run a bakery for one busy day!</b> Orders arrive with deadlines. Buy flour, sugar and butter, bake the right recipe in an oven, and deliver before the order expires or the baked good spoils.</p>
+<div class="row">
+<div class="card"><b>Bread</b><br>2 Flour • 4s bake<br>Reward 28 gold</div>
+<div class="card"><b>Cake</b><br>2 Flour + 2 Sugar • 7s<br>Reward 48 gold</div>
+<div class="card"><b>Croissant</b><br>1 Flour + 2 Butter • 6s<br>Reward 42 gold</div>
+</div>
+<p class="hint">HOW TO PLAY: Click an order, then click a free oven to start baking. When an oven flashes READY, click it to deliver. Buy supplies before you run out. Missed orders and spoiled goods cost reputation.</p>
+<p class="hint">Keys: 1/2/3 select oven • B bread • C cake • R croissant • F buy flour • S sugar • U butter • Space start/restart</p>
+<button id="startBtn">▶ Start Bakery Day</button>
+</div>
+<div id="end" class="overlay hidden">
+<h2 id="endTitle">Day Complete!</h2>
+<p id="endText"></p>
+<button id="restartBtn">↻ Play Again</button>
+</div>
+</div>
+<div class="row">
+<button class="small" id="buyFlour">Buy Flour (10g) — Stock: <span id="flour">8</span></button>
+<button class="small" id="buySugar">Buy Sugar (12g) — Stock: <span id="sugar">4</span></button>
+<button class="small" id="buyButter">Buy Butter (14g) — Stock: <span id="butter">4</span></button>
+<button class="small" id="bakeBread">Bake Bread (B)</button>
+<button class="small" id="bakeCake">Bake Cake (C)</button>
+<button class="small" id="bakeCroissant">Bake Croissant (R)</button>
+</div>
+<p class="hint">Selected order: <span id="sel">None — click an order on the board, or press a recipe button.</span> &nbsp;|&nbsp; Mouse, touch, or keyboard all work. Sound starts after you press Start.</p>
+</div>
+<script>
+const c=document.getElementById('game'),x=c.getContext('2d');
+let audio=null,running=false,over=false,selected=-1,selRecipe=null;
+let gold=50,rep=5,done=0,timeLeft=150,score=0,last=0,spawnT=0,orderId=0;
+let flour=8,sugar=4,butter=4;
+const recipes={
+ bread:{name:'Bread',flour:2,sugar:0,butter:0,bake:4,reward:28,color:'#e8a94a'},
+ cake:{name:'Cake',flour:2,sugar:2,butter:0,bake:7,reward:48,color:'#ff6b9d'},
+ croissant:{name:'Croissant',flour:1,sugar:0,butter:2,bake:6,reward:42,color:'#f4c95d'}
+};
+let orders=[],ovens=[
+ {id:0,state:'free',recipe:null,t:0,readyT:0},
+ {id:1,state:'free',recipe:null,t:0,readyT:0},
+ {id:2,state:'free',recipe:null,t:0,readyT:0}
+];
+function beep(f,d,type){try{if(!audio)return;const o=audio.createOscillator(),g=audio.createGain();o.type=type||'sine';o.frequency.value=f;g.gain.setValueAtTime(.12,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+d);}catch(e){}}
+function initAudio(){if(!audio){try{audio=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}} if(audio&&audio.state==='suspended')audio.resume();}
+function newOrder(){const keys=Object.keys(recipes);const k=keys[Math.floor(Math.random()*keys.length)];orders.push({id:++orderId,recipe:k,left:26+Math.random()*14});}
+function updateHUD(){document.getElementById('gold').textContent=gold;document.getElementById('rep').textContent=rep;document.getElementById('done').textContent=done;document.getElementById('time').textContent=Math.max(0,Math.ceil(timeLeft));document.getElementById('flour').textContent=flour;document.getElementById('sugar').textContent=sugar;document.getElementById('butter').textContent=butter;document.getElementById('sel').textContent=selected>=0&&orders[selected]?('Order #'+orders[selected].id+' — '+recipes[orders[selected].recipe].name):(selRecipe?recipes[selRecipe].name+' (no order selected — will bake to stock)':'None — click an order, or press a recipe button.');}
+function canBake(r){const p=recipes[r];return flour>=p.flour&&sugar>=p.sugar&&butter>=p.butter;}
+function tryBake(ovenIdx,recipeKey){
+ if(!running||over||ovenIdx<0||!ovens[ovenIdx])return;
+ const r=recipeKey||(selected>=0&&orders[selected]?orders[selected].recipe:null);
+ if(!r){alert('Pick an order or a recipe first!');return;}
+ const o=ovens[ovenIdx];if(o.state!=='free'){return;}
+ if(!canBake(r)){beep(140,.25,'sawtooth');alert('Not enough ingredients! Buy supplies first.');return;}
+ const p=recipes[r];flour-=p.flour;sugar-=p.sugar;butter-=p.butter;
+ o.state='baking';o.recipe=r;o.t=p.bake;o.readyT=0;beep(440,.15);updateHUD();
+}
+function deliver(ovenIdx){
+ const o=ovens[ovenIdx];if(o.state!=='ready')return;
+ const idx=orders.findIndex(q=>q.recipe===o.recipe);
+ if(idx>=0){const reward=recipes[o.recipe].reward;gold+=reward;score+=reward;done++;orders.splice(idx,1);if(selected>=idx)selected=-1;beep(760,.2);beep(980,.2);}
+ else {gold+=10;score+=10;beep(620,.15);}
+ o.state='free';o.recipe=null;o.readyT=0;checkEnd();updateHUD();
+}
+function buy(kind,cost){
+ if(gold<cost){beep(140,.2,'sawtooth');return;}
+ gold-=cost;if(kind==='flour')flour+=4;if(kind==='sugar')sugar+=3;if(kind==='butter')butter+=3;beep(520,.12);updateHUD();
+}
+function checkEnd(){
+ if(done>=12||gold>=250){endGame(true);}
+ else if(rep<=0||timeLeft<=0){endGame(false);}
+}
+function endGame(win){
+ if(over)return;over=true;running=false;
+ document.getElementById('end').classList.remove('hidden');
+ document.getElementById('endTitle').textContent=win?'🏆 You Win — Bakery Star!':'💔 Game Over — Bakery Closed';
+ document.getElementById('endText').textContent='Orders fulfilled: '+done+' / 12 • Gold: '+gold+' • Reputation: '+Math.max(0,rep)+' • Score: '+score+'. '+(win?'You hit the day goal!':'You ran out of reputation or time. Try a tighter supply plan!');
+ beep(win?880:180,.4,win?'triangle':'sawtooth');
+}
+function reset(){
+ gold=50;rep=5;done=0;timeLeft=150;score=0;flour=8;sugar=4;butter=4;orders=[];selected=-1;selRecipe=null;over=false;
+ ovens.forEach(o=>{o.state='free';o.recipe=null;o.t=0;o.readyT=0;});
+ newOrder();newOrder();newOrder();updateHUD();
+}
+function start(){
+ initAudio();reset();document.getElementById('title').classList.add('hidden');document.getElementById('end').classList.add('hidden');
+ running=true;last=performance.now();requestAnimationFrame(loop);beep(660,.2);
+}
+function loop(now){
+ if(!running)return;
+ const dt=Math.min(.05,(now-last)/1000);last=now;timeLeft-=dt;spawnT+=dt;
+ if(spawnT>7&&orders.length<5){spawnT=0;newOrder();}
+ orders.forEach(o=>o.left-=dt);
+ for(let i=orders.length-1;i>=0;i--){if(orders[i].left<=0){orders.splice(i,0);orders.splice(i,1);rep--;beep(160,.3,'sawtooth');if(selected>=i)selected=-1;}}
+ ovens.forEach(o=>{
+  if(o.state==='baking'){o.t-=dt;if(o.t<=0){o.state='ready';o.readyT=10;beep(880,.2);}}
+  else if(o.state==='ready'){o.readyT-=dt;if(o.readyT<=0){o.state='free';o.recipe=null;rep--;beep(160,.3,'sawtooth');}}
+ });
+ updateHUD();draw();checkEnd();if(running)requestAnimationFrame(loop);
+}
+function draw(){
+ x.clearRect(0,0,860,460);
+ x.fillStyle='#fff8e6';x.fillRect(0,0,860,460);
+ x.fillStyle='#3a2410';x.font='bold 19px Arial';x.fillText('CUSTOMER ORDERS  (click one, then click a free oven)',20,28);
+ orders.forEach((o,i)=>{
+  const y=48+i*52,sel=i===selected;
+  x.fillStyle=sel?'#ffe08a':'#ffffff';x.strokeStyle=sel?'#ff7a1a':'#d9a441';x.lineWidth=3;
+  x.beginPath();x.roundRect(20,y,520,44,10);x.fill();x.stroke();
+  x.fillStyle='#2b1d12';x.font='bold 16px Arial';x.fillText('#'+o.id+' '+recipes[o.recipe].name+' — '+recipes[o.recipe].reward+' gold',32,y+28);
+  x.fillStyle=o.left<8?'#d32f2f':'#2e7d32';x.fillRect(360,y+8,150*(Math.max(0,o.left)/40),10);
+  x.fillStyle='#2b1d12';x.fillText(Math.ceil(Math.max(0,o.left))+'s',520,y+28);
+ });
+ x.fillStyle='#3a2410';x.font='bold 19px Arial';x.fillText('OVENS  (click a READY oven to deliver)',560,28);
+ ovens.forEach((o,i)=>{
+  const y=48+i*118;
+  x.fillStyle=o.state==='ready'?'#c8f7c5':o.state==='baking'?'#ffe0b2':'#eeeeee';
+  x.strokeStyle='#8d5a1f';x.lineWidth=3;x.beginPath();x.roundRect(560,y,280,104,12);x.fill();x.stroke();
+  x.fillStyle='#2b1d12';x.font='bold 17px Arial';
+  x.fillText('Oven '+(i+1)+' — '+(o.state==='free'?'FREE':o.state==='baking'?'BAKING '+recipes[o.recipe].name:'READY! '+recipes[o.recipe].name),572,y+28);
+  x.font='15px Arial';
+  if(o.state==='baking')x.fillText('Ready in '+Math.ceil(o.t)+'s — do not open yet!',572,y+56);
+  else if(o.state==='ready')x.fillText('Spoils in '+Math.ceil(o.readyT)+'s — CLICK TO DELIVER!',572,y+56);
+  else x.fillText('Click after choosing an order/recipe.',572,y+56);
+  x.font='13px Arial';x.fillText('Bread 2F • Cake 2F+2S • Croissant 1F+2B',572,y+84);
+ });
+ x.fillStyle='#5a3a1e';x.font='14px Arial';x.fillText('Tip: cakes pay most but use sugar and take longest. Keep stock balanced and never let a ready item spoil.',20,440);
+}
+function canvasPos(e){const r=c.getBoundingClientRect();const px=(e.touches?e.touches[0].clientX:e.clientX);const py=(e.touches?e.touches[0].clientY:e.clientY);return{x:(px-r.left)*860/r.width,y:(py-r.top)*460/r.height};}
+function onCanvas(e){
+ if(!running)return;e.preventDefault();const p=canvasPos(e);
+ orders.forEach((o,i)=>{if(p.x>=20&&p.x<=540&&p.y>=48+i*52&&p.y<=92+i*52){selected=i;beep(520,.1);updateHUD();}});
+ ovens.forEach((o,i)=>{if(p.x>=560&&p.x<=840&&p.y>=48+i*118&&p.y<=152+i*118){if(o.state==='ready')deliver(i);else if(o.state==='free')tryBake(i,null);}});
+}
+c.addEventListener('mousedown',onCanvas);
+c.addEventListener('mousemove',()=>{});
+c.addEventListener('touchstart',onCanvas,{passive:false});
+c.addEventListener('touchmove',(e)=>{e.preventDefault();},{passive:false});
+document.addEventListener('keydown',(e)=>{
+ const k=e.key.toLowerCase();
+ if(k===' '){e.preventDefault();if(!running&&!over)start();else if(over)start();}
+ if(!running)return;
+ if(k==='1')tryBake(0,selRecipe); if(k==='2')tryBake(1,selRecipe); if(k==='3')tryBake(2,selRecipe);
+ if(k==='b'){selRecipe='bread';tryBake(ovens.findIndex(o=>o.state==='free'), 'bread');}
+ if(k==='c'){selRecipe='cake';tryBake(ovens.findIndex(o=>o.state==='free'), 'cake');}
+ if(k==='r'){selRecipe='croissant';tryBake(ovens.findIndex(o=>o.state==='free'), 'croissant');}
+ if(k==='f')buy('flour',10); if(k==='s')buy('sugar',12); if(k==='u')buy('butter',14);
+ updateHUD();
+});
+document.addEventListener('click',(e)=>{});
+document.getElementById('startBtn').addEventListener('click',start);
+document.getElementById('restartBtn').addEventListener('click',start);
+document.getElementById('buyFlour').addEventListener('click',()=>buy('flour',10));
+document.getElementById('buySugar').addEventListener('click',()=>buy('sugar',12));
+document.getElementById('buyButter').addEventListener('click',()=>buy('butter',14));
+document.getElementById('bakeBread').addEventListener('click',()=>{selRecipe='bread';const i=ovens.findIndex(o=>o.state==='free');if(i>=0)tryBake(i,'bread');});
+document.getElementById('bakeCake').addEventListener('click',()=>{selRecipe='cake';const i=ovens.findIndex(o=>o.state==='free');if(i>=0)tryBake(i,'cake');});
+document.getElementById('bakeCroissant').addEventListener('click',()=>{selRecipe='croissant';const i=ovens.findIndex(o=>o.state==='free');if(i>=0)tryBake(i,'croissant');});
+reset();draw();updateHUD();
+</script>
+</body>
+</html>

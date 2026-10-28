@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Tile Bridge Builder</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f2438; color: #f2f2f2; font-family: Arial, Helvetica, sans-serif; text-align: center; }
+  h1 { margin: 12px 0 4px; font-size: 30px; letter-spacing: 1px; }
+  p { margin: 6px 12px; line-height: 1.5; }
+  #hud { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; margin: 8px; font-weight: bold; }
+  #hud span { background: #173a56; border: 1px solid #4a7ea6; border-radius: 8px; padding: 7px 12px; min-width: 130px; }
+  #wrap { position: relative; width: 880px; max-width: 96vw; margin: 0 auto; }
+  canvas { width: 100%; height: auto; background: #87b7d6; border: 3px solid #fff; border-radius: 12px; display: block; touch-action: none; }
+  .bar { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 10px; }
+  button { font-size: 17px; font-weight: bold; padding: 10px 18px; border-radius: 10px; border: 2px solid #fff; cursor: pointer; background: #ffb703; color: #222; }
+  button:hover { background: #ffd166; }
+  button.sel { background: #06d6a0; color: #063; outline: 3px solid #fff; }
+  button.danger { background: #ef476f; color: #fff; }
+  .overlay { position: absolute; inset: 0; background: rgba(8,25,40,0.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; margin: 6px 0; }
+  .overlay ul { text-align: left; max-width: 560px; }
+  .overlay li { margin: 6px 0; }
+  #msg { min-height: 26px; font-weight: bold; color: #ffe066; margin: 4px; }
+  small { color: #cfe6f5; }
+</style>
+</head>
+<body>
+<h1>Tile Bridge Builder</h1>
+<p>Place tiles across the water, respect the weight limits, and get the walker home.</p>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Lives: <b id="lives">3</b></span>
+  <span>Level: <b id="level">1 / 3</b></span>
+  <span>Status: <b id="status">Build the bridge</b></span>
+  <span>Wood: <b id="wood">0</b> &nbsp; Steel: <b id="steel">0</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="880" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Tile Bridge Builder</h2>
+    <p><b>How to Play</b></p>
+    <ul>
+      <li>Click or tap a dotted cell over the water to place the selected tile. Click a placed tile to remove it.</li>
+      <li>Wood tiles are plentiful but weak: they collapse if they sit more than 2 steps from an island or rock pillar.</li>
+      <li>Steel tiles are strong: they hold up to 4 steps from support, but you only have a few. Use them on long spans.</li>
+      <li>Fill every gap column, then press Walk to send the walker across. A missing tile or a collapsed tile costs a life.</li>
+      <li>Finish all 3 levels to win. Keys: 1 = Wood, 2 = Steel, W or Space = Walk, C = Clear, R = Restart.</li>
+    </ul>
+    <button id="startBtn">Start Game</button>
+    <p><small>Mouse, touch, and keyboard all work. Sound starts only after you press Start.</small></p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<div id="msg">Choose Wood or Steel, then build across the gap.</div>
+<div class="bar">
+  <button id="woodBtn" class="sel">Wood Tile (1)</button>
+  <button id="steelBtn">Steel Tile (2)</button>
+  <button id="walkBtn">Walk Across (W)</button>
+  <button id="clearBtn">Clear Bridge (C)</button>
+  <button id="resetBtn" class="danger">Restart (R)</button>
+</div>
+<p><small>Tip: rock pillars count as supports. The red glow marks a tile that is too far from support for its material.</small></p>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var statusEl = document.getElementById('status');
+  var woodEl = document.getElementById('wood');
+  var steelEl = document.getElementById('steel');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var woodBtn = document.getElementById('woodBtn');
+  var steelBtn = document.getElementById('steelBtn');
+
+  var levels = [
+    { cols: 10, pillars: [4], wood: 9, steel: 2 },
+    { cols: 14, pillars: [4, 10], wood: 11, steel: 2 },
+    { cols: 16, pillars: [5, 11], wood: 13, steel: 3 }
+  ];
+  var levelIndex = 0, score = 0, lives = 3, started = false, walking = false;
+  var selected = 'wood', placed = {}, hoverCol = -1;
+  var walker = { x: 60, y: 268, col: -1, falling: false, vy: 0, targetX: 60 };
+  var audioCtx = null, lastTime = 0, animId = 0;
+
+  function level() { return levels[levelIndex]; }
+  function isPillar(c) { return level().pillars.indexOf(c) !== -1; }
+  function supports() { var s = [-1].concat(level().pillars); s.push(level().cols); return s; }
+  function distToSupport(c) {
+    var best = 99, ss = supports();
+    for (var i = 0; i < ss.length; i++) { var d = Math.abs(c - ss[i]); if (d < best) best = d; }
+    return best;
+  }
+  function limitFor(t) { return t === 'steel' ? 4 : 2; }
+  function isWeak(c) {
+    if (!placed[c] || isPillar(c)) return false;
+    return distToSupport(c) > limitFor(placed[c]);
+  }
+  function cellGeom() {
+    var gapX = 120, gapW = 640, cw = gapW / level().cols;
+    return { x: gapX, w: cw, y: 272, h: 46 };
+  }
+  function colFromX(x) {
+    var g = cellGeom();
+    if (x < g.x || x >= g.x + g.w * level().cols) return -1;
+    return Math.floor((x - g.x) / g.w);
+  }
+  function colCenterX(c) { var g = cellGeom(); return g.x + c * g.w + g.w / 2; }
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), gn = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      gn.gain.setValueAtTime(0.18, audioCtx.currentTime);
+      gn.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(gn); gn.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function updateHud(status) {
+    var woodLeft = level().wood - countType('wood');
+    var steelLeft = level().steel - countType('steel');
+    scoreEl.textContent = score; livesEl.textContent = lives;
+    levelEl.textContent = (levelIndex + 1) + ' / ' + levels.length;
+    woodEl.textContent = woodLeft; steelEl.textContent = steelLeft;
+    if (status) statusEl.textContent = status;
+  }
+  function countType(t) { var n = 0; for (var k in placed) if (placed[k] === t) n++; return n; }
+  function setSelected(t) {
+    selected = t;
+    woodBtn.className = t === 'wood' ? 'sel' : '';
+    steelBtn.className = t === 'steel' ? 'sel' : '';
+  }
+  function placeOrRemove(c) {
+    if (!started || walking || c < 0 || isPillar(c)) return;
+    var g = cellGeom(); void g;
+    if (placed[c]) { delete placed[c]; beep(300, 0.08, 'square'); msgEl.textContent = 'Tile removed.'; }
+    else {
+      var left = level()[selected] - countType(selected);
+      if (left <= 0) { msgEl.textContent = 'No ' + selected + ' tiles left. Try the other material or remove a tile.'; beep(140, 0.15, 'sawtooth'); return; }
+      placed[c] = selected; beep(selected === 'steel' ? 520 : 420, 0.09, 'triangle');
+      msgEl.textContent = isWeak(c) ? 'Warning: that tile is too far from support and may collapse!' : 'Tile placed. Fill every column, then Walk.';
+    }
+    updateHud();
+  }
+  function clearBridge() {
+    if (walking) return;
+    placed = {}; updateHud('Build the bridge'); msgEl.textContent = 'Bridge cleared. Build again.';
+  }
+  function resetGame() {
+    levelIndex = 0; score = 0; lives = 3; walking = false; placed = {};
+    walker = { x: 60, y: 268, col: -1, falling: false, vy: 0, targetX: 60 };
+    endScreen.className = 'overlay hidden';
+    updateHud('Build the bridge'); msgEl.textContent = 'Fresh bridge. Choose a material and build.';
+  }
+  function startGame() {
+    ensureAudio(); started = true; resetGame();
+    titleScreen.className = 'overlay hidden'; beep(660, 0.15, 'triangle');
+    updateHud('Build the bridge');
+  }
+  function showEnd(win) {
+    walking = false; started = false;
+    endTitle.textContent = win ? 'You Win!' : 'Game Over';
+    endText.textContent = win
+      ? 'All 3 bridges held! Final score: ' + score + '. Brilliant engineering.'
+      : 'Out of lives. Final score: ' + score + '. Try a stronger span next time.';
+    endScreen.className = 'overlay';
+    updateHud(win ? 'You Win!' : 'Game Over');
+    beep(win ? 880 : 160, 0.4, win ? 'triangle' : 'sawtooth');
+  }
+  function startWalk() {
+    if (!started || walking) return;
+    ensureAudio();
+    var missing = [];
+    for (var c = 0; c < level().cols; c++) if (!isPillar(c) && !placed[c]) missing.push(c + 1);
+    if (missing.length) { msgEl.textContent = 'Gap at column ' + missing.join(', ') + '. Fill it before walking.'; beep(180, 0.2, 'sawtooth'); return; }
+    walking = true; walker.col = -1; walker.x = 60; walker.y = 268; walker.falling = false; walker.vy = 0;
+    updateHud('Walker crossing...'); msgEl.textContent = 'The walker is crossing. Hold on...'; beep(500, 0.1, 'sine');
+  }
+  function stepWalker() {
+    if (walker.falling) {
+      walker.vy += 0.9; walker.y += walker.vy;
+      if (walker.y > 520) { walking = false; walker.falling = false; loseLife(); }
+      return;
+    }
+    var next = walker.col + 1;
+    var targetX = next >= level().cols ? 820 : colCenterX(next);
+    walker.x += (targetX - walker.x) * 0.18;
+    if (Math.abs(targetX - walker.x) < 4) {
+      walker.x = targetX; walker.col = next;
+      if (next >= level().cols) {
+        walking = false; score += 100;
+        score += (level().wood - countType('wood')) * 25 + (level().steel - countType('steel')) * 25;
+        beep(880, 0.2, 'triangle');
+        if (levelIndex + 1 >= levels.length) { updateHud('You Win!'); showEnd(true); return; }
+        levelIndex++; placed = {}; walker.x = 60; walker.col = -1;
+        msgEl.textContent = 'Level complete! A wider river awaits.';
+        updateHud('Build the bridge'); return;
+      }
+      if (!isPillar(next) && isWeak(next)) {
+        delete placed[next]; walker.falling = true; walker.vy = 0;
+        msgEl.textContent = 'Collapse! That tile was too far from support.'; beep(120, 0.35, 'sawtooth'); return;
+      }
+      if (next % 3 === 0) beep(600, 0.05, 'sine');
+    }
+  }
+  function loseLife() {
+    lives--; walker.x = 60; walker.y = 268; walker.col = -1;
+    if (lives <= 0) { updateHud('Game Over'); showEnd(false); }
+    else { msgEl.textContent = 'The walker fell! Lives left: ' + lives + '. Fix the weak span and try again.'; updateHud('Build the bridge'); }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, 880, 520);
+    ctx.fillStyle = '#87b7d6'; ctx.fillRect(0, 0, 880, 300);
+    ctx.fillStyle = '#2a7ab8'; ctx.fillRect(0, 300, 880, 220);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (var w = 0; w < 5; w++) ctx.fillRect(60 + w * 150, 310 + (w % 3) * 40, 70, 8);
+    ctx.fillStyle = '#5a8a3c'; ctx.fillRect(0, 220, 120, 80); ctx.fillRect(760, 220, 120, 80);
+    ctx.fillStyle = '#3f6b2a'; ctx.fillRect(0, 220, 120, 14); ctx.fillRect(760, 220, 120, 14);
+    ctx.fillStyle = '#6b4a2f'; ctx.fillRect(30, 180, 34, 50); ctx.fillRect(800, 180, 34, 50);
+    ctx.font = 'bold 26px Arial'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.fillText('START', 60, 200); ctx.fillText('HOME', 820, 200);
+    var g = cellGeom();
+    for (var c = 0; c < level().cols; c++) {
+      var x = g.x + c * g.w;
+      if (isPillar(c)) {
+        ctx.fillStyle = '#7a7a7a'; ctx.fillRect(x + 2, 272, g.w - 4, 110);
+        ctx.fillStyle = '#555'; ctx.fillRect(x + 2, 272, g.w - 4, 12);
+      } else if (placed[c]) {
+        var weak = isWeak(c);
+        ctx.fillStyle = placed[c] === 'steel' ? '#9aa7b5' : '#a4713b';
+        ctx.fillRect(x + 2, g.y, g.w - 4, g.h);
+        ctx.fillStyle = placed[c] === 'steel' ? '#5d6b7a' : '#7a5226';
+        ctx.fillRect(x + 2, g.y + g.h - 8, g.w - 4, 8);
+        if (weak) { ctx.strokeStyle = '#ff2d2d'; ctx.lineWidth = 4; ctx.strokeRect(x + 2, g.y, g.w - 4, g.h); }
+      } else {
+        ctx.strokeStyle = hoverCol === c ? '#fff' : 'rgba(255,255,255,0.55)';
+        ctx.lineWidth = hoverCol === c ? 3 : 2; ctx.setLineDash([6, 5]);
+        ctx.strokeRect(x + 3, g.y, g.w - 6, g.h); ctx.setLineDash([]);
+      }
+    }
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(walker.x, walker.y - 8, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(walker.x, walker.y - 22, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('River: support every span, or it collapses.', 16, 500);
+  }
+  function loop(t) {
+    if (t - lastTime > 16) { if (walking) stepWalker(); draw(); lastTime = t; }
+    animId = requestAnimationFrame(loop);
+  }
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - r.left) * 880 / r.width, y: (cy - r.top) * 520 / r.height };
+  }
+  canvas.addEventListener('mousedown', function (e) { var p = canvasPos(e); placeOrRemove(colFromX(p.x)); });
+  canvas.addEventListener('mousemove', function (e) { var p = canvasPos(e); hoverCol = colFromX(p.x); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); var p = canvasPos(e); placeOrRemove(colFromX(p.x)); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); var p = canvasPos(e); hoverCol = colFromX(p.x); }, { passive: false });
+  canvas.addEventListener('click', function (e) { var p = canvasPos(e); hoverCol = colFromX(p.x); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === '1') setSelected('wood');
+    else if (e.key === '2') setSelected('steel');
+    else if (e.key === 'w' || e.key === 'W' || e.key === ' ') { e.preventDefault(); startWalk(); }
+    else if (e.key === 'c' || e.key === 'C') clearBridge();
+    else if (e.key === 'r' || e.key === 'R') { resetGame(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', function () { ensureAudio(); resetGame(); started = true; });
+  document.getElementById('woodBtn').addEventListener('click', function () { setSelected('wood'); });
+  document.getElementById('steelBtn').addEventListener('click', function () { setSelected('steel'); });
+  document.getElementById('walkBtn').addEventListener('click', startWalk);
+  document.getElementById('clearBtn').addEventListener('click', clearBridge);
+  document.getElementById('resetBtn').addEventListener('click', resetGame);
+  updateHud('Build the bridge');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

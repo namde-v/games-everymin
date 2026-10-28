@@ -4,9 +4,9 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 750
-- **Latest game:** 0750 — Meteor Shower Defender
-- **Current volume:** 008 (Games 0701 to 0800) — in progress (50 of 100)
+- **Total games:** 760
+- **Latest game:** 0760 — Archery Wind Shot
+- **Current volume:** 008 (Games 0701 to 0800) — in progress (60 of 100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
 ## Volume index
@@ -20,7 +20,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 005 | 0401–0500 (100, complete) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
 | 006 | 0501–0600 (100, complete) | [catalogs/readme-006.md](./catalogs/readme-006.md) |
 | 007 | 0601–0700 (100, complete) | [catalogs/readme-007.md](./catalogs/readme-007.md) |
-| 008 | 0701–0800 (50, in progress) | [catalogs/readme-008.md](./catalogs/readme-008.md) |
+| 008 | 0701–0800 (60, in progress) | [catalogs/readme-008.md](./catalogs/readme-008.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -34,20 +34,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 075
+## Latest batch — Batch 076
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0741 | Volcano Ash Runner | Arcade / Lava Dodge Runner | [Play](./games/game-0741.html) |
-| 0742 | Mirror Maze Light Bender | Puzzle / Mirror Reflection Logic | [Play](./games/game-0742.html) |
-| 0743 | Orchard Harvest Planner | Strategy / Farm Planning | [Play](./games/game-0743.html) |
-| 0744 | Samba Street Drummer | Rhythm / Samba Beat | [Play](./games/game-0744.html) |
-| 0745 | Deep Sea Pearl Diver | Arcade / Underwater Collection | [Play](./games/game-0745.html) |
-| 0746 | Rune Stone Decoder | Puzzle / Rune Sequence Logic | [Play](./games/game-0746.html) |
-| 0747 | Mountain Rescue Dispatcher | Strategy / Rescue Coordination | [Play](./games/game-0747.html) |
-| 0748 | Flamenco Castanet Tempo | Rhythm / Castanet Timing | [Play](./games/game-0748.html) |
-| 0749 | Windmill Blade Balancer | Precision / Windmill Balance Timing | [Play](./games/game-0749.html) |
-| 0750 | Meteor Shower Defender | Arcade / Meteor Defense Shooter | [Play](./games/game-0750.html) |
+| 0751 | Glacier Penguin Slide | Arcade / Penguin Slide Collector | [Play](./games/game-0751.html) |
+| 0752 | Constellation Connector | Puzzle / Star Connection Logic | [Play](./games/game-0752.html) |
+| 0753 | Desert Oasis Trader | Strategy / Caravan Trading | [Play](./games/game-0753.html) |
+| 0754 | Bell Tower Chime Master | Rhythm / Bell Chime Timing | [Play](./games/game-0754.html) |
+| 0755 | Paper Plane Glider | Precision / Glider Ring Flight | [Play](./games/game-0755.html) |
+| 0756 | Meadow Bee Pollinator | Arcade / Pollination Flight | [Play](./games/game-0756.html) |
+| 0757 | Tile Bridge Builder | Puzzle / Bridge Construction Logic | [Play](./games/game-0757.html) |
+| 0758 | Bakery Supply Chain | Strategy / Bakery Logistics | [Play](./games/game-0758.html) |
+| 0759 | Ukulele Island Strum | Rhythm / Ukulele Strum Timing | [Play](./games/game-0759.html) |
+| 0760 | Archery Wind Shot | Precision / Wind Archery | [Play](./games/game-0760.html) |
 ## Quality standard
 
 Every game must have: a title screen, Start button, How-to-Play instructions, a score/lives/status HUD, a definitive Win / Game Over state with instant Restart, and keyboard + mouse + touch controls.
