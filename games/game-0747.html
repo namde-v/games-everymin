@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Mountain Rescue Dispatcher</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:#0b1e2d;color:#eaf6ff;font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;min-height:100vh}
+  #wrap{width:min(980px,100%);padding:12px}
+  h1{margin:6px 0 2px;text-align:center;font-size:28px;letter-spacing:.5px}
+  p.sub{text-align:center;margin:0 0 10px;color:#bfe3f5}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+  .pill{background:#14324a;border:1px solid #2f6b8c;border-radius:20px;padding:7px 12px;font-weight:bold;font-size:14px}
+  .pill.warn{background:#5a2418;border-color:#c65a3a}
+  .pill.good{background:#123f2a;border-color:#4caf7d}
+  #cv{display:block;width:100%;height:520px;background:linear-gradient(#aee3f5,#e8f7ff 35%,#7fae6d 62%,#4e7d4a 100%);border:3px solid #224a5e;border-radius:12px;touch-action:none;cursor:pointer}
+  #teams{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+  .team{background:#132f44;border:2px solid #355e77;border-radius:10px;padding:10px;text-align:center;cursor:pointer}
+  .team.sel{border-color:#ffd54d;background:#233f1f;box-shadow:0 0 0 3px rgba(255,213,77,.35)}
+  .team.busy{opacity:.75}
+  .bar{height:10px;background:#0a1822;border-radius:6px;overflow:hidden;margin-top:6px}
+  .bar i{display:block;height:100%;background:#ffca28}
+  .bar.stam i{background:#4fc3f7}
+  button{border:0;border-radius:10px;background:#ffb300;color:#231a00;font-weight:900;padding:12px 18px;font-size:17px;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  #overlay{position:relative;margin-top:-520px;height:520px;display:flex;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+  .card{pointer-events:auto;background:rgba(4,22,34,.92);border:2px solid #6db7d8;border-radius:16px;padding:22px;max-width:620px;width:92%}
+  .card h2{margin-top:0;font-size:30px}
+  .card p{line-height:1.55;color:#d7edf8}
+  .keys{background:#0c2333;border-radius:8px;padding:10px;text-align:left;font-size:14px;line-height:1.6}
+  #msg{text-align:center;min-height:24px;font-weight:bold;margin-top:8px;color:#ffe082}
+  #log{text-align:center;color:#aed6e8;font-size:13px;min-height:20px}
+  @media(max-width:600px){#cv{height:460px}#overlay{margin-top:-460px;height:460px}h1{font-size:24px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>⛰️ Mountain Rescue Dispatcher</h1>
+  <p class="sub">Coordinate teams, beat the storms, and bring every hiker home.</p>
+  <div id="hud">
+    <span class="pill" id="score">Score: 0</span>
+    <span class="pill good" id="rescued">Rescued: 0 / 15</span>
+    <span class="pill" id="missed">Missed: 0 / 3</span>
+    <span class="pill" id="weather">Weather: Clear ☀️</span>
+    <span class="pill" id="clock">Shift: 0:00</span>
+  </div>
+  <canvas id="cv" width="940" height="520"></canvas>
+  <div id="overlay"><div class="card" id="card"></div></div>
+  <div id="teams"></div>
+  <div id="msg">Select a team, then tap a stranded hiker.</div>
+  <div id="log">Tip: red hikers are urgent — rescue them first.</div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+var scoreEl=document.getElementById('score'), resEl=document.getElementById('rescued'), misEl=document.getElementById('missed');
+var weatherEl=document.getElementById('weather'), clockEl=document.getElementById('clock'), msgEl=document.getElementById('msg'), logEl=document.getElementById('log');
+var teamsEl=document.getElementById('teams'), card=document.getElementById('card'), overlay=document.getElementById('overlay');
+var state='title', score=0, rescued=0, missed=0, elapsed=0, spawnT=0, weather='Clear', weatherT=0, stormT=0, selected=0;
+var hikers=[], teams=[], particles=[], audioCtx=null, muted=false;
+var spots=[[120,150],[240,110],[360,180],[500,120],[630,170],[760,120],[850,210],[180,300],[330,270],[480,300],[640,290],[790,340],[260,410],[520,420],[720,430]];
+var names=['Ava','Ben','Cara','Dario','Elif','Finn','Greta','Hugo','Iris','Jules','Kai','Lena','Marco','Nina','Omar','Priya','Quinn','Rosa','Sam','Tara'];
+
+function beep(f,d,type,vol){ if(!audioCtx||muted) return; try{ var o=audioCtx.createOscillator(), g=audioCtx.createGain(); o.type=type||'sine'; o.frequency.value=f; g.gain.setValueAtTime(vol||0.08,audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d); o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+d); }catch(e){} }
+function sfx(kind){ if(kind==='go'){beep(520,0.12,'triangle',0.1); setTimeout(function(){beep(780,0.15,'triangle',0.1);},90);} else if(kind==='save'){beep(660,0.12,'sine',0.1); setTimeout(function(){beep(880,0.18,'sine',0.1);},110);} else if(kind==='bad'){beep(180,0.3,'sawtooth',0.08);} else if(kind==='click'){beep(440,0.07,'square',0.05);} }
+function initAudio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); }
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+
+function reset(){
+  score=0; rescued=0; missed=0; elapsed=0; spawnT=0; weather='Clear'; weatherT=0; stormT=0; hikers=[]; particles=[]; selected=0;
+  teams=[
+    {id:0,name:'Alpha',color:'#ffd54d',x:470,y:480,tx:470,ty:480,state:'base',stamina:100,target:null,carry:0,home:470},
+    {id:1,name:'Bravo',color:'#4fc3f7',x:400,y:480,tx:400,ty:480,state:'base',stamina:100,target:null,carry:0,home:400},
+    {id:2,name:'Charlie',color:'#ff8a65',x:540,y:480,tx:540,ty:480,state:'base',stamina:100,target:null,carry:0,home:540}
+  ];
+  spawnHiker(true); spawnHiker(true);
+  renderTeams(); updateHud();
+}
+function spawnHiker(first){
+  var free=spots.filter(function(s){ return !hikers.some(function(h){ return Math.abs(h.x-s[0])<20 && Math.abs(h.y-s[1])<20; }); });
+  if(!free.length) return;
+  var s=free[Math.floor(Math.random()*free.length)];
+  var urgency=Math.random()<0.35 ? 'critical' : (Math.random()<0.5 ? 'urgent' : 'stable');
+  var time = urgency==='critical' ? 26 : urgency==='urgent' ? 38 : 55;
+  hikers.push({x:s[0],y:s[1],name:names[Math.floor(Math.random()*names.length)],urgency:urgency,time:time,max:time,rescue:0,flash:0});
+}
+function updateHud(){
+  scoreEl.textContent='Score: '+score;
+  resEl.textContent='Rescued: '+rescued+' / 15';
+  misEl.textContent='Missed: '+missed+' / 3';
+  misEl.className='pill'+(missed>=2?' warn':'');
+  var mm=Math.floor(elapsed/60), ss=Math.floor(elapsed%60);
+  clockEl.textContent='Shift: '+mm+':'+(ss<10?'0':'')+ss;
+  weatherEl.textContent='Weather: '+(weather==='Storm'?'Storm ⛈️ — routes slow':'Clear ☀️');
+  weatherEl.className='pill'+(weather==='Storm'?' warn':'');
+}
+function renderTeams(){
+  teamsEl.innerHTML='';
+  teams.forEach(function(t){
+    var d=document.createElement('div');
+    d.className='team'+(selected===t.id?' sel':'')+(t.state!=='base'?' busy':'');
+    d.innerHTML='<b>Team '+t.name+'</b> — '+(t.state==='base'?'At Base':t.state==='out'?'En Route':t.state==='rescuing'?'Rescuing':'Returning')+'<div class="bar stam"><i style="width:'+Math.max(0,t.stamina)+'%"></i></div><small>Stamina '+Math.round(t.stamina)+'% · Press '+(t.id+1)+'</small>';
+    d.addEventListener('click',function(){ initAudio(); selectTeam(t.id); });
+    d.addEventListener('touchstart',function(e){ e.preventDefault(); initAudio(); selectTeam(t.id); },{passive:false});
+    teamsEl.appendChild(d);
+  });
+}
+function selectTeam(i){ selected=i; sfx('click'); renderTeams(); var t=teams[i]; msgEl.textContent='Team '+t.name+' selected — now tap a hiker on the map.'; }
+function showTitle(){
+  state='title'; overlay.style.display='flex';
+  card.innerHTML='<h2>⛰️ Mountain Rescue Dispatcher</h2><p>You run the rescue base at the foot of the mountain. Stranded hikers appear on the map with countdown timers. Send a team before time runs out!</p><div class="keys"><b>How to Play</b><br>• Click a team card (or press 1, 2, 3), then click a hiker.<br>• Teams travel, rescue, and return. Travel drains stamina.<br>• Storms slow teams — critical hikers (red) expire fastest.<br>• Resting at base restores stamina. Rescue 15 hikers to win; lose 3 and the shift fails.<br>• Mouse, touch, and keyboard all work.</div><p><button id="startBtn">▶ Start Rescue Shift</button></p><p style="font-size:13px">Sound starts only after you press Start.</p>';
+  document.getElementById('startBtn').addEventListener('click',startGame);
+}
+function startGame(){ initAudio(); reset(); state='playing'; overlay.style.display='none'; sfx('go'); msgEl.textContent='Shift started! Dispatch your first team.'; }
+function endGame(win){
+  state=win?'win':'over'; overlay.style.display='flex';
+  var title=win?'🏆 Shift Complete — Everyone Safe!':'❌ Shift Failed';
+  var body=win?('You rescued 15 hikers and earned '+score+' points. Outstanding coordination!'):('Too many hikers were lost. You rescued '+rescued+' and scored '+score+' points. Try a faster dispatch strategy.');
+  card.innerHTML='<h2>'+title+'</h2><p>'+body+'</p><p><button id="againBtn">↻ Play Again</button></p>';
+  document.getElementById('againBtn').addEventListener('click',function(){ initAudio(); startGame(); });
+  if(win) sfx('save'); else sfx('bad');
+}
+function canvasPos(e){
+  var r=cv.getBoundingClientRect(), x, y;
+  if(e.touches&&e.touches[0]){ x=e.touches[0].clientX-r.left; y=e.touches[0].clientY-r.top; }
+  else { x=e.clientX-r.left; y=e.clientY-r.top; }
+  return {x:x*(cv.width/r.width), y:y*(cv.height/r.height)};
+}
+function onPick(e){
+  if(state!=='playing') return;
+  initAudio();
+  var p=canvasPos(e), best=null, bd=1e9;
+  hikers.forEach(function(h){ var d=Math.hypot(h.x-p.x,h.y-p.y); if(d<bd){bd=d;best=h;} });
+  if(best&&bd<55){
+    var t=teams[selected];
+    if(t.state!=='base'){ msgEl.textContent='Team '+t.name+' is busy! Pick a team at base or wait.'; sfx('bad'); return; }
+    if(t.stamina<25){ msgEl.textContent='Team '+t.name+' is too tired — let stamina recover at base.'; sfx('bad'); return; }
+    t.state='out'; t.tx=best.x; t.ty=best.y; t.target=best; best.assigned=true; sfx('go');
+    msgEl.textContent='Team '+t.name+' dispatched to '+best.name+' ('+best.urgency+').'; logEl.textContent='En route: '+best.name+' at the '+(best.urgency==='critical'?'summit trail':best.urgency==='urgent'?'ridge path':'forest trail')+'.';
+    renderTeams();
+  }
+}
+cv.addEventListener('mousedown',onPick);
+cv.addEventListener('click',function(e){ initAudio(); });
+cv.addEventListener('touchstart',function(e){ e.preventDefault(); onPick(e); },{passive:false});
+document.addEventListener('keydown',function(e){
+  initAudio();
+  if(e.key==='1'||e.key==='2'||e.key==='3'){ selectTeam(parseInt(e.key,10)-1); }
+  if(e.key==='m'||e.key==='M'){ muted=!muted; logEl.textContent=muted?'Sound muted (press M again).':'Sound on.'; }
+  if((e.key==='Enter'||e.key===' ')&&state!=='playing'){ var b=document.querySelector('#card button'); if(b) b.click(); }
+});
+function update(dt){
+  if(state!=='playing') return;
+  elapsed+=dt; spawnT+=dt; weatherT+=dt;
+  if(weatherT>22){ weatherT=0; weather=(weather==='Clear'?'Storm':'Clear'); stormT=0; logEl.textContent=weather==='Storm'?'⛈️ Storm moving in! Teams move slower.':'☀️ Skies clear. Teams move at full speed.'; }
+  if(spawnT>7 && hikers.length<6){ spawnT=0; spawnHiker(false); }
+  for(var i=hikers.length-1;i>=0;i--){
+    var h=hikers[i]; h.time-=dt; h.flash+=dt;
+    if(h.time<=0){
+      hikers.splice(i,1); missed++; sfx('bad');
+      msgEl.textContent='⚠️ '+h.name+' could not be reached in time.';
+      if(missed>=3){ updateHud(); renderTeams(); endGame(false); return; }
+    }
+  }
+  teams.forEach(function(t){
+    if(t.state==='base'){ t.stamina=Math.min(100,t.stamina+dt*6); }
+    else {
+      var speed=(weather==='Storm'?58:105);
+      var dx=t.tx-t.x, dy=t.ty-t.y, d=Math.hypot(dx,dy);
+      if(d>2){ t.x+=dx/d*speed*dt; t.y+=dy/d*speed*dt; t.stamina=Math.max(0,t.stamina-dt*2.2); }
+      else if(t.state==='out'&&t.target){ t.state='rescuing'; t.carry=0; }
+      else if(t.state==='rescuing'){
+        t.carry+=dt;
+        if(t.target){ t.target.rescue=t.carry/2.2; }
+        if(t.carry>=2.2){
+          var h=t.target, bonus=h?(h.urgency==='critical'?180:h.urgency==='urgent'?120:80):80;
+          var timeBonus=h?Math.max(0,Math.round(h.time)):0;
+          score+=bonus+timeBonus; rescued++;
+          if(h){ var idx=hikers.indexOf(h); if(idx>=0) hikers.splice(idx,1); logEl.textContent='✅ '+h.name+' rescued safely! +'+(bonus+timeBonus)+' points.'; }
+          for(var k=0;k<14;k++) particles.push({x:t.x,y:t.y,vx:rnd(-60,60),vy:rnd(-90,-20),life:0.8});
+          sfx('save'); t.state='returning'; t.tx=t.home; t.ty=480; t.target=null;
+          if(rescued>=15){ updateHud(); renderTeams(); endGame(true); return; }
+        }
+      }
+      else if(t.state==='returning'&&Math.abs(t.x-t.home)<4&&Math.abs(t.y-480)<4){ t.state='base'; t.x=t.home; t.y=480; }
+      if(t.stamina<=0&&t.state!=='base'&&t.state!=='returning'){ t.state='returning'; t.tx=t.home; t.ty=480; t.target=null; msgEl.textContent='Team '+t.name+' exhausted — returning to base.'; }
+    }
+  });
+  particles.forEach(function(p){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt; });
+  particles=particles.filter(function(p){ return p.life>0; });
+  updateHud(); renderTeams();
+}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  // mountain ridges
+  ctx.fillStyle='#5d8a5a'; ctx.beginPath(); ctx.moveTo(0,340); ctx.lineTo(150,180); ctx.lineTo(300,300); ctx.lineTo(470,90); ctx.lineTo(620,280); ctx.lineTo(780,150); ctx.lineTo(940,320); ctx.lineTo(940,520); ctx.lineTo(0,520); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.moveTo(470,90); ctx.lineTo(505,150); ctx.lineTo(470,135); ctx.lineTo(435,150); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.moveTo(150,180); ctx.lineTo(175,215); ctx.lineTo(150,205); ctx.lineTo(125,215); ctx.closePath(); ctx.fill();
+  // base camp
+  ctx.fillStyle='#263238'; ctx.fillRect(350,452,240,50);
+  ctx.fillStyle='#ffd54d'; ctx.font='bold 15px Arial'; ctx.textAlign='center'; ctx.fillText('🏕️ RESCUE BASE',470,445);
+  // trail lines
+  ctx.strokeStyle='rgba(90,60,30,0.55)'; ctx.lineWidth=3; ctx.setLineDash([8,7]);
+  hikers.forEach(function(h){ ctx.beginPath(); ctx.moveTo(470,470); ctx.lineTo(h.x,h.y); ctx.stroke(); });
+  ctx.setLineDash([]);
+  // hikers
+  hikers.forEach(function(h){
+    var col=h.urgency==='critical'?'#e53935':h.urgency==='urgent'?'#ff9800':'#2e7d32';
+    var pulse=h.urgency==='critical'&&Math.sin(h.flash*6)>0?6:0;
+    ctx.fillStyle=col; ctx.beginPath(); ctx.arc(h.x,h.y,16+pulse,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 18px Arial'; ctx.fillText('🧑',h.x,h.y+6);
+    ctx.fillStyle='#102027'; ctx.font='bold 12px Arial'; ctx.fillText(h.name,h.x,h.y-26);
+    ctx.fillStyle='#102027'; ctx.fillRect(h.x-24,h.y+20,48,8);
+    ctx.fillStyle=col; ctx.fillRect(h.x-24,h.y+20,48*Math.max(0,h.time/h.max),8);
+    ctx.fillStyle='#fff'; ctx.font='bold 11px Arial'; ctx.fillText(Math.ceil(Math.max(0,h.time))+'s',h.x,h.y+38);
+    if(h.assigned){ ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(h.x,h.y,22,0,Math.PI*2); ctx.stroke(); }
+  });
+  // teams
+  teams.forEach(function(t){
+    ctx.fillStyle=t.color; ctx.beginPath(); ctx.arc(t.x,t.y,15,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=selected===t.id?'#fff':'#102027'; ctx.lineWidth=selected===t.id?3:1; ctx.stroke();
+    ctx.fillStyle='#102027'; ctx.font='bold 13px Arial'; ctx.fillText(t.name[0],t.x,t.y+4);
+    if(t.state==='rescuing'){ ctx.fillStyle='#102027'; ctx.fillText('⛑️',t.x,t.y-24); }
+  });
+  particles.forEach(function(p){ ctx.fillStyle='rgba(255,213,77,'+Math.max(0,p.life)+')'; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); });
+  if(weather==='Storm'){
+    ctx.fillStyle='rgba(30,50,80,0.18)'; ctx.fillRect(0,0,cv.width,cv.height);
+    ctx.fillStyle='#cfd8dc'; ctx.font='bold 16px Arial'; ctx.textAlign='left'; ctx.fillText('⛈️ STORM ACTIVE',16,30);
+  }
+  ctx.textAlign='center';
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min(0.05,(now-last)/1000); last=now;
+  update(dt); draw();
+  requestAnimationFrame(loop);
+}
+reset(); showTitle(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

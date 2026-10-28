@@ -44,3 +44,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0738 | Arctic Research Station Manager | Strategy / Station Management | Mouse/touch assign crew, Space pause, R restart | [Play](./../games/game-0738.html) |
 | 0739 | Firefly Lantern Beat | Rhythm / Firefly Catch Beat | Arrow Keys/WASD move, Space catch, mouse/touch tap | [Play](./../games/game-0739.html) |
 | 0740 | Tightrope Acrobatic Balance | Precision / Balance | Arrow Keys lean, mouse/touch on-screen buttons | [Play](./../games/game-0740.html) |
+| 0741 | Volcano Ash Runner | Arcade / Lava Dodge Runner | Arrow Keys/Space jump, mouse/touch tap | [Play](./../games/game-0741.html) |
+| 0742 | Mirror Maze Light Bender | Puzzle / Mirror Reflection Logic | Mouse/touch tap mirror, Arrow Keys select, Space rotate | [Play](./../games/game-0742.html) |
+| 0743 | Orchard Harvest Planner | Strategy / Farm Planning | Mouse/touch place trees, Arrow Keys select, Space confirm | [Play](./../games/game-0743.html) |
+| 0744 | Samba Street Drummer | Rhythm / Samba Beat | Keys tap pads, mouse click pad, touch tap pad | [Play](./../games/game-0744.html) |
+| 0745 | Deep Sea Pearl Diver | Arcade / Underwater Collection | Arrow Keys/WASD swim, mouse move, touch drag | [Play](./../games/game-0745.html) |
+| 0746 | Rune Stone Decoder | Puzzle / Rune Sequence Logic | Mouse/touch tap runes, number keys select | [Play](./../games/game-0746.html) |
+| 0747 | Mountain Rescue Dispatcher | Strategy / Rescue Coordination | Mouse/touch dispatch teams, Arrow Keys select, Space confirm | [Play](./../games/game-0747.html) |
+| 0748 | Flamenco Castanet Tempo | Rhythm / Castanet Timing | Keys tap beats, mouse click, touch tap | [Play](./../games/game-0748.html) |
+| 0749 | Windmill Blade Balancer | Precision / Windmill Balance Timing | Arrow Keys adjust, mouse drag, touch drag | [Play](./../games/game-0749.html) |
+| 0750 | Meteor Shower Defender | Arcade / Meteor Defense Shooter | Arrow Keys move, Space shoot, mouse aim, touch tap | [Play](./../games/game-0750.html) |

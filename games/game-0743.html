@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Orchard Harvest Planner</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#1a2f1a;color:#fff;font-family:Arial,Helvetica,sans-serif;text-align:center;overflow-x:hidden}
+  h1{margin:8px 0 2px;font-size:26px}
+  p.sub{margin:0 0 8px;color:#cfe8c9}
+  #hud{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:860px;margin:6px auto}
+  .pill{background:#2f5d2f;border:2px solid #7bc47f;border-radius:20px;padding:6px 12px;font-weight:bold;font-size:14px}
+  .pill.warn{background:#7a2e2e;border-color:#ff8888}
+  #tools{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:6px auto;max-width:860px}
+  button{cursor:pointer;border:2px solid #fff;background:#3a7d3a;color:#fff;padding:9px 14px;border-radius:10px;font-weight:bold;font-size:15px}
+  button.sel{background:#ffd23f;color:#222;border-color:#fff700}
+  button:active{transform:scale(.97)}
+  #wrap{position:relative;max-width:860px;margin:8px auto}
+  canvas{background:#7ab648;border:4px solid #3d2b1f;border-radius:12px;width:100%;max-width:840px;height:auto;display:block;margin:0 auto;touch-action:none}
+  #overlay{position:absolute;inset:0;background:rgba(0,20,0,.88);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+  #overlay h2{font-size:32px;margin:6px 0}
+  #overlay p{max-width:620px;line-height:1.55;color:#e8f5e8}
+  #overlay.hidden{display:none}
+  #msg{min-height:22px;font-weight:bold;color:#ffe066}
+  #legend{font-size:13px;color:#d8ecd8;max-width:840px;margin:4px auto 16px;line-height:1.5}
+  kbd{background:#fff;color:#111;padding:1px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>🌳 Orchard Harvest Planner 🌳</h1>
+<p class="sub">Plant smart, water well, and harvest before the storm!</p>
+
+<div id="hud">
+  <div class="pill">🪙 Coins: <span id="coins">80</span> / 300</div>
+  <div class="pill">💧 Water: <span id="water">60</span></div>
+  <div class="pill">☀️ Sun: <span id="sun">60</span></div>
+  <div class="pill">📅 Day <span id="day">1</span> — <span id="season">Spring</span></div>
+  <div class="pill">❤️ Lives: <span id="lives">♥♥♥</span></div>
+  <div class="pill" id="stormPill">🌤️ Weather: Calm</div>
+</div>
+
+<div id="tools" role="toolbar" aria-label="Tools">
+  <button id="tool-tree" class="sel">🌱 Tree (25 coins)</button>
+  <button id="tool-worker">👨‍🌾 Worker (40 coins)</button>
+  <button id="tool-water">💧 Water (free, +growth)</button>
+  <button id="tool-harvest">🍎 Harvest (+coins)</button>
+</div>
+<div id="msg">Choose a tool, then tap a plot on the field.</div>
+
+<div id="wrap">
+  <canvas id="game" width="840" height="560"></canvas>
+  <div id="overlay">
+    <h2 id="ovTitle">🌳 Orchard Harvest Planner</h2>
+    <p id="ovText"><b>How to Play:</b> You run a small orchard on a 10 × 7 field.
+    Plant trees, water them, and harvest ripe apples for coins. Workers placed next to trees auto-harvest ripe fruit.
+    Sun and water refill over time — water also helps trees grow faster. Storms arrive regularly: harvest ripe fruit before a storm, or you lose the fruit and a life!
+    <br><br><b>Win:</b> reach 300 coins. <b>Lose:</b> lose all 3 lives.
+    <br><b>Controls:</b> Mouse / touch: tap a plot. Keys: <kbd>1</kbd>-<kbd>4</kbd> tools, <kbd>Arrows</kbd> move cursor, <kbd>Enter</kbd>/<kbd>Space</kbd> place, <kbd>R</kbd> restart.</p>
+    <button id="startBtn" style="font-size:20px;padding:14px 28px">▶ Start Game</button>
+  </div>
+</div>
+
+<p id="legend">🌱 Sapling grows with sun + water → 🌿 Growing → 🌳 Mature → 🍎 Ripe (harvest now!) &nbsp;|&nbsp; Worker 👨‍🌾 harvests neighbouring ripe trees automatically. &nbsp;|&nbsp; Storm ⛈️ destroys unharvested ripe fruit.</p>
+
+<script>
+(function(){
+  var cv=document.getElementById('game'), ctx=cv.getContext('2d');
+  var COLS=10, ROWS=7, CW=84, CH=80;
+  var coins=80, water=60, sun=60, day=1, lives=3, tool='tree', playing=false, over=false, won=false;
+  var grid=[], workers=[], cursor={x:0,y:0}, stormIn=38, stormWarn=false, stormTimer=0, elapsed=0, last=0, raf=0;
+  var seasons=['Spring','Summer','Autumn','Winter'];
+  var msgEl=document.getElementById('msg'), overlay=document.getElementById('overlay');
+  var ovTitle=document.getElementById('ovTitle'), ovText=document.getElementById('ovText'), startBtn=document.getElementById('startBtn');
+
+  // ---- Audio (procedural, after interaction only) ----
+  var AC=null;
+  function audio(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(AC&&AC.state==='suspended'){AC.resume();} return AC; }
+  function beep(f,d,type,vol){ var a=audio(); if(!a) return; try{ var o=a.createOscillator(), g=a.createGain(); o.type=type||'sine'; o.frequency.value=f; g.gain.value=vol||0.12; o.connect(g); g.connect(a.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d); o.stop(a.currentTime+d); }catch(e){} }
+  function sndPlace(){ beep(440,0.15,'triangle'); setTimeout(function(){beep(660,0.12,'triangle');},70); }
+  function sndHarvest(){ beep(880,0.12,'sine'); setTimeout(function(){beep(1100,0.15,'sine');},80); }
+  function sndBad(){ beep(160,0.25,'sawtooth',0.08); }
+  function sndStorm(){ beep(90,0.6,'sawtooth',0.12); setTimeout(function(){beep(70,0.5,'sawtooth',0.1);},200); }
+  function sndWin(){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){beep(f,0.25,'triangle',0.14);},i*130); }); }
+
+  function cell(x,y){ return grid[y*COLS+x]; }
+  function reset(){
+    coins=80; water=60; sun=60; day=1; lives=3; tool='tree'; playing=true; over=false; won=false;
+    stormIn=38; stormWarn=false; stormTimer=0; elapsed=0; cursor={x:0,y:0};
+    grid=[]; workers=[];
+    for(var i=0;i<COLS*ROWS;i++) grid.push(null);
+    // A few starter trees so the first minute is fun, not empty.
+    grid[22]={stage:1,growth:45,ripe:false}; grid[24]={stage:1,growth:30,ripe:false}; grid[43]={stage:0,growth:10,ripe:false};
+    overlay.classList.add('hidden'); setTool('tree'); say('Welcome! Plant trees, water them, harvest ripe apples before the storm.');
+    updateHUD();
+  }
+  function say(t){ msgEl.textContent=t; }
+  function setTool(t){
+    tool=t;
+    ['tree','worker','water','harvest'].forEach(function(k){ document.getElementById('tool-'+k).classList.toggle('sel',k===t); });
+  }
+  ['tree','worker','water','harvest'].forEach(function(k){
+    document.getElementById('tool-'+k).addEventListener('click',function(){ audio(); setTool(k); say('Tool: '+k+'. Tap a plot.'); });
+  });
+
+  function neighbours(x,y){
+    var out=[];
+    for(var dy=-1;dy<=1;dy++) for(var dx=-1;dx<=1;dx++){
+      if(!dx&&!dy) continue; var nx=x+dx, ny=y+dy;
+      if(nx>=0&&nx<COLS&&ny>=0&&ny<ROWS) out.push({x:nx,y:ny});
+    }
+    return out;
+  }
+  function hasWorkerNear(x,y){
+    return workers.some(function(w){ return Math.abs(w.x-x)<=1 && Math.abs(w.y-y)<=1; });
+  }
+
+  function act(x,y){
+    if(!playing||over) return;
+    audio();
+    var idx=y*COLS+x, cur=cell(x,y);
+    if(tool==='tree'){
+      if(cur||workers.some(function(w){return w.x===x&&w.y===y;})){ say('That plot is already used. Pick an empty plot.'); sndBad(); return; }
+      if(coins<25){ say('Not enough coins for a tree (need 25). Harvest first!'); sndBad(); return; }
+      coins-=25; grid[idx]={stage:0,growth:0,ripe:false}; sndPlace(); say('Sapling planted! Water it to help it grow.');
+    } else if(tool==='worker'){
+      if(cur||workers.some(function(w){return w.x===x&&w.y===y;})){ say('That plot is already used.'); sndBad(); return; }
+      if(coins<40){ say('Not enough coins for a worker (need 40).'); sndBad(); return; }
+      coins-=40; workers.push({x:x,y:y}); sndPlace(); say('Worker hired! They auto-harvest ripe trees next to them.');
+    } else if(tool==='water'){
+      if(!cur){ say('Water a tree, not bare soil.'); sndBad(); return; }
+      if(water<5){ say('Out of water — wait for rain / refill.'); sndBad(); return; }
+      water-=5; cur.growth+=22; say('Splashed! That tree grows faster now.'); beep(520,0.15,'sine');
+    } else if(tool==='harvest'){
+      if(!cur||!cur.ripe){ say('Nothing ripe here yet. Ripe trees show red apples.'); sndBad(); return; }
+      harvestAt(x,y);
+    }
+    checkEnd(); updateHUD();
+  }
+  function harvestAt(x,y){
+    var c=cell(x,y); if(!c) return;
+    grid[y*COLS+x]={stage:1,growth:20,ripe:false}; // mature tree regrows after harvest
+    var bonus=hasWorkerNear(x,y)?5:0;
+    coins+=25+bonus; sndHarvest();
+    say('Harvested! +'+(25+bonus)+' coins. '+(coins>=300?'You are close to winning!':''));
+  }
+
+  function stormHits(){
+    sndStorm(); var lost=0;
+    for(var y=0;y<ROWS;y++) for(var x=0;x<COLS;x++){
+      var c=cell(x,y);
+      if(c&&c.ripe){ grid[y*COLS+x]={stage:1,growth:20,ripe:false}; lost++; }
+    }
+    if(lost>0){ lives--; say('⛈️ Storm! '+lost+' ripe crop(s) lost and you lose a life. Harvest earlier next time!'); }
+    else { say('⛈️ Storm passed — no ripe fruit was left out. Well planned!'); }
+    stormWarn=false; stormIn=42; stormTimer=0; updateHUD(); checkEnd();
+  }
+
+  function checkEnd(){
+    if(coins>=300 && !over){ won=true; over=true; playing=false; sndWin(); showEnd('🏆 YOU WIN!','You reached '+coins+' coins and saved the orchard! Brilliant planning. Press Restart to play again.'); }
+    else if(lives<=0 && !over){ over=true; playing=false; sndBad(); showEnd('💔 GAME OVER','The storms overwhelmed your orchard. You finished with '+coins+' coins. Try planting earlier and harvesting before storms!'); }
+  }
+  function showEnd(title,text){
+    ovTitle.textContent=title; ovText.textContent=text; startBtn.textContent='↻ Restart';
+    overlay.classList.remove('hidden'); updateHUD();
+  }
+
+  function updateHUD(){
+    document.getElementById('coins').textContent=coins;
+    document.getElementById('water').textContent=Math.floor(water);
+    document.getElementById('sun').textContent=Math.floor(sun);
+    document.getElementById('day').textContent=day;
+    document.getElementById('season').textContent=seasons[(day-1)%4];
+    document.getElementById('lives').textContent='♥'.repeat(Math.max(0,lives))||'—';
+    var sp=document.getElementById('stormPill');
+    if(stormWarn){ sp.textContent='⛈️ STORM in '+Math.ceil(10-stormTimer)+'s — HARVEST NOW!'; sp.classList.add('warn'); }
+    else { sp.textContent='🌤️ Next storm in '+Math.ceil(stormIn)+'s'; sp.classList.remove('warn'); }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    for(var y=0;y<ROWS;y++) for(var x=0;x<COLS;x++){
+      var px=x*CW, py=y*CH, alt=(x+y)%2===0;
+      ctx.fillStyle=alt?'#8ec94f':'#7ab648'; ctx.fillRect(px,py,CW,CH);
+      ctx.strokeStyle='rgba(0,0,0,.18)'; ctx.strokeRect(px+1,py+1,CW-2,CH-2);
+      var c=cell(x,y), isW=workers.some(function(w){return w.x===x&&w.y===y;});
+      if(c){
+        var cx=px+CW/2, cy=py+CH/2;
+        ctx.fillStyle='#6b4423'; ctx.fillRect(cx-5,cy+4,10,26);
+        if(c.stage===0){ ctx.fillStyle='#3fae5a'; ctx.beginPath(); ctx.arc(cx,cy,10,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.font='11px Arial'; ctx.textAlign='center'; ctx.fillText('sapling',cx,cy+42); }
+        else if(c.stage===1 && !c.ripe){ ctx.fillStyle='#2e8b3e'; ctx.beginPath(); ctx.arc(cx,cy-6,24,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.font='11px Arial'; ctx.fillText('growing '+Math.floor(c.growth)+'%',cx,cy+42); }
+        else if(c.ripe){ ctx.fillStyle='#2e8b3e'; ctx.beginPath(); ctx.arc(cx,cy-6,26,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#e53935'; [[-14,-14],[12,-18],[0,-4]].forEach(function(p){ ctx.beginPath(); ctx.arc(cx+p[0],cy+p[1],7,0,Math.PI*2); ctx.fill(); }); ctx.fillStyle='#fff'; ctx.font='bold 12px Arial'; ctx.fillText('🍎 RIPE!',cx,cy+42); }
+        else { ctx.fillStyle='#2e8b3e'; ctx.beginPath(); ctx.arc(cx,cy-6,24,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.font='11px Arial'; ctx.fillText('mature',cx,cy+42); }
+      }
+      if(isW){ ctx.font='34px Arial'; ctx.textAlign='center'; ctx.fillText('👨‍🌾',px+CW/2,py+46); ctx.font='11px Arial'; ctx.fillText('worker',px+CW/2,py+70); }
+    }
+    // cursor
+    if(playing){ ctx.strokeStyle='#ffe600'; ctx.lineWidth=4; ctx.strokeRect(cursor.x*CW+2,cursor.y*CH+2,CW-4,CH-4); ctx.lineWidth=1; }
+    // progress bar
+    ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillRect(0,cv.height-14,cv.width,14);
+    ctx.fillStyle='#ffd23f'; ctx.fillRect(0,cv.height-14,cv.width*Math.min(1,coins/300),14);
+    ctx.fillStyle='#fff'; ctx.font='10px Arial'; ctx.textAlign='left'; ctx.fillText('Progress to 300 coins',6,cv.height-3);
+  }
+
+  function tick(ts){
+    if(!last) last=ts; var dt=Math.min(0.1,(ts-last)/1000); last=ts;
+    if(playing && !over){
+      elapsed+=dt;
+      if(elapsed>=8){ elapsed=0; day++; water=Math.min(100,water+8); sun=Math.min(100,sun+10); }
+      water=Math.min(100,water+dt*0.7); sun=Math.min(100,sun+dt*0.9);
+      // growth
+      for(var y=0;y<ROWS;y++) for(var x=0;x<COLS;x++){
+        var c=cell(x,y); if(!c||c.ripe) continue;
+        var rate=4+sun*0.04+(hasWorkerNear(x,y)?2:0);
+        c.growth+=dt*rate;
+        if(c.stage===0 && c.growth>=40){ c.stage=1; c.growth=40; }
+        else if(c.stage===1 && c.growth>=100){ c.ripe=true; }
+      }
+      // workers auto-harvest
+      workers.forEach(function(w){
+        neighbours(w.x,w.y).forEach(function(n){ var cc=cell(n.x,n.y); if(cc&&cc.ripe) harvestAt(n.x,n.y); });
+      });
+      // storms
+      if(!stormWarn){ stormIn-=dt; if(stormIn<=0){ stormWarn=true; stormTimer=0; say('⚠️ STORM WARNING! Harvest all ripe fruit in 10 seconds!'); beep(220,0.3,'square',0.08); } }
+      else { stormTimer+=dt; if(stormTimer>=10) stormHits(); }
+      updateHUD();
+    }
+    draw();
+    raf=requestAnimationFrame(tick);
+  }
+
+  function posFromEvent(e){
+    var r=cv.getBoundingClientRect();
+    var cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left, cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;
+    var x=Math.floor(cx/r.width*COLS), y=Math.floor(cy/r.height*ROWS);
+    return {x:Math.max(0,Math.min(COLS-1,x)), y:Math.max(0,Math.min(ROWS-1,y))};
+  }
+  cv.addEventListener('mousedown',function(e){ var p=posFromEvent(e); cursor=p; act(p.x,p.y); });
+  cv.addEventListener('click',function(e){ audio(); });
+  cv.addEventListener('touchstart',function(e){ e.preventDefault(); var p=posFromEvent(e); cursor=p; act(p.x,p.y); }, {passive:false});
+  document.addEventListener('keydown',function(e){
+    audio();
+    if(e.key==='1') setTool('tree');
+    else if(e.key==='2') setTool('worker');
+    else if(e.key==='3') setTool('water');
+    else if(e.key==='4') setTool('harvest');
+    else if(e.key==='ArrowLeft') cursor.x=Math.max(0,cursor.x-1);
+    else if(e.key==='ArrowRight') cursor.x=Math.min(COLS-1,cursor.x+1);
+    else if(e.key==='ArrowUp') cursor.y=Math.max(0,cursor.y-1);
+    else if(e.key==='ArrowDown') cursor.y=Math.min(ROWS-1,cursor.y+1);
+    else if(e.key==='Enter'||e.key===' '){ e.preventDefault(); if(playing) act(cursor.x,cursor.y); }
+    else if(e.key==='r'||e.key==='R'){ if(over||!playing) reset(); }
+  });
+  startBtn.addEventListener('click',function(){ audio(); reset(); });
+  startBtn.addEventListener('touchstart',function(){ audio(); reset(); });
+  // Title screen is the first view; animation still runs behind it.
+  raf=requestAnimationFrame(tick);
+  updateHUD(); draw();
+})();
+</script>
+</body>
+</html>

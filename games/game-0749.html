@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Windmill Blade Balancer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: linear-gradient(180deg, #7ec8f7 0%, #c9ecff 55%, #e8f7d9 100%);
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px; color: #1d3557; user-select: none;
+  }
+  h1 { font-size: 26px; margin: 6px 0 2px; text-align: center; text-shadow: 0 1px 0 #fff; }
+  p.sub { font-size: 13px; margin-bottom: 8px; text-align: center; }
+  #wrap { position: relative; width: min(96vw, 640px); }
+  canvas {
+    display: block; width: 100%; height: auto; aspect-ratio: 640 / 460;
+    background: linear-gradient(180deg, #8ed0ff 0%, #d6f2ff 62%, #b9e6a3 100%);
+    border: 3px solid #1d3557; border-radius: 14px; touch-action: none;
+  }
+  #hud {
+    display: flex; justify-content: space-between; gap: 8px; margin: 8px 0;
+    font-weight: bold; font-size: 15px; flex-wrap: wrap;
+  }
+  #hud span { background: rgba(255,255,255,.85); padding: 6px 10px; border-radius: 20px; border: 2px solid #1d3557; }
+  #meterWrap { width: 100%; height: 22px; background: #fff; border: 2px solid #1d3557; border-radius: 12px; overflow: hidden; position: relative; }
+  #meterFill { height: 100%; width: 100%; background: #43aa8b; transition: width .15s; }
+  #meterLabel { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(20,40,70,.82); color: #fff; border-radius: 14px; text-align: center; padding: 20px; gap: 10px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { font-size: 15px; line-height: 1.5; max-width: 480px; }
+  button {
+    font-size: 19px; font-weight: bold; padding: 12px 26px; border-radius: 12px; cursor: pointer;
+    background: #ffd166; color: #1d3557; border: 3px solid #1d3557; box-shadow: 0 4px 0 #1d3557;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #1d3557; }
+  button.small { font-size: 16px; padding: 9px 18px; }
+  #controls { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+  #controls button { flex: 1; min-width: 130px; }
+  #gust { font-size: 15px; font-weight: bold; text-align: center; margin-top: 8px; min-height: 20px; }
+  #hint { font-size: 12px; text-align: center; margin-top: 6px; color: #33415c; }
+</style>
+</head>
+<body>
+<h1>🌬️ Windmill Blade Balancer</h1>
+<p class="sub">Precision / Windmill Balance Timing — keep the rotor in the green zone!</p>
+
+<div id="wrap">
+  <canvas id="game" width="640" height="460"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🌬️ Windmill Blade Balancer</h2>
+    <p><b>How to Play:</b> Gusts of wind push your windmill rotor off balance.
+    Steer it back into the <span style="color:#7bf1a8">GREEN ZONE</span> and hold it there to score.
+    Stay in the green to gain points; drift too far for too long and you lose stability.</p>
+    <p>🕹️ <b>Controls:</b> ← → or A / D keys to tilt &bull; Hold on-screen buttons &bull;
+    Tap / drag on the canvas: left side tilts left, right side tilts right &bull;
+    Space = brake (slows the rotor swing) &bull; P = pause</p>
+    <p>🏆 <b>Win:</b> reach <b>1500 points</b>. 💔 <b>Lose:</b> all 3 stability hearts run out.</p>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+
+<div id="hud">
+  <span>⭐ Score: <b id="score">0</b> / 1500</span>
+  <span>❤️ Stability: <b id="lives">3</b></span>
+  <span>🎯 Tilt: <b id="tilt">0°</b></span>
+  <span>💨 Gust: <b id="gustVal">Calm</b></span>
+  <span>⏱️ Time: <b id="time">0s</b></span>
+</div>
+<div id="meterWrap"><div id="meterFill"></div><div id="meterLabel">BALANCE — keep the needle in the green!</div></div>
+<div id="gust">🌤️ Calm air. Watch for gusts!</div>
+
+<div id="controls">
+  <button id="leftBtn" class="small">◀ Tilt Left</button>
+  <button id="brakeBtn" class="small">⏸ Brake (Space)</button>
+  <button id="rightBtn" class="small">Tilt Right ▶</button>
+</div>
+<p id="hint">Tip: small, frequent corrections beat big swings. A gust warning flashes before a strong gust hits — get ready!</p>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+  var endScore = document.getElementById("endScore");
+  var scoreEl = document.getElementById("score");
+  var livesEl = document.getElementById("lives");
+  var tiltEl = document.getElementById("tilt");
+  var gustValEl = document.getElementById("gustVal");
+  var timeEl = document.getElementById("time");
+  var gustEl = document.getElementById("gust");
+  var meterFill = document.getElementById("meterFill");
+
+  var W = 640, H = 460;
+  var state = "title"; // title | playing | paused | over
+  var score = 0, lives = 3, tilt = 0, tiltVel = 0, bladeAngle = 0;
+  var bladePitch = 0; // visual blade angle adjustment
+  var gust = 0, gustTarget = 0, gustTimer = 0, warnTimer = 0, gustName = "Calm";
+  var elapsed = 0, lastTime = 0, outTimer = 0, flash = 0, perfectStreak = 0;
+  var pressLeft = false, pressRight = false, braking = false;
+  var particles = [];
+  var audioCtx = null, muted = false;
+
+  var GUSTS = [
+    { name: "Calm", force: 0, label: "🌤️ Calm air." },
+    { name: "Breeze", force: 9, label: "🍃 Light breeze drifting." },
+    { name: "Strong Gust", force: 22, label: "💨 Strong gust! Correct quickly!" },
+    { name: "Storm Blast", force: 34, label: "🌪️ STORM BLAST! Hold steady!" }
+  ];
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === "suspended") audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function chord(notes) { notes.forEach(function (f, i) { setTimeout(function () { beep(f, 0.35, "triangle", 0.12); }, i * 90); }); }
+
+  function pickGust() {
+    var roll = Math.random();
+    var idx = 0;
+    if (roll > 0.92) idx = 3; else if (roll > 0.68) idx = 2; else if (roll > 0.38) idx = 1;
+    var g = GUSTS[idx];
+    gustName = g.name;
+    var dir = Math.random() < 0.5 ? -1 : 1;
+    gustTarget = g.force * dir;
+    warnTimer = idx >= 2 ? 1.1 : 0; // warning window for big gusts
+    gustEl.textContent = (idx >= 2 ? "⚠️ INCOMING: " : "") + g.label + (idx > 0 ? (dir < 0 ? " (pushing LEFT)" : " (pushing RIGHT)") : "");
+    if (idx >= 2) beep(220, 0.25, "square", 0.1);
+  }
+
+  function resetGame() {
+    score = 0; lives = 3; tilt = 0; tiltVel = 0; bladeAngle = 0; bladePitch = 0;
+    gust = 0; gustTarget = 0; gustTimer = 2.5; warnTimer = 0; gustName = "Calm";
+    elapsed = 0; outTimer = 0; flash = 0; perfectStreak = 0; particles = [];
+    gustEl.textContent = "🌤️ Calm air. Watch for gusts!";
+  }
+
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    lastTime = performance.now();
+    chord([523, 659, 784]);
+  }
+
+  function endGame(won) {
+    state = "over";
+    endTitle.textContent = won ? "🏆 YOU WIN! Mill Master!" : "💔 Game Over — The Mill Toppled!";
+    endText.textContent = won
+      ? "You held the rotor steady through every gust and kept the village grinding. Brilliant balancing!"
+      : "The rotor spun out of control one too many times. The miller believes in you — try again!";
+    endScore.textContent = "Final Score: " + Math.floor(score) + "  •  Time survived: " + Math.floor(elapsed) + "s  •  Best green streak: " + perfectStreak + "s";
+    endScreen.classList.remove("hidden");
+    if (won) chord([523, 659, 784, 1047]); else { beep(330, 0.3, "sawtooth", 0.1); setTimeout(function () { beep(220, 0.4, "sawtooth", 0.1); }, 200); }
+  }
+
+  function update(dt) {
+    if (state !== "playing") return;
+    elapsed += dt;
+
+    // Gust scheduling
+    gustTimer -= dt;
+    if (gustTimer <= 0) { pickGust(); gustTimer = 3.2 + Math.random() * 3.2; }
+    if (warnTimer > 0) { warnTimer -= dt; }
+    else { gust += (gustTarget - gust) * Math.min(1, dt * 2.5); }
+    if (Math.abs(gustTarget) < 1 && Math.random() < dt * 0.4) gustTarget = 0;
+
+    // Player input torque
+    var torque = 0;
+    if (pressLeft) torque -= 1;
+    if (pressRight) torque += 1;
+    // Tilt physics: gust pushes, player counters, spring pulls gently to centre
+    tiltVel += (gust * 0.55 + torque * 46 - tilt * 0.35) * dt;
+    if (braking) tiltVel *= Math.pow(0.05, dt);
+    else tiltVel *= Math.pow(0.55, dt);
+    tilt += tiltVel * dt;
+    if (tilt > 70) { tilt = 70; tiltVel = 0; }
+    if (tilt < -70) { tilt = -70; tiltVel = 0; }
+    bladeAngle += dt * (2.2 + Math.abs(gust) * 0.06);
+    bladePitch += ((pressRight ? 1 : 0) - (pressLeft ? 1 : 0) - bladePitch) * Math.min(1, dt * 6);
+
+    // Scoring: green zone is within 15 degrees
+    var inGreen = Math.abs(tilt) <= 15;
+    var inAmber = !inGreen && Math.abs(tilt) <= 32;
+    if (inGreen) {
+      score += dt * 22;
+      perfectStreak = Math.max(perfectStreak, Math.floor(elapsed));
+      outTimer = 0;
+      if (Math.random() < dt * 2) beep(880, 0.06, "sine", 0.03);
+    } else if (inAmber) {
+      score += dt * 4;
+      outTimer = Math.max(0, outTimer - dt * 0.5);
+    } else {
+      outTimer += dt;
+      flash = Math.max(flash, 0.35);
+      if (Math.random() < dt * 3) beep(140, 0.12, "square", 0.05);
+    }
+    if (outTimer >= 2.2) {
+      lives -= 1; outTimer = 0; tilt = 0; tiltVel = 0;
+      beep(180, 0.35, "sawtooth", 0.14);
+      gustEl.textContent = "💥 Stability lost! A heart is gone — re-centre the rotor!";
+      if (lives <= 0) { updateHUD(); endGame(false); return; }
+    }
+    if (score >= 1500) { score = 1500; updateHUD(); endGame(true); return; }
+
+    // Wind particles
+    if (Math.random() < dt * (6 + Math.abs(gust))) {
+      particles.push({ x: gust >= 0 ? -10 : W + 10, y: 40 + Math.random() * 260, v: (gust >= 0 ? 1 : -1) * (60 + Math.abs(gust) * 4 + Math.random() * 60), life: 1 });
+    }
+    particles.forEach(function (p) { p.x += p.v * dt; p.life -= dt * 0.7; });
+    particles = particles.filter(function (p) { return p.life > 0 && p.x > -20 && p.x < W + 20; });
+    if (flash > 0) flash -= dt;
+    updateHUD();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = Math.floor(score);
+    livesEl.textContent = "❤️".repeat(Math.max(0, lives)) + (lives > 0 ? " (" + lives + ")" : " 0");
+    tiltEl.textContent = Math.round(tilt) + "°";
+    gustValEl.textContent = gustName + (Math.abs(gust) > 1 ? (gust < 0 ? " ◀" : " ▶") : "");
+    timeEl.textContent = Math.floor(elapsed) + "s";
+    var pct = Math.max(0, 100 - (Math.abs(tilt) / 70) * 100);
+    meterFill.style.width = pct + "%";
+    meterFill.style.background = Math.abs(tilt) <= 15 ? "#43aa8b" : (Math.abs(tilt) <= 32 ? "#f4a261" : "#e63946");
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky details
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.beginPath(); ctx.arc(110, 60, 26, 0, Math.PI * 2); ctx.arc(140, 52, 32, 0, Math.PI * 2); ctx.arc(172, 62, 24, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.beginPath(); ctx.arc(480, 48, 20, 0, Math.PI * 2); ctx.arc(505, 42, 26, 0, Math.PI * 2); ctx.arc(530, 52, 18, 0, Math.PI * 2); ctx.fill();
+    // Sun
+    ctx.fillStyle = "#ffd166";
+    ctx.beginPath(); ctx.arc(560, 70, 26, 0, Math.PI * 2); ctx.fill();
+    // Ground
+    ctx.fillStyle = "#8fce7e"; ctx.fillRect(0, 380, W, 80);
+    ctx.fillStyle = "#6db45e"; ctx.fillRect(0, 380, W, 8);
+    // Wind particles
+    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 2;
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + (p.v > 0 ? 22 : -22), p.y); ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+
+    var cx = 320, cy = 170;
+    // Tower
+    ctx.save();
+    ctx.translate(cx, 380);
+    ctx.fillStyle = "#e9e5d6";
+    ctx.beginPath(); ctx.moveTo(-28, 0); ctx.lineTo(-14, -200); ctx.lineTo(14, -200); ctx.lineTo(28, 0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#1d3557"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#6c584c"; ctx.fillRect(-14, -120, 28, 26);
+    ctx.fillStyle = "#ffd166"; ctx.fillRect(-6, -112, 12, 10);
+    ctx.restore();
+
+    // Rotor, tilted by current tilt
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(tilt * Math.PI / 180);
+    ctx.fillStyle = "#1d3557";
+    ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.fill();
+    for (var i = 0; i < 4; i++) {
+      ctx.save();
+      ctx.rotate(bladeAngle + i * Math.PI / 2 + bladePitch * 0.25);
+      ctx.fillStyle = i % 2 ? "#f4f1de" : "#e07a5f";
+      ctx.strokeStyle = "#1d3557"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-13, 6); ctx.lineTo(-13, -118); ctx.quadraticCurveTo(0, -132, 13, -118); ctx.lineTo(13, 6); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // Balance gauge at bottom
+    var gy = 428;
+    ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#1d3557"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(90, gy - 6, 460, 22, 10); ctx.fill(); ctx.stroke();
+    // Green zone
+    ctx.fillStyle = "#43aa8b";
+    var greenW = 460 * (30 / 140);
+    ctx.fillRect(90 + (460 - greenW) / 2, gy - 6, greenW, 22);
+    ctx.fillStyle = "#f4a261";
+    ctx.fillRect(90 + 460 * (38 / 140), gy - 6, 460 * (16 / 140), 22);
+    ctx.fillRect(90 + 460 * (86 / 140), gy - 6, 460 * (16 / 140), 22);
+    // Needle
+    var nx = 320 + (tilt / 70) * 230;
+    ctx.strokeStyle = "#e63946"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(nx, gy - 12); ctx.lineTo(nx, gy + 22); ctx.stroke();
+    ctx.fillStyle = "#1d3557"; ctx.font = "bold 13px Arial"; ctx.textAlign = "center";
+    ctx.fillText("◀ LEFT", 130, gy + 38); ctx.fillText("GREEN ZONE", 320, gy + 38); ctx.fillText("RIGHT ▶", 510, gy + 38);
+
+    // Warning / flash
+    if (warnTimer > 0 && state === "playing") {
+      ctx.fillStyle = "rgba(230,57,70,0.85)"; ctx.font = "bold 24px Arial"; ctx.textAlign = "center";
+      ctx.fillText("⚠️ GUST INCOMING — GET READY!", 320, 40);
+    }
+    if (flash > 0) {
+      ctx.fillStyle = "rgba(230,57,70," + (flash * 0.5).toFixed(2) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (state === "paused") {
+      ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 34px Arial"; ctx.textAlign = "center";
+      ctx.fillText("⏸ PAUSED — press P to resume", 320, 230);
+    }
+    if (state === "title") {
+      ctx.fillStyle = "#1d3557"; ctx.font = "bold 20px Arial"; ctx.textAlign = "center";
+      ctx.fillText("Press Start and keep the needle green!", 320, 420);
+    }
+  }
+
+  function loop(now) {
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    if (state === "playing") update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // --- Input: keyboard, mouse, touch ---
+  document.addEventListener("keydown", function (e) {
+    initAudio();
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") pressLeft = true;
+    if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") pressRight = true;
+    if (e.key === " ") { braking = true; e.preventDefault(); }
+    if (e.key === "p" || e.key === "P") {
+      if (state === "playing") { state = "paused"; }
+      else if (state === "paused") { state = "playing"; lastTime = performance.now(); }
+    }
+    if (e.key === "Enter" && (state === "title" || state === "over")) startGame();
+  });
+  document.addEventListener("keyup", function (e) {
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") pressLeft = false;
+    if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") pressRight = false;
+    if (e.key === " ") braking = false;
+  });
+  function canvasSteer(clientX) {
+    var rect = canvas.getBoundingClientRect();
+    var x = clientX - rect.left;
+    var mid = rect.width / 2;
+    pressLeft = x < mid; pressRight = x >= mid;
+  }
+  canvas.addEventListener("mousedown", function (e) { initAudio(); canvasSteer(e.clientX); });
+  canvas.addEventListener("mousemove", function (e) { if (e.buttons > 0) canvasSteer(e.clientX); });
+  document.addEventListener("mouseup", function () { pressLeft = false; pressRight = false; });
+  canvas.addEventListener("click", function (e) { initAudio(); canvasSteer(e.clientX); });
+  canvas.addEventListener("touchstart", function (e) {
+    initAudio();
+    if (e.touches && e.touches.length) canvasSteer(e.touches[0].clientX);
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) {
+    if (e.touches && e.touches.length) canvasSteer(e.touches[0].clientX);
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener("touchend", function (e) { pressLeft = false; pressRight = false; e.preventDefault(); }, { passive: false });
+
+  function holdButton(el, set) {
+    el.addEventListener("mousedown", function () { initAudio(); set(true); });
+    el.addEventListener("mouseup", function () { set(false); });
+    el.addEventListener("mouseleave", function () { set(false); });
+    el.addEventListener("touchstart", function (e) { initAudio(); set(true); e.preventDefault(); }, { passive: false });
+    el.addEventListener("touchend", function (e) { set(false); e.preventDefault(); }, { passive: false });
+    el.addEventListener("click", function () { initAudio(); });
+  }
+  holdButton(document.getElementById("leftBtn"), function (v) { pressLeft = v; });
+  holdButton(document.getElementById("rightBtn"), function (v) { pressRight = v; });
+  holdButton(document.getElementById("brakeBtn"), function (v) { braking = v; });
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  document.getElementById("startBtn").addEventListener("touchstart", function (e) { e.preventDefault(); startGame(); }, { passive: false });
+  document.getElementById("restartBtn").addEventListener("touchstart", function (e) { e.preventDefault(); startGame(); }, { passive: false });
+
+  updateHUD();
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

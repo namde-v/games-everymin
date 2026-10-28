@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mirror Maze Light Bender</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #070b1a; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 14px; }
+  h1 { font-size: 26px; text-align: center; color: #ffe066; text-shadow: 0 0 14px rgba(255,224,102,.6); margin: 6px 0 4px; }
+  .tag { color: #9fd8ff; font-size: 13px; text-align: center; margin-bottom: 10px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 600px; margin-bottom: 10px; }
+  .pill { background: #16224a; border: 1px solid #35508f; border-radius: 999px; padding: 6px 11px; font-size: 14px; font-weight: bold; }
+  .pill span { color: #ffe066; }
+  #status { min-height: 22px; text-align: center; font-weight: bold; color: #7dffb2; margin-bottom: 8px; }
+  #wrap { position: relative; width: 560px; max-width: 96vw; }
+  canvas { width: 100%; height: auto; display: block; background: #0b1230; border: 3px solid #35508f; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(4,8,22,.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 12px; }
+  .overlay h2 { font-size: 30px; color: #ffe066; }
+  .overlay p { line-height: 1.55; font-size: 15px; color: #dbe8ff; max-width: 440px; }
+  .overlay .big { font-size: 20px; color: #7dffb2; font-weight: bold; }
+  button { cursor: pointer; border: 0; border-radius: 10px; padding: 13px 22px; font-size: 17px; font-weight: bold; background: #ffd23f; color: #182042; box-shadow: 0 4px 0 #b8930a; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #2f6bff; color: #fff; box-shadow: 0 4px 0 #1a3fa0; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+  .hint { margin-top: 10px; color: #9fb4d8; font-size: 13px; text-align: center; line-height: 1.5; max-width: 600px; }
+  kbd { background: #22315f; padding: 2px 6px; border-radius: 5px; font-weight: bold; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<h1>🪞 Mirror Maze Light Bender</h1>
+<div class="tag">Rotate the mirrors. Bend the beam. Light the crystal.</div>
+
+<div id="hud">
+  <div class="pill">Level: <span id="hudLevel">1 / 5</span></div>
+  <div class="pill">Score: <span id="hudScore">0</span></div>
+  <div class="pill">Lives: <span id="hudLives">❤❤❤</span></div>
+  <div class="pill">Moves left: <span id="hudMoves">4</span></div>
+</div>
+<div id="status">Press Start to begin.</div>
+
+<div id="wrap">
+  <canvas id="game" width="560" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Mirror Maze<br>Light Bender</h2>
+    <p><strong>How to Play:</strong> A beam leaves the glowing emitter. Click, tap, or select a mirror and press Space to rotate it between / and \. Guide the beam through every mirror to the sparkling target crystal before you run out of moves.</p>
+    <p>Each rotation uses 1 move. Finish fast for a big bonus. Running out of moves costs a life. Lose all 3 lives and it is Game Over. Clear all 5 levels to win!</p>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Keyboard: Arrow keys move the cursor • Space / Enter rotates • R restarts<br>Mouse &amp; touch: tap a mirror to rotate it.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText" class="big"></p>
+    <p id="endDetail"></p>
+    <button id="restartBtn">↻ Restart Game</button>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="rotateBtn" class="secondary">↻ Rotate Selected Mirror</button>
+  <button id="resetLevelBtn" class="secondary">Reset Level</button>
+  <button id="soundBtn" class="secondary">🔊 Sound: On</button>
+</div>
+<p class="hint">Tip: trace the beam in your head first. A <kbd>/</kbd> mirror turns Right→Up and Down→Left. A <kbd>\</kbd> mirror turns Right→Down and Up→Left. Mirrors on the wrong path are decoys — rotating them wastes moves!</p>
+
+<script>
+(function() {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var hudLevel = document.getElementById('hudLevel');
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudMoves = document.getElementById('hudMoves');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endDetail = document.getElementById('endDetail');
+
+  var GRID = 7, CELL = 80;
+  var state = 'title'; // title, playing, over
+  var score = 0, lives = 3, levelIndex = 0, movesLeft = 4;
+  var cursor = { x: 3, y: 3 };
+  var beamPath = [], beamHit = false, beamAnim = 0, flash = 0;
+  var soundOn = true, audioCtx = null;
+
+  // Levels: emitter, target, mirrors (initial type is deliberately wrong for path mirrors)
+  var levels = [
+    { name: 'First Light', moves: 4,
+      emitter: { x: 0, y: 2, dir: 'right' }, target: { x: 3, y: 5 },
+      mirrors: [ { x: 3, y: 2, type: '/' } ] },
+    { name: 'Two Turns', moves: 6,
+      emitter: { x: 0, y: 1, dir: 'right' }, target: { x: 5, y: 4 },
+      mirrors: [ { x: 2, y: 1, type: '/' }, { x: 2, y: 4, type: '/' } ] },
+    { name: 'Up and Over', moves: 8,
+      emitter: { x: 0, y: 5, dir: 'right' }, target: { x: 6, y: 2 },
+      mirrors: [ { x: 3, y: 5, type: '\\' }, { x: 3, y: 2, type: '\\' }, { x: 1, y: 1, type: '/' } ] },
+    { name: 'The Snake', moves: 10,
+      emitter: { x: 0, y: 3, dir: 'right' }, target: { x: 6, y: 1 },
+      mirrors: [ { x: 2, y: 3, type: '/' }, { x: 2, y: 5, type: '/' }, { x: 5, y: 5, type: '\\' }, { x: 5, y: 1, type: '\\' }, { x: 6, y: 6, type: '/' } ] },
+    { name: 'Reverse Run', moves: 12,
+      emitter: { x: 6, y: 6, dir: 'left' }, target: { x: 6, y: 3 },
+      mirrors: [ { x: 4, y: 6, type: '/' }, { x: 4, y: 3, type: '\\' }, { x: 1, y: 1, type: '/' }, { x: 2, y: 6, type: '\\' } ] }
+  ];
+  var current = null; // deep copy of level in play
+
+  function cloneLevel(lv) {
+    return JSON.parse(JSON.stringify(lv));
+  }
+  function dirVec(d) {
+    if (d === 'right') return { x: 1, y: 0 };
+    if (d === 'left') return { x: -1, y: 0 };
+    if (d === 'up') return { x: 0, y: -1 };
+    return { x: 0, y: 1 };
+  }
+  function reflect(type, d) {
+    if (type === '/') {
+      if (d === 'right') return 'up';
+      if (d === 'up') return 'right';
+      if (d === 'left') return 'down';
+      return 'left';
+    }
+    // backslash
+    if (d === 'right') return 'down';
+    if (d === 'down') return 'right';
+    if (d === 'left') return 'up';
+    return 'left';
+  }
+  function mirrorAt(x, y) {
+    for (var i = 0; i < current.mirrors.length; i++) {
+      if (current.mirrors[i].x === x && current.mirrors[i].y === y) return current.mirrors[i];
+    }
+    return null;
+  }
+  function computeBeam() {
+    var path = [], hit = false;
+    var x = current.emitter.x, y = current.emitter.y, d = current.emitter.dir;
+    var seen = {};
+    path.push({ x: x, y: y });
+    for (var step = 0; step < 60; step++) {
+      var v = dirVec(d);
+      x += v.x; y += v.y;
+      if (x < 0 || y < 0 || x >= GRID || y >= GRID) break;
+      path.push({ x: x, y: y });
+      if (x === current.target.x && y === current.target.y) { hit = true; break; }
+      var m = mirrorAt(x, y);
+      if (m) {
+        var key = x + ',' + y + ',' + d;
+        if (seen[key]) break;
+        seen[key] = true;
+        d = reflect(m.type, d);
+      }
+    }
+    beamPath = path; beamHit = hit;
+    return hit;
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!soundOn) return;
+    ensureAudio();
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function playRotate() { beep(520, 0.09, 'square', 0.07); beep(760, 0.08, 'square', 0.06); }
+  function playWin() { [523, 659, 784, 1046].forEach(function(f, i) { setTimeout(function() { beep(f, 0.22, 'triangle', 0.14); }, i * 110); }); }
+  function playLose() { [300, 220, 150].forEach(function(f, i) { setTimeout(function() { beep(f, 0.25, 'sawtooth', 0.09); }, i * 130); }); }
+
+  function updateHUD() {
+    hudLevel.textContent = (levelIndex + 1) + ' / ' + levels.length + ' — ' + (current ? current.name : '');
+    hudScore.textContent = score;
+    hudLives.textContent = lives > 0 ? '❤'.repeat(lives) : '—';
+    hudMoves.textContent = movesLeft;
+  }
+  function setStatus(t) { statusEl.textContent = t; }
+
+  function loadLevel(idx) {
+    levelIndex = idx;
+    current = cloneLevel(levels[idx]);
+    movesLeft = current.moves;
+    cursor = { x: current.emitter.x, y: current.emitter.y };
+    computeBeam();
+    updateHUD();
+    setStatus('Level ' + (idx + 1) + ': ' + current.name + ' — rotate mirrors to reach the crystal!');
+  }
+  function startGame() {
+    ensureAudio();
+    score = 0; lives = 3; state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    loadLevel(0);
+    beep(440, 0.15, 'triangle', 0.12);
+  }
+  function showEnd(win) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    if (win) {
+      endTitle.textContent = '🏆 You Win!';
+      endText.textContent = 'Final Score: ' + score;
+      endDetail.textContent = 'You bent every beam and lit every crystal. Brilliant puzzle solving!';
+      playWin();
+    } else {
+      endTitle.textContent = '💥 Game Over';
+      endText.textContent = 'Final Score: ' + score;
+      endDetail.textContent = 'Out of lives on Level ' + (levelIndex + 1) + '. Tap Restart and try a sharper route!';
+      playLose();
+    }
+  }
+  function resetLevel() {
+    if (state !== 'playing') return;
+    current = cloneLevel(levels[levelIndex]);
+    movesLeft = current.moves;
+    computeBeam(); updateHUD();
+    setStatus('Level reset. Mirrors restored — try a new route.');
+  }
+  function rotateAt(x, y) {
+    if (state !== 'playing') return;
+    var m = mirrorAt(x, y);
+    if (!m) { setStatus('No mirror there — tap a mirror tile to rotate it.'); return; }
+    m.type = (m.type === '/') ? '\\' : '/';
+    movesLeft--;
+    cursor = { x: x, y: y };
+    playRotate();
+    var hit = computeBeam();
+    updateHUD();
+    if (hit) {
+      var bonus = 200 + movesLeft * 100 + (levelIndex + 1) * 50;
+      score += bonus; flash = 1;
+      setStatus('Beam hit! +' + bonus + ' points. Next level coming up...');
+      updateHUD(); playWin();
+      setTimeout(function() {
+        if (state !== 'playing') return;
+        if (levelIndex + 1 >= levels.length) { showEnd(true); }
+        else { loadLevel(levelIndex + 1); }
+      }, 1100);
+    } else if (movesLeft <= 0) {
+      lives--;
+      updateHUD();
+      if (lives <= 0) {
+        setStatus('Out of moves and out of lives!');
+        setTimeout(function() { showEnd(false); }, 500);
+      } else {
+        setStatus('Out of moves! You lost a life. Level reset — look closer this time.');
+        playLose();
+        setTimeout(function() { if (state === 'playing') resetLevel(); }, 1200);
+      }
+    } else {
+      setStatus('Mirror rotated. Moves left: ' + movesLeft + '. Beam ' + (beamHit ? 'hit!' : 'missed — keep bending.'));
+    }
+  }
+
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    var x = Math.floor((cx - rect.left) / rect.width * GRID);
+    var y = Math.floor((cy - rect.top) / rect.height * GRID);
+    if (x < 0) x = 0; if (x >= GRID) x = GRID - 1;
+    if (y < 0) y = 0; if (y >= GRID) y = GRID - 1;
+    return { x: x, y: y };
+  }
+
+  // Mouse + touch + click controls
+  canvas.addEventListener('mousedown', function(e) {
+    ensureAudio();
+    if (state !== 'playing') return;
+    var c = cellFromEvent(e);
+    cursor = c;
+    rotateAt(c.x, c.y);
+  });
+  canvas.addEventListener('click', function(e) {
+    if (state !== 'playing') return;
+    // Click is a fallback for devices where mousedown is suppressed; avoid double-rotate by only handling when no mirror was just rotated is complex, so this handler only moves the cursor.
+    cursor = cellFromEvent(e);
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    ensureAudio();
+    if (state !== 'playing') return;
+    var c = cellFromEvent(e);
+    cursor = c;
+    rotateAt(c.x, c.y);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function(e) {
+    if (state !== 'playing') {
+      if (e.key === 'Enter' && state === 'title') startGame();
+      if (e.key === 'r' || e.key === 'R') startGame();
+      return;
+    }
+    if (e.key === 'ArrowUp') { cursor.y = Math.max(0, cursor.y - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { cursor.y = Math.min(GRID - 1, cursor.y + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { cursor.x = Math.max(0, cursor.x - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { cursor.x = Math.min(GRID - 1, cursor.x + 1); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); ensureAudio(); rotateAt(cursor.x, cursor.y); }
+    else if (e.key === 'r' || e.key === 'R') { startGame(); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('rotateBtn').addEventListener('click', function() { ensureAudio(); rotateAt(cursor.x, cursor.y); });
+  document.getElementById('resetLevelBtn').addEventListener('click', resetLevel);
+  document.getElementById('soundBtn').addEventListener('click', function(e) {
+    soundOn = !soundOn;
+    e.target.textContent = soundOn ? '🔊 Sound: On' : '🔇 Sound: Off';
+    if (soundOn) { ensureAudio(); beep(600, 0.1, 'sine', 0.1); }
+  });
+
+  function drawMirror(x, y, type) {
+    var px = x * CELL + 10, py = y * CELL + 10, s = CELL - 20;
+    ctx.fillStyle = '#1d2c5c';
+    ctx.fillRect(px, py, s, s);
+    ctx.strokeStyle = '#6f8fd8'; ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, s, s);
+    ctx.strokeStyle = '#eaf2ff'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (type === '/') { ctx.moveTo(px + 8, py + s - 8); ctx.lineTo(px + s - 8, py + 8); }
+    else { ctx.moveTo(px + 8, py + 8); ctx.lineTo(px + s - 8, py + s - 8); }
+    ctx.stroke();
+    ctx.strokeStyle = '#9fd8ff'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (type === '/') { ctx.moveTo(px + 8, py + s - 8); ctx.lineTo(px + s - 8, py + 8); }
+    else { ctx.moveTo(px + 8, py + 8); ctx.lineTo(px + s - 8, py + s - 8); }
+    ctx.stroke();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Board
+    for (var gy = 0; gy < GRID; gy++) {
+      for (var gx = 0; gx < GRID; gx++) {
+        ctx.fillStyle = (gx + gy) % 2 === 0 ? '#0f1836' : '#0c1430';
+        ctx.fillRect(gx * CELL, gy * CELL, CELL, CELL);
+      }
+    }
+    if (state === 'title') {
+      ctx.fillStyle = '#ffe066'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Mirror Maze', 280, 260);
+      ctx.fillStyle = '#9fd8ff'; ctx.font = '16px Arial';
+      ctx.fillText('Press Start and bend the light!', 280, 295);
+      requestAnimationFrame(draw);
+      return;
+    }
+    if (!current) { requestAnimationFrame(draw); return; }
+
+    // Cursor
+    ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 3;
+    ctx.strokeRect(cursor.x * CELL + 3, cursor.y * CELL + 3, CELL - 6, CELL - 6);
+
+    // Grid lines
+    ctx.strokeStyle = 'rgba(120,150,220,.25)'; ctx.lineWidth = 1;
+    for (var i = 0; i <= GRID; i++) {
+      ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, 560); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(560, i * CELL); ctx.stroke();
+    }
+
+    // Mirrors
+    current.mirrors.forEach(function(m) { drawMirror(m.x, m.y, m.type); });
+
+    // Emitter
+    var ex = current.emitter.x * CELL + CELL / 2, ey = current.emitter.y * CELL + CELL / 2;
+    ctx.fillStyle = '#ff9f1c';
+    ctx.beginPath(); ctx.arc(ex, ey, 24, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff3c4'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('◉', ex, ey + 1);
+
+    // Target crystal (pulsing)
+    var tx = current.target.x * CELL + CELL / 2, ty = current.target.y * CELL + CELL / 2;
+    var pulse = 1 + Math.sin(Date.now() / 250) * 0.12;
+    ctx.save();
+    ctx.translate(tx, ty); ctx.scale(pulse, pulse); ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = beamHit ? '#7dffb2' : '#ff5da2';
+    ctx.shadowColor = beamHit ? '#7dffb2' : '#ff5da2'; ctx.shadowBlur = 22;
+    ctx.fillRect(-18, -18, 36, 36);
+    ctx.restore();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('◆', tx, ty);
+
+    // Beam
+    if (beamPath.length > 1) {
+      beamAnim += 0.08;
+      ctx.strokeStyle = beamHit ? '#ffe066' : '#ff6b6b';
+      ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 12;
+      ctx.setLineDash([14, 10]); ctx.lineDashOffset = -beamAnim * 20;
+      ctx.beginPath();
+      beamPath.forEach(function(p, i) {
+        var px = p.x * CELL + CELL / 2, py = p.y * CELL + CELL / 2;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]); ctx.shadowBlur = 0;
+    }
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(125,255,178,' + (flash * 0.25) + ')';
+      ctx.fillRect(0, 0, 560, 560);
+      flash = Math.max(0, flash - 0.02);
+    }
+    if (state === 'playing') {
+      ctx.fillStyle = '#dbe8ff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Level ' + (levelIndex + 1) + ': ' + current.name, 12, 22);
+    }
+    requestAnimationFrame(draw);
+  }
+  updateHUD();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

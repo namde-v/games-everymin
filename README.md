@@ -4,9 +4,9 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 740
-- **Latest game:** 0740 — Tightrope Acrobatic Balance
-- **Current volume:** 008 (Games 0701 to 0800) — in progress (40 of 100)
+- **Total games:** 750
+- **Latest game:** 0750 — Meteor Shower Defender
+- **Current volume:** 008 (Games 0701 to 0800) — in progress (50 of 100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
 ## Volume index
@@ -20,7 +20,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 005 | 0401–0500 (100, complete) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
 | 006 | 0501–0600 (100, complete) | [catalogs/readme-006.md](./catalogs/readme-006.md) |
 | 007 | 0601–0700 (100, complete) | [catalogs/readme-007.md](./catalogs/readme-007.md) |
-| 008 | 0701–0800 (40, in progress) | [catalogs/readme-008.md](./catalogs/readme-008.md) |
+| 008 | 0701–0800 (50, in progress) | [catalogs/readme-008.md](./catalogs/readme-008.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -34,11 +34,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 074
+## Latest batch — Batch 075
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0731 | Canyon River Raft Rush | Arcade / Whitewater Raft Dodge | [Play](./games/game-0731.html) |
+| 0741 | Volcano Ash Runner | Arcade / Lava Dodge Runner | [Play](./games/game-0741.html) |
+| 0742 | Mirror Maze Light Bender | Puzzle / Mirror Reflection Logic | [Play](./games/game-0742.html) |
+| 0743 | Orchard Harvest Planner | Strategy / Farm Planning | [Play](./games/game-0743.html) |
+| 0744 | Samba Street Drummer | Rhythm / Samba Beat | [Play](./games/game-0744.html) |
+| 0745 | Deep Sea Pearl Diver | Arcade / Underwater Collection | [Play](./games/game-0745.html) |
+| 0746 | Rune Stone Decoder | Puzzle / Rune Sequence Logic | [Play](./games/game-0746.html) |
+| 0747 | Mountain Rescue Dispatcher | Strategy / Rescue Coordination | [Play](./games/game-0747.html) |
+| 0748 | Flamenco Castanet Tempo | Rhythm / Castanet Timing | [Play](./games/game-0748.html) |
+| 0749 | Windmill Blade Balancer | Precision / Windmill Balance Timing | [Play](./games/game-0749.html) |
+| 0750 | Meteor Shower Defender | Arcade / Meteor Defense Shooter | [Play](./games/game-0750.html) |
 | 0732 | Clockwork Beetle Maze | Puzzle / Gear Path Logic | [Play](./games/game-0732.html) |
 | 0733 | Harbor Lighthouse Keeper | Strategy / Ship Guidance | [Play](./games/game-0733.html) |
 | 0734 | Drumline Parade March | Rhythm / Marching Beat | [Play](./games/game-0734.html) |
