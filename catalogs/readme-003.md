@@ -34,7 +34,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0228 | Glacier Guild | Strategy / Expedition Management | Mouse/touch click buttons and routes, Arrow Keys move selection, Enter/Space confirm, 1/2/3 assign | [Play](./../games/game-0228.html) |
 | 0229 | Drumline Dash | Rhythm / Marching Beat | Space/J/K hit beats, mouse click pads, touch tap pads | [Play](./../games/game-0229.html) |
 | 0230 | Horseshoe Hero | Precision / Horseshoe Toss | Mouse/touch aim and throw, Arrow Keys aim, Space throw | [Play](./../games/game-0230.html) |
-
 | 0231 | Avalanche Ace | Arcade / Snowboard Downhill | Arrow Keys / WASD steer, Space jump, mouse move steer, touch drag | [Play](./../games/game-0231.html) |
 | 0232 | Orbit Oracle | Puzzle / Gravity Orbit Logic | Mouse/touch drag wells, Arrow Keys move selected well, Space launch/reset, R reset level | [Play](./../games/game-0232.html) |
 | 0233 | Tidepool Tycoon | Strategy / Tidepool Ecosystem Management | Mouse/touch click tiles and buttons, Arrow Keys move selection, 1/2/3/4 buy creature, Enter/Space confirm, N next tide | [Play](./../games/game-0233.html) |
@@ -45,7 +44,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0238 | Windmill Warden | Strategy / Windmill Farm Management | Mouse/touch click plots and buttons, Arrow Keys move selection, 1/2/3 build/repair/angle, Enter/Space confirm, N next day | [Play](./../games/game-0238.html) |
 | 0239 | Saxophone Soiree | Rhythm / Saxophone Note Run | D/F/J/K lanes, hold for long notes, mouse click/hold lanes, touch tap/hold lanes | [Play](./../games/game-0239.html) |
 | 0240 | Curling Champion | Precision / Curling Slide | Mouse/touch drag aim and release, Arrow Keys aim/power, Space slide/sweep | [Play](./../games/game-0240.html) |
-
 | 0241 | Kite Kraze | Arcade / Kite Flying | Arrow Keys / WASD steer, mouse move steer, touch drag | [Play](./../games/game-0241.html) |
 | 0242 | Rune Relay | Puzzle / Rune Sequence Memory | 1-6 / Q W E A S D keys, click/tap runes | [Play](./../games/game-0242.html) |
 | 0243 | Bakery Baron | Strategy / Bakery Management | Click/tap customers and buttons, mouse/touch | [Play](./../games/game-0243.html) |
@@ -56,7 +54,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0248 | Harbor Haven | Strategy / Port Management | Click/tap ships and docks, 1-4 berth, Space service | [Play](./../games/game-0248.html) |
 | 0249 | Accordion Alley | Rhythm / Accordion Beat | Left/A and Right/D, tap on-screen buttons | [Play](./../games/game-0249.html) |
 | 0250 | Bowling Blitz | Precision / Bowling | Mouse/touch aim, Arrow Keys aim, A/D hook, Space throw | [Play](./../games/game-0250.html) |
-
 | 0251 | Corgi Canyon | Arcade / Corgi Canyon Runner | Arrow Keys / WASD jump and slide, Space jump, mouse/touch tap upper/lower half | [Play](./../games/game-0251.html) |
 | 0252 | Hex Hive | Puzzle / Hex Tile Logic | Mouse/touch click tiles to rotate, Arrow Keys move selection, Space rotate, R reset | [Play](./../games/game-0252.html) |
 | 0253 | Cactus Kingdom | Strategy / Desert Garden Management | Mouse/touch click plots and buttons, 1/2/3/4 seeds, W water, H harvest, N next day, B buy water | [Play](./../games/game-0253.html) |
@@ -67,7 +64,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0258 | Airship Admiral | Strategy / Airship Fleet Management | Mouse/touch click buttons and routes, 1/2/3/4 choose route, Enter/Space launch, B fuel, C crew, R restart | [Play](./../games/game-0258.html) |
 | 0259 | Beat Boxer | Rhythm / Beat Boxing | A/Left punch left, D/Right punch right, mouse click pads, touch tap pads | [Play](./../games/game-0259.html) |
 | 0260 | Archery Ace | Precision / Archery | Mouse/touch drag aim and release, Arrow Keys aim/power, Space shoot | [Play](./../games/game-0260.html) |
-
 | 0261 | Tempest Rider | Arcade / Wave Surfing | Arrow Keys / A-D steer, mouse move steer, touch drag | [Play](./../games/game-0261.html) |
 | 0262 | Prism Path | Puzzle / Light Prism Logic | Mouse/touch click tiles to rotate, Arrow Keys move selection, Space rotate, R reset | [Play](./../games/game-0262.html) |
 | 0263 | Pastry Palace | Strategy / Bakery Management | Mouse/touch click customers and buttons, 1/2/3 bake, F/S/E/B buy, R restart | [Play](./../games/game-0263.html) |
@@ -98,7 +94,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0288 | Subway Scheduler | Strategy / Transit Scheduling | Mouse/touch click trains and switches, Arrow Keys select, Space hold/release train, R restart | [Play](./../games/game-0288.html) |
 | 0289 | Synth Samba | Rhythm / Synth Beat Timing | A/S/K/L synth lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0289.html) |
 | 0290 | Discus Dynamo | Precision / Discus Throw | Mouse/touch drag spin and release, Arrow Keys angle/power, Space throw, R restart | [Play](./../games/game-0290.html) |
-
 | 0291 | Mirror Meadow | Puzzle / Light Reflection | Mouse/touch click mirrors to rotate, Arrow Keys select, Space/Enter rotate or place, R restart | [Play](./../games/game-0291.html) |
 | 0292 | Photon Pilgrim | Arcade / Solar Wind Riding | Arrow Keys / WASD steer, mouse move, touch drag, Space pause | [Play](./../games/game-0292.html) |
 | 0293 | Cinderfield Cultivator | Strategy / Farm Simulation | Mouse/touch click soil plots to plant, water and harvest, Arrow Keys move cursor | [Play](./../games/game-0293.html) |

@@ -24,7 +24,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0118 | Harbor Master | Strategy / Port Logistics | Click/tap ships and docks, 1-3 assign, mouse/touch | [Play](./../games/game-0118.html) |
 | 0119 | Echo Ensemble | Rhythm / Melody Memory | Click/tap instruments, 1-4 keys, touch tap | [Play](./../games/game-0119.html) |
 | 0120 | Ricochet Range | Precision / Bouncing Target Shot | Mouse/touch drag aim, Space fire, Arrow Keys | [Play](./../games/game-0120.html) |
-
 | 0121 | Tide Turner | Puzzle / Tidal Flow Routing | Click/tap tiles rotate, Arrow Keys select, Space rotate | [Play](./../games/game-0121.html) |
 | 0122 | Forge Frenzy | Arcade / Blacksmith Timing | A/S/D/J/K keys, Space, click/tap anvil | [Play](./../games/game-0122.html) |
 | 0123 | Starship Steward | Strategy / Crew Allocation | Click/tap stations, 1-4 assign crew, N next event | [Play](./../games/game-0123.html) |
@@ -65,7 +64,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0158 | Railroad Tycoonlet | Strategy / Train Network | Click/tap build track, Arrow Keys cursor, Space build, D dispatch | [Play](./../games/game-0158.html) |
 | 0159 | Ukulele Uprising | Rhythm / Strum Timing | Chord keys / tap chord buttons, mouse/touch | [Play](./../games/game-0159.html) |
 | 0160 | Tightrope Titan | Precision / Balance Walk | Arrow Keys / A-D lean, mouse/touch lean | [Play](./../games/game-0160.html) |
-
 | 0161 | Glacier Glider | Arcade / Ice Momentum Slider | Arrow Keys / WASD push, swipe, click/tap canvas glide | [Play](./../games/game-0161.html) |
 | 0162 | Rune Reactor | Puzzle / Rune Sequence Logic | Keys 1-6 pick rune, Enter submit, click/tap buttons | [Play](./../games/game-0162.html) |
 | 0163 | Observatory Operator | Strategy / Telescope Scheduling | Click/tap request cards, 1-4 select, mouse/touch | [Play](./../games/game-0163.html) |
@@ -76,7 +74,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0168 | Farmstead Frontier | Strategy / Crop Rotation Simulation | Arrow Keys move, 1-6 plant, W water, H harvest, click/tap plots | [Play](./../games/game-0168.html) |
 | 0169 | Meadow Maestro | Rhythm / Birdsong Conducting | Keys 1/A etc. echo birds, click/tap bird buttons | [Play](./../games/game-0169.html) |
 | 0170 | Archery Aurora | Precision / Wind Archery | Mouse/touch drag aim, Arrow Keys adjust, Click/Space shoot | [Play](./../games/game-0170.html) |
-
 | 0171 | Kite Kraze | Arcade / Storm Kite Dodger | Arrow Keys / WASD steer, mouse move steer, touch drag steer | [Play](./../games/game-0171.html) |
 | 0172 | Locksmith Labyrinth | Puzzle / Key-and-Lock Maze Logic | Arrow Keys / WASD move, click/tap maze cells, on-screen arrows, R restart | [Play](./../games/game-0172.html) |
 | 0173 | Oasis Operator | Strategy / Desert Oasis Management | Click/tap plots and action buttons, 1-4 select action, Space advance day | [Play](./../games/game-0173.html) |

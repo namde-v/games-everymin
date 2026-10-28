@@ -4,7 +4,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 
 | # | Game Title | Genre | Controls | Direct Link |
 |---|------------|-------|----------|-------------|
-
 | 0501 | Vault Voyager | Arcade / Gravity Vault Runner | Arrow Keys/WASD move and flip gravity, Space jump, mouse/touch steer | [Play](./../games/game-0501.html) |
 | 0502 | Whispering Willow | Puzzle / Botanical Pattern Logic | Mouse/touch click grid tiles, Arrow Keys select, Enter plant | [Play](./../games/game-0502.html) |
 | 0503 | Xenon Xenolith | Strategy / Alien Crystal Colony Simulation | Mouse/touch click grid to place, Keys select building, Arrow Keys select | [Play](./../games/game-0503.html) |

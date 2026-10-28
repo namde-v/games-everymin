@@ -4,7 +4,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 
 | # | Game Title | Genre | Controls | Direct Link |
 |---|------------|-------|----------|-------------|
-
 | 0401 | Lunar Luthier | Rhythm / Moon-Note Plucking | Keys D/F/J/K pluck, mouse/touch tap lanes | [Play](./../games/game-0401.html) |
 | 0402 | Mossy Mechanic | Puzzle / Gear Connection | Mouse/touch click rotate tiles, Arrow Keys select, Enter rotate | [Play](./../games/game-0402.html) |
 | 0403 | Obsidian Outrider | Arcade / Desert Lane Rider | Arrow Keys switch lanes, Space jump, mouse/touch lane buttons, swipe | [Play](./../games/game-0403.html) |
@@ -15,7 +14,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0408 | Tidal Tinkerer | Strategy / Tide Defense Building | Mouse/touch click grid place defenses, Keys 1/2/3 select tool | [Play](./../games/game-0408.html) |
 | 0409 | Umbral Undertaker | Arcade / Shadow Stealth Maze | Arrow Keys / WASD move, mouse/touch swipe, Space interact | [Play](./../games/game-0409.html) |
 | 0410 | Velvet Voyager | Arcade / Gravity Slingshot Navigation | Mouse/touch drag to aim, release to launch, Arrow Keys nudge aim, Space launch | [Play](./../games/game-0410.html) |
-
 | 0411 | Amber Alchemist | Puzzle / Potion Mixing Sequence | Mouse/touch click vials, Keys 1-4 select | [Play](./../games/game-0411.html) |
 | 0412 | Bramble Bandit | Arcade / Vine Swing Platformer | Hold Space/mouse/touch to swing, release to leap | [Play](./../games/game-0412.html) |
 | 0413 | Coral Cartographer | Strategy / Reef Map Exploration | Arrow Keys/WASD move, click/tap adjacent tile | [Play](./../games/game-0413.html) |
@@ -26,7 +24,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0418 | Harbor Harbinger | Puzzle / Signal Flag Decoding | Mouse/touch select letters, keyboard letters | [Play](./../games/game-0418.html) |
 | 0419 | Ivory Inventor | Puzzle / Clockwork Chain Reaction | Mouse/touch place parts, Keys 1/2/3 select, R rotate | [Play](./../games/game-0419.html) |
 | 0420 | Jade Juggler | Rhythm / Precision Juggling | Keys D/F/J/K catch, mouse/touch tap zones | [Play](./../games/game-0420.html) |
-
 | 0421 | Kelp Captain | Strategy / Kelp Farm Simulation | Mouse/touch click plots, Arrow Keys move, Space use tool, Keys 1-4 switch tool | [Play](./../games/game-0421.html) |
 | 0422 | Lightning Locksmith | Puzzle / Circuit Lock Picking | Mouse/touch click tiles, Arrow Keys select, Space rotate | [Play](./../games/game-0422.html) |
 | 0423 | Comet Cutter | Arcade / Asteroid Mining Dash | Arrow Keys/WASD thrust, Space drill, mouse/touch drag | [Play](./../games/game-0423.html) |
@@ -37,7 +34,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0428 | Rune Runner | Arcade / Word Rune Collector | Arrow Keys switch lanes, Space jump, mouse/touch swipe | [Play](./../games/game-0428.html) |
 | 0429 | Solar Shepherd | Strategy / Herding Simulation | Arrow Keys/WASD move shepherd, mouse/touch drag guide | [Play](./../games/game-0429.html) |
 | 0430 | Timber Trapper | Action / Trap Setting Defense | Mouse/touch place traps, Keys 1/2/3 select trap | [Play](./../games/game-0430.html) |
-
 | 0431 | Umbra Umbrella | Arcade / Rain Shield Defense | Arrow Keys/A-D move, mouse move, touch drag | [Play](./../games/game-0431.html) |
 | 0432 | Velvet Voyager | Puzzle / Gravity Slingshot Orbit | Mouse/touch drag aim, R retry | [Play](./../games/game-0432.html) |
 | 0433 | Willow Warden | Strategy / Forest Tower Defense | Mouse/touch click place, Keys 1/2/3 select tower | [Play](./../games/game-0433.html) |
@@ -48,7 +44,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0438 | Beacon Builder | Strategy / Lighthouse Signal Network | Mouse/touch click place, Arrow Keys select, Enter place | [Play](./../games/game-0438.html) |
 | 0439 | Cipher Courier | Puzzle / Code-Breaking Delivery | Arrow Keys/WASD move, mouse/touch click waypoints | [Play](./../games/game-0439.html) |
 | 0440 | Drift Diver | Arcade / Deep-Sea Current Dodging | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0440.html) |
-
 | 0441 | Ember Engineer | Strategy / Furnace Logistics Simulation | Mouse/touch click furnaces, Keys 1/2/3 select, V vent | [Play](./../games/game-0441.html) |
 | 0442 | Frost Falcon | Arcade / Dive-Bomb Fishing | Arrow Keys steer, Space dive, mouse/touch tap dive | [Play](./../games/game-0442.html) |
 | 0443 | Glade Gardener | Puzzle / Pollination Tile Rotation | Mouse/touch tap rotate tiles, Arrow Keys select, Space rotate | [Play](./../games/game-0443.html) |
@@ -59,7 +54,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0448 | Marble Miner | Arcade / Rolling Marble Physics | Arrow Keys/WASD steer, mouse/touch drag steer | [Play](./../games/game-0448.html) |
 | 0449 | Nova Nomad | Strategy / Space Trade Route Planning | Mouse/touch click stations to plot route, Space launch | [Play](./../games/game-0449.html) |
 | 0450 | Onyx Oracle | Puzzle / Rune Deduction Logic | Mouse/touch click cells, Arrow Keys select, Space mark | [Play](./../games/game-0450.html) |
-
 | 0451 | Prism Pilot | Arcade / Light-Beam Mirror Dodging | Arrow Keys/WASD move, mouse/touch drag steer, Space fire | [Play](./../games/game-0451.html) |
 | 0452 | Quartz Quest | Puzzle / Gem Vein Tracing | Mouse/touch drag trace, Arrow Keys move | [Play](./../games/game-0452.html) |
 | 0453 | River Ranger | Strategy / Watershed Flow Management | Mouse/touch click gates/dam, Keys 1-5 gates, D dam | [Play](./../games/game-0453.html) |
@@ -70,7 +64,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0458 | Willow Whisperer | Rhythm / Wind-Chime Precision | Hold/release chime keys, mouse/touch hold chimes | [Play](./../games/game-0458.html) |
 | 0459 | Xenon Xplorer | Arcade / Gravity-Slingshot Orbit | Mouse/touch drag aim and release, Arrow Keys nudge | [Play](./../games/game-0459.html) |
 | 0460 | Summit Skier | Action / Avalanche Slope Runner | Space/Arrow Up/W jump, mouse/touch tap jump | [Play](./../games/game-0460.html) |
-
 | 0461 | Ember Engineer | Strategy / Foundry Line Management | Mouse/touch click molds, Space adjust heat, Arrow Keys select | [Play](./../games/game-0461.html) |
 | 0462 | Fjord Fisher | Arcade / Ice-Hole Fishing Reflex | Mouse/touch click ice holes and CAST, Space cast/reel, Arrow Keys move | [Play](./../games/game-0462.html) |
 | 0463 | Glyph Gardener | Puzzle / Rune Garden Matching | Mouse/touch click plots to plant, Space rotate, Arrow Keys select | [Play](./../games/game-0463.html) |
@@ -81,7 +74,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0468 | Lagoon Legislator | Strategy / Reef Council Simulation | Mouse/touch tap policy cards, Arrow Keys select, Enter enact | [Play](./../games/game-0468.html) |
 | 0469 | Metronome Miner | Rhythm / Beat-Driven Digging | Space swing pickaxe on beat, mouse/touch tap canvas, Arrow Keys move | [Play](./../games/game-0469.html) |
 | 0470 | Nebula Navigator | Action / Starfield Asteroid Weaving | WASD/Arrow Keys steer, Space boost, mouse/touch tap shield | [Play](./../games/game-0470.html) |
-
 | 0471 | Quarry Quake | Action / Falling-Rock Dodger | Arrow Keys/WASD move, Space jump, mouse/touch drag move | [Play](./../games/game-0471.html) |
 | 0472 | Riddle Reef | Puzzle / Clue-Chain Deduction | Mouse/touch click answer tiles, Arrow Keys select, Enter/Space confirm | [Play](./../games/game-0472.html) |
 | 0473 | Solar Shepherd | Strategy / Orbital Power Management | Mouse/touch click panels and stations, Arrow Keys select, Space toggle link | [Play](./../games/game-0473.html) |
@@ -102,7 +94,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0488 | Harmonic Harvester | Rhythm / Melody Crop Timing | Keys play notes on beat, mouse/touch tap notes, Arrow Keys select | [Play](./../games/game-0488.html) |
 | 0489 | Inkwell Investigator | Puzzle / Mystery Ink Deduction | Mouse/touch click clues and suspects, Arrow Keys select, Enter accuse | [Play](./../games/game-0489.html) |
 | 0490 | Jetstream Juggler | Arcade / Wind Balloon Juggling | Mouse/touch tap balloons, Arrow Keys move, Space gust | [Play](./../games/game-0490.html) |
-
 | 0491 | Kelp Keeper | Strategy / Underwater Farm Management | Mouse/touch click kelp beds, Keys plant/feed/harvest | [Play](./../games/game-0491.html) |
 | 0492 | Lantern Labyrinth | Puzzle / Light Maze | Arrow Keys/WASD move, mouse/touch tap to move | [Play](./../games/game-0492.html) |
 | 0493 | Meteor Mechanic | Arcade / Asteroid Repair Action | Arrow Keys/WASD fly, Space weld, mouse/touch steer | [Play](./../games/game-0493.html) |

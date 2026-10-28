@@ -1,4 +1,4 @@
-# Game Catalog: Volume 001 (Games 0001 to 0040)
+# Game Catalog: Volume 001 (Games 0001 to 0100)
 
 Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets, or assets — all CSS and JavaScript are inline, audio is procedural Web Audio, graphics are Canvas 2D / DOM.
 
@@ -44,7 +44,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0038 | Shadow Shot | Precision / Ricochet Archery | Mouse/touch drag aim and release, Arrow Keys, Space shoot | [Play](./../games/game-0038.html) |
 | 0039 | Vine Vault | Arcade / Grapple Swing | Space grab/release, mouse click, touch tap | [Play](./../games/game-0039.html) |
 | 0040 | War Council | Strategy / Turn-Based Tactics | Click/tap units, Arrow Keys, Enter select, E end turn | [Play](./../games/game-0040.html) |
-
 | 0041 | Solar Sailor | Arcade / Solar Wind Surfing | Arrow Keys / WASD, mouse/touch drag, Space pause | [Play](./../games/game-0041.html) |
 | 0042 | Ink Trail | Puzzle / Path Drawing Logic | Click/tap drag path, Arrow Keys, U undo, R restart | [Play](./../games/game-0042.html) |
 | 0043 | Oasis Outpost | Simulation / Desert Management | Mouse clicks/taps, 1-4 crews, W/F/B builds, N next day | [Play](./../games/game-0043.html) |
@@ -65,7 +64,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0058 | Skyline Tycoon | Strategy / City Builder | Mouse clicks/taps, 1-5 build, N next day | [Play](./../games/game-0058.html) |
 | 0059 | Synth Surfer | Rhythm / Wave Riding | Space / J / K strike peaks, mouse click, touch tap | [Play](./../games/game-0059.html) |
 | 0060 | Boomerang Bay | Precision / Boomerang Throw | Mouse/touch drag aim and release, Arrow Keys aim, Space throw | [Play](./../games/game-0060.html) |
-
 | 0061 | Frostbite Frontier | Arcade / Ice Rescue | Arrow Keys / WASD slide, mouse/touch swipe | [Play](./../games/game-0061.html) |
 | 0062 | Glyph Grove | Puzzle / Rune Path Logic | Mouse/touch drag path, Arrow Keys, Space/Enter | [Play](./../games/game-0062.html) |
 | 0063 | Railway Rendezvous | Strategy / Train Yard Scheduler | Click/tap junctions and trains, 1/2/3 switch, Space pause | [Play](./../games/game-0063.html) |
@@ -76,7 +74,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0068 | Orbit Orchard | Strategy / Asteroid Farming | Click/tap asteroids, Arrow Keys select, Space start | [Play](./../games/game-0068.html) |
 | 0069 | Echo Chamber | Rhythm / Memory Echo | Click/tap tiles, 1-4 keys, mouse/touch | [Play](./../games/game-0069.html) |
 | 0070 | Lantern Labyrinth | Puzzle / Mirror Light Maze | Click/tap place and flip mirrors, R rotate | [Play](./../games/game-0070.html) |
-
 | 0071 | Tempest Trawler | Arcade / Storm Fishing | Arrow Keys / WASD steer, mouse/touch drag | [Play](./../games/game-0071.html) |
 | 0072 | Mosaic Mason | Puzzle / Mosaic Tile Logic | Click/tap place, R rotate, D discard, Arrow Keys | [Play](./../games/game-0072.html) |
 | 0073 | Portside Planner | Strategy / Dock Scheduler | Click/tap ships and docks, Arrow Keys, Space | [Play](./../games/game-0073.html) |
@@ -97,7 +94,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0088 | Windmill Warden | Simulation / Wind Farm Management | Mouse/touch click place/rotate, 1-3 select, R repair, N next day | [Play](./../games/game-0088.html) |
 | 0089 | Frost Flute | Rhythm / Melody Memory | 1-4 / A/S/D/F notes, mouse click, touch tap pads | [Play](./../games/game-0089.html) |
 | 0090 | Castle Cartographer | Strategy / Map Expansion | Click/tap tiles and grid, Arrow Keys, Enter/Space place, R rotate | [Play](./../games/game-0090.html) |
-
 | 0091 | Quarry Quake | Arcade / Rockslide Dodge | Arrow Keys / WASD dodge, mouse/touch move | [Play](./../games/game-0091.html) |
 | 0092 | Beam Bender | Puzzle / Beam Reflection Logic | Click/tap mirrors, Arrow Keys, Space/Enter rotate | [Play](./../games/game-0092.html) |
 | 0093 | Quay Commander | Strategy / Dock Logistics | Click/tap docks, Arrow Keys, mouse/touch assign | [Play](./../games/game-0093.html) |
