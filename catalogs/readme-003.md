@@ -88,6 +88,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0278 | Zoo Zookeeper | Strategy / Animal Habitat Management | Mouse/touch click enclosures and buttons, Arrow Keys select, 1/2/3 Feed/Clean/Play, R restart | [Play](./../games/game-0278.html) |
 | 0279 | Banjo Bonanza | Rhythm / String Strumming Timing | A/S/D/F strum strings, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0279.html) |
 | 0280 | Horseshoe Hero | Precision / Horseshoe Toss | Mouse/touch drag aim and release, Arrow Keys aim/power, Space toss, R restart | [Play](./../games/game-0280.html) |
+| 0281 | Deepsea Dispatch | Arcade / Underwater Parcel Dash | Arrow Keys / WASD swim, mouse move steer, touch drag | [Play](./../games/game-0281.html) |
+| 0282 | Loom Logic | Puzzle / Weaving Pattern Logic | Mouse/touch click cells to toggle, Arrow Keys move selection, Space toggle, U undo, H hint | [Play](./../games/game-0282.html) |
+| 0283 | Grove Guardian | Strategy / Orchard Management | Mouse/touch click plots and buttons, Arrow Keys select, 1/2/3 Plant/Water/Harvest, R restart | [Play](./../games/game-0283.html) |
+| 0284 | Cajon Cadence | Rhythm / Hand Drum Timing | D/F/J/K drum lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0284.html) |
+| 0285 | Boomerang Bounce | Precision / Boomerang Throw | Mouse/touch drag aim and release, Arrow Keys aim/power, Space throw, R restart | [Play](./../games/game-0285.html) |
+| 0286 | Skyline Swing | Arcade / Rooftop Grapple Swing | Space/click/tap hold to grapple and release to swing, Arrow Keys steer | [Play](./../games/game-0286.html) |
+| 0287 | Pollen Path | Puzzle / Bee Pathfinding Logic | Mouse/touch drag to draw path, Arrow Keys move bee, Enter confirm, Backspace undo, R reset | [Play](./../games/game-0287.html) |
+| 0288 | Subway Scheduler | Strategy / Transit Scheduling | Mouse/touch click trains and switches, Arrow Keys select, Space hold/release train, R restart | [Play](./../games/game-0288.html) |
+| 0289 | Synth Samba | Rhythm / Synth Beat Timing | A/S/K/L synth lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0289.html) |
+| 0290 | Discus Dynamo | Precision / Discus Throw | Mouse/touch drag spin and release, Arrow Keys angle/power, Space throw, R restart | [Play](./../games/game-0290.html) |
 
 ## Batch notes
 
@@ -99,4 +109,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 026: 10 games, produced in one cycle.
 - Batch 027: 10 games, produced in one cycle.
 - Batch 028: 10 games, produced in one cycle.
+- Batch 029: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

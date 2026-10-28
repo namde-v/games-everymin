@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Deepsea Dispatch</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #03182e; color: #eafcff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 12px; min-height: 100vh; }
+  h1 { font-size: 34px; letter-spacing: 1px; color: #7fe7ff; text-shadow: 0 2px 0 #004d66; margin: 6px 0 2px; text-align: center; }
+  .tag { color: #ffd166; font-weight: bold; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(920px, 96vw); }
+  canvas { width: 100%; height: auto; display: block; background: linear-gradient(180deg, #0a6ea6 0%, #075a8a 45%, #04365e 100%); border: 3px solid #7fe7ff; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; background: #062a44; border: 2px solid #2aa7c9; border-radius: 10px; padding: 9px 12px; margin-bottom: 10px; font-weight: bold; font-size: 16px; }
+  #hud span { white-space: nowrap; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; background: rgba(2, 25, 48, 0.86); border-radius: 14px; padding: 22px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 36px; color: #7fe7ff; }
+  .overlay p { max-width: 620px; line-height: 1.55; font-size: 16px; }
+  .howto { background: rgba(255,255,255,0.10); border: 1px solid #4cc9e8; border-radius: 10px; padding: 12px 16px; text-align: left; }
+  .howto b { color: #ffd166; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 13px 28px; font-size: 19px; font-weight: bold; color: #032a3d; background: #ffd166; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #7fe7ff; box-shadow: 0 4px 0 #1d7d99; }
+  .controls { margin-top: 10px; color: #bfeeff; font-size: 14px; line-height: 1.6; text-align: center; max-width: 920px; }
+  .pill { display: inline-block; background: #0b4a68; border: 1px solid #4cc9e8; padding: 2px 8px; border-radius: 999px; margin: 2px; }
+</style>
+</head>
+<body>
+<h1>🪸 Deepsea Dispatch 🐠</h1>
+<div class="tag">Arcade / Underwater Parcel Dash — Deliver 12 parcels to win!</div>
+<div id="wrap">
+  <div id="hud" aria-live="polite">
+    <span>Score: <span id="score">0</span></span>
+    <span>❤️ Lives: <span id="lives">3</span></span>
+    <span>📦 Deliveries: <span id="deliveries">0</span> / 12</span>
+    <span>⏱ Time: <span id="time">0</span>s</span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <canvas id="game" width="920" height="540"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Deepsea Dispatch</h2>
+    <p>You are the reef's fastest diver-courier! Grab glowing parcels, then swim them to the golden checkpoint before the eels and sharks catch you.</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      • <b>Arrow Keys / WASD</b> — swim up, down, left, right<br>
+      • <b>Mouse move</b> — steer toward the mouse pointer<br>
+      • <b>Touch drag</b> — swim toward your finger<br>
+      • Collect a parcel (📦), then touch the glowing checkpoint (⭐) to deliver it<br>
+      • Avoid eels and sharks — each hit costs 1 life. You have 3 lives.<br>
+      • Score 100 points per delivery, plus a speed bonus. Win at 12 deliveries!
+    </div>
+    <button id="startBtn" type="button">▶ Start Game</button>
+    <p>Tip: Grab parcels near the reef edge first, then cut across open water only when the checkpoint is clear.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn" type="button">↻ Play Again — Instant Restart</button>
+  </div>
+</div>
+<div class="controls">
+  <span class="pill">Arrow Keys / WASD swim</span>
+  <span class="pill">Mouse move steer</span>
+  <span class="pill">Touch drag swim</span>
+  <span class="pill">P pause &nbsp;•&nbsp; R restart</span>
+</div>
+<script>
+(function() {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var delEl = document.getElementById('deliveries');
+  var timeEl = document.getElementById('time');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+
+  var state = 'title'; // title, playing, paused, win, over
+  var keys = {};
+  var mouse = { x: null, y: null, active: false };
+  var touch = { x: null, y: null, active: false };
+  var player, parcels, checkpoint, eels, sharks, bubbles, seaweed;
+  var score, lives, deliveries, elapsed, lastTime, invulnUntil, spawnTimer, difficulty;
+  var audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || state !== 'playing') return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function resetGame() {
+    player = { x: 120, y: 270, r: 22, vx: 0, vy: 0, carrying: false, angle: 0 };
+    score = 0; lives = 3; deliveries = 0; elapsed = 0; difficulty = 1;
+    invulnUntil = 0; spawnTimer = 0; lastTime = performance.now();
+    parcels = [];
+    checkpoint = { x: 800, y: 120, r: 36, pulse: 0 };
+    eels = []; sharks = []; bubbles = []; seaweed = [];
+    for (var i = 0; i < 14; i++) seaweed.push({ x: rand(20, W - 20), y: H - rand(0, 60), h: rand(30, 90), sway: rand(0, 6.28) });
+    for (var j = 0; j < 24; j++) bubbles.push({ x: rand(0, W), y: rand(0, H), r: rand(2, 7), s: rand(0.3, 1.1) });
+    spawnParcel(); spawnParcel();
+    spawnEel(); spawnEel(); spawnShark();
+    updateHUD('Swimming!');
+  }
+  function spawnParcel() {
+    parcels.push({ x: rand(70, W - 70), y: rand(70, H - 90), r: 20, bob: rand(0, 6.28) });
+  }
+  function spawnEel() {
+    var side = Math.random() < 0.5 ? 30 : W - 30;
+    eels.push({ x: side, y: rand(70, H - 90), vx: (side < 100 ? 1 : -1) * rand(55, 85) * difficulty, wave: rand(0, 6.28), r: 20 });
+  }
+  function spawnShark() {
+    sharks.push({ x: rand(200, W - 200), y: rand(60, H - 120), vx: rand(-95, 95), vy: rand(-35, 35), r: 30 });
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    delEl.textContent = deliveries;
+    timeEl.textContent = Math.floor(elapsed);
+    if (status) statusEl.textContent = status;
+  }
+  function showEnd(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? '🏆 You Win! Reef Hero!' : '💀 Game Over';
+    endText.textContent = win
+      ? 'All 12 parcels delivered! Final score: ' + score + ' in ' + Math.floor(elapsed) + ' seconds. The reef celebrates you!'
+      : 'Out of lives after ' + deliveries + ' deliveries. Final score: ' + score + '. Tap Play Again to try again instantly!';
+    updateHUD(win ? 'WIN!' : 'GAME OVER');
+    endScreen.classList.remove('hidden');
+    beep(win ? 880 : 160, 0.5, win ? 'triangle' : 'sawtooth', 0.15);
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    beep(523, 0.18, 'triangle', 0.14);
+    requestAnimationFrame(loop);
+  }
+
+  document.addEventListener('keydown', function(e) {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === 'p' || e.key === 'P') {
+      if (state === 'playing') { state = 'paused'; updateHUD('Paused'); }
+      else if (state === 'paused') { state = 'playing'; updateHUD('Swimming!'); lastTime = performance.now(); requestAnimationFrame(loop); }
+    }
+    if ((e.key === 'r' || e.key === 'R') && (state === 'win' || state === 'over' || state === 'paused')) startGame();
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(e.key.toLowerCase()) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key.toLowerCase()] = false; });
+
+  canvas.addEventListener('mousemove', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * (W / rect.width);
+    mouse.y = (e.clientY - rect.top) * (H / rect.height);
+    mouse.active = true;
+  });
+  canvas.addEventListener('mouseleave', function() { mouse.active = false; });
+  canvas.addEventListener('mousedown', function() { initAudio(); mouse.active = true; });
+
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault(); initAudio();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    touch.x = (t.clientX - rect.left) * (W / rect.width);
+    touch.y = (t.clientY - rect.top) * (H / rect.height);
+    touch.active = true;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    touch.x = (t.clientX - rect.left) * (W / rect.width);
+    touch.y = (t.clientY - rect.top) * (H / rect.height);
+    touch.active = true;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function() { touch.active = false; });
+
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+
+  function update(dt) {
+    elapsed += dt;
+    difficulty = 1 + Math.min(1.8, deliveries * 0.12 + elapsed / 120);
+    var speed = 250;
+    var ax = 0, ay = 0;
+    if (keys['arrowleft'] || keys['a']) ax -= 1;
+    if (keys['arrowright'] || keys['d']) ax += 1;
+    if (keys['arrowup'] || keys['w']) ay -= 1;
+    if (keys['arrowdown'] || keys['s']) ay += 1;
+    var target = null;
+    if (touch.active) target = touch; else if (mouse.active) target = mouse;
+    if (target && target.x !== null) {
+      var dx = target.x - player.x, dy = target.y - player.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 24) { ax = dx / d; ay = dy / d; }
+    }
+    if (ax !== 0 || ay !== 0) {
+      var len = Math.sqrt(ax * ax + ay * ay);
+      player.vx = (ax / len) * speed; player.vy = (ay / len) * speed;
+      player.angle = Math.atan2(player.vy, player.vx);
+    } else { player.vx *= 0.82; player.vy *= 0.82; }
+    player.x = Math.max(26, Math.min(W - 26, player.x + player.vx * dt));
+    player.y = Math.max(26, Math.min(H - 26, player.y + player.vy * dt));
+
+    checkpoint.pulse += dt * 3;
+    for (var i = 0; i < bubbles.length; i++) {
+      bubbles[i].y -= bubbles[i].s * 30 * dt;
+      if (bubbles[i].y < -10) { bubbles[i].y = H + 10; bubbles[i].x = rand(0, W); }
+    }
+    for (var s = 0; s < seaweed.length; s++) seaweed[s].sway += dt;
+
+    for (var p = parcels.length - 1; p >= 0; p--) {
+      parcels[p].bob += dt * 3;
+      if (!player.carrying && dist(player, parcels[p]) < player.r + parcels[p].r) {
+        parcels.splice(p, 1);
+        player.carrying = true;
+        updateHUD('Carrying parcel — head to ⭐!');
+        beep(660, 0.16, 'sine', 0.14);
+        if (parcels.length < 2) spawnParcel();
+      }
+    }
+    if (player.carrying && dist(player, checkpoint) < player.r + checkpoint.r) {
+      deliveries++;
+      var bonus = Math.max(0, 50 - Math.floor(elapsed % 60));
+      score += 100 + bonus;
+      player.carrying = false;
+      checkpoint.x = rand(90, W - 90); checkpoint.y = rand(90, H - 110);
+      beep(880, 0.22, 'triangle', 0.16);
+      setTimeout(function() { beep(1046, 0.2, 'triangle', 0.14); }, 110);
+      updateHUD('Delivered! ' + deliveries + ' / 12');
+      spawnParcel();
+      if (deliveries % 3 === 0) { spawnEel(); if (deliveries >= 6) spawnShark(); }
+      if (deliveries >= 12) { showEnd(true); return; }
+    }
+
+    spawnTimer += dt;
+    if (spawnTimer > 14) { spawnTimer = 0; spawnEel(); }
+    var now = performance.now();
+    for (var e = 0; e < eels.length; e++) {
+      var eel = eels[e];
+      eel.wave += dt * 4;
+      eel.x += eel.vx * dt;
+      eel.y += Math.sin(eel.wave) * 28 * dt;
+      if (eel.x < 20 || eel.x > W - 20) eel.vx *= -1;
+      if (now > invulnUntil && dist(player, eel) < player.r + eel.r - 6) hitEnemy();
+    }
+    for (var k = 0; k < sharks.length; k++) {
+      var sh = sharks[k];
+      sh.x += sh.vx * difficulty * dt; sh.y += sh.vy * dt;
+      if (sh.x < 35 || sh.x > W - 35) sh.vx *= -1;
+      if (sh.y < 45 || sh.y > H - 45) sh.vy *= -1;
+      if (now > invulnUntil && dist(player, sh) < player.r + sh.r - 8) hitEnemy();
+    }
+    updateHUD();
+  }
+  function hitEnemy() {
+    lives--;
+    invulnUntil = performance.now() + 1500;
+    player.x = 120; player.y = 270; player.carrying = false;
+    beep(140, 0.35, 'sawtooth', 0.16);
+    if (lives <= 0) { showEnd(false); return; }
+    updateHUD('Ouch! ' + lives + ' lives left');
+    spawnParcel();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0a7ab5'); grad.addColorStop(1, '#04365e');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (var b = 0; b < bubbles.length; b++) {
+      ctx.beginPath(); ctx.arc(bubbles[b].x, bubbles[b].y, bubbles[b].r, 0, 6.283); ctx.fill();
+    }
+    for (var w = 0; w < seaweed.length; w++) {
+      var sw = seaweed[w];
+      ctx.strokeStyle = '#2f9e44'; ctx.lineWidth = 5; ctx.beginPath();
+      ctx.moveTo(sw.x, H); ctx.quadraticCurveTo(sw.x + Math.sin(sw.sway) * 12, H - sw.h / 2, sw.x + Math.sin(sw.sway) * 18, H - sw.h);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#c98f2e'; ctx.fillRect(0, H - 14, W, 14);
+    ctx.fillStyle = '#f2c14e';
+    for (var c = 0; c < parcels.length; c++) {
+      var pc = parcels[c];
+      var bobY = pc.y + Math.sin(pc.bob) * 4;
+      ctx.fillRect(pc.x - 16, bobY - 13, 32, 26);
+      ctx.strokeStyle = '#7a4a00'; ctx.lineWidth = 3; ctx.strokeRect(pc.x - 16, bobY - 13, 32, 26);
+      ctx.beginPath(); ctx.moveTo(pc.x - 16, bobY); ctx.lineTo(pc.x + 16, bobY); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('📦', pc.x, bobY + 7);
+      ctx.fillStyle = '#f2c14e';
+    }
+    var pulseR = checkpoint.r + Math.sin(checkpoint.pulse) * 6;
+    ctx.fillStyle = 'rgba(255,209,102,0.35)';
+    ctx.beginPath(); ctx.arc(checkpoint.x, checkpoint.y, pulseR + 14, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(checkpoint.x, checkpoint.y, pulseR, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#032a3d'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('★', checkpoint.x, checkpoint.y + 9);
+    ctx.fillStyle = '#032a3d'; ctx.font = 'bold 12px Arial';
+    ctx.fillText('DELIVER HERE', checkpoint.x, checkpoint.y + pulseR + 18);
+
+    for (var e = 0; e < eels.length; e++) {
+      var eel = eels[e];
+      ctx.fillStyle = '#7b2d8b';
+      ctx.beginPath(); ctx.ellipse(eel.x, eel.y, 28, 11, Math.sin(eel.wave) * 0.3, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(eel.x + (eel.vx > 0 ? 18 : -18), eel.y - 2, 4, 0, 6.283); ctx.fill();
+    }
+    for (var k = 0; k < sharks.length; k++) {
+      var sh = sharks[k];
+      ctx.fillStyle = '#5a6d80';
+      ctx.beginPath(); ctx.ellipse(sh.x, sh.y, 38, 16, 0, 0, 6.283); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(sh.x, sh.y - 14); ctx.lineTo(sh.x + 8, sh.y - 30); ctx.lineTo(sh.x + 16, sh.y - 12); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(sh.x + 22, sh.y - 4, 4, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#032a3d'; ctx.beginPath(); ctx.arc(sh.x + 22, sh.y - 4, 2, 0, 6.283); ctx.fill();
+    }
+
+    if (player) {
+      var blink = performance.now() < invulnUntil && Math.floor(performance.now() / 150) % 2 === 0;
+      if (!blink) {
+        ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.angle);
+        ctx.fillStyle = '#1d7d99'; ctx.beginPath(); ctx.ellipse(0, 0, 24, 14, 0, 0, 6.283); ctx.fill();
+        ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(14, 0, 8, 0, 6.283); ctx.fill();
+        ctx.fillStyle = '#032a3d'; ctx.beginPath(); ctx.arc(16, -2, 2.5, 0, 6.283); ctx.fill();
+        ctx.fillStyle = '#7fe7ff'; ctx.beginPath(); ctx.ellipse(-16, 0, 8, 12, 0, 0, 6.283); ctx.fill();
+        ctx.restore();
+        if (player.carrying) {
+          ctx.fillStyle = '#f2c14e'; ctx.fillRect(player.x - 13, player.y - 38, 26, 20);
+          ctx.fillStyle = '#032a3d'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.fillText('📦', player.x, player.y - 23);
+        }
+      }
+    }
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('Paused — press P to resume', W / 2, H / 2);
+    }
+  }
+  function loop(now) {
+    if (state !== 'playing') { draw(); return; }
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    draw();
+    if (state === 'playing') requestAnimationFrame(loop);
+    else draw();
+  }
+  resetGame();
+  state = 'title';
+  updateHUD('Ready — press Start');
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Subway Scheduler</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1020; color: #eef2ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 28px; margin: 6px 0 2px; letter-spacing: 1px; }
+  p.sub { color: #9fb3ff; font-size: 14px; margin-bottom: 8px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 6px 0; width: 100%; max-width: 860px; }
+  .pill { background: #1a2342; border: 1px solid #3a4a8a; border-radius: 20px; padding: 7px 12px; font-size: 14px; font-weight: bold; }
+  .pill span { color: #ffd166; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { width: 100%; height: auto; background: #101830; border: 2px solid #3a4a8a; border-radius: 12px; display: block; touch-action: none; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(5,8,20,0.88); border-radius: 12px; padding: 20px; gap: 10px; }
+  .screen h2 { font-size: 32px; }
+  .screen p { max-width: 620px; line-height: 1.5; color: #cdd7ff; font-size: 15px; }
+  .screen ul { text-align: left; color: #cdd7ff; line-height: 1.6; font-size: 14px; max-width: 620px; }
+  button { background: #ffd166; color: #111; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #2d3f7a; color: #fff; padding: 10px 18px; font-size: 15px; }
+  #msg { min-height: 22px; color: #ffd166; font-weight: bold; margin-top: 6px; text-align: center; }
+  #controls { color: #9fb3ff; font-size: 13px; text-align: center; margin-top: 4px; line-height: 1.5; }
+  .key { background: #222c55; border: 1px solid #556; border-radius: 4px; padding: 1px 6px; color: #fff; }
+</style>
+</head>
+<body>
+<h1>🚇 Subway Scheduler</h1>
+<p class="sub">Strategy / Transit Scheduling — keep the rush hour moving, no crashes, no stranded passengers.</p>
+<div id="hud">
+  <div class="pill">Served: <span id="served">0</span> / 20</div>
+  <div class="pill">Time left: <span id="time">180</span>s</div>
+  <div class="pill">Missed: <span id="missed">0</span> / 5</div>
+  <div class="pill">Selected: <span id="sel">Train 1</span></div>
+  <div class="pill">Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="560"></canvas>
+  <div id="titleScreen" class="screen">
+    <h2>🚇 Subway Scheduler</h2>
+    <p><strong>Goal:</strong> Serve <strong>20 passengers</strong> before the 180-second rush hour ends. Two trains run the metro loop. Passengers wait at stations for a ride to their destination station.</p>
+    <ul>
+      <li><strong>How to play:</strong> Trains stop briefly at each station and pick up waiting passengers, then drop them at their destination. Watch the waiting timers — a passenger waiting over 40 seconds is missed.</li>
+      <li><strong>Spacing:</strong> If the trailing train catches the train ahead, they collide! Hold a train back to keep distance.</li>
+      <li><strong>Switches:</strong> Click a gold switch diamond (or press S) to toggle the selected train between the Local loop and the Express shortcut, which skips two stations.</li>
+      <li><strong>Hold / release:</strong> Hold <span class="key">Space</span> to hold the selected train, release to let it go.</li>
+    </ul>
+    <p>Controls: Mouse / touch — click trains and switches &nbsp;•&nbsp; Arrow Keys — select train / switch &nbsp;•&nbsp; Space — hold / release train &nbsp;•&nbsp; R — restart</p>
+    <button id="startBtn">▶ Start Game</button>
+    <p style="font-size:13px;">Tip: hold the faster train when it closes in, and use Express only when no one is waiting at the skipped stations.</p>
+  </div>
+  <div id="endScreen" class="screen" style="display:none;">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+    <button class="secondary" id="againBtn">Play Again</button>
+  </div>
+</div>
+<div id="msg">Click Start, then keep the trains spaced and the passengers moving!</div>
+<div id="controls">Mouse / touch: click trains and switches &nbsp;•&nbsp; Arrow Keys: select &nbsp;•&nbsp; Space: hold / release train &nbsp;•&nbsp; R: restart &nbsp;•&nbsp; S: toggle switch</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var servedEl = document.getElementById('served');
+  var timeEl = document.getElementById('time');
+  var missedEl = document.getElementById('missed');
+  var selEl = document.getElementById('sel');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  // Metro loop: stations around a rounded rectangle loop.
+  var stations = [
+    {name:'Central', x:430, y:90, color:'#ffd166'},
+    {name:'Harbor', x:650, y:90, color:'#7bd88f'},
+    {name:'Museum', x:770, y:230, color:'#7bd88f'},
+    {name:'Stadium', x:650, y:430, color:'#ff8a7a'},
+    {name:'University', x:430, y:470, color:'#ff8a7a'},
+    {name:'Garden', x:210, y:430, color:'#9fb3ff'},
+    {name:'Old Town', x:90, y:230, color:'#9fb3ff'},
+    {name:'Airport', x:210, y:90, color:'#ffd166'}
+  ];
+  // Express shortcut: Central -> Stadium directly, skipping Harbor/Museum.
+  var switchPoint = {x:540, y:250, name:'Express Switch'};
+
+  var state = 'title';
+  var served = 0, missed = 0, timeLeft = 180, selected = 0;
+  var passengers = []; // {from, to, wait, id}
+  var pid = 0, spawnTimer = 0, lastTime = 0, elapsed = 0;
+  var audioCtx = null;
+
+  function beep(freq, dur, type){
+    if(!audioCtx) return;
+    try{
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    }catch(e){}
+  }
+  function initAudio(){
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+    }catch(e){}
+  }
+
+  function makeTrains(){
+    return [
+      {id:1, pos:0, speed:0.055, color:'#ffd166', held:false, stopTimer:0, onboard:[], express:false, x:0, y:0},
+      {id:2, pos:4, speed:0.042, color:'#7bd88f', held:false, stopTimer:0, onboard:[], express:false, x:0, y:0}
+    ];
+  }
+  var trains = makeTrains();
+
+  function stationPos(i){
+    return stations[((i % stations.length) + stations.length) % stations.length];
+  }
+  // Position along the loop: interpolate between station points, with express shortcut handling.
+  function posOnLoop(train){
+    var p = train.pos;
+    var idx = Math.floor(p);
+    var frac = p - idx;
+    // Express: when train is flagged and leaving Central (0), jump path Central->Stadium (3)
+    if(train.express && idx === 0){
+      var a = stations[0], b = stations[3];
+      return {x: a.x + (b.x-a.x)*frac, y: a.y + (b.y-a.y)*frac};
+    }
+    if(train.express && idx === 7){
+      // After Stadium, continue normally; express flag clears at Stadium arrival
+      var a2 = stations[7], b2 = stations[0];
+      return {x: a2.x + (b2.x-a2.x)*frac, y: a2.y + (b2.y-a2.y)*frac};
+    }
+    var a = stationPos(idx), b = stationPos(idx+1);
+    return {x: a.x + (b.x-a.x)*frac, y: a.y + (b.y-a.y)*frac};
+  }
+  function nearestStationIndex(train){
+    return Math.round(train.pos) % stations.length;
+  }
+  function atStation(train){
+    var frac = train.pos - Math.floor(train.pos);
+    return frac < 0.03 || frac > 0.97;
+  }
+
+  function reset(){
+    served = 0; missed = 0; timeLeft = 180; selected = 0;
+    passengers = []; pid = 0; spawnTimer = 0; elapsed = 0;
+    trains = makeTrains();
+    // Seed a few waiting passengers so the first minute is busy.
+    for(var i=0;i<4;i++) spawnPassenger(true);
+    updateHUD('Running');
+  }
+  function spawnPassenger(seed){
+    var from = Math.floor(Math.random()*stations.length);
+    var to = Math.floor(Math.random()*stations.length);
+    if(to === from) to = (to+3) % stations.length;
+    passengers.push({from:from, to:to, wait:0, id:++pid});
+    if(!seed) beep(660, 0.08, 'triangle');
+  }
+  function updateHUD(status){
+    servedEl.textContent = served;
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+    missedEl.textContent = missed;
+    selEl.textContent = 'Train ' + trains[selected].id + (trains[selected].express ? ' (Express)' : ' (Local)');
+    if(status) statusEl.textContent = status;
+  }
+  function endGame(win, reason){
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? '🎉 You Win!' : '💥 Game Over';
+    endText.textContent = reason + ' Served: ' + served + ' / 20. Missed: ' + missed + '. Time left: ' + Math.max(0, Math.ceil(timeLeft)) + 's.';
+    endScreen.style.display = 'flex';
+    statusEl.textContent = win ? 'Won!' : 'Game Over';
+    beep(win ? 880 : 160, 0.4, win ? 'sine' : 'sawtooth');
+    if(win) setTimeout(function(){ beep(1100, 0.3, 'sine'); }, 180);
+  }
+  function startGame(){
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.style.display = 'none';
+    endScreen.style.display = 'none';
+    msgEl.textContent = 'Rush hour is on! Hold Space to hold Train ' + trains[selected].id + ' and keep spacing.';
+    lastTime = performance.now();
+    beep(520, 0.15, 'sine');
+    requestAnimationFrame(loop);
+  }
+
+  function handleStationStop(train, dt){
+    var idx = nearestStationIndex(train);
+    // Deliver onboard passengers whose destination is here.
+    var kept = [];
+    for(var i=0;i<train.onboard.length;i++){
+      if(train.onboard[i].to === idx){
+        served++; beep(880, 0.12, 'sine');
+        msgEl.textContent = 'Passenger delivered to ' + stations[idx].name + '! Served: ' + served + ' / 20.';
+      } else kept.push(train.onboard[i]);
+    }
+    train.onboard = kept;
+    // Board waiting passengers here, up to capacity 4.
+    var waiting = [];
+    for(var j=0;j<passengers.length;j++){
+      if(passengers[j].from === idx && train.onboard.length < 4){
+        train.onboard.push(passengers[j]);
+      } else waiting.push(passengers[j]);
+    }
+    passengers = waiting;
+    if(train.express && idx === 3) train.express = false; // express ends at Stadium
+    if(served >= 20){ endGame(true, 'Rush hour conquered! All 20 passengers served.'); }
+  }
+
+  function update(dt){
+    if(state !== 'playing') return;
+    elapsed += dt; timeLeft -= dt;
+    if(timeLeft <= 0){
+      timeLeft = 0;
+      if(served >= 20) endGame(true, 'Just in time!');
+      else endGame(false, 'Rush hour ended before the target was reached.');
+      updateHUD(); return;
+    }
+    spawnTimer += dt;
+    if(spawnTimer > 2.8){ spawnTimer = 0; spawnPassenger(false); if(passengers.length < 3) spawnPassenger(false); }
+    // Passenger waiting / missed
+    var still = [];
+    for(var i=0;i<passengers.length;i++){
+      passengers[i].wait += dt;
+      if(passengers[i].wait > 40){
+        missed++; beep(180, 0.25, 'sawtooth');
+        msgEl.textContent = 'A passenger gave up at ' + stations[passengers[i].from].name + '. Missed: ' + missed + ' / 5.';
+        if(missed >= 5){ endGame(false, 'Too many passengers missed their trains.'); updateHUD(); return; }
+      } else still.push(passengers[i]);
+    }
+    passengers = still;
+    // Move trains
+    for(var t=0;t<trains.length;t++){
+      var tr = trains[t];
+      if(tr.held){ tr.stopTimer = 0; }
+      else if(atStation(tr) && tr.stopTimer < 1.4){
+        if(tr.stopTimer === 0) handleStationStop(tr, dt);
+        tr.stopTimer += dt;
+        if(state !== 'playing') return;
+      } else {
+        tr.stopTimer = 0;
+        tr.pos += tr.speed * dt;
+        if(tr.pos >= stations.length) tr.pos -= stations.length;
+      }
+      var p = posOnLoop(tr); tr.x = p.x; tr.y = p.y;
+    }
+    // Collision: trains too close on the loop (circular distance)
+    var d = Math.abs(trains[0].pos - trains[1].pos);
+    d = Math.min(d, stations.length - d);
+    if(d < 0.45){
+      endGame(false, 'Collision! The trains got too close together. Hold one back next time.');
+      updateHUD(); return;
+    }
+    if(d < 1.0) msgEl.textContent = '⚠ Trains closing in! Hold Space to hold Train ' + trains[selected].id + '.';
+    updateHUD();
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // Track loop
+    ctx.strokeStyle = '#2d3f7a'; ctx.lineWidth = 10; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    stations.forEach(function(s,i){ if(i===0) ctx.moveTo(s.x,s.y); else ctx.lineTo(s.x,s.y); });
+    ctx.closePath(); ctx.stroke();
+    // Express shortcut
+    ctx.strokeStyle = '#8a6d1a'; ctx.lineWidth = 4; ctx.setLineDash([10,8]);
+    ctx.beginPath(); ctx.moveTo(stations[0].x, stations[0].y); ctx.lineTo(stations[3].x, stations[3].y); ctx.stroke();
+    ctx.setLineDash([]);
+    // Switch diamond
+    var sp = {x:(stations[0].x+stations[3].x)/2, y:(stations[0].y+stations[3].y)/2};
+    ctx.fillStyle = '#ffd166'; ctx.beginPath();
+    ctx.moveTo(sp.x, sp.y-14); ctx.lineTo(sp.x+14, sp.y); ctx.lineTo(sp.x, sp.y+14); ctx.lineTo(sp.x-14, sp.y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('S', sp.x, sp.y+4);
+    ctx.fillStyle = '#cdd7ff'; ctx.font = '12px Arial'; ctx.fillText('Express switch', sp.x, sp.y+32);
+    // Stations
+    stations.forEach(function(s,i){
+      var waiting = passengers.filter(function(p){ return p.from===i; }).length;
+      ctx.fillStyle = '#0b1020'; ctx.strokeStyle = s.color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 20, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText(s.name, s.x, s.y-30);
+      if(waiting>0){
+        ctx.fillStyle = '#ff8a7a'; ctx.beginPath(); ctx.arc(s.x+16, s.y-16, 11, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.fillText(waiting, s.x+16, s.y-12);
+      }
+      // Destination hints for waiting passengers
+      passengers.filter(function(p){ return p.from===i; }).slice(0,3).forEach(function(p,k){
+        ctx.fillStyle = '#cdd7ff'; ctx.font = '11px Arial';
+        ctx.fillText('→ ' + stations[p.to].name + ' (' + Math.ceil(40-p.wait) + 's)', s.x, s.y+42+k*13);
+      });
+    });
+    // Trains
+    trains.forEach(function(tr, idx){
+      ctx.fillStyle = tr.color;
+      ctx.strokeStyle = (idx===selected) ? '#ffffff' : '#111';
+      ctx.lineWidth = (idx===selected) ? 4 : 2;
+      ctx.beginPath(); ctx.roundRect(tr.x-22, tr.y-14, 44, 28, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#111'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('T'+tr.id + (tr.held ? ' ⏸' : ''), tr.x, tr.y+5);
+      ctx.fillStyle = '#fff'; ctx.font = '11px Arial';
+      ctx.fillText(tr.onboard.length + ' aboard', tr.x, tr.y+28);
+    });
+    if(state==='title'){
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to begin the rush hour.', 430, 530);
+    }
+  }
+
+  function loop(now){
+    if(state !== 'playing'){ draw(); return; }
+    var dt = Math.min(0.05, (now - lastTime)/1000 || 0.016);
+    lastTime = now;
+    update(dt); draw();
+    if(state === 'playing') requestAnimationFrame(loop);
+    else draw();
+  }
+
+  function canvasCoords(e){
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return {x:(cx-r.left) * (canvas.width/r.width), y:(cy-r.top) * (canvas.height/r.height)};
+  }
+  function onPointer(e){
+    if(state !== 'playing') return;
+    var p = canvasCoords(e);
+    // Switch?
+    var sp = {x:(stations[0].x+stations[3].x)/2, y:(stations[0].y+stations[3].y)/2};
+    if(Math.abs(p.x-sp.x)<24 && Math.abs(p.y-sp.y)<24){
+      trains[selected].express = !trains[selected].express;
+      msgEl.textContent = 'Train ' + trains[selected].id + ' switched to ' + (trains[selected].express ? 'Express' : 'Local') + '.';
+      beep(740, 0.1, 'triangle'); updateHUD(); return;
+    }
+    // Train?
+    for(var i=0;i<trains.length;i++){
+      if(Math.abs(p.x-trains[i].x)<30 && Math.abs(p.y-trains[i].y)<24){
+        selected = i; updateHUD(); beep(520, 0.08, 'sine');
+        msgEl.textContent = 'Selected Train ' + trains[i].id + '. Hold Space to hold it.';
+        return;
+      }
+    }
+  }
+  canvas.addEventListener('click', onPointer);
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); onPointer(e); }, {passive:false});
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('mousedown', function(e){ initAudio(); });
+
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'ArrowRight' || e.key === 'ArrowDown'){ selected = (selected+1)%trains.length; updateHUD(); }
+    if(e.key === 'ArrowLeft' || e.key === 'ArrowUp'){ selected = (selected-1+trains.length)%trains.length; updateHUD(); }
+    if(e.key === ' '){
+      e.preventDefault();
+      if(state==='playing'){ trains[selected].held = true; statusEl.textContent = 'Holding Train ' + trains[selected].id; }
+    }
+    if(e.key === 's' || e.key === 'S'){
+      if(state==='playing'){ trains[selected].express = !trains[selected].express; updateHUD(); beep(740,0.1,'triangle'); }
+    }
+    if(e.key === 'r' || e.key === 'R'){
+      if(state==='playing' || state==='win' || state==='over') startGame();
+    }
+  });
+  document.addEventListener('keyup', function(e){
+    if(e.key === ' ' && state==='playing'){ trains[selected].held = false; statusEl.textContent = 'Running'; }
+  });
+  document.addEventListener('touchstart', function(e){ initAudio(); }, {passive:true});
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('againBtn').addEventListener('click', startGame);
+
+  updateHUD('Ready');
+  draw();
+  // Keep title screen animated behind overlay
+  (function titleLoop(){ if(state==='title'){ draw(); requestAnimationFrame(titleLoop); } })();
+})();
+</script>
+</body>
+</html>

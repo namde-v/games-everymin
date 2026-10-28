@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Discus Dynamo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1f2a; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 12px; overflow: hidden; }
+  #wrap { width: 100%; max-width: 860px; }
+  h1 { text-align: center; font-size: 34px; letter-spacing: 1px; margin-bottom: 4px; color: #ffd166; text-shadow: 0 2px 0 #000; }
+  .tag { text-align: center; color: #9fd8ff; margin-bottom: 10px; font-size: 14px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; background: #123649; border: 2px solid #2a7aa8; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; font-weight: bold; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  #stage { position: relative; background: linear-gradient(#7ec8ff 0 42%, #8fce6a 42% 100%); border: 3px solid #ffd166; border-radius: 14px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 460px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(4, 25, 38, 0.88); padding: 24px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 36px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #eaf6ff; }
+  .big { font-size: 22px; font-weight: bold; color: #7bf1a8; }
+  button { background: #ffd166; color: #12202a; border: 0; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #9fd8ff; box-shadow: 0 4px 0 #3a7ca5; }
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; text-align: left; max-width: 560px; font-size: 14px; color: #d9efff; }
+  .controls b { color: #ffd166; }
+  #meter { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+  .bar { flex: 1; height: 18px; background: #163a4d; border-radius: 9px; overflow: hidden; border: 1px solid #2a7aa8; }
+  #powerFill { height: 100%; width: 30%; background: linear-gradient(90deg, #7bf1a8, #ffd166, #ff6b6b); transition: width 0.08s; }
+  #angleFill { height: 100%; width: 35%; background: #9fd8ff; transition: width 0.08s; }
+  .small { font-size: 13px; color: #9fd8ff; text-align: center; margin-top: 8px; }
+  @media (max-width: 560px) { canvas { height: 380px; } h1 { font-size: 27px; } .controls { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🥏 DISCUS DYNAMO</h1>
+  <div class="tag">Spin up. Time your release. Beat the wind. Qualify or go home.</div>
+  <div id="hud">
+    <span id="hudRound">Round: 1 / 5</span>
+    <span id="hudDist">Last: — m</span>
+    <span id="hudBest">Best: 0.0 m</span>
+    <span id="hudWind">Wind: 0.0 m/s →</span>
+    <span id="hudStatus">Status: Ready</span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="860" height="460"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>DISCUS DYNAMO</h2>
+      <p class="big">Qualifying distance: 52.0 m &nbsp;•&nbsp; 5 rounds</p>
+      <p><b>How to Play:</b> Spin the discus to build power, aim your angle, then release at the perfect moment. Wind pushes the discus left or right — a tailwind helps, a headwind hurts. Beat 52.0 m in any of your 5 rounds to win!</p>
+      <div class="controls">
+        <div><b>Mouse / Touch:</b> Drag in circles to spin, release to throw</div>
+        <div><b>Arrow Keys:</b> ↑ / ↓ angle, ← / → power</div>
+        <div><b>Space:</b> Throw discus</div>
+        <div><b>R:</b> Instant restart</div>
+      </div>
+      <button id="startBtn">▶ START GAME</button>
+      <p>Tip: 38–44° is usually the sweet spot. Spin faster for more power — but don't over-spin and lose control!</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">YOU QUALIFIED!</h2>
+      <p id="endText" class="big"></p>
+      <p id="endDetail"></p>
+      <button id="restartBtn">↻ PLAY AGAIN (R)</button>
+    </div>
+  </div>
+  <div id="meter">
+    <span style="font-weight:bold;min-width:52px;">Power</span><div class="bar"><div id="powerFill"></div></div>
+    <span style="font-weight:bold;min-width:52px;">Angle</span><div class="bar"><div id="angleFill"></div></div>
+    <span id="angleLabel" style="font-weight:bold;min-width:52px;">40°</span>
+  </div>
+  <p class="small">Controls: Mouse/touch drag spin and release • Arrow Keys angle/power • Space throw • R restart</p>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endDetail = document.getElementById('endDetail');
+  var hudRound = document.getElementById('hudRound');
+  var hudDist = document.getElementById('hudDist');
+  var hudBest = document.getElementById('hudBest');
+  var hudWind = document.getElementById('hudWind');
+  var hudStatus = document.getElementById('hudStatus');
+  var powerFill = document.getElementById('powerFill');
+  var angleFill = document.getElementById('angleFill');
+  var angleLabel = document.getElementById('angleLabel');
+
+  var QUALIFY = 52.0, MAX_ROUNDS = 5;
+  var state = 'title'; // title, aiming, flying, won, lost
+  var round = 1, best = 0, lastDist = 0;
+  var angle = 40, power = 30, spin = 0, spinAngle = 0;
+  var wind = 0, windDir = 1;
+  var discus = { x: 110, y: 340, vx: 0, vy: 0, rot: 0, flying: false };
+  var throwTrail = [];
+  var message = 'Ready';
+  var audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function newWind() {
+    wind = (Math.random() * 7 - 3.5);
+    windDir = wind >= 0 ? 1 : -1;
+  }
+  function resetGame() {
+    round = 1; best = 0; lastDist = 0; angle = 40; power = 30; spin = 0;
+    newWind(); discus.x = 110; discus.y = 340; discus.flying = false; throwTrail = [];
+    state = 'aiming'; message = 'Spin up and release!';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    updateHUD();
+  }
+  function updateHUD() {
+    hudRound.textContent = 'Round: ' + round + ' / ' + MAX_ROUNDS;
+    hudDist.textContent = 'Last: ' + (lastDist ? lastDist.toFixed(1) + ' m' : '— m');
+    hudBest.textContent = 'Best: ' + best.toFixed(1) + ' m';
+    var arrow = wind >= 0 ? '→ tailwind' : '← headwind';
+    hudWind.textContent = 'Wind: ' + Math.abs(wind).toFixed(1) + ' m/s ' + arrow;
+    hudStatus.textContent = 'Status: ' + message;
+    powerFill.style.width = Math.min(100, power) + '%';
+    angleFill.style.width = (angle / 90 * 100) + '%';
+    angleLabel.textContent = Math.round(angle) + '°';
+  }
+  function throwDiscus() {
+    if (state !== 'aiming') return;
+    ensureAudio(); beep(520, 0.18, 'triangle');
+    var rad = angle * Math.PI / 180;
+    var speed = 14 + power * 0.32 + spin * 0.12;
+    // Wind: tailwind adds distance, headwind subtracts; also slight lift effect
+    var windBoost = wind * 0.9;
+    discus.vx = Math.cos(rad) * speed + windBoost * 0.4;
+    discus.vy = -Math.sin(rad) * speed;
+    discus.flying = true; state = 'flying'; message = 'Flying...';
+    throwTrail = [];
+    updateHUD();
+  }
+  function endThrow() {
+    // Map pixel travel to metres: start x 110, landing x maps roughly to metres
+    var px = Math.max(0, discus.x - 110);
+    var dist = px * 0.115 + (wind * 1.4) + (power * 0.06);
+    if (dist < 0) dist = 0;
+    lastDist = dist;
+    if (dist > best) best = dist;
+    beep(dist >= QUALIFY ? 880 : 220, 0.4, 'sine');
+    if (dist >= QUALIFY) {
+      state = 'won'; message = 'QUALIFIED!';
+      endTitle.textContent = '🏆 YOU QUALIFIED!';
+      endText.textContent = 'Throw: ' + dist.toFixed(1) + ' m — Best: ' + best.toFixed(1) + ' m';
+      endDetail.textContent = 'You beat the ' + QUALIFY.toFixed(1) + ' m qualifying mark in round ' + round + '. Champion thrower!';
+      endScreen.classList.remove('hidden');
+    } else if (round >= MAX_ROUNDS) {
+      state = 'lost'; message = 'Out of rounds';
+      endTitle.textContent = 'GAME OVER';
+      endText.textContent = 'Best: ' + best.toFixed(1) + ' m — needed ' + QUALIFY.toFixed(1) + ' m';
+      endDetail.textContent = 'All 5 rounds used and the qualifying distance was not reached. Spin harder and try again!';
+      endScreen.classList.remove('hidden');
+    } else {
+      round++;
+      discus.x = 110; discus.y = 340; discus.flying = false; power = 30; spin = 0;
+      newWind(); state = 'aiming'; message = 'Round ' + round + ' — spin up!';
+    }
+    updateHUD();
+  }
+  function drawField() {
+    ctx.clearRect(0, 0, 860, 460);
+    // sky and field
+    ctx.fillStyle = '#7ec8ff'; ctx.fillRect(0, 0, 860, 195);
+    ctx.fillStyle = '#8fce6a'; ctx.fillRect(0, 195, 860, 265);
+    // clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath(); ctx.arc(650, 55, 26, 0, Math.PI * 2); ctx.arc(680, 48, 30, 0, Math.PI * 2); ctx.arc(710, 58, 22, 0, Math.PI * 2); ctx.fill();
+    // throwing circle and sector lines
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(110, 340, 42, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(110, 340); ctx.lineTo(830, 210); ctx.moveTo(110, 340); ctx.lineTo(830, 420); ctx.stroke();
+    // distance markers
+    ctx.fillStyle = '#123649'; ctx.font = 'bold 13px Arial';
+    [20, 40, 60, 80].forEach(function(m) {
+      var x = 110 + m * 8.2;
+      ctx.fillRect(x, 430, 2, 18); ctx.fillText(m + 'm', x - 8, 448);
+    });
+    // qualifying line
+    var qx = 110 + QUALIFY * 8.2;
+    ctx.strokeStyle = '#ffdd00'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]);
+    ctx.beginPath(); ctx.moveTo(qx, 195); ctx.lineTo(qx, 430); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#ffdd00'; ctx.font = 'bold 14px Arial'; ctx.fillText('QUALIFY 52m', qx - 48, 210);
+    // wind arrow
+    ctx.fillStyle = '#123649'; ctx.font = 'bold 16px Arial';
+    ctx.fillText('Wind ' + Math.abs(wind).toFixed(1) + ' m/s ' + (wind >= 0 ? '→' : '←'), 620, 30);
+    // trail
+    throwTrail.forEach(function(p, i) {
+      ctx.fillStyle = 'rgba(255,209,102,' + (0.2 + 0.6 * i / Math.max(1, throwTrail.length)) + ')';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+    });
+    // athlete (simple)
+    ctx.fillStyle = '#123649'; ctx.beginPath(); ctx.arc(110, 300, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(100, 316, 20, 34);
+    // discus
+    ctx.save(); ctx.translate(discus.x, discus.y); ctx.rotate(discus.rot);
+    ctx.fillStyle = '#ff6b6b'; ctx.beginPath(); ctx.ellipse(0, 0, 18, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.ellipse(0, 0, 9, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // aim arrow when aiming
+    if (state === 'aiming') {
+      var rad = angle * Math.PI / 180;
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(discus.x, discus.y);
+      ctx.lineTo(discus.x + Math.cos(rad) * 90, discus.y - Math.sin(rad) * 90); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Arial';
+      ctx.fillText('Power ' + Math.round(power) + '%  •  Angle ' + Math.round(angle) + '°  •  Spin ' + Math.round(spin), 20, 30);
+      ctx.fillText('Drag in circles to spin, then release — or press Space!', 20, 52);
+    }
+    if (state === 'flying') {
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
+      ctx.fillText('In flight...', 20, 30);
+    }
+  }
+  function loop() {
+    if (state === 'aiming') {
+      // idle spin decay, discus wobble in hand
+      spin = Math.max(0, spin - 0.08);
+      power = Math.min(100, Math.max(5, spin * 1.4 + 20));
+      discus.rot += 0.08 + spin * 0.02;
+      discus.x = 110; discus.y = 340;
+    }
+    if (state === 'flying' && discus.flying) {
+      discus.vy += 0.42; // gravity
+      discus.vx += wind * 0.008; // wind drift
+      discus.x += discus.vx; discus.y += discus.vy; discus.rot += 0.35;
+      throwTrail.push({ x: discus.x, y: discus.y });
+      if (throwTrail.length > 60) throwTrail.shift();
+      if (discus.y >= 400 || discus.x > 850) { discus.y = Math.min(400, discus.y); endThrow(); }
+    }
+    drawField(); updateHUD();
+    requestAnimationFrame(loop);
+  }
+  // --- Controls: mouse, touch, keyboard ---
+  var dragging = false, lastAngle = 0, dragCount = 0;
+  function pointerPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined ? e.clientX : e.touches[0].clientX);
+    var cy = (e.clientY !== undefined ? e.clientY : e.touches[0].clientY);
+    return { x: (cx - r.left) * 860 / r.width, y: (cy - r.top) * 460 / r.height };
+  }
+  function onDown(e) {
+    ensureAudio();
+    if (state !== 'aiming') return;
+    dragging = true; dragCount = 0;
+    var p = pointerPos(e);
+    lastAngle = Math.atan2(p.y - 340, p.x - 110);
+    if (e.cancelable) e.preventDefault();
+  }
+  function onMove(e) {
+    if (!dragging || state !== 'aiming') return;
+    var p = pointerPos(e);
+    var a = Math.atan2(p.y - 340, p.x - 110);
+    var d = a - lastAngle;
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    spin = Math.min(60, spin + Math.abs(d) * 8);
+    spinAngle += d; lastAngle = a; dragCount++;
+    // dragging up/down nudges angle
+    if (p.y < 280) angle = Math.min(80, angle + 0.4);
+    if (p.y > 390) angle = Math.max(10, angle - 0.4);
+    if (e.cancelable) e.preventDefault();
+  }
+  function onUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    if (state === 'aiming' && dragCount > 3) throwDiscus();
+    if (e && e.cancelable) e.preventDefault();
+  }
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('mouseleave', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp, { passive: false });
+  canvas.addEventListener('touchcancel', onUp, { passive: false });
+  document.addEventListener('keydown', function(e) {
+    ensureAudio();
+    if (e.code === 'Space') { e.preventDefault(); if (state === 'aiming') throwDiscus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); angle = Math.min(80, angle + 2); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); angle = Math.max(10, angle - 2); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); spin = Math.min(60, spin + 5); power = Math.min(100, power + 4); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); power = Math.max(5, power - 4); }
+    if (e.key === 'r' || e.key === 'R') { resetGame(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', function() { ensureAudio(); beep(660, 0.15, 'triangle'); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function() { ensureAudio(); resetGame(); });
+  newWind(); updateHUD(); drawField();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

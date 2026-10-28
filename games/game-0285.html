@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Boomerang Bounce</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0b1020;color:#f2f5ff;font-family:Arial,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:12px}
+  .wrap{width:min(920px,100%)}
+  h1{margin:6px 0 2px;text-align:center;font-size:32px;letter-spacing:1px}
+  p.sub{text-align:center;color:#b9c4e8;margin:0 0 10px}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;background:#17203d;border:2px solid #3b4a7d;border-radius:12px;padding:10px 12px;font-weight:bold}
+  #hud span{white-space:nowrap}
+  #gameBox{position:relative;background:#101c3a;border:3px solid #5b74c2;border-radius:14px;overflow:hidden;margin-top:10px}
+  canvas{display:block;width:100%;height:520px;background:linear-gradient(#79c7e8,#bfead0 62%,#7fbf7a)}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(6,10,28,.82);padding:22px}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:34px;margin:0 0 8px}
+  .overlay p{max-width:620px;line-height:1.55;color:#dce3ff}
+  button{cursor:pointer;border:0;border-radius:999px;padding:13px 26px;font-size:17px;font-weight:bold;background:#ffcf3f;color:#17203d;margin-top:12px}
+  button:active{transform:scale(.97)}
+  .keys{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+  .keys b{background:#24315f;border:1px solid #52649f;border-radius:8px;padding:6px 9px;font-size:13px}
+  .hint{text-align:center;color:#aeb9dd;font-size:14px;margin-top:9px;line-height:1.5}
+  .scorebig{font-size:22px;color:#ffdf6b}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🪃 Boomerang Bounce</h1>
+  <p class="sub">Curve it out, catch targets on the way back, and beat the score before your throws run out!</p>
+  <div id="hud">
+    <span>Score: <span id="score">0</span> / 150</span>
+    <span>Throws left: <span id="throws">12</span></span>
+    <span>Round: <span id="round">1</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+    <span>Best hit: <span id="best">—</span></span>
+  </div>
+  <div id="gameBox">
+    <canvas id="game" width="880" height="520"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>Boomerang Bounce</h2>
+      <p><strong>How to Play:</strong> You stand at the lower-left. Aim your boomerang, throw it, and let its curve sweep back toward you. Hit floating targets on the outbound <em>and</em> return path for bonus points. Avoid the rocky obstacles — smacking one ends that throw early. Reach <strong>150 points in 12 throws</strong> to win!</p>
+      <p>Gold targets = 30, Pink = 20, Blue = 10. Small fast targets are worth more. A return-path hit earns a +10 Curve Bonus.</p>
+      <button id="startBtn" type="button">▶ Start Game</button>
+      <div class="keys"><b>Mouse / Touch: drag to aim, release to throw</b><b>Arrow Keys: aim / power</b><b>Space: throw</b><b>R: restart</b></div>
+    </div>
+    <div class="overlay hidden" id="endScreen">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <p class="scorebig" id="endScore"></p>
+      <button id="restartBtn" type="button">↻ Play Again (R)</button>
+    </div>
+  </div>
+  <p class="hint">Controls: Mouse/touch drag aim and release &nbsp;•&nbsp; Arrow Keys aim/power &nbsp;•&nbsp; Space throw &nbsp;•&nbsp; R restart<br>Tip: aim past a target so the boomerang curves back through it — the return is where the big combos live.</p>
+</div>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var scoreEl=document.getElementById('score'), throwsEl=document.getElementById('throws'), statusEl=document.getElementById('status'), bestEl=document.getElementById('best'), roundEl=document.getElementById('round');
+  var titleScreen=document.getElementById('titleScreen'), endScreen=document.getElementById('endScreen');
+  var endTitle=document.getElementById('endTitle'), endText=document.getElementById('endText'), endScore=document.getElementById('endScore');
+  var W=canvas.width, H=canvas.height;
+  var player={x:90,y:440};
+  var state='title'; // title, aiming, flying, over
+  var score=0, throwsLeft=12, round=1, bestHit=0;
+  var aimAngle=-0.7, aimPower=0.72;
+  var aiming=false, aimX=0, aimY=0;
+  var boom=null, trail=[], particles=[], floaters=[];
+  var targets=[], obstacles=[];
+  var audioCtx=null, muted=false;
+
+  function audio(){
+    if(!audioCtx){
+      try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return null; }
+    }
+    if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+    return audioCtx;
+  }
+  function tone(freq,dur,type,vol,slide){
+    var ac=audio(); if(!ac) return;
+    var o=ac.createOscillator(), g=ac.createGain();
+    o.type=type||'sine'; o.frequency.setValueAtTime(freq,ac.currentTime);
+    if(slide){ o.frequency.exponentialRampToValueAtTime(Math.max(40,slide),ac.currentTime+dur); }
+    g.gain.setValueAtTime(vol||0.12,ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
+  }
+  function sfx(name){
+    if(name==='throw'){ tone(300,0.28,'triangle',0.14,700); }
+    if(name==='hit'){ tone(620,0.16,'square',0.13,980); tone(930,0.12,'sine',0.10); }
+    if(name==='bonus'){ tone(880,0.22,'sine',0.13,1320); }
+    if(name==='thud'){ tone(140,0.22,'sawtooth',0.14,70); }
+    if(name==='win'){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ tone(f,0.25,'triangle',0.14); }, i*130); }); }
+    if(name==='lose'){ [392,330,262,196].forEach(function(f,i){ setTimeout(function(){ tone(f,0.28,'sawtooth',0.10); }, i*150); }); }
+  }
+
+  function rand(a,b){ return a+Math.random()*(b-a); }
+  function resetLevel(){
+    score=0; throwsLeft=12; round=1; bestHit=0; boom=null; trail=[]; particles=[]; floaters=[];
+    aimAngle=-0.7; aimPower=0.72;
+    targets=[];
+    var kinds=[
+      {r:26,val:10,col:'#38b6ff',sp:0.55},
+      {r:20,val:20,col:'#ff5fa2',sp:0.85},
+      {r:15,val:30,col:'#ffcf3f',sp:1.15}
+    ];
+    for(var i=0;i<9;i++){
+      var k=kinds[i%3];
+      targets.push({x:rand(260,830),y:rand(70,330),r:k.r,val:k.val,col:k.col,sp:k.sp,ph:rand(0,6.28),baseY:0,alive:true,drift:rand(-0.4,0.4)});
+      targets[i].baseY=targets[i].y;
+    }
+    obstacles=[
+      {x:360,y:300,r:34},{x:560,y:200,r:40},{x:700,y:360,r:32},{x:460,y:120,r:28}
+    ];
+    updateHUD('Aim and throw!');
+  }
+  function updateHUD(msg){
+    scoreEl.textContent=score; throwsEl.textContent=throwsLeft; roundEl.textContent=round;
+    bestEl.textContent=bestHit? (bestHit+' pts') : '—';
+    if(msg) statusEl.textContent=msg;
+  }
+  function startGame(){
+    audio();
+    resetLevel();
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    state='aiming'; updateHUD('Aim and throw!');
+  }
+  function endGame(win){
+    state='over'; boom=null;
+    endScreen.classList.remove('hidden');
+    endTitle.textContent=win?'🏆 You Win!':'💥 Game Over';
+    endText.textContent=win?('Brilliant curving! You reached the target score with throws to spare.') : ('Out of throws. The targets drift away — try curving wider next time.');
+    endScore.textContent='Final Score: '+score+' / 150  •  Throws left: '+throwsLeft;
+    if(win) sfx('win'); else sfx('lose');
+    updateHUD(win?'You Win!':'Game Over');
+  }
+  function throwBoomerang(){
+    if(state!=='aiming'||throwsLeft<=0) return;
+    audio();
+    throwsLeft--;
+    var ang=aiming? Math.atan2(aimY-player.y,aimX-player.x) : aimAngle;
+    var pow=aiming? Math.min(1,Math.hypot(aimX-player.x,aimY-player.y)/280) : aimPower;
+    if(pow<0.18) pow=0.18;
+    var speed=9+pow*7;
+    boom={x:player.x,y:player.y,vx:Math.cos(ang)*speed,vy:Math.sin(ang)*speed,rot:0,age:0,returned:false,turned:false};
+    trail=[]; state='flying'; sfx('throw'); updateHUD('Boomerang flying…');
+  }
+  function burst(x,y,col,n){
+    for(var i=0;i<(n||14);i++){ particles.push({x:x,y:y,vx:rand(-3,3),vy:rand(-4,1),life:rand(18,42),col:col}); }
+  }
+  function addFloater(x,y,text){
+    floaters.push({x:x,y:y,text:text,life:50});
+  }
+  function update(){
+    // targets bob and drift
+    targets.forEach(function(t,i){
+      if(!t.alive) return;
+      t.ph+=0.03*t.sp; t.y=t.baseY+Math.sin(t.ph)*28; t.x+=t.drift;
+      if(t.x<240) {t.x=240;t.drift=Math.abs(t.drift);}
+      if(t.x>840) {t.x=840;t.drift=-Math.abs(t.drift);}
+    });
+    particles=particles.filter(function(p){ p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.life--; return p.life>0; });
+    floaters=floaters.filter(function(f){ f.y-=1; f.life--; return f.life>0; });
+    if(boom){
+      boom.age++; boom.rot+=0.45;
+      // Curve: gentle pull back toward the player after the outbound leg, creating the return arc.
+      if(boom.age>28){
+        var dx=player.x-boom.x, dy=player.y-boom.y, d=Math.hypot(dx,dy)||1;
+        var pull=0.16;
+        boom.vx+=dx/d*pull; boom.vy+=dy/d*pull;
+        if(!boom.turned && d<260){ boom.turned=true; }
+      }
+      boom.x+=boom.vx; boom.y+=boom.vy;
+      trail.push({x:boom.x,y:boom.y}); if(trail.length>26) trail.shift();
+      // wall bounce keeps it in play
+      if(boom.x<12||boom.x>W-12){ boom.vx*=-0.7; boom.x=Math.max(12,Math.min(W-12,boom.x)); }
+      if(boom.y<12||boom.y>H-12){ boom.vy*=-0.7; boom.y=Math.max(12,Math.min(H-12,boom.y)); }
+      // obstacles end the throw
+      for(var oi=0;oi<obstacles.length;oi++){
+        var ob=obstacles[oi];
+        if(Math.hypot(boom.x-ob.x,boom.y-ob.y)<ob.r+13){
+          burst(boom.x,boom.y,'#8a6a45',18); sfx('thud');
+          boom=null; state='aiming'; round++;
+          addFloater(ob.x,ob.y-40,'CLANG!');
+          checkEnd(); updateHUD('Hit an obstacle — throw lost!');
+          return;
+        }
+      }
+      // targets
+      for(var ti=0;ti<targets.length;ti++){
+        var t=targets[ti]; if(!t.alive) continue;
+        if(Math.hypot(boom.x-t.x,boom.y-t.y)<t.r+14){
+          var bonus=(boom.age>28)?10:0;
+          var pts=t.val+bonus;
+          score+=pts; if(pts>bestHit) bestHit=pts;
+          t.alive=false; burst(t.x,t.y,t.col,20); addFloater(t.x,t.y-20,'+'+pts+(bonus?' CURVE!':''));
+          if(bonus) sfx('bonus'); else sfx('hit');
+          // respawn a fresh target elsewhere after a hit, so the board stays lively
+          setTimeout((function(){
+            var kinds=[{r:26,val:10,col:'#38b6ff',sp:0.55},{r:20,val:20,col:'#ff5fa2',sp:0.85},{r:15,val:30,col:'#ffcf3f',sp:1.15}];
+            var k=kinds[Math.floor(Math.random()*3)];
+            targets.push({x:rand(300,830),y:rand(70,330),r:k.r,val:k.val,col:k.col,sp:k.sp,ph:rand(0,6.28),baseY:0,alive:true,drift:rand(-0.4,0.4)});
+            targets[targets.length-1].baseY=targets[targets.length-1].y;
+          }),900);
+          updateHUD('Hit! +'+pts);
+          if(score>=150){ endGame(true); return; }
+        }
+      }
+      // return to player ends throw successfully
+      if(boom.age>45 && Math.hypot(boom.x-player.x,boom.y-player.y)<34){
+        burst(player.x,player.y,'#ffcf3f',12);
+        boom=null; state='aiming'; round++;
+        checkEnd(); updateHUD('Caught! Aim again.');
+        return;
+      }
+      if(boom.age>420){
+        boom=null; state='aiming'; round++; checkEnd(); updateHUD('Boomerang faded — aim again.');
+      }
+    }
+  }
+  function checkEnd(){
+    if(score>=150){ endGame(true); }
+    else if(throwsLeft<=0 && !boom){ endGame(false); }
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // sky, hills and clouds
+    ctx.fillStyle='#eaf7ff';
+    ctx.beginPath(); ctx.ellipse(140,70,70,18,0,0,6.283); ctx.ellipse(200,62,55,16,0,0,6.283); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(650,55,80,18,0,0,6.283); ctx.fill();
+    ctx.fillStyle='#5da85a'; ctx.beginPath(); ctx.ellipse(440,540,560,90,0,0,6.283); ctx.fill();
+    // obstacles
+    obstacles.forEach(function(o){
+      ctx.fillStyle='#7a5a38'; ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,6.283); ctx.fill();
+      ctx.fillStyle='#9c7a52'; ctx.beginPath(); ctx.arc(o.x-8,o.y-9,o.r*0.45,0,6.283); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font='bold 18px Arial'; ctx.textAlign='center'; ctx.fillText('⛰',o.x,o.y+6);
+    });
+    // targets as balloons
+    targets.forEach(function(t){
+      if(!t.alive) return;
+      ctx.strokeStyle='rgba(20,30,60,.55)'; ctx.beginPath(); ctx.moveTo(t.x,t.y+t.r); ctx.lineTo(t.x,t.y+t.r+18); ctx.stroke();
+      ctx.fillStyle=t.col; ctx.beginPath(); ctx.arc(t.x,t.y,t.r,0,6.283); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font='bold '+(t.r>20?15:13)+'px Arial'; ctx.textAlign='center'; ctx.fillText(t.val,t.x,t.y+5);
+    });
+    // trail
+    trail.forEach(function(p,i){ ctx.fillStyle='rgba(255,207,63,'+(0.12+0.6*i/trail.length)+')'; ctx.beginPath(); ctx.arc(p.x,p.y,5,0,6.283); ctx.fill(); });
+    // player
+    ctx.fillStyle='#17203d'; ctx.beginPath(); ctx.arc(player.x,player.y,26,0,6.283); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 24px Arial'; ctx.textAlign='center'; ctx.fillText('🧑',player.x,player.y+9);
+    ctx.fillStyle='#17203d'; ctx.font='bold 13px Arial'; ctx.fillText('YOU',player.x,player.y+46);
+    // aim line
+    if(state==='aiming'){
+      var ax, ay;
+      if(aiming){ ax=aimX; ay=aimY; } else { ax=player.x+Math.cos(aimAngle)*(90+aimPower*170); ay=player.y+Math.sin(aimAngle)*(90+aimPower*170); }
+      ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.setLineDash([8,7]); ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(player.x,player.y); ctx.lineTo(ax,ay); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth=1;
+      ctx.fillStyle='#ffcf3f'; ctx.beginPath(); ctx.arc(ax,ay,9,0,6.283); ctx.fill();
+      ctx.fillStyle='#17203d'; ctx.font='bold 13px Arial'; ctx.fillText('DRAG TO AIM',player.x+70,player.y-52);
+    }
+    // boomerang
+    if(boom){
+      ctx.save(); ctx.translate(boom.x,boom.y); ctx.rotate(boom.rot);
+      ctx.fillStyle='#ffcf3f'; ctx.strokeStyle='#b8860b'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(-22,0); ctx.quadraticCurveTo(0,-24,22,0); ctx.quadraticCurveTo(0,-10,-22,0); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+    particles.forEach(function(p){ ctx.fillStyle=p.col; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,6.283); ctx.fill(); });
+    floaters.forEach(function(f){ ctx.fillStyle='#fff'; ctx.strokeStyle='#17203d'; ctx.lineWidth=3; ctx.font='bold 17px Arial'; ctx.textAlign='center'; ctx.strokeText(f.text,f.x,f.y); ctx.fillText(f.text,f.x,f.y); });
+    ctx.fillStyle='#17203d'; ctx.font='bold 14px Arial'; ctx.textAlign='left';
+    ctx.fillText('Goal: 150 pts  •  Avoid rocks  •  Return hits = +10 bonus',14,24);
+  }
+  function loop(){ update(); draw(); requestAnimationFrame(loop); }
+  function pos(e){
+    var r=canvas.getBoundingClientRect();
+    var cx=(e.touches?e.touches[0].clientX:e.clientX), cy=(e.touches?e.touches[0].clientY:e.clientY);
+    return {x:(cx-r.left)*W/r.width, y:(cy-r.top)*H/r.height};
+  }
+  canvas.addEventListener('mousedown',function(e){ if(state!=='aiming') return; aiming=true; var p=pos(e); aimX=p.x; aimY=p.y; });
+  canvas.addEventListener('mousemove',function(e){ if(!aiming) return; var p=pos(e); aimX=p.x; aimY=p.y; });
+  canvas.addEventListener('mouseup',function(e){ if(!aiming) return; aiming=false; var p=pos(e); aimX=p.x; aimY=p.y; throwBoomerang(); });
+  canvas.addEventListener('touchstart',function(e){ e.preventDefault(); if(state!=='aiming') return; aiming=true; var p=pos(e); aimX=p.x; aimY=p.y; },{passive:false});
+  canvas.addEventListener('touchmove',function(e){ e.preventDefault(); if(!aiming) return; var p=pos(e); aimX=p.x; aimY=p.y; },{passive:false});
+  canvas.addEventListener('touchend',function(e){ e.preventDefault(); if(!aiming) return; aiming=false; throwBoomerang(); },{passive:false});
+  document.addEventListener('keydown',function(e){
+    if(e.key==='ArrowLeft') aimAngle-=0.08;
+    if(e.key==='ArrowRight') aimAngle+=0.08;
+    if(e.key==='ArrowUp') aimPower=Math.min(1,aimPower+0.08);
+    if(e.key==='ArrowDown') aimPower=Math.max(0.2,aimPower-0.08);
+    if(e.key===' '){ e.preventDefault(); if(state==='title'||state==='over'){ startGame(); } else { throwBoomerang(); } }
+    if(e.key==='r'||e.key==='R'){ startGame(); }
+  });
+  document.getElementById('startBtn').addEventListener('click',startGame);
+  document.getElementById('restartBtn').addEventListener('click',startGame);
+  resetLevel(); state='title'; updateHUD('Press Start');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

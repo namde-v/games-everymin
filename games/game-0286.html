@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Skyline Swing — Rooftop Grapple Swing</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1026; color: #f4f1ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 14px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 1px; margin: 6px 0 2px; text-align: center; }
+  p.sub { color: #b9b3ff; text-align: center; margin-bottom: 10px; font-size: 14px; }
+  #wrap { position: relative; width: min(920px, 96vw); }
+  canvas { width: 100%; height: auto; display: block; background: linear-gradient(#1a2452, #0b1026); border: 3px solid #7c6cff; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: #171c3f; border: 1px solid #4b4a8a; border-radius: 10px; padding: 9px 12px; margin-bottom: 10px; font-weight: 700; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(7, 10, 32, 0.86); border-radius: 14px; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #d8d4ff; }
+  .big { font-size: 20px; color: #ffd94d; font-weight: 800; }
+  button { background: #ffd94d; color: #191423; border: none; border-radius: 999px; padding: 13px 28px; font-size: 18px; font-weight: 900; cursor: pointer; margin-top: 8px; }
+  button:hover { filter: brightness(1.08); }
+  button.secondary { background: #7c6cff; color: white; }
+  .keys { background: #23265a; border: 1px solid #56559f; border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 14px; line-height: 1.6; }
+  .keys b { color: #ffd94d; }
+  #hint { text-align: center; color: #b9b3ff; font-size: 13px; margin-top: 9px; }
+  .stars-note { color: #ffd94d; font-weight: 800; }
+</style>
+</head>
+<body>
+<h1>🏙️ Skyline Swing</h1>
+<p class="sub">Arcade / Rooftop Grapple Swing — swing the skyline, don't fall!</p>
+<div id="wrap">
+  <div id="hud">
+    <span>⭐ Score: <span id="score">0</span></span>
+    <span>❤️ Lives: <span id="lives">3</span></span>
+    <span>📍 Rooftop: <span id="roof">1 / 8</span></span>
+    <span>📌 Status: <span id="status">Ready</span></span>
+  </div>
+  <canvas id="game" width="920" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🏙️ Skyline Swing</h2>
+    <p class="big">Grapple. Swing. Land. Survive the skyline!</p>
+    <p>Run across the rooftops, hold to grapple an anchor above the gaps, build momentum, and release at just the right moment to fly to the next roof. Collect stars, avoid falling, and reach the final golden rooftop to win.</p>
+    <div class="keys">
+      <b>How to Play:</b><br>
+      • <b>Space / click / tap &amp; HOLD</b> — grapple the nearest anchor and swing<br>
+      • <b>Release</b> — let go and fly forward<br>
+      • <b>Arrow Keys</b> — Left / Right steer in the air, Up adds a little pump while swinging<br>
+      • <b>Touch</b> — touch &amp; hold to grapple, lift your finger to release<br>
+      • Land on a rooftop to save your progress. Fall 3 times and it's game over.
+    </div>
+    <button id="startBtn" type="button">▶ Start Game</button>
+    <p>Tip: release near the top of your swing for the longest flight!</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="endScore" class="big"></p>
+    <button id="restartBtn" type="button">↻ Play Again</button>
+    <button id="menuBtn" type="button" class="secondary">Back to Title</button>
+  </div>
+</div>
+<p id="hint">Hold Space / mouse / touch to grapple &nbsp;•&nbsp; Release to fly &nbsp;•&nbsp; Arrow Keys steer &nbsp;•&nbsp; Press R to restart</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var roofEl = document.getElementById('roof');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  // Audio: procedural only, created after user interaction.
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+
+  // World: 8 rooftops, left to right, with gaps and anchors above the gaps.
+  var roofs = [
+    { x: 0,   w: 170, y: 410, h: 110, color: '#3b3f7d' },
+    { x: 240, w: 150, y: 390, h: 130, color: '#4a4a8f' },
+    { x: 460, w: 130, y: 420, h: 100, color: '#3b3f7d' },
+    { x: 660, w: 150, y: 380, h: 140, color: '#54479e' },
+    { x: 880, w: 140, y: 410, h: 110, color: '#3b3f7d' },
+    { x: 1090, w: 160, y: 385, h: 135, color: '#4a4a8f' },
+    { x: 1320, w: 140, y: 415, h: 105, color: '#54479e' },
+    { x: 1530, w: 200, y: 375, h: 145, color: '#c9a227' }
+  ];
+  var anchors = [
+    { x: 210, y: 170 }, { x: 430, y: 150 }, { x: 625, y: 165 },
+    { x: 815, y: 145 }, { x: 1035, y: 160 }, { x: 1260, y: 150 }, { x: 1470, y: 155 }
+  ];
+  var stars = [
+    { x: 320, y: 300, taken: false }, { x: 540, y: 280, taken: false },
+    { x: 730, y: 290, taken: false }, { x: 960, y: 275, taken: false },
+    { x: 1170, y: 285, taken: false }, { x: 1390, y: 280, taken: false },
+    { x: 1600, y: 270, taken: false }
+  ];
+  var WORLD_W = 1730;
+
+  var state = 'title'; // title | playing | won | over
+  var player, camera, keys, grappling, anchor, lives, score, starCount, lastRoof, maxDist;
+
+  function resetGame() {
+    player = { x: 70, y: 388, vx: 0, vy: 0, r: 15, onGround: true, swinging: false };
+    camera = 0; keys = {}; grappling = false; anchor = null;
+    lives = 3; score = 0; starCount = 0; lastRoof = 0; maxDist = 70;
+    stars.forEach(function (s) { s.taken = false; });
+    updateHud('Ready — hold to grapple!');
+  }
+  function updateHud(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    roofEl.textContent = (lastRoof + 1) + ' / 8';
+    if (status) statusEl.textContent = status;
+  }
+  function roofAt(x, y) {
+    for (var i = 0; i < roofs.length; i++) {
+      var r = roofs[i];
+      if (x >= r.x && x <= r.x + r.w && y >= r.y - 4 && y <= r.y + 30) return i;
+    }
+    return -1;
+  }
+  function nearestAnchor() {
+    var best = null, bestD = 1e9;
+    anchors.forEach(function (a) {
+      var d = Math.hypot(a.x - player.x, a.y - player.y);
+      if (a.x > player.x - 40 && d < bestD) { best = a; bestD = d; }
+    });
+    return (best && bestD < 340) ? best : null;
+  }
+  function startGrapple() {
+    if (state !== 'playing') return;
+    if (player.onGround) { player.vy = -2; player.onGround = false; }
+    var a = nearestAnchor();
+    if (a) { anchor = a; grappling = true; player.swinging = true; beep(520, 0.08, 'triangle', 0.1); updateHud('Swinging!'); }
+  }
+  function releaseGrapple() {
+    if (!grappling) return;
+    grappling = false; player.swinging = false; anchor = null;
+    // Keep momentum, add a forward boost from the swing.
+    player.vx = Math.max(player.vx, 3.2);
+    player.vy = Math.min(player.vy, -1.5);
+    beep(760, 0.1, 'sine', 0.1);
+    updateHud('Flying!');
+  }
+  function respawn() {
+    var r = roofs[lastRoof];
+    player.x = r.x + r.w / 2; player.y = r.y - player.r - 2;
+    player.vx = 0; player.vy = 0; player.onGround = true;
+    grappling = false; anchor = null;
+    camera = Math.max(0, Math.min(player.x - 280, WORLD_W - canvas.width));
+    updateHud('Back on rooftop ' + (lastRoof + 1) + ' — try again!');
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    grappling = false;
+    endTitle.textContent = won ? '🏆 You Win!' : '💥 Game Over';
+    endText.textContent = won
+      ? 'You reached the final golden rooftop! The whole skyline is yours.'
+      : 'You fell three times. The skyline wins this round — try again!';
+    endScore.textContent = 'Score: ' + score + '  •  Stars: ' + starCount + ' / 7  •  Rooftop reached: ' + (lastRoof + 1) + ' / 8';
+    endScreen.classList.remove('hidden');
+    beep(won ? 880 : 180, won ? 0.5 : 0.4, won ? 'triangle' : 'sawtooth', 0.14);
+    updateHud(won ? 'You Win!' : 'Game Over');
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHud('Running — hold to grapple!');
+    beep(440, 0.15, 'triangle', 0.12);
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    // Steering
+    if (keys.ArrowLeft) player.vx -= 0.12;
+    if (keys.ArrowRight) player.vx += 0.12;
+    if (keys.ArrowUp && grappling) player.vx += 0.08;
+
+    if (grappling && anchor) {
+      // Pendulum: constrain to rope length, add gravity tangentially.
+      var dx = player.x - anchor.x, dy = player.y - anchor.y;
+      var dist = Math.hypot(dx, dy) || 1;
+      var rope = Math.min(dist, 300);
+      // Gravity pulls down; rope tension keeps distance.
+      player.vy += 0.42;
+      player.vx += 0.06; // gentle forward pump so swings carry you onward
+      player.x += player.vx; player.y += player.vy;
+      var nx = player.x - anchor.x, ny = player.y - anchor.y;
+      var nd = Math.hypot(nx, ny) || 1;
+      player.x = anchor.x + nx / nd * rope;
+      player.y = anchor.y + ny / nd * rope;
+      // Tangential velocity only: remove radial component.
+      var rx = nx / nd, ry = ny / nd;
+      var radial = player.vx * rx + player.vy * ry;
+      player.vx -= radial * rx; player.vy -= radial * ry;
+    } else {
+      player.vy += 0.45;
+      if (!player.onGround) player.vx *= 0.995;
+      player.x += player.vx; player.y += player.vy;
+    }
+    // Gentle auto-run on rooftops so the game keeps moving.
+    if (player.onGround) { player.vx = Math.max(player.vx, 1.4); player.x += player.vx; }
+
+    // Landing on a rooftop
+    var idx = roofAt(player.x, player.y + player.r);
+    if (idx >= 0 && player.vy >= 0) {
+      var r = roofs[idx];
+      if (player.y + player.r >= r.y && player.y < r.y + 30) {
+        player.y = r.y - player.r; player.vy = 0; player.onGround = true;
+        grappling = false; anchor = null;
+        if (idx > lastRoof) {
+          lastRoof = idx;
+          score += 150;
+          beep(660, 0.12, 'triangle', 0.12);
+          updateHud('Landed on rooftop ' + (idx + 1) + '!');
+          if (idx === roofs.length - 1) { score += 500; updateHud('You Win!'); endGame(true); return; }
+        }
+      }
+    } else if (player.y + player.r < 370) {
+      // In the air above roof level: not grounded unless just left a roof edge.
+      if (player.onGround && roofAt(player.x, player.y + player.r + 2) < 0) player.onGround = false;
+    }
+    // Walked / swung off a roof edge
+    if (player.onGround && roofAt(player.x, player.y + player.r + 4) < 0 && !grappling) player.onGround = false;
+
+    // Stars
+    stars.forEach(function (s) {
+      if (!s.taken && Math.hypot(s.x - player.x, s.y - player.y) < 34) {
+        s.taken = true; starCount++; score += 100; beep(990, 0.15, 'sine', 0.13);
+        updateHud('Star collected!');
+      }
+    });
+
+    // Distance score
+    if (player.x > maxDist) { score += Math.round((player.x - maxDist) / 10); maxDist = player.x; }
+
+    // Falling
+    if (player.y > canvas.height + 60) {
+      lives--;
+      beep(160, 0.35, 'sawtooth', 0.13);
+      if (lives <= 0) { updateHud('Game Over'); endGame(false); return; }
+      respawn();
+    }
+    // Camera follows the player.
+    camera = Math.max(0, Math.min(player.x - 280, WORLD_W - canvas.width));
+    updateHud();
+  }
+
+  function drawSky() {
+    var g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    g.addColorStop(0, '#1a2452'); g.addColorStop(0.6, '#2a2a6e'); g.addColorStop(1, '#0b1026');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    [[90, 70, 2], [240, 50, 2], [420, 90, 2], [610, 55, 3], [790, 80, 2]].forEach(function (s) {
+      ctx.beginPath(); ctx.arc(s[0], s[1], s[2], 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = '#ffd94d';
+    ctx.beginPath(); ctx.arc(850, 60, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,217,77,0.25)';
+    ctx.beginPath(); ctx.arc(850, 60, 42, 0, Math.PI * 2); ctx.fill();
+  }
+  function draw() {
+    drawSky();
+    ctx.save();
+    ctx.translate(-camera, 0);
+    // Distant skyline silhouettes
+    ctx.fillStyle = '#23265a';
+    for (var i = 0; i < 20; i++) ctx.fillRect(i * 95, 300 + (i % 3) * 20, 60, 220);
+    // Anchors
+    anchors.forEach(function (a) {
+      ctx.fillStyle = '#ffd94d';
+      ctx.beginPath(); ctx.arc(a.x, a.y, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#191423';
+      ctx.beginPath(); ctx.arc(a.x, a.y, 4, 0, Math.PI * 2); ctx.fill();
+    });
+    // Stars
+    stars.forEach(function (s) {
+      if (s.taken) return;
+      ctx.fillStyle = '#ffe066'; ctx.font = '26px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('★', s.x, s.y + 9);
+    });
+    // Rooftops
+    roofs.forEach(function (r, i) {
+      ctx.fillStyle = r.color; ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(r.x, r.y, r.w, 8);
+      ctx.fillStyle = '#ffd94d'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(i === roofs.length - 1 ? 'FINISH ★' : 'ROOF ' + (i + 1), r.x + r.w / 2, r.y + 26);
+      // Windows
+      ctx.fillStyle = 'rgba(255,220,120,0.55)';
+      for (var wx = r.x + 14; wx < r.x + r.w - 14; wx += 28) {
+        for (var wy = r.y + 42; wy < r.y + r.h - 10; wy += 30) ctx.fillRect(wx, wy, 14, 16);
+      }
+    });
+    // Rope
+    if (grappling && anchor) {
+      ctx.strokeStyle = '#ffd94d'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(anchor.x, anchor.y); ctx.lineTo(player.x, player.y); ctx.stroke();
+    }
+    // Player: little runner with a cape
+    ctx.fillStyle = '#ff5d5d';
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#191423';
+    ctx.beginPath(); ctx.arc(player.x + 5, player.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(player.x - 5, player.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#7c6cff';
+    ctx.beginPath(); ctx.moveTo(player.x - 10, player.y - 4); ctx.lineTo(player.x - 26, player.y + 4); ctx.lineTo(player.x - 10, player.y + 10); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start, then hold Space / click / tap to grapple!', canvas.width / 2, 500);
+    }
+  }
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, touch.
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); ensureAudio(); startGrapple(); }
+    if (e.key === 'r' || e.key === 'R') { if (state === 'won' || state === 'over') startGame(); }
+    if (e.key === 'Enter' && state === 'title') startGame();
+  });
+  document.addEventListener('keyup', function (e) {
+    keys[e.key] = false;
+    if (e.key === ' ' || e.key === 'Spacebar') releaseGrapple();
+  });
+  canvas.addEventListener('mousedown', function (e) { e.preventDefault(); ensureAudio(); startGrapple(); });
+  document.addEventListener('mouseup', function () { releaseGrapple(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); startGrapple(); }, { passive: false });
+  document.addEventListener('touchend', function (e) { e.preventDefault(); releaseGrapple(); }, { passive: false });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    resetGame(); state = 'title';
+    endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+    updateHud('Ready');
+  });
+
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
