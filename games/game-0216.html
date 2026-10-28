@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Kite Kraze — Game 0216</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b2545; font-family: Arial, Helvetica, sans-serif; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+  #wrap { position: relative; width: 900px; max-width: 98vw; }
+  canvas { display: block; width: 100%; height: 560px; background: linear-gradient(#7ec8ff, #cdeaff); border: 3px solid #ffd166; border-radius: 12px; touch-action: none; }
+  #hud { position: absolute; top: 12px; left: 14px; right: 14px; display: flex; justify-content: space-between; font-weight: bold; font-size: 18px; color: #133a5e; text-shadow: 0 1px 0 #fff; pointer-events: none; }
+  .panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: rgba(11,37,69,0.72); border-radius: 12px; text-align: center; padding: 24px; }
+  .panel h1 { font-size: 52px; color: #ffd166; text-shadow: 3px 3px 0 #e76f51; letter-spacing: 2px; }
+  .panel h2 { font-size: 40px; color: #ffd166; }
+  .panel p { font-size: 17px; line-height: 1.55; max-width: 620px; }
+  button { cursor: pointer; background: #ffd166; color: #133a5e; border: none; border-radius: 10px; padding: 14px 34px; font-size: 22px; font-weight: bold; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  .small { font-size: 14px; opacity: 0.9; }
+  .hidden { display: none !important; }
+  #altWarn { color: #ff5d5d; font-weight: bold; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="hud">
+    <span id="hudScore">Score: 0</span>
+    <span id="hudRings">Rings: 0 / 25</span>
+    <span id="hudLives">Lives: 3</span>
+    <span id="hudAlt">Altitude: 100%</span>
+  </div>
+
+  <div id="titleScreen" class="panel">
+    <h1>KITE KRAZE</h1>
+    <p><strong>How to Play:</strong> Steer your kite through the sky! Fly through golden rings to score points. Ride green wind gusts for a speed and lift boost. Dodge dark storm clouds and tangled power lines — each hit costs a life. Keep your altitude up: if you sink too low, you lose a life and relaunch. Collect <strong>25 rings</strong> to win!</p>
+    <p>Controls: Arrow keys / WASD to steer &bull; Mouse: move to steer &bull; Touch: drag to steer</p>
+    <button id="startBtn" type="button">Start</button>
+    <p class="small">Sound starts only after you press Start. Fully offline — no downloads needed.</p>
+  </div>
+
+  <div id="endScreen" class="panel hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn" type="button">Restart</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var hudScore = document.getElementById('hudScore');
+  var hudRings = document.getElementById('hudRings');
+  var hudLives = document.getElementById('hudLives');
+  var hudAlt = document.getElementById('hudAlt');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title | playing | over
+  var score = 0, rings = 0, lives = 3;
+  var kite = { x: 150, y: 280, vx: 0, vy: 0, angle: 0 };
+  var keys = {};
+  var pointer = { active: false, x: 150, y: 280 };
+  var ringList = [], cloudList = [], lineList = [], gustList = [], birds = [];
+  var spawnTimer = 0, gustTimer = 0, frame = 0, lastTime = 0;
+  var audioCtx = null, muted = false;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+  }
+  function chime() { beep(660, 0.12, 'sine', 0.15); setTimeout(function () { beep(990, 0.18, 'sine', 0.15); }, 90); }
+  function thud() { beep(140, 0.25, 'sawtooth', 0.18); }
+
+  function reset() {
+    score = 0; rings = 0; lives = 3;
+    kite = { x: 150, y: 280, vx: 0, vy: 0, angle: 0 };
+    ringList = []; cloudList = []; lineList = []; gustList = []; birds = [];
+    spawnTimer = 0; gustTimer = 0; frame = 0;
+    for (var i = 0; i < 3; i++) { spawnRing(); }
+    for (var j = 0; j < 4; j++) { spawnCloud(); }
+    updateHUD();
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function spawnRing() {
+    ringList.push({ x: rand(350, W - 60), y: rand(70, H - 120), r: 30, bob: rand(0, 6.28), taken: false });
+  }
+  function spawnCloud() {
+    cloudList.push({ x: rand(W + 20, W + 300), y: rand(50, H - 150), vx: rand(-1.4, -0.7), r: rand(34, 52), flash: 0 });
+  }
+  function spawnLine() {
+    lineList.push({ x: W + 40, y: rand(120, H - 80), w: rand(90, 170), h: 26, vx: -1.1 });
+  }
+  function spawnGust() {
+    gustList.push({ x: W + 30, y: rand(60, H - 120), vx: -1.6, r: rand(26, 40), life: 400 });
+  }
+  function spawnBird() {
+    birds.push({ x: rand(0, W), y: rand(40, 180), vx: rand(0.4, 0.9), flap: rand(0, 6.28) });
+  }
+  for (var b = 0; b < 4; b++) spawnBird();
+
+  function updateHUD() {
+    hudScore.textContent = 'Score: ' + score;
+    hudRings.textContent = 'Rings: ' + rings + ' / 25';
+    hudLives.textContent = 'Lives: ' + lives;
+    var alt = Math.max(0, Math.round((1 - kite.y / H) * 100));
+    hudAlt.textContent = 'Altitude: ' + alt + '%';
+    hudAlt.style.color = kite.y > H - 90 ? '#ff2222' : '#133a5e';
+  }
+
+  function loseLife(reason) {
+    lives--; thud();
+    kite.x = 150; kite.y = 280; kite.vx = 0; kite.vy = 0;
+    updateHUD();
+    if (lives <= 0) { endGame(false, reason); }
+  }
+
+  function endGame(won, reason) {
+    state = 'over';
+    endTitle.textContent = won ? 'You Win!' : 'Game Over';
+    endText.textContent = won
+      ? 'Your kite soared through all 25 rings! Final score: ' + score + '. Brilliant flying!'
+      : (reason || 'Your kite came down.') + ' Final score: ' + score + ', rings collected: ' + rings + '. Try again!';
+    endScreen.classList.remove('hidden');
+    if (won) { chime(); setTimeout(chime, 250); }
+  }
+
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    frame++;
+    // Steering: keyboard
+    var ax = 0, ay = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) ax += 1;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) ay -= 1;
+    if (keys['ArrowDown'] || keys['s'] || keys['S']) ay += 1;
+    kite.vx += ax * 0.35; kite.vy += ay * 0.35;
+    // Pointer steering (mouse / touch): kite follows pointer gently
+    if (pointer.active) {
+      kite.vx += (pointer.x - kite.x) * 0.012;
+      kite.vy += (pointer.y - kite.y) * 0.012;
+    }
+    // Gravity drags the kite down slowly — keep altitude up!
+    kite.vy += 0.02;
+    kite.vx *= 0.96; kite.vy *= 0.96;
+    kite.x += kite.vx; kite.y += kite.vy;
+    kite.angle = Math.max(-0.6, Math.min(0.6, kite.vx * 0.05));
+
+    // Bounds: hitting the ground costs a life
+    if (kite.x < 20) { kite.x = 20; kite.vx = 0; }
+    if (kite.x > W - 20) { kite.x = W - 20; kite.vx = 0; }
+    if (kite.y < 20) { kite.y = 20; kite.vy = 0; }
+    if (kite.y > H - 30) {
+      loseLife('Your kite crashed into the ground.');
+      if (state !== 'playing') return;
+    }
+
+    // Spawning
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnTimer = rand(900, 1800);
+      var roll = Math.random();
+      if (roll < 0.45) spawnRing();
+      else if (roll < 0.75) spawnCloud();
+      else spawnLine();
+    }
+    gustTimer -= dt;
+    if (gustTimer <= 0) { gustTimer = rand(3500, 6500); spawnGust(); }
+
+    // Rings
+    for (var i = ringList.length - 1; i >= 0; i--) {
+      var r = ringList[i];
+      r.bob += 0.05;
+      var ry = r.y + Math.sin(r.bob) * 8;
+      var dx = kite.x - r.x, dy = kite.y - ry;
+      if (Math.sqrt(dx * dx + dy * dy) < r.r + 14) {
+        ringList.splice(i, 1);
+        rings++; score += 50;
+        chime(); spawnRing();
+        if (rings >= 25) { updateHUD(); endGame(true); return; }
+      }
+    }
+    // Gusts: boost score and lift
+    for (var g = gustList.length - 1; g >= 0; g--) {
+      var gu = gustList[g];
+      gu.x += gu.vx; gu.life -= dt;
+      var gdx = kite.x - gu.x, gdy = kite.y - gu.y;
+      if (Math.sqrt(gdx * gdx + gdy * gdy) < gu.r + 14) {
+        gustList.splice(g, 1);
+        kite.vy -= 5; kite.vx += 2; score += 20;
+        beep(520, 0.2, 'triangle', 0.15);
+      } else if (gu.life <= 0 || gu.x < -60) { gustList.splice(g, 1); }
+    }
+    // Storm clouds
+    for (var c = cloudList.length - 1; c >= 0; c--) {
+      var cl = cloudList[c];
+      cl.x += cl.vx; cl.flash = Math.random() < 0.02 ? 8 : Math.max(0, cl.flash - 1);
+      var cdx = kite.x - cl.x, cdy = kite.y - cl.y;
+      if (Math.sqrt(cdx * cdx + cdy * cdy) < cl.r + 12) {
+        cloudList.splice(c, 1);
+        loseLife('A storm cloud zapped your kite!');
+        if (state !== 'playing') return;
+        spawnCloud();
+      } else if (cl.x < -80) { cloudList.splice(c, 1); spawnCloud(); }
+    }
+    // Power lines: tangled wires hanging across the sky
+    for (var l = lineList.length - 1; l >= 0; l--) {
+      var ln = lineList[l];
+      ln.x += ln.vx;
+      if (kite.x > ln.x - 10 && kite.x < ln.x + ln.w + 10 && Math.abs(kite.y - ln.y) < 30) {
+        lineList.splice(l, 1);
+        loseLife('Your kite tangled in power lines!');
+        if (state !== 'playing') return;
+      } else if (ln.x + ln.w < -20) { lineList.splice(l, 1); }
+    }
+    // Background birds
+    for (var bi = 0; bi < birds.length; bi++) {
+      birds[bi].x += birds[bi].vx; birds[bi].flap += 0.2;
+      if (birds[bi].x > W + 20) { birds[bi].x = -20; birds[bi].y = rand(40, 180); }
+    }
+    // Survival tick
+    if (frame % 60 === 0) { score += 1; }
+    updateHUD();
+  }
+
+  function drawSky() {
+    // Sun
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(800, 70, 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,209,102,0.25)';
+    ctx.beginPath(); ctx.arc(800, 70, 62, 0, Math.PI * 2); ctx.fill();
+    // Rolling hills at the bottom
+    ctx.fillStyle = '#5aa469';
+    ctx.beginPath(); ctx.moveTo(0, H - 40);
+    ctx.quadraticCurveTo(220, H - 90, 450, H - 40);
+    ctx.quadraticCurveTo(680, H - 10, 900, H - 50);
+    ctx.lineTo(900, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    // Birds
+    ctx.strokeStyle = '#133a5e'; ctx.lineWidth = 2;
+    for (var i = 0; i < birds.length; i++) {
+      var bd = birds[i], flap = Math.sin(bd.flap) * 5;
+      ctx.beginPath();
+      ctx.moveTo(bd.x - 10, bd.y + flap); ctx.quadraticCurveTo(bd.x, bd.y - 4, bd.x + 10, bd.y + flap);
+      ctx.stroke();
+    }
+  }
+
+  function drawKite() {
+    ctx.save();
+    ctx.translate(kite.x, kite.y);
+    // String down to the ground anchor
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, 16); ctx.lineTo(-kite.x + 120, H - kite.y - 16); ctx.stroke();
+    ctx.rotate(kite.angle);
+    // Diamond kite
+    ctx.fillStyle = '#e76f51';
+    ctx.beginPath(); ctx.moveTo(0, -26); ctx.lineTo(20, 0); ctx.lineTo(0, 26); ctx.lineTo(-20, 0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.moveTo(0, -26); ctx.lineTo(20, 0); ctx.lineTo(0, 0); ctx.lineTo(-20, 0); ctx.closePath(); ctx.fill();
+    // Tail with bows
+    ctx.strokeStyle = '#e76f51'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, 26);
+    ctx.quadraticCurveTo(8, 50, 0, 70); ctx.quadraticCurveTo(-8, 90, 0, 108); ctx.stroke();
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(-4, 48, 8, 8); ctx.fillRect(-4, 82, 8, 8);
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#7ec8ff'); grad.addColorStop(1, '#eaf7ff');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    drawSky();
+    // Gusts
+    for (var g = 0; g < gustList.length; g++) {
+      var gu = gustList[g];
+      ctx.strokeStyle = 'rgba(90,200,90,0.9)'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (var s = 0; s < 3; s++) {
+        ctx.moveTo(gu.x - gu.r + s * 8, gu.y - 12 + s * 10);
+        ctx.quadraticCurveTo(gu.x, gu.y - 18 + s * 10, gu.x + gu.r, gu.y - 8 + s * 10);
+      }
+      ctx.stroke();
+      ctx.fillStyle = '#2f7d32'; ctx.font = 'bold 13px Arial';
+      ctx.fillText('GUST', gu.x - 18, gu.y + 26);
+    }
+    // Rings
+    for (var i = 0; i < ringList.length; i++) {
+      var r = ringList[i], ry = r.y + Math.sin(r.bob) * 8;
+      ctx.strokeStyle = '#ffb703'; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(r.x, ry, r.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#fff3b0'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(r.x, ry, r.r - 5, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Clouds
+    for (var c = 0; c < cloudList.length; c++) {
+      var cl = cloudList[c];
+      ctx.fillStyle = cl.flash > 0 ? '#ffe066' : '#4a4e69';
+      ctx.beginPath();
+      ctx.arc(cl.x - 22, cl.y + 6, 20, 0, Math.PI * 2);
+      ctx.arc(cl.x, cl.y - 8, 26, 0, Math.PI * 2);
+      ctx.arc(cl.x + 24, cl.y + 6, 20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 20px Arial';
+      ctx.fillText('⚡', cl.x - 9, cl.y + 12);
+    }
+    // Power lines
+    for (var l = 0; l < lineList.length; l++) {
+      var ln = lineList[l];
+      ctx.strokeStyle = '#222'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ln.x, ln.y - 30); ctx.lineTo(ln.x, ln.y + 30); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ln.x + ln.w, ln.y - 30); ctx.lineTo(ln.x + ln.w, ln.y + 30); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ln.x, ln.y); ctx.quadraticCurveTo(ln.x + ln.w / 2, ln.y + 18, ln.x + ln.w, ln.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ln.x, ln.y + 10); ctx.quadraticCurveTo(ln.x + ln.w / 2, ln.y + 28, ln.x + ln.w, ln.y + 10); ctx.stroke();
+      ctx.fillStyle = '#c1121f'; ctx.font = 'bold 13px Arial';
+      ctx.fillText('POWER', ln.x + ln.w / 2 - 24, ln.y - 34);
+    }
+    drawKite();
+    // Low altitude warning
+    if (state === 'playing' && kite.y > H - 90) {
+      ctx.fillStyle = '#c1121f'; ctx.font = 'bold 20px Arial';
+      ctx.fillText('TOO LOW! Climb!', 20, 60);
+    }
+  }
+
+  function loop(now) {
+    if (state !== 'playing') { draw(); return; }
+    var dt = Math.min(50, now - (lastTime || now));
+    lastTime = now;
+    update(dt);
+    draw();
+    if (state === 'playing') { requestAnimationFrame(loop); }
+  }
+
+  // Controls: keyboard, mouse, touch
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) >= 0) { e.preventDefault(); }
+    if ((e.key === 'Enter' || e.key === ' ') && state !== 'playing') { startGame(); }
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+    initAudio();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var t = e.touches[0], rect = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - rect.left) * (W / rect.width);
+    pointer.y = (t.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+    initAudio();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0], rect = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - rect.left) * (W / rect.width);
+    pointer.y = (t.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointer.active = false; });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>

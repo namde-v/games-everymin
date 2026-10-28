@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Prism Pathfinder</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1020; color: #eef2ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 30px; letter-spacing: 1px; margin: 6px 0 2px; text-align: center; }
+  .sub { color: #9fb0ff; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center; margin-bottom: 10px; font-size: 16px; font-weight: bold; }
+  #hud span { background: #18224a; border: 1px solid #33407f; border-radius: 8px; padding: 6px 12px; }
+  #status { color: #ffd166; min-height: 22px; font-size: 15px; margin-bottom: 8px; text-align: center; }
+  #wrap { position: relative; width: 640px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: #101736; border: 2px solid #33407f; border-radius: 12px; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; background: rgba(5, 8, 20, 0.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; }
+  .overlay p { font-size: 16px; line-height: 1.55; color: #cdd6ff; max-width: 480px; }
+  button { background: #ffd166; color: #141414; border: none; border-radius: 10px; padding: 12px 22px; font-size: 18px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffdf8a; }
+  button.small { padding: 8px 14px; font-size: 14px; background: #3b4ca8; color: #fff; }
+  button.small:hover { background: #4d5fc0; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  .legend { font-size: 13px; color: #aab6e8; margin-top: 10px; text-align: center; line-height: 1.5; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin: 0 3px; }
+</style>
+</head>
+<body>
+<h1>&#9650; Prism Pathfinder &#9650;</h1>
+<p class="sub">Puzzle / Light Prism Routing &mdash; bend every beam home</p>
+<div id="hud">
+  <span>Score: <span id="score">0</span></span>
+  <span>Level: <span id="level">1</span> / 3</span>
+  <span>Placed: <span id="placed">0</span></span>
+  <span>Lit: <span id="lit">0</span> / <span id="total">1</span></span>
+</div>
+<div id="status">Press Start, then place prisms to route the light.</div>
+<div id="wrap">
+  <canvas id="game" width="640" height="480"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Prism Pathfinder</h2>
+    <p><strong>How to Play:</strong> Coloured light beams leave the glowing emitters on the left.
+    Place prism mirrors on empty grid squares to bend each beam into the matching coloured receiver.
+    Click (or tap) an empty square to place a <strong>/</strong> prism, click it again to rotate it to <strong>\</strong>,
+    and click once more to remove it. Beams of different colours must never cross, and a beam must
+    never hit the wrong receiver.</p>
+    <p>Keyboard: Arrow keys move the cursor, Space places / rotates, C clears all prisms, G gives up.
+    Mouse and touch work too. Light up every receiver to win the level &mdash; finish all 3 levels to win the game!</p>
+    <button id="startBtn">Start</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<div class="row">
+  <button class="small" id="clearBtn">Clear Prisms</button>
+  <button class="small" id="giveUpBtn">Give Up</button>
+  <button class="small" id="nextBtn" style="display:none;">Next Level</button>
+</div>
+<p class="legend">Emitters glow with their beam colour. Receivers are rings in the matching colour.<br>
+<span class="swatch" style="background:#ff4d5e;"></span> Red
+<span class="swatch" style="background:#38b6ff;"></span> Blue
+<span class="swatch" style="background:#ffd166;"></span> Yellow &mdash; click a square to place, rotate, or remove a prism.</p>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 8, ROWS = 6, CELL = 80;
+  var COLORS = { red: '#ff4d5e', blue: '#38b6ff', yellow: '#ffd166' };
+  // Directions: 0=E, 1=S, 2=W, 3=N. DX/DY indexed by direction.
+  var DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
+  var LEVELS = [
+    { name: 'First Light', hint: 'Bend the red beam up to its receiver.',
+      emitters: [{ x: 0, y: 2, color: 'red', dir: 0 }],
+      receivers: [{ x: 5, y: 0, color: 'red' }] },
+    { name: 'Twin Beams', hint: 'Route red up and blue down without crossing.',
+      emitters: [{ x: 0, y: 1, color: 'red', dir: 0 }, { x: 0, y: 4, color: 'blue', dir: 0 }],
+      receivers: [{ x: 6, y: 0, color: 'red' }, { x: 6, y: 5, color: 'blue' }] },
+    { name: 'Crossroads', hint: 'Two zig-zag routes that must not cross each other.',
+      emitters: [{ x: 0, y: 2, color: 'red', dir: 0 }, { x: 0, y: 5, color: 'blue', dir: 0 }],
+      receivers: [{ x: 7, y: 3, color: 'red' }, { x: 2, y: 3, color: 'blue' }] }
+  ];
+  var levelIndex = 0, score = 0, moves = 0, started = false, won = false;
+  var grid = []; // grid[y][x] = null or '/' or '\\'
+  var cursor = { x: 3, y: 2 };
+  var beams = [], litCount = 0, crossed = false, wrongHit = false;
+  var audioCtx = null;
+
+  function $(id) { return document.getElementById(id); }
+  function setStatus(t) { $('status').textContent = t; }
+
+  function beep(freq, dur) {
+    try {
+      if (!audioCtx) return;
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is optional */ }
+  }
+  function initAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { /* no audio */ }
+  }
+
+  function newGrid() {
+    grid = [];
+    for (var y = 0; y < ROWS; y++) { grid.push([]); for (var x = 0; x < COLS; x++) grid[y].push(null); }
+  }
+  function loadLevel(i) {
+    levelIndex = i; newGrid(); moves = 0; won = false;
+    $('nextBtn').style.display = 'none';
+    $('endScreen').classList.add('hidden');
+    setStatus('Level ' + (i + 1) + ': ' + LEVELS[i].name + ' - ' + LEVELS[i].hint);
+    traceBeams(); updateHud(); draw();
+  }
+  function isFixed(x, y) {
+    var L = LEVELS[levelIndex];
+    for (var i = 0; i < L.emitters.length; i++) if (L.emitters[i].x === x && L.emitters[i].y === y) return true;
+    for (var j = 0; j < L.receivers.length; j++) if (L.receivers[j].x === x && L.receivers[j].y === y) return true;
+    return false;
+  }
+  function cellKey(x, y) { return x + ',' + y; }
+
+  // Reflect a direction off a mirror. '/' : E<->N, W<->S. '\\' : E<->S, W<->N.
+  function reflect(dir, mirror) {
+    if (mirror === '/') return [3, 2, 1, 0][dir];
+    return [1, 0, 3, 2][dir];
+  }
+
+  function traceBeams() {
+    var L = LEVELS[levelIndex];
+    beams = []; litCount = 0; crossed = false; wrongHit = false;
+    var cellColors = {}, lit = {};
+    L.emitters.forEach(function (em) {
+      var x = em.x, y = em.y, dir = em.dir;
+      var path = [{ x: x, y: y }];
+      var seen = {};
+      for (var step = 0; step < 60; step++) {
+        var nx = x + DX[dir], ny = y + DY[dir];
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) break;
+        x = nx; y = ny;
+        path.push({ x: x, y: y });
+        var key = cellKey(x, y);
+        if (!cellColors[key]) cellColors[key] = {};
+        cellColors[key][em.color] = true;
+        // Receiver check first: a beam stops when it enters a receiver cell.
+        var hit = null;
+        for (var r = 0; r < L.receivers.length; r++) {
+          if (L.receivers[r].x === x && L.receivers[r].y === y) { hit = L.receivers[r]; break; }
+        }
+        if (hit) {
+          if (hit.color === em.color) lit[cellKey(x, y)] = true; else wrongHit = true;
+          break;
+        }
+        var m = grid[y][x];
+        if (m) {
+          var state = cellKey(x, y) + ':' + dir;
+          if (seen[state]) break; // loop guard
+          seen[state] = true;
+          dir = reflect(dir, m);
+        }
+      }
+      beams.push({ color: em.color, path: path });
+    });
+    for (var k in cellColors) {
+      var count = 0; for (var c in cellColors[k]) count++;
+      if (count > 1) crossed = true;
+    }
+    for (var lk in lit) litCount++;
+    $('total').textContent = L.receivers.length;
+  }
+
+  function checkWin() {
+    var L = LEVELS[levelIndex];
+    if (litCount === L.receivers.length && !crossed && !wrongHit) {
+      won = true;
+      score += 100;
+      beep(660, 0.15); setTimeout(function () { beep(880, 0.2); }, 120);
+      if (levelIndex + 1 < LEVELS.length) {
+        setStatus('Level complete! Score ' + score + ' - press Next Level.');
+        $('nextBtn').style.display = 'inline-block';
+      } else {
+        showEnd(true, 'All 3 levels solved with a final score of ' + score + '. Brilliant routing!');
+      }
+      updateHud(); draw();
+    }
+  }
+  function showEnd(isWin, text) {
+    $('endTitle').textContent = isWin ? 'You Win!' : 'Game Over';
+    $('endText').textContent = text;
+    $('endScreen').classList.remove('hidden');
+  }
+  function updateHud() {
+    $('score').textContent = score;
+    $('level').textContent = levelIndex + 1;
+    var placed = 0;
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) if (grid[y][x]) placed++;
+    $('placed').textContent = placed;
+    $('lit').textContent = litCount;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Grid
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? '#131c42' : '#101736';
+      ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      ctx.strokeStyle = '#232f66'; ctx.strokeRect(x * CELL + 0.5, y * CELL + 0.5, CELL, CELL);
+    }
+    // Cursor
+    if (started && !won) {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+      ctx.strokeRect(cursor.x * CELL + 3, cursor.y * CELL + 3, CELL - 6, CELL - 6);
+      ctx.lineWidth = 1;
+    }
+    // Beams (under tiles, over grid)
+    beams.forEach(function (b) {
+      ctx.strokeStyle = COLORS[b.color]; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.globalAlpha = 0.85; ctx.shadowColor = COLORS[b.color]; ctx.shadowBlur = 12;
+      ctx.beginPath();
+      b.path.forEach(function (p, i) {
+        var px = p.x * CELL + CELL / 2, py = p.y * CELL + CELL / 2;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.stroke(); ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    });
+    var L = LEVELS[levelIndex];
+    // Prisms
+    for (var yy = 0; yy < ROWS; yy++) for (var xx = 0; xx < COLS; xx++) {
+      if (!grid[yy][xx]) continue;
+      var cx = xx * CELL + CELL / 2, cy = yy * CELL + CELL / 2;
+      ctx.fillStyle = '#dfe6ff'; ctx.strokeStyle = '#8fa2ff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx - 22, cy + 22); ctx.lineTo(cx + 22, cy + 22); ctx.lineTo(cx, cy - 24); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#141a3a'; ctx.lineWidth = 5; ctx.beginPath();
+      if (grid[yy][xx] === '/') { ctx.moveTo(cx - 16, cy + 16); ctx.lineTo(cx + 16, cy - 16); }
+      else { ctx.moveTo(cx - 16, cy - 16); ctx.lineTo(cx + 16, cy + 16); }
+      ctx.stroke(); ctx.lineWidth = 1;
+    }
+    // Emitters
+    L.emitters.forEach(function (em) {
+      var cx = em.x * CELL + CELL / 2, cy = em.y * CELL + CELL / 2;
+      ctx.fillStyle = COLORS[em.color]; ctx.shadowColor = COLORS[em.color]; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(cx, cy, 20, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = '#0b1020'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('\u25B6', cx + 1, cy + 1);
+    });
+    // Receivers
+    L.receivers.forEach(function (rc) {
+      var cx = rc.x * CELL + CELL / 2, cy = rc.y * CELL + CELL / 2;
+      var isLit = false;
+      beams.forEach(function (b) {
+        if (b.color !== rc.color) return;
+        var last = b.path[b.path.length - 1];
+        if (last.x === rc.x && last.y === rc.y) isLit = true;
+      });
+      ctx.strokeStyle = COLORS[rc.color]; ctx.lineWidth = 5; ctx.shadowColor = COLORS[rc.color];
+      ctx.shadowBlur = isLit ? 20 : 0;
+      ctx.beginPath(); ctx.arc(cx, cy, 22, 0, Math.PI * 2); ctx.stroke(); ctx.shadowBlur = 0;
+      ctx.fillStyle = isLit ? COLORS[rc.color] : '#1a2350';
+      ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI * 2); ctx.fill(); ctx.lineWidth = 1;
+    });
+    if (crossed) setStatus('Warning: beams are crossing! Reroute one beam.');
+    else if (wrongHit) setStatus('Warning: a beam hit the wrong receiver!');
+  }
+
+  function cycleCell(x, y) {
+    if (!started || won) return;
+    if (isFixed(x, y)) { setStatus('That square holds an emitter or receiver.'); return; }
+    if (grid[y][x] === null) grid[y][x] = '/';
+    else if (grid[y][x] === '/') grid[y][x] = '\\';
+    else grid[y][x] = null;
+    moves++; beep(440, 0.08);
+    traceBeams(); updateHud(); draw(); checkWin();
+  }
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX - rect.left) * canvas.width / rect.width;
+    var cy = (e.clientY - rect.top) * canvas.height / rect.height;
+    return { x: Math.floor(cx / CELL), y: Math.floor(cy / CELL) };
+  }
+
+  canvas.addEventListener('click', function (e) {
+    var c = cellFromEvent(e);
+    cursor.x = c.x; cursor.y = c.y;
+    cycleCell(c.x, c.y);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (e.touches.length > 0) {
+      var t = e.touches[0];
+      var c = cellFromEvent(t);
+      cursor.x = c.x; cursor.y = c.y;
+      cycleCell(c.x, c.y);
+    }
+  }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (!started) { if (e.key === 'Enter' || e.key === ' ') startGame(); return; }
+    if (e.key === 'ArrowLeft') cursor.x = Math.max(0, cursor.x - 1);
+    else if (e.key === 'ArrowRight') cursor.x = Math.min(COLS - 1, cursor.x + 1);
+    else if (e.key === 'ArrowUp') cursor.y = Math.max(0, cursor.y - 1);
+    else if (e.key === 'ArrowDown') cursor.y = Math.min(ROWS - 1, cursor.y + 1);
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); cycleCell(cursor.x, cursor.y); return; }
+    else if (e.key === 'c' || e.key === 'C') { newGrid(); traceBeams(); updateHud(); draw(); return; }
+    else if (e.key === 'g' || e.key === 'G') { showEnd(false, 'You gave up on level ' + (levelIndex + 1) + ' with a score of ' + score + '. Try again!'); return; }
+    else return;
+    draw();
+  });
+  function startGame() {
+    initAudio(); started = true; score = 0;
+    $('titleScreen').classList.add('hidden');
+    loadLevel(0); beep(523, 0.12);
+  }
+  $('startBtn').addEventListener('click', startGame);
+  $('restartBtn').addEventListener('click', function () { initAudio(); started = true; score = 0; loadLevel(0); });
+  $('clearBtn').addEventListener('click', function () {
+    if (!started) return;
+    newGrid(); traceBeams(); updateHud(); draw(); beep(330, 0.08);
+  });
+  $('giveUpBtn').addEventListener('click', function () {
+    if (!started) return;
+    showEnd(false, 'You gave up on level ' + (levelIndex + 1) + ' with a score of ' + score + '. Try again!');
+  });
+  $('nextBtn').addEventListener('click', function () {
+    if (levelIndex + 1 < LEVELS.length) loadLevel(levelIndex + 1);
+  });
+
+  newGrid(); traceBeams(); updateHud(); draw();
+  requestAnimationFrame(function loop() {
+    draw();
+    requestAnimationFrame(loop);
+  });
+})();
+</script>
+</body>
+</html>

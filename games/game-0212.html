@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Glyph Garden — Puzzle / Symbol Matching Logic</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #101a12; color: #eaf5e8; font-family: Georgia, "Times New Roman", serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 12px; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #ffe98a; text-shadow: 0 2px 0 #3a5a2a; margin: 6px 0 2px; text-align: center; }
+  .sub { color: #b8d8a8; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #hud { width: min(520px, 96vw); display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; background: #1d2f1d; border: 2px solid #4a7a3a; border-radius: 12px; padding: 10px 12px; font-size: 15px; }
+  #hud b { color: #ffe98a; }
+  #targets { width: min(520px, 96vw); margin-top: 8px; background: #22351f; border-radius: 10px; padding: 8px 12px; font-size: 15px; line-height: 1.6; }
+  #targets span.done { color: #7dff8a; text-decoration: line-through; }
+  #wrap { position: relative; width: min(520px, 96vw); margin-top: 10px; }
+  canvas { display: block; width: 100%; aspect-ratio: 1 / 1; background: #243d22; border: 3px solid #6aa84f; border-radius: 14px; touch-action: none; cursor: pointer; }
+  #side { width: min(520px, 96vw); display: flex; gap: 8px; margin-top: 10px; }
+  .panel { flex: 1; background: #1d2f1d; border: 2px solid #4a7a3a; border-radius: 10px; padding: 10px; text-align: center; }
+  .panel .big { font-size: 38px; line-height: 1.1; }
+  button { background: #ffe98a; color: #22331a; border: none; border-radius: 10px; padding: 12px 18px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:active { transform: scale(0.97); }
+  button.secondary { background: #8fbf7a; }
+  .overlay { position: absolute; inset: 0; background: rgba(8, 20, 8, 0.94); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 12px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffe98a; font-size: 30px; }
+  .overlay p { color: #d8ecd0; font-size: 15px; line-height: 1.55; max-width: 420px; }
+  .overlay .glyphrow { font-size: 34px; letter-spacing: 8px; }
+  .hint { color: #b8d8a8; font-size: 13px; margin-top: 10px; text-align: center; max-width: 520px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🌿 GLYPH GARDEN 🌿</h1>
+<div class="sub">Puzzle / Symbol Matching Logic &bull; Game 0212</div>
+
+<div id="hud">
+  <div>Score: <b id="score">0</b></div>
+  <div>Moves left: <b id="moves">30</b></div>
+  <div>Combo: <b id="combo">x1</b></div>
+  <div>Status: <b id="status">Ready</b></div>
+</div>
+
+<div id="targets">Target blooms — <span id="t0">☀ × 8</span> &nbsp; <span id="t1">☽ × 8</span> &nbsp; <span id="t2">❀ × 8</span> &nbsp; <span id="t3">★ × 6</span></div>
+
+<div id="wrap">
+  <canvas id="game" width="600" height="600" aria-label="Glyph Garden board"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Glyph Garden</h2>
+    <div class="glyphrow">☀ ☽ ❀ ★ ◆ ♪</div>
+    <p><b>How to Play:</b> Plant the glyph in your hand on any empty garden plot. When 3 or more matching glyphs line up in a row or column, they bloom, clear, and score points. Bloom every target glyph before you run out of 30 moves to win the garden.</p>
+    <p>Mouse / touch: tap a plot to plant. Keyboard: Arrow keys move the cursor, Space or Enter plants, R re-rolls your glyph (3 per game), M mutes sound.</p>
+    <p>Longer blooms and back-to-back blooms build your combo multiplier. Plan ahead — a careless plant can block a big bloom!</p>
+    <button id="startBtn" type="button">🌱 Start Garden</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn" type="button">↻ Play Again</button>
+  </div>
+</div>
+
+<div id="side">
+  <div class="panel"><div>Next glyph</div><div class="big" id="nextGlyph">☀</div><div id="nextName">Sun</div></div>
+  <div class="panel"><div>Re-rolls left</div><div class="big" id="rerolls">3</div><button id="rerollBtn" class="secondary" type="button">Re-roll (R)</button></div>
+  <div class="panel"><div>Sound</div><div class="big" id="soundIcon">🔊</div><button id="muteBtn" class="secondary" type="button">Mute (M)</button></div>
+</div>
+<p class="hint">Tip: corners and edges are harder to bloom — save them for glyphs you still need, and aim for 4- and 5-long lines for bonus points.</p>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var SIZE = 6, CELL = 100;
+  var GLYPHS = [
+    { sym: "☀", name: "Sun", color: "#ffd54a" },
+    { sym: "☽", name: "Moon", color: "#b8c6ff" },
+    { sym: "❀", name: "Bloom", color: "#ff8fb3" },
+    { sym: "★", name: "Star", color: "#9be8ff" },
+    { sym: "◆", name: "Gem", color: "#a5e68a" },
+    { sym: "♪", name: "Song", color: "#e0aaff" }
+  ];
+  var TARGETS = [8, 8, 8, 6]; // only first four glyph types count toward the win
+  var board, score, moves, combo, bloomed, next, rerollLeft, muted, playing, over;
+  var cursor = { x: 0, y: 0 };
+  var particles = [];
+  var audioCtx = null;
+
+  function $(id) { return document.getElementById(id); }
+  function rand(n) { return Math.floor(Math.random() * n); }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (muted || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function playPlant() { tone(320, 0.12, "triangle", 0.12); }
+  function playBloom(n) { for (var i = 0; i < Math.min(n, 6); i++) { (function (k) { setTimeout(function () { tone(440 + k * 90, 0.18, "sine", 0.14); }, k * 55); })(i); } }
+  function playWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, "triangle", 0.15); }, i * 130); }); }
+  function playLose() { [330, 262, 196].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, "sawtooth", 0.08); }, i * 150); }); }
+
+  function newGame() {
+    board = [];
+    for (var y = 0; y < SIZE; y++) { board.push([]); for (var x = 0; x < SIZE; x++) board[y].push(-1); }
+    // Pre-plant a few glyphs so the first moves can already bloom.
+    var presets = [[0,0,0],[1,0,0],[0,1,1],[2,2,2],[3,2,2],[1,3,3],[4,4,5],[4,5,1]];
+    presets.forEach(function (p) { board[p[1]][p[0]] = p[2]; });
+    score = 0; moves = 30; combo = 1; rerollLeft = 3; muted = false;
+    bloomed = [0, 0, 0, 0]; next = rand(GLYPHS.length);
+    cursor = { x: 2, y: 2 }; particles = [];
+    playing = true; over = false;
+    $("endScreen").classList.add("hidden");
+    updateHUD(); setStatus("Plant a glyph!");
+  }
+
+  function updateHUD() {
+    $("score").textContent = score;
+    $("moves").textContent = moves;
+    $("combo").textContent = "x" + combo;
+    $("nextGlyph").textContent = GLYPHS[next].sym;
+    $("nextGlyph").style.color = GLYPHS[next].color;
+    $("nextName").textContent = GLYPHS[next].name;
+    $("rerolls").textContent = rerollLeft;
+    $("soundIcon").textContent = muted ? "🔇" : "🔊";
+    for (var i = 0; i < 4; i++) {
+      var el = $("t" + i);
+      el.textContent = GLYPHS[i].sym + " × " + Math.max(0, TARGETS[i] - bloomed[i]) + " left";
+      el.className = bloomed[i] >= TARGETS[i] ? "done" : "";
+    }
+  }
+  function setStatus(t) { $("status").textContent = t; }
+
+  function findLines() {
+    var toClear = {}, found = [];
+    function scanLine(cells) {
+      var run = [cells[0]];
+      for (var i = 1; i <= cells.length; i++) {
+        var c = cells[i];
+        if (c && run[0].v === c.v) { run.push(c); }
+        else {
+          if (run.length >= 3 && run[0].v >= 0) found.push(run.slice());
+          run = c ? [c] : [];
+        }
+      }
+    }
+    for (var y = 0; y < SIZE; y++) {
+      var row = [];
+      for (var x = 0; x < SIZE; x++) row.push({ x: x, y: y, v: board[y][x] });
+      scanLine(row);
+    }
+    for (var x = 0; x < SIZE; x++) {
+      var col = [];
+      for (var yy = 0; yy < SIZE; yy++) col.push({ x: x, y: yy, v: board[yy][x] });
+      scanLine(col);
+    }
+    found.forEach(function (run) { run.forEach(function (c) { toClear[c.y + "," + c.x] = c; }); });
+    return { cells: Object.keys(toClear).map(function (k) { return toClear[k]; }), runs: found };
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) {
+      particles.push({ x: x * CELL + CELL / 2, y: y * CELL + CELL / 2, vx: (Math.random() - 0.5) * 260, vy: (Math.random() - 0.7) * 220, life: 0.7 + Math.random() * 0.4, color: color });
+    }
+  }
+
+  function checkEnd() {
+    var won = bloomed.every(function (v, i) { return v >= TARGETS[i]; });
+    if (won) { endGame(true); return true; }
+    if (moves <= 0) { endGame(false); return true; }
+    return false;
+  }
+  function endGame(won) {
+    playing = false; over = true;
+    $("endTitle").textContent = won ? "🌸 Garden in Full Bloom! You Win!" : "🍂 Out of Moves — Game Over";
+    $("endText").textContent = won
+      ? "You bloomed every target glyph with a final score of " + score + ". Beautiful gardening!"
+      : "You scored " + score + " but some target glyphs never bloomed. Try a fresh garden!";
+    $("endScreen").classList.remove("hidden");
+    setStatus(won ? "You Win!" : "Game Over");
+    if (won) playWin(); else playLose();
+  }
+
+  function plant(x, y) {
+    if (!playing || over) return;
+    if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
+    if (board[y][x] !== -1) { setStatus("That plot is already planted!"); tone(160, 0.12, "square", 0.07); return; }
+    board[y][x] = next; moves--; playPlant();
+    var res = findLines();
+    if (res.cells.length > 0) {
+      var pts = 0;
+      res.runs.forEach(function (run) { pts += run.length * 10 + (run.length - 3) * 15; });
+      pts *= combo;
+      score += pts;
+      res.cells.forEach(function (c) {
+        burst(c.x, c.y, GLYPHS[c.v].color);
+        if (c.v < 4) bloomed[c.v]++;
+        board[c.y][c.x] = -1;
+      });
+      playBloom(res.cells.length);
+      setStatus("Bloom! +" + pts + " points");
+      combo = Math.min(combo + 1, 5);
+    } else {
+      combo = 1;
+      setStatus("Planted " + GLYPHS[next].name + ". No bloom yet.");
+    }
+    next = rand(GLYPHS.length);
+    updateHUD();
+    if (!checkEnd() && board.every(function (row) { return row.every(function (v) { return v !== -1; }); })) {
+      setStatus("Garden full — no empty plots!");
+    }
+  }
+
+  function cellFromEvent(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: Math.floor((cx - r.left) / r.width * SIZE), y: Math.floor((cy - r.top) / r.height * SIZE) };
+  }
+
+  function draw(now) {
+    ctx.clearRect(0, 0, 600, 600);
+    for (var y = 0; y < SIZE; y++) {
+      for (var x = 0; x < SIZE; x++) {
+        var px = x * CELL, py = y * CELL;
+        ctx.fillStyle = ((x + y) % 2 === 0) ? "#2c4a26" : "#274423";
+        ctx.fillRect(px + 2, py + 2, CELL - 4, CELL - 4);
+        ctx.strokeStyle = "#4a7a3a"; ctx.lineWidth = 2;
+        ctx.strokeRect(px + 2, py + 2, CELL - 4, CELL - 4);
+        var v = board ? board[y][x] : -1;
+        if (v >= 0) {
+          ctx.fillStyle = GLYPHS[v].color;
+          ctx.font = "64px Georgia, serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(GLYPHS[v].sym, px + CELL / 2, py + CELL / 2 + 2);
+        }
+      }
+    }
+    if (playing) {
+      ctx.strokeStyle = "#ffe98a"; ctx.lineWidth = 4;
+      ctx.strokeRect(cursor.x * CELL + 3, cursor.y * CELL + 3, CELL - 6, CELL - 6);
+    }
+    particles = particles.filter(function (p) { return p.life > 0; });
+    particles.forEach(function (p) {
+      p.life -= 0.016; p.x += p.vx * 0.016; p.y += p.vy * 0.016; p.vy += 180 * 0.016;
+      ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    requestAnimationFrame(draw);
+  }
+
+  canvas.addEventListener("click", function (e) { ensureAudio(); var c = cellFromEvent(e); cursor = c; plant(c.x, c.y); });
+  canvas.addEventListener("mousemove", function (e) { var c = cellFromEvent(e); if (c.x >= 0 && c.x < SIZE && c.y >= 0 && c.y < SIZE) cursor = c; });
+  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); ensureAudio(); var c = cellFromEvent(e); cursor = c; plant(c.x, c.y); }, { passive: false });
+  document.addEventListener("keydown", function (e) {
+    if (!playing) return;
+    if (e.key === "ArrowLeft") cursor.x = Math.max(0, cursor.x - 1);
+    else if (e.key === "ArrowRight") cursor.x = Math.min(SIZE - 1, cursor.x + 1);
+    else if (e.key === "ArrowUp") cursor.y = Math.max(0, cursor.y - 1);
+    else if (e.key === "ArrowDown") cursor.y = Math.min(SIZE - 1, cursor.y + 1);
+    else if (e.key === " " || e.key === "Enter") { e.preventDefault(); ensureAudio(); plant(cursor.x, cursor.y); }
+    else if (e.key === "r" || e.key === "R") { doReroll(); }
+    else if (e.key === "m" || e.key === "M") { toggleMute(); }
+  });
+  function doReroll() {
+    if (!playing || rerollLeft <= 0) return;
+    rerollLeft--; next = rand(GLYPHS.length); updateHUD(); setStatus("Re-rolled to " + GLYPHS[next].name + ".");
+    tone(500, 0.1, "triangle", 0.1);
+  }
+  function toggleMute() { muted = !muted; updateHUD(); }
+  $("rerollBtn").addEventListener("click", function () { ensureAudio(); doReroll(); });
+  $("muteBtn").addEventListener("click", function () { ensureAudio(); toggleMute(); });
+  $("startBtn").addEventListener("click", function () {
+    ensureAudio(); newGame();
+    $("titleScreen").classList.add("hidden");
+    tone(523, 0.2, "triangle", 0.14);
+  });
+  $("restartBtn").addEventListener("click", function () {
+    ensureAudio(); newGame();
+  });
+
+  // Initial empty board for the title backdrop, then start the loop.
+  board = [];
+  for (var yy = 0; yy < SIZE; yy++) { board.push([]); for (var xx = 0; xx < SIZE; xx++) board[yy].push(-1); }
+  playing = false; over = false; score = 0; moves = 30; combo = 1; bloomed = [0, 0, 0, 0]; next = 0; rerollLeft = 3; muted = false;
+  updateHUD();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

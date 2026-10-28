@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Dart Dynamo — Precision Dart Throwing</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #14100c;
+    color: #f5eeda;
+    font-family: Georgia, 'Times New Roman', serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px;
+    user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  }
+  h1 { font-size: clamp(26px, 6vw, 44px); letter-spacing: 2px; color: #ffd94a; text-shadow: 0 2px 0 #7a4d00; margin: 6px 0 2px; }
+  .sub { font-size: 14px; color: #c9bfa5; margin-bottom: 10px; }
+  #wrap { position: relative; width: min(96vw, 620px); }
+  canvas {
+    display: block; width: 100%; aspect-ratio: 620 / 460;
+    background: linear-gradient(#3d2b1f, #241a12);
+    border: 3px solid #8a6b34; border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.6);
+  }
+  #hud {
+    display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+    width: min(96vw, 620px); margin: 10px 0; font-size: 15px; font-weight: bold;
+  }
+  #hud span { background: #2a2118; border: 1px solid #8a6b34; border-radius: 8px; padding: 6px 10px; }
+  #hud .hot { color: #ffd94a; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px; text-align: center;
+    background: rgba(10, 7, 4, 0.88); border-radius: 9px; padding: 20px;
+  }
+  .overlay h2 { font-size: clamp(24px, 5vw, 36px); color: #ffd94a; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #e8ddc2; max-width: 460px; }
+  .overlay .small { font-size: 13px; color: #b8ad90; }
+  button {
+    font-family: inherit; font-size: 18px; font-weight: bold; cursor: pointer;
+    background: #ffd94a; color: #2a1c00; border: none; border-radius: 10px;
+    padding: 12px 28px; box-shadow: 0 4px 0 #a67c00; margin-top: 6px;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #a67c00; }
+  button.secondary { background: #6b5a3e; color: #f5eeda; box-shadow: 0 4px 0 #3d3222; }
+  #controls { font-size: 13px; color: #b8ad90; text-align: center; margin-top: 8px; line-height: 1.5; max-width: 620px; }
+  kbd { background: #2a2118; border: 1px solid #8a6b34; border-radius: 4px; padding: 1px 6px; font-family: inherit; }
+</style>
+</head>
+<body>
+<h1>&#127919; DART DYNAMO</h1>
+<div class="sub">Precision dart throwing &mdash; tame the wind, chase the bullseye!</div>
+
+<div id="wrap">
+  <canvas id="game" width="620" height="460"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>DART DYNAMO</h2>
+    <p><strong>How to Play</strong><br>
+    A dartboard slides and sways across the pub wall while the wind pushes your dart off course.
+    Move your mouse, finger, or arrow keys to aim the crosshair. Hold <kbd>Space</kbd> (or press and hold
+    on the board) to charge power, then release to throw. Land darts to score points &mdash; bullseyes are worth 50!</p>
+    <p>Reach <strong>300 points in 5 rounds</strong> (3 darts per round) to win. Watch the wind arrow:
+    stronger wind means more drift. Perfect power (in the green zone) flies true; too weak or too strong wobbles.</p>
+    <p class="small">Controls: Mouse / Touch to aim &amp; throw &bull; Arrow keys / WASD to aim &bull; Space to charge &amp; throw &bull; R to restart</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay" style="display:none">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endStats" class="small"></p>
+    <button id="restartBtn">Play Again</button>
+  </div>
+</div>
+
+<div id="hud">
+  <span>Score: <span id="score" class="hot">0</span> / 300</span>
+  <span>Round: <span id="round" class="hot">1</span> / 5</span>
+  <span>Darts: <span id="darts" class="hot">3</span></span>
+  <span>Wind: <span id="wind" class="hot">Calm</span></span>
+  <span id="status">Aim and throw!</span>
+</div>
+
+<div id="controls">
+  Aim with mouse / touch / arrow keys &bull; Hold <kbd>Space</kbd> or press-and-hold to charge power, release to throw &bull; <kbd>R</kbd> restarts
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  // ---------- Audio (procedural, starts only after user interaction) ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(name) {
+    if (!audioCtx) return;
+    if (name === 'throw') tone(500, 0.18, 'sawtooth', 0.08, 180);
+    else if (name === 'hit') { tone(220, 0.12, 'triangle', 0.2); tone(880, 0.15, 'sine', 0.12); }
+    else if (name === 'bull') { tone(523, 0.15, 'sine', 0.2); setTimeout(function(){ tone(659, 0.15, 'sine', 0.2); }, 90); setTimeout(function(){ tone(784, 0.3, 'sine', 0.22); }, 180); }
+    else if (name === 'miss') tone(140, 0.25, 'sawtooth', 0.08, 70);
+    else if (name === 'win') { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, 'triangle', 0.2); }, i * 130); }); }
+    else if (name === 'lose') { [330, 262, 196, 131].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, 'sawtooth', 0.1); }, i * 150); }); }
+  }
+
+  // ---------- Game state ----------
+  var TARGET = 300, TOTAL_ROUNDS = 5, DARTS_PER_ROUND = 3;
+  var state = 'title'; // title | aiming | charging | flying | stuck | over
+  var score = 0, round = 1, dartsLeft = DARTS_PER_ROUND;
+  var bulls = 0, bestRing = 99, totalThrows = 0;
+  var aim = { x: W / 2, y: 300 };
+  var power = 0, charging = false, chargeDir = 1;
+  var board = { x: 310, y: 190, r: 105, vx: 0.7, sway: 0, swaySpeed: 0.012 };
+  var wind = 0; // -1..1, negative = blows left
+  var dart = null; // flying dart {x,y,vx,vy}
+  var stuckDarts = []; // {dx, dy, ring}
+  var message = 'Aim and throw!', messageTimer = 0;
+  var hitFlash = 0, lastRing = -1;
+
+  var RINGS = [
+    { r: 1.00, pts: 5,  color: '#e8dcc0', label: '5' },
+    { r: 0.82, pts: 10, color: '#22201c', label: '10' },
+    { r: 0.64, pts: 20, color: '#d23b2e', label: '20' },
+    { r: 0.46, pts: 30, color: '#22201c', label: '30' },
+    { r: 0.28, pts: 40, color: '#2e8b47', label: '40' },
+    { r: 0.13, pts: 50, color: '#d23b2e', label: '50' }
+  ];
+
+  function setWindForRound() {
+    // Wind grows stronger in later rounds
+    var max = 0.25 + round * 0.16;
+    wind = (Math.random() * 2 - 1) * max;
+    board.vx = (0.6 + round * 0.25) * (Math.random() < 0.5 ? -1 : 1);
+    board.swaySpeed = 0.010 + round * 0.003;
+  }
+  function windLabel() {
+    var a = Math.abs(wind);
+    var s = a < 0.08 ? 'Calm' : a < 0.3 ? 'Breeze' : a < 0.55 ? 'Windy' : 'Gale';
+    return s + (a >= 0.08 ? (wind > 0 ? ' \u2192' : ' \u2190') : '');
+  }
+
+  function resetGame() {
+    score = 0; round = 1; dartsLeft = DARTS_PER_ROUND;
+    bulls = 0; bestRing = 99; totalThrows = 0;
+    stuckDarts = []; dart = null; power = 0; charging = false;
+    board.x = 310; board.y = 190; board.sway = 0;
+    setWindForRound();
+    setMessage('Round 1 — aim and throw!');
+    state = 'aiming';
+    updateHUD();
+  }
+
+  function setMessage(msg, secs) {
+    message = msg; messageTimer = secs || 2.4;
+    document.getElementById('status').textContent = msg;
+  }
+
+  function updateHUD() {
+    document.getElementById('score').textContent = score;
+    document.getElementById('round').textContent = round;
+    document.getElementById('darts').textContent = dartsLeft;
+    document.getElementById('wind').textContent = windLabel();
+    document.getElementById('status').textContent = message;
+  }
+
+  function ringFor(dx, dy) {
+    var d = Math.sqrt(dx * dx + dy * dy) / board.r;
+    for (var i = RINGS.length - 1; i >= 0; i--) {
+      if (d <= RINGS[i].r) return i;
+    }
+    return -1; // missed the board
+  }
+
+  function startCharge() {
+    if (state !== 'aiming') return;
+    ensureAudio();
+    charging = true; state = 'charging'; power = 0; chargeDir = 1;
+  }
+  function releaseThrow() {
+    if (state !== 'charging') return;
+    charging = false;
+    // Perfect power zone: 55-85%. Outside it, wobble grows.
+    var perfect = power >= 0.55 && power <= 0.85;
+    var wobble = perfect ? 0 : (power < 0.55 ? (0.55 - power) * 260 : (power - 0.85) * 320);
+    var wobX = (Math.random() * 2 - 1) * wobble;
+    var wobY = (Math.random() * 2 - 1) * wobble * 0.6;
+    // Wind drift accumulates during flight; aim point + drift + wobble = landing
+    var drift = wind * 130 * (0.7 + Math.random() * 0.6);
+    var tx = aim.x + wobX + drift;
+    var ty = aim.y + wobY - power * 30; // stronger throws fly slightly flatter/higher
+    dart = { x: 310, y: 440, tx: tx, ty: ty, t: 0 };
+    state = 'flying';
+    totalThrows++;
+    sfx('throw');
+    setMessage(perfect ? 'Perfect power! Flying true...' : (power < 0.55 ? 'Weak throw...' : 'Overpowered! Wobbling...'), 1.6);
+  }
+
+  function resolveHit() {
+    var dx = dart.tx - board.x, dy = dart.ty - board.y;
+    var ri = ringFor(dx, dy);
+    lastRing = ri;
+    if (ri >= 0) {
+      var pts = RINGS[ri].pts;
+      score += pts;
+      if (ri === RINGS.length - 1) bulls++;
+      if (ri < bestRing) bestRing = ri;
+      stuckDarts.push({ dx: dx, dy: dy, ring: ri });
+      hitFlash = 1;
+      sfx(ri === RINGS.length - 1 ? 'bull' : 'hit');
+      setMessage(ri === RINGS.length - 1 ? 'BULLSEYE! +50' : 'Hit! +' + pts + ' points', 2);
+    } else {
+      sfx('miss');
+      setMessage('Missed the board! No points.', 2);
+    }
+    dart = null;
+    dartsLeft--;
+    updateHUD();
+    if (score >= TARGET) return endGame(true);
+    if (dartsLeft <= 0) {
+      if (round >= TOTAL_ROUNDS) return endGame(false);
+      round++;
+      dartsLeft = DARTS_PER_ROUND;
+      stuckDarts = [];
+      setWindForRound();
+      setMessage('Round ' + round + ' — wind shifts!', 2.2);
+    }
+    state = 'aiming';
+    updateHUD();
+  }
+
+  function endGame(won) {
+    state = 'over';
+    document.getElementById('endTitle').textContent = won ? 'YOU WIN!' : 'GAME OVER';
+    document.getElementById('endText').textContent = won
+      ? 'You reached ' + score + ' points and conquered the dartboard!'
+      : 'You finished with ' + score + ' of ' + TARGET + ' points. The board wins this time!';
+    document.getElementById('endStats').textContent =
+      'Throws: ' + totalThrows + '  |  Bullseyes: ' + bulls + '  |  Rounds played: ' + round;
+    document.getElementById('endScreen').style.display = 'flex';
+    sfx(won ? 'win' : 'lose');
+    updateHUD();
+  }
+
+  // ---------- Input ----------
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches ? e.touches[0].clientX : e.clientX);
+    var cy = (e.touches ? e.touches[0].clientY : e.clientY);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function onMove(e) {
+    if (state === 'title' || state === 'over') return;
+    var p = canvasPos(e);
+    aim.x = Math.max(10, Math.min(W - 10, p.x));
+    aim.y = Math.max(20, Math.min(H - 20, p.y));
+  }
+  function onDown(e) {
+    ensureAudio();
+    if (state === 'title' || state === 'over') return;
+    e.preventDefault();
+    var p = canvasPos(e);
+    aim.x = Math.max(10, Math.min(W - 10, p.x));
+    aim.y = Math.max(20, Math.min(H - 20, p.y));
+    startCharge();
+  }
+  function onUp(e) {
+    if (state === 'charging') { e.preventDefault(); releaseThrow(); }
+  }
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('mouseleave', function () { if (state === 'charging') releaseThrow(); });
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); onMove(e); }, { passive: false });
+  canvas.addEventListener('touchend', onUp, { passive: false });
+  canvas.addEventListener('touchcancel', onUp, { passive: false });
+
+  var keys = {};
+  document.addEventListener('keydown', function (e) {
+    ensureAudio();
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); startCharge(); }
+    if (e.key === 'r' || e.key === 'R') {
+      if (state !== 'title') { document.getElementById('endScreen').style.display = 'none'; resetGame(); }
+    }
+    if (e.key === 'Enter' && state === 'title') startGame();
+    if (e.key === 'Enter' && state === 'over') restartGame();
+  });
+  document.addEventListener('keyup', function (e) {
+    keys[e.key] = false;
+    if (e.key === ' ' || e.key === 'Spacebar') releaseThrow();
+  });
+
+  function startGame() {
+    ensureAudio();
+    document.getElementById('titleScreen').style.display = 'none';
+    resetGame();
+  }
+  function restartGame() {
+    ensureAudio();
+    document.getElementById('endScreen').style.display = 'none';
+    resetGame();
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', restartGame);
+
+  // ---------- Drawing ----------
+  function drawBoard() {
+    var bx = board.x, by = board.y, r = board.r;
+    ctx.save();
+    // wall shadow + wooden rim
+    ctx.beginPath(); ctx.arc(bx + 5, by + 6, r + 8, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(bx, by, r + 8, 0, Math.PI * 2); ctx.fillStyle = '#6b4a26'; ctx.fill();
+    ctx.beginPath(); ctx.arc(bx, by, r + 8, 0, Math.PI * 2); ctx.strokeStyle = '#c9a15a'; ctx.lineWidth = 2; ctx.stroke();
+    // rings, outer to inner
+    for (var i = 0; i < RINGS.length; i++) {
+      ctx.beginPath(); ctx.arc(bx, by, r * RINGS[i].r, 0, Math.PI * 2);
+      ctx.fillStyle = RINGS[i].color; ctx.fill();
+    }
+    // wire separators + numbers
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
+    for (var j = 0; j < RINGS.length; j++) {
+      ctx.beginPath(); ctx.arc(bx, by, r * RINGS[j].r, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Georgia, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (var k = 0; k < 20; k++) {
+      var a = (k / 20) * Math.PI * 2 - Math.PI / 2;
+      var pts = [20, 5, 10, 20, 5, 10, 15, 30, 5, 10, 20, 40, 5, 10, 15, 25, 5, 10, 30, 50][k];
+      ctx.fillStyle = k % 2 ? '#ffd94a' : '#ffffff';
+      ctx.fillText(String(pts), bx + Math.cos(a) * (r + 16), by + Math.sin(a) * (r + 16));
+    }
+    // bullseye centre dot
+    ctx.beginPath(); ctx.arc(bx, by, 5, 0, Math.PI * 2); ctx.fillStyle = '#7a1010'; ctx.fill();
+    // stuck darts
+    stuckDarts.forEach(function (d) {
+      var x = bx + d.dx, y = by + d.dy;
+      ctx.strokeStyle = '#ddd'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x - 14, y - 14); ctx.lineTo(x, y); ctx.stroke();
+      ctx.fillStyle = '#d23b2e';
+      ctx.beginPath(); ctx.moveTo(x - 14, y - 14); ctx.lineTo(x - 22, y - 10); ctx.lineTo(x - 18, y - 20); ctx.closePath(); ctx.fill();
+    });
+    if (hitFlash > 0) {
+      ctx.globalAlpha = hitFlash * 0.5;
+      ctx.beginPath(); ctx.arc(bx, by, r * (lastRing >= 0 ? RINGS[lastRing].r : 1), 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd94a'; ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  function drawAim() {
+    if (state === 'title' || state === 'over') return;
+    var x = aim.x, y = aim.y;
+    ctx.save();
+    ctx.strokeStyle = '#ffd94a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - 26, y); ctx.lineTo(x - 8, y);
+    ctx.moveTo(x + 8, y); ctx.lineTo(x + 26, y);
+    ctx.moveTo(x, y - 26); ctx.lineTo(x, y - 8);
+    ctx.moveTo(x, y + 8); ctx.lineTo(x, y + 26);
+    ctx.stroke();
+    ctx.fillStyle = '#ffd94a';
+    ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    // predicted drift ghost (wind hint)
+    ctx.globalAlpha = 0.45;
+    ctx.strokeStyle = '#7ec8ff';
+    ctx.beginPath(); ctx.arc(x + wind * 130, y, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function drawPower() {
+    if (state !== 'charging') return;
+    var x = 20, y = H - 30, w = W - 40, h = 16;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = '#333'; ctx.fillRect(x, y, w, h);
+    // perfect zone 55-85%
+    ctx.fillStyle = '#2e8b47'; ctx.fillRect(x + w * 0.55, y, w * 0.30, h);
+    var grad = ctx.createLinearGradient(x, 0, x + w, 0);
+    grad.addColorStop(0, '#ffd94a'); grad.addColorStop(1, '#d23b2e');
+    ctx.fillStyle = grad; ctx.fillRect(x, y, w * power, h);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Georgia, serif'; ctx.textAlign = 'center';
+    ctx.fillText('POWER  ' + Math.round(power * 100) + '%  —  green zone flies true!', W / 2, y - 8);
+    ctx.restore();
+  }
+
+  function drawWind() {
+    ctx.save();
+    ctx.font = 'bold 15px Georgia, serif'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#e8ddc2';
+    ctx.fillText('Wind: ' + windLabel(), 16, 26);
+    // arrow, length ~ strength
+    var ax = 150, ay = 20, len = Math.abs(wind) * 90;
+    if (len > 3) {
+      ctx.strokeStyle = '#7ec8ff'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      if (wind > 0) { ctx.moveTo(ax, ay); ctx.lineTo(ax + len, ay); ctx.lineTo(ax + len - 8, ay - 5); ctx.moveTo(ax + len, ay); ctx.lineTo(ax + len - 8, ay + 5); }
+      else { ctx.moveTo(ax + len, ay); ctx.lineTo(ax, ay); ctx.lineTo(ax + 8, ay - 5); ctx.moveTo(ax, ay); ctx.lineTo(ax + 8, ay + 5); }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawThrower() {
+    // simple thrower silhouette at the bottom
+    ctx.save();
+    ctx.fillStyle = '#4a3826';
+    ctx.beginPath(); ctx.arc(310, 428, 26, Math.PI, 0); ctx.fill();
+    ctx.fillRect(284, 428, 52, 14);
+    ctx.fillStyle = '#ffd94a'; ctx.font = 'bold 12px Georgia, serif'; ctx.textAlign = 'center';
+    ctx.fillText(state === 'charging' ? 'CHARGING...' : (state === 'flying' ? 'THROWN!' : 'READY'), 310, 452);
+    ctx.restore();
+  }
+
+  function drawFlyingDart() {
+    if (!dart) return;
+    var t = dart.t;
+    var x = dart.x + (dart.tx - dart.x) * t;
+    var y = dart.y + (dart.ty - dart.y) * t - Math.sin(t * Math.PI) * 40;
+    ctx.save();
+    ctx.strokeStyle = '#eee'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 16, y - 14); ctx.stroke();
+    ctx.fillStyle = '#d23b2e';
+    ctx.beginPath(); ctx.moveTo(x + 16, y - 14); ctx.lineTo(x + 26, y - 10); ctx.lineTo(x + 22, y - 20); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------- Main loop ----------
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(50, now - last); last = now;
+
+    if (state !== 'title' && state !== 'over') {
+      // board movement: horizontal drift + gentle vertical sway
+      board.sway += board.swaySpeed * dt / 16.7;
+      board.x += board.vx * dt / 16.7;
+      if (board.x < 140 || board.x > W - 140) board.vx *= -1;
+      board.y = 190 + Math.sin(board.sway) * 34;
+      // keyboard aiming
+      var sp = 4.5 * dt / 16.7;
+      if (keys['ArrowLeft'] || keys['a'] || keys['A']) aim.x -= sp;
+      if (keys['ArrowRight'] || keys['d'] || keys['D']) aim.x += sp;
+      if (keys['ArrowUp'] || keys['w'] || keys['W']) aim.y -= sp;
+      if (keys['ArrowDown'] || keys['s'] || keys['S']) aim.y += sp;
+      aim.x = Math.max(10, Math.min(W - 10, aim.x));
+      aim.y = Math.max(20, Math.min(H - 20, aim.y));
+      // charge oscillation
+      if (state === 'charging') {
+        power += chargeDir * 0.012 * dt / 16.7;
+        if (power >= 1) { power = 1; chargeDir = -1; }
+        if (power <= 0) { power = 0; chargeDir = 1; }
+      }
+      // flying dart
+      if (state === 'flying' && dart) {
+        dart.t += dt / 420;
+        if (dart.t >= 1) { dart.t = 1; resolveHit(); }
+      }
+      if (hitFlash > 0) hitFlash -= dt / 500;
+      if (messageTimer > 0) {
+        messageTimer -= dt / 1000;
+        if (messageTimer <= 0) { message = 'Aim: ' + windLabel() + ' wind'; updateHUD(); }
+      }
+    }
+
+    // render
+    ctx.clearRect(0, 0, W, H);
+    // pub wall planks
+    ctx.fillStyle = '#3d2b1f';
+    for (var i = 0; i < 6; i++) { ctx.fillRect(0, i * 78, W, 76); ctx.fillStyle = i % 2 ? '#3d2b1f' : '#38271c'; }
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    for (var j = 0; j < 6; j++) { ctx.beginPath(); ctx.moveTo(0, j * 78); ctx.lineTo(W, j * 78); ctx.stroke(); }
+    drawBoard();
+    drawThrower();
+    drawFlyingDart();
+    drawAim();
+    drawWind();
+    drawPower();
+
+    requestAnimationFrame(loop);
+  }
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

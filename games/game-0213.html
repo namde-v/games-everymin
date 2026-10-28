@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Observatory Overseer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050816; color: #e8ecff; font-family: Verdana, Geneva, sans-serif; overflow: hidden; }
+  #wrap { display: flex; flex-direction: column; align-items: center; padding: 8px; height: 100vh; }
+  h1 { font-size: 22px; letter-spacing: 1px; color: #ffd166; text-align: center; margin: 4px 0; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; max-width: 920px; font-size: 14px; }
+  .pill { background: #16224d; border: 1px solid #3b4f8a; border-radius: 999px; padding: 5px 12px; }
+  .pill b { color: #ffd166; }
+  #canvas { background: #0a1030; border: 2px solid #3b4f8a; border-radius: 12px; margin-top: 8px; max-width: 100%; touch-action: none; }
+  #panel { width: 100%; max-width: 920px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; }
+  button { background: #ffd166; color: #141428; border: none; border-radius: 10px; padding: 10px 16px; font-size: 15px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #2a3a6e; color: #fff; }
+  .card { background: #16224d; border: 2px solid #3b4f8a; border-radius: 10px; padding: 8px 10px; font-size: 13px; min-width: 150px; cursor: pointer; }
+  .card.sel { border-color: #ffd166; background: #2a2a55; }
+  .card.done { opacity: .55; }
+  #msg { margin-top: 8px; min-height: 22px; font-size: 14px; color: #a8f0c6; text-align: center; max-width: 920px; }
+  #overlay { position: fixed; inset: 0; background: rgba(3,5,18,.92); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  #box { background: #121c3f; border: 2px solid #ffd166; border-radius: 16px; padding: 24px; max-width: 620px; width: 92%; text-align: center; }
+  #box h2 { color: #ffd166; font-size: 30px; margin-bottom: 10px; }
+  #box p, #box li { text-align: left; line-height: 1.55; font-size: 15px; }
+  #box ul { margin: 12px 0 16px 20px; }
+  #startBtn, #restartBtn { font-size: 20px; padding: 13px 26px; margin-top: 12px; }
+  #howto { background: #0f1836; border-radius: 10px; padding: 12px; margin-top: 12px; }
+  .small { font-size: 13px; color: #b9c3e8; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🔭 Observatory Overseer</h1>
+  <div id="hud">
+    <span class="pill">Score: <b id="score">0</b></span>
+    <span class="pill">Discoveries: <b id="found">0</b> / <b>12</b></span>
+    <span class="pill">Night Time: <b id="clock">20:00</b></span>
+    <span class="pill">Weather: <b id="weather">Clear</b></span>
+    <span class="pill">Status: <b id="status">Waiting to start</b></span>
+  </div>
+  <canvas id="canvas" width="900" height="420"></canvas>
+  <div id="panel"></div>
+  <div id="msg">Assign your 3 telescopes to sky targets before dawn. Clear skies observe faster; clouds slow work.</div>
+</div>
+
+<div id="overlay">
+  <div id="box">
+    <h2>🔭 Observatory Overseer</h2>
+    <p><b>Strategy / Telescope Scheduling</b> — You run a mountain observatory for one night. Planets, comets and nebulae rise and set on their own schedules. Assign telescopes wisely and make 12 discoveries before dawn at 05:00.</p>
+    <div id="howto">
+      <b>How to Play</b>
+      <ul>
+        <li><b>Mouse / Touch:</b> tap a target card below the sky, or tap a target in the sky, to assign your first free telescope.</li>
+        <li><b>Keyboard:</b> press <b>1, 2, 3</b> to pick a telescope, <b>← →</b> to pick a target, <b>Enter / Space</b> to assign it.</li>
+        <li>Each target needs a set observation time and is only visible inside its time window. Miss the window and it sets — lost!</li>
+        <li><b>Clear</b> weather observes at full speed, <b>Partly Cloudy</b> at 60%, <b>Cloudy</b> at 30%. Rare targets are worth more points.</li>
+        <li>Comets move fast and pay bonus points. Nebulae take longest but are worth the most. Planets are reliable mid-value targets.</li>
+        <li><b>Win</b> by reaching 12 discoveries before 05:00. Otherwise dawn ends the night.</li>
+      </ul>
+    </div>
+    <button id="startBtn">Start Night ▶</button>
+    <p class="small">Single-file, fully offline game. Sound starts only after you press Start. Keyboard, mouse and touch supported.</p>
+  </div>
+</div>
+
+<script>
+(function() {
+  var canvas = document.getElementById('canvas');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var foundEl = document.getElementById('found');
+  var clockEl = document.getElementById('clock');
+  var weatherEl = document.getElementById('weather');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var panelEl = document.getElementById('panel');
+  var overlay = document.getElementById('overlay');
+  var box = document.getElementById('box');
+
+  var running = false, over = false, won = false;
+  var score = 0, found = 0, GOAL = 12;
+  var nightMin = 20 * 60; // 20:00 in minutes
+  var DAWN = 5 * 60 + 24 * 60; // treat as 29:00 internally for easy math
+  var lastTime = 0, acc = 0;
+  var weather = 'Clear', weatherTimer = 0, weatherSpeed = 1;
+  var selectedTarget = 0, selectedScope = -1;
+  var stars = [];
+  for (var i = 0; i < 110; i++) stars.push({x: Math.random()*900, y: Math.random()*300, r: Math.random()*1.8+0.4, tw: Math.random()*6.28});
+
+  var scopes = [
+    {id: 1, name: 'Scope A', target: null, x: 130},
+    {id: 2, name: 'Scope B', target: null, x: 450},
+    {id: 3, name: 'Scope C', target: null, x: 770}
+  ];
+
+  var NAMES = {
+    planet: ['Jupiter Watch','Mars Opposition','Saturn Rings','Venus Glow','Neptune Drift'],
+    comet: ['Comet Swift','Comet Ember','Comet Frost','Halley Echo'],
+    nebula: ['Orion Nebula','Eagle Nebula','Ring Nebula','Carina Veil']
+  };
+  var targets = [];
+  var nextId = 1;
+  var spawnTimer = 0;
+
+  // ---- Procedural Web Audio (created only after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function fanfare() { beep(523, .18, 'triangle'); setTimeout(function(){beep(659,.18,'triangle');},160); setTimeout(function(){beep(784,.32,'triangle');},320); }
+
+  function fmt(mins) {
+    var h = Math.floor(mins / 60) % 24, m = Math.floor(mins % 60);
+    return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
+  }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function spawnTarget(force) {
+    var kinds = ['planet','planet','comet','nebula'];
+    var kind = pick(kinds);
+    var now = nightMin;
+    var dur = kind === 'comet' ? rand(55, 80) : kind === 'nebula' ? rand(110, 150) : rand(80, 120);
+    var need = kind === 'comet' ? rand(14, 22) : kind === 'nebula' ? rand(38, 55) : rand(24, 36);
+    var pts = kind === 'comet' ? 220 : kind === 'nebula' ? 300 : 150;
+    var t = {
+      id: nextId++, kind: kind, name: pick(NAMES[kind]),
+      start: now, end: now + dur, need: need, progress: 0,
+      points: pts, assigned: null, missed: false, done: false,
+      x: rand(70, 830), y: rand(50, 230), vx: kind === 'comet' ? rand(0.3, 0.8) : 0
+    };
+    targets.push(t);
+    if (force) msgEl.textContent = 'New target: ' + t.name + ' — visible until ' + fmt(t.end) + '.';
+  }
+
+  function freeScope() { for (var i = 0; i < scopes.length; i++) if (!scopes[i].target) return scopes[i]; return null; }
+
+  function assign(target) {
+    if (!running || over) return;
+    if (!target || target.done || target.missed) return;
+    if (target.assigned) { msgEl.textContent = target.name + ' is already being observed.'; return; }
+    var s = null;
+    if (selectedScope >= 0 && !scopes[selectedScope].target) s = scopes[selectedScope];
+    else s = freeScope();
+    if (!s) { msgEl.textContent = 'All telescopes are busy! Wait for one to finish.'; beep(160, .15, 'square'); return; }
+    s.target = target; target.assigned = s;
+    selectedScope = -1;
+    msgEl.textContent = s.name + ' → ' + target.name + ' (' + target.kind + ', ' + Math.round(target.need) + ' min).';
+    beep(440, .12, 'triangle'); renderCards();
+  }
+
+  function update(dt) {
+    // dt is real seconds; 1 real second = 1 night minute for a brisk night
+    nightMin += dt * 1.0;
+    acc += dt;
+    weatherTimer -= dt;
+    if (weatherTimer <= 0) {
+      var r = Math.random();
+      if (r < 0.5) { weather = 'Clear'; weatherSpeed = 1; }
+      else if (r < 0.8) { weather = 'Partly Cloudy'; weatherSpeed = 0.6; }
+      else { weather = 'Cloudy'; weatherSpeed = 0.3; }
+      weatherTimer = rand(12, 22);
+    }
+    spawnTimer -= dt;
+    if (spawnTimer <= 0 && targets.filter(function(t){ return !t.done && !t.missed; }).length < 6) {
+      spawnTarget(false); spawnTimer = rand(4, 9);
+    }
+    targets.forEach(function(t) {
+      if (t.kind === 'comet') { t.x += t.vx; if (t.x > 860) t.x = 40; }
+      if (t.assigned && !t.done) {
+        t.progress += dt * weatherSpeed; // progress in night-minutes
+        if (t.progress >= t.need) {
+          t.done = true; found++; score += t.points;
+          if (t.kind === 'comet') score += 50;
+          t.assigned.target = null; t.assigned = null;
+          msgEl.textContent = 'Discovery! ' + t.name + ' recorded. +' + t.points + ' points.';
+          beep(880, .2, 'triangle');
+          if (found >= GOAL) endGame(true);
+        }
+      } else if (!t.done && nightMin > t.end) {
+        t.missed = true;
+        if (t.assigned) { t.assigned.target = null; t.assigned = null; }
+        msgEl.textContent = t.name + ' has set below the horizon. Missed!';
+      }
+    });
+    targets = targets.filter(function(t){ return !(t.done && nightMin > t.end + 5) && !t.missed || t.missed; });
+    // keep missed visible briefly, then prune old ones
+    targets = targets.filter(function(t){ return t.done || !t.missed || nightMin <= t.end + 8; });
+    if (nightMin >= DAWN && !over) endGame(false);
+    clockEl.textContent = fmt(nightMin);
+    weatherEl.textContent = weather;
+    scoreEl.textContent = score;
+    foundEl.textContent = found;
+    statusEl.textContent = over ? (won ? 'Night complete — WIN!' : 'Dawn — night over') : (freeScope() ? 'Telescopes free' : 'All telescopes busy');
+    renderCards();
+  }
+
+  function renderCards() {
+    var html = '';
+    var active = targets.filter(function(t){ return !t.done; });
+    active.forEach(function(t, idx) {
+      var pct = t.assigned ? Math.min(100, Math.round(t.progress / t.need * 100)) : 0;
+      var cls = 'card' + (idx === selectedTarget ? ' sel' : '') + (t.missed ? ' done' : '');
+      var label = t.missed ? ' — SET (missed)' : t.assigned ? ' — ' + t.assigned.name + ' ' + pct + '%' : ' — free';
+      html += '<div class="' + cls + '" data-idx="' + idx + '"><b>' + t.name + '</b><br>' + t.kind + ' · ' + t.points + ' pts · window until ' + fmt(t.end) + label + '</div>';
+    });
+    panelEl.innerHTML = html || '<div class="card">No targets yet — the sky is waking up…</div>';
+    var cards = panelEl.querySelectorAll('.card[data-idx]');
+    cards.forEach(function(c) {
+      c.addEventListener('click', function() {
+        var t = active[parseInt(c.getAttribute('data-idx'), 10)];
+        selectedTarget = parseInt(c.getAttribute('data-idx'), 10);
+        assign(t);
+      });
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, 900, 420);
+    var grd = ctx.createLinearGradient(0, 0, 0, 420);
+    grd.addColorStop(0, '#070d2b'); grd.addColorStop(1, '#1a2a5e');
+    ctx.fillStyle = grd; ctx.fillRect(0, 0, 900, 420);
+    // moon
+    ctx.fillStyle = '#f5f0c8'; ctx.beginPath(); ctx.arc(830, 45, 22, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#d8d2a0'; ctx.beginPath(); ctx.arc(824, 40, 6, 0, 6.283); ctx.fill();
+    // stars
+    var tt = Date.now() / 1000;
+    stars.forEach(function(s) {
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(tt * 0.7 + s.tw));
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.283); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // clouds overlay
+    if (weather !== 'Clear') {
+      ctx.fillStyle = weather === 'Cloudy' ? 'rgba(180,190,220,0.28)' : 'rgba(180,190,220,0.14)';
+      for (var c = 0; c < 5; c++) {
+        var cx = ((c * 190 + tt * 6) % 980) - 40;
+        ctx.beginPath(); ctx.ellipse(cx, 60 + c * 38, 90, 22, 0, 0, 6.283); ctx.fill();
+      }
+    }
+    // horizon / observatory ground
+    ctx.fillStyle = '#0d1730'; ctx.fillRect(0, 300, 900, 120);
+    ctx.fillStyle = '#2a3a6e'; ctx.fillRect(0, 300, 900, 4);
+    // targets in the sky
+    targets.forEach(function(t) {
+      if (t.done) return;
+      var col = t.kind === 'comet' ? '#7ef0ff' : t.kind === 'nebula' ? '#e08aff' : '#ffd166';
+      ctx.fillStyle = t.missed ? '#666' : col;
+      ctx.beginPath();
+      if (t.kind === 'comet') {
+        ctx.arc(t.x, t.y, 7, 0, 6.283); ctx.fill();
+        ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(t.x - 8, t.y + 6); ctx.lineTo(t.x - 34, t.y + 22); ctx.stroke();
+      } else if (t.kind === 'nebula') {
+        ctx.ellipse(t.x, t.y, 22, 13, 0, 0, 6.283); ctx.fill();
+      } else {
+        ctx.arc(t.x, t.y, 11, 0, 6.283); ctx.fill();
+        ctx.strokeStyle = col; ctx.beginPath(); ctx.ellipse(t.x, t.y + 1, 20, 5, -0.3, 0, 6.283); ctx.stroke();
+      }
+      ctx.fillStyle = '#fff'; ctx.font = '12px Verdana';
+      ctx.fillText(t.name, Math.max(4, Math.min(760, t.x - 30)), t.y + 30);
+      if (t.assigned) {
+        ctx.fillStyle = '#a8f0c6';
+        ctx.fillRect(Math.max(4, t.x - 30), t.y + 36, 70, 7);
+        ctx.fillStyle = '#ffd166';
+        ctx.fillRect(Math.max(4, t.x - 30), t.y + 36, 70 * Math.min(1, t.progress / t.need), 7);
+      }
+    });
+    // telescopes
+    scopes.forEach(function(s) {
+      ctx.fillStyle = '#c8d2f0'; ctx.fillRect(s.x - 34, 340, 68, 46);
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(s.x, 340, 26, Math.PI, 0); ctx.fill();
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 5; ctx.beginPath();
+      ctx.moveTo(s.x, 318); ctx.lineTo(s.x + (s.target ? 26 : 10), s.target ? 292 : 296); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(s.name + (s.target ? ': ' + s.target.name : ' (free)'), s.x, 405);
+      ctx.textAlign = 'left';
+    });
+    // dawn progress bar
+    var frac = Math.min(1, (nightMin - 20 * 60) / (DAWN - 20 * 60));
+    ctx.fillStyle = '#222'; ctx.fillRect(20, 12, 860, 10);
+    ctx.fillStyle = '#ff9a3d'; ctx.fillRect(20, 12, 860 * frac, 10);
+    ctx.fillStyle = '#fff'; ctx.font = '12px Verdana';
+    ctx.fillText('Night progress → dawn at 05:00', 20, 34);
+  }
+
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.1, (ts - lastTime) / 1000);
+    lastTime = ts;
+    if (running && !over) update(dt);
+    draw();
+    if (!over || running) requestAnimationFrame(loop);
+    else requestAnimationFrame(loop);
+  }
+
+  function endGame(didWin) {
+    over = true; won = didWin; running = false;
+    statusEl.textContent = didWin ? 'Night complete — WIN!' : 'Dawn — night over';
+    if (didWin) { fanfare(); }
+    else { beep(220, .4, 'sawtooth'); }
+    box.innerHTML = '<h2>' + (didWin ? '🏆 Night Complete — You Win!' : '🌅 Dawn Breaks — Game Over') + '</h2>'
+      + '<p style="text-align:center">Final score: <b>' + score + '</b> &nbsp;·&nbsp; Discoveries: <b>' + found + ' / ' + GOAL + '</b></p>'
+      + '<p style="text-align:center">' + (didWin ? 'A brilliant night of scheduling! The observatory logs your discoveries with pride.' : 'The sky lightened before you reached 12 discoveries. Plan tighter windows and grab comets early next time.') + '</p>'
+      + '<button id="restartBtn">Restart Night ↻</button>';
+    overlay.style.display = 'flex';
+    var rb = document.getElementById('restartBtn');
+    rb.addEventListener('click', startGame);
+    rb.addEventListener('touchstart', function(e){ e.preventDefault(); startGame(); }, {passive: false});
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; found = 0; nightMin = 20 * 60; over = false; won = false; running = true;
+    weather = 'Clear'; weatherSpeed = 1; weatherTimer = 15; spawnTimer = 0;
+    targets = []; nextId = 1; selectedTarget = 0; selectedScope = -1;
+    scopes.forEach(function(s){ s.target = null; });
+    spawnTarget(true); spawnTarget(true); spawnTarget(true);
+    overlay.style.display = 'none';
+    msgEl.textContent = 'Night begins! Assign telescopes to the first targets.';
+    beep(523, .15, 'triangle');
+    lastTime = 0;
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  canvas.addEventListener('click', function(e) {
+    if (!running || over) return;
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (900 / rect.width);
+    var y = (e.clientY - rect.top) * (420 / rect.height);
+    var best = null, bestD = 1e9;
+    targets.forEach(function(t) {
+      if (t.done || t.missed) return;
+      var d = Math.hypot(t.x - x, t.y - y);
+      if (d < bestD) { bestD = d; best = t; }
+    });
+    if (best && bestD < 50) assign(best);
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (!running || over) return;
+    var touch = e.changedTouches[0];
+    var rect = canvas.getBoundingClientRect();
+    var x = (touch.clientX - rect.left) * (900 / rect.width);
+    var y = (touch.clientY - rect.top) * (420 / rect.height);
+    var best = null, bestD = 1e9;
+    targets.forEach(function(t) {
+      if (t.done || t.missed) return;
+      var d = Math.hypot(t.x - x, t.y - y);
+      if (d < bestD) { bestD = d; best = t; }
+    });
+    if (best && bestD < 60) assign(best);
+  }, {passive: false});
+  document.addEventListener('keydown', function(e) {
+    if (!running || over) return;
+    var active = targets.filter(function(t){ return !t.done; });
+    if (e.key === '1' || e.key === '2' || e.key === '3') { selectedScope = parseInt(e.key, 10) - 1; msgEl.textContent = scopes[selectedScope].name + ' selected. Press Enter to assign it.'; }
+    else if (e.key === 'ArrowRight') { selectedTarget = Math.min(active.length - 1, selectedTarget + 1); renderCards(); }
+    else if (e.key === 'ArrowLeft') { selectedTarget = Math.max(0, selectedTarget - 1); renderCards(); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (active[selectedTarget]) assign(active[selectedTarget]); }
+  });
+  document.addEventListener('touchstart', function() { ensureAudio(); }, {passive: true});
+
+  renderCards();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

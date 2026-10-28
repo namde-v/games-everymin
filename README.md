@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 210
-- **Latest game:** 0210 — Anchor Angler
+- **Total games:** 220
+- **Latest game:** 0220 — Lasso Legend
 - **Current volume:** 003 (Games 0201 to 0300)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -15,7 +15,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
-| 003 | 0201–0210 (10 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
+| 003 | 0201–0220 (20 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -29,20 +29,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 021
+## Latest batch — Batch 022
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0201 | Zephyr Zipline | Arcade / Zipline Descent | [Play](./games/game-0201.html) |
-| 0202 | Quill Quest | Puzzle / Word Letter Puzzle | [Play](./games/game-0202.html) |
-| 0203 | Lighthouse Keeper | Strategy / Lighthouse Beam Management | [Play](./games/game-0203.html) |
-| 0204 | Sitar Serenade | Rhythm / Sitar Note Timing | [Play](./games/game-0204.html) |
-| 0205 | Boomerang Bandit | Precision / Boomerang Throwing | [Play](./games/game-0205.html) |
-| 0206 | Coral Collector | Arcade / Underwater Collector | [Play](./games/game-0206.html) |
-| 0207 | Circuit Crafter | Puzzle / Circuit Routing | [Play](./games/game-0207.html) |
-| 0208 | Vineyard Venture | Strategy / Vineyard Management | [Play](./games/game-0208.html) |
-| 0209 | Flute Flight | Rhythm / Melody Note Matching | [Play](./games/game-0209.html) |
-| 0210 | Anchor Angler | Precision / Fishing | [Play](./games/game-0210.html) |
+| 0211 | Glacier Glider | Arcade / Ice Gliding | [Play](./games/game-0211.html) |
+| 0212 | Glyph Garden | Puzzle / Symbol Matching Logic | [Play](./games/game-0212.html) |
+| 0213 | Observatory Overseer | Strategy / Telescope Scheduling | [Play](./games/game-0213.html) |
+| 0214 | Cello Cadence | Rhythm / Bow Timing | [Play](./games/game-0214.html) |
+| 0215 | Dart Dynamo | Precision / Dart Throwing | [Play](./games/game-0215.html) |
+| 0216 | Kite Kraze | Arcade / Kite Flying | [Play](./games/game-0216.html) |
+| 0217 | Prism Pathfinder | Puzzle / Light Prism Routing | [Play](./games/game-0217.html) |
+| 0218 | Apiary Architect | Strategy / Beehive Management | [Play](./games/game-0218.html) |
+| 0219 | Harmonica Highway | Rhythm / Harmonica Note Run | [Play](./games/game-0219.html) |
+| 0220 | Lasso Legend | Precision / Lasso Roping | [Play](./games/game-0220.html) |
 
 
 ## Quality standard

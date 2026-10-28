@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lasso Legend — Game 0220</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #2b1d10; font-family: Georgia, 'Times New Roman', serif; color: #fff7e6;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #ffd166; text-shadow: 2px 2px 0 #7a3b00; margin: 6px 0 2px; text-align: center; }
+  .sub { color: #e8c9a0; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: 900px; max-width: 98vw; }
+  canvas { display: block; width: 100%; height: auto; background: #7ec850; border: 4px solid #5b3a1a;
+    border-radius: 12px; touch-action: none; cursor: crosshair; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 8px 0;
+    font-weight: bold; font-size: 17px; }
+  #hud span { background: #4a2c14; padding: 6px 12px; border-radius: 20px; border: 1px solid #ffd166; }
+  #hud .hot { color: #ffd166; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; background: rgba(30,18,5,0.88); border-radius: 12px;
+    text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 16px; color: #fff2d8; }
+  .overlay .big { font-size: 20px; font-weight: bold; color: #a8e063; }
+  button { font-family: inherit; font-size: 20px; font-weight: bold; padding: 12px 30px; border: none;
+    border-radius: 30px; background: #ffd166; color: #4a2400; cursor: pointer;
+    box-shadow: 0 4px 0 #b97f00; }
+  button:hover { background: #ffe08a; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b97f00; }
+  .keys { font-size: 14px; color: #e8c9a0; line-height: 1.6; }
+  #msg { min-height: 24px; text-align: center; font-weight: bold; color: #ffd166; font-size: 17px; }
+  #chargeBar { width: 220px; height: 16px; background: #333; border-radius: 8px; overflow: hidden; border: 1px solid #ffd166; }
+  #chargeFill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffd166, #ff7b54); }
+</style>
+</head>
+<body>
+<h1>🤠 LASSO LEGEND 🤠</h1>
+<p class="sub">Game 0220 &nbsp;|&nbsp; Precision / Lasso Roping &nbsp;|&nbsp; Rope 600 points before the sun sets!</p>
+<div id="wrap">
+  <canvas id="game" width="900" height="540"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>LASSO LEGEND</h2>
+    <p class="big">Swing it. Time it. Rope 'em all!</p>
+    <p><strong>How to Play:</strong> Calves wander across the ranch. Hold to swing your lasso — the loop
+    grows, then shrinks, then grows again. Release at just the right moment so the loop is big enough
+    to fit over a calf, but not so big it flops! A perfect-sized loop scores bonus points.
+    Golden calves are worth double. Rope <strong>600 points in 90 seconds</strong> to win.</p>
+    <p class="keys">MOVE: ← → or A / D &nbsp;•&nbsp; AIM: mouse / touch &nbsp;•&nbsp; HOLD + RELEASE: mouse, touch, or SPACE to throw<br>
+    Small calves = 40 pts &nbsp;•&nbsp; Big cattle = 60 pts &nbsp;•&nbsp; Golden calf = 120 pts &nbsp;•&nbsp; Perfect loop = +25 bonus</p>
+    <button id="startBtn" type="button">Start Roping!</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore" class="big"></p>
+    <button id="restartBtn" type="button">Restart Instantly</button>
+  </div>
+</div>
+<div id="hud">
+  <span>Score: <span id="score" class="hot">0</span> / 600</span>
+  <span>Time: <span id="time" class="hot">90</span>s</span>
+  <span>Roped: <span id="roped" class="hot">0</span></span>
+  <span>Combo: <span id="combo" class="hot">x1</span></span>
+  <span id="loopState">Loop: ready</span>
+</div>
+<div id="msg">Hold to swing, release to throw!</div>
+<div id="chargeBar"><div id="chargeFill"></div></div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var timeEl = document.getElementById('time');
+  var ropedEl = document.getElementById('roped');
+  var comboEl = document.getElementById('combo');
+  var loopEl = document.getElementById('loopState');
+  var msgEl = document.getElementById('msg');
+  var fillEl = document.getElementById('chargeFill');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+
+  var state = 'title'; // title | playing | over
+  var score = 0, roped = 0, combo = 1, comboTimer = 0, timeLeft = 90;
+  var lastTime = 0, elapsed = 0, spawnTimer = 0;
+  var player = { x: W / 2, y: H - 70, speed: 320 };
+  var keys = {};
+  var aim = { x: W / 2, y: H / 2 };
+  var charging = false, charge = 0, chargeDir = 1;
+  var lasso = null; // flying lasso
+  var calves = [];
+  var particles = [];
+  var floats = [];
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + dur);
+  }
+  function whoosh() { beep(500, 0.18, 'triangle', 0.10); beep(900, 0.12, 'sine', 0.08); }
+  function successSound() { beep(660, 0.12, 'square', 0.10); setTimeout(function(){ beep(880, 0.16, 'square', 0.10); }, 90); }
+  function failSound() { beep(180, 0.25, 'sawtooth', 0.10); }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function spawnCalf() {
+    var dir = Math.random() < 0.5 ? 1 : -1;
+    var kind = Math.random();
+    var calf;
+    if (kind < 0.14) {
+      calf = { kind: 'golden', r: 26, pts: 120, color: '#ffd700', speed: rand(70, 110) };
+    } else if (kind < 0.55) {
+      calf = { kind: 'small', r: 20, pts: 40, color: '#e8b06a', speed: rand(55, 95) };
+    } else {
+      calf = { kind: 'big', r: 32, pts: 60, color: '#a5672f', speed: rand(35, 65) };
+    }
+    calf.x = dir > 0 ? -40 : W + 40;
+    calf.y = rand(90, H - 190);
+    calf.vx = calf.speed * dir;
+    calf.wob = rand(0, Math.PI * 2);
+    calf.caught = false;
+    calves.push(calf);
+  }
+
+  function resetGame() {
+    score = 0; roped = 0; combo = 1; comboTimer = 0; timeLeft = 90; elapsed = 0;
+    spawnTimer = 0; player.x = W / 2; charging = false; charge = 0; lasso = null;
+    calves = []; particles = []; floats = [];
+    for (var i = 0; i < 4; i++) { spawnCalf(); calves[i].x = rand(80, W - 80); }
+    updateHUD();
+    msgEl.textContent = 'Hold to swing, release to throw!';
+  }
+
+  function startGame() {
+    audio(); // user gesture: safe to start audio
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    beep(523, 0.12, 'square', 0.10);
+  }
+
+  function endGame(win) {
+    state = 'over';
+    document.getElementById('endTitle').textContent = win ? '🏆 YOU WIN, LEGEND! 🏆' : '⏰ TIME UP — GAME OVER';
+    document.getElementById('endText').textContent = win
+      ? 'You roped your way to glory before sunset. The ranch celebrates you!'
+      : 'The sun set before you reached 600 points. Saddle up and try again!';
+    document.getElementById('endScore').textContent = 'Final Score: ' + score + '  •  Roped: ' + roped;
+    endScreen.classList.remove('hidden');
+    if (win) { successSound(); } else { failSound(); }
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    timeEl.textContent = Math.ceil(timeLeft);
+    ropedEl.textContent = roped;
+    comboEl.textContent = 'x' + combo;
+    fillEl.style.width = Math.round(charge * 100) + '%';
+    loopEl.textContent = lasso ? 'Loop: flying!' : (charging ? 'Loop: swinging…' : 'Loop: ready');
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0].clientX);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0].clientY);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  function startCharge() {
+    if (state !== 'playing' || lasso) return;
+    audio();
+    charging = true; charge = 0.15; chargeDir = 1;
+  }
+  function releaseThrow() {
+    if (state !== 'playing' || !charging) return;
+    charging = false;
+    var dx = aim.x - player.x, dy = aim.y - (player.y - 30);
+    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    var loopR = 14 + charge * 46; // 14 .. 60
+    lasso = { x: player.x, y: player.y - 30, vx: dx / dist * 620, vy: dy / dist * 620,
+              r: loopR, dist: 0, maxDist: Math.min(dist + 40, 620) };
+    whoosh();
+    msgEl.textContent = 'Loop size ' + Math.round(loopR) + ' — watch it fly!';
+  }
+
+  function catchCalf(calf, loopR) {
+    calf.caught = true; roped++;
+    var perfect = Math.abs(loopR - (calf.r + 12)) <= 10;
+    var gained = calf.pts * combo + (perfect ? 25 : 0);
+    score += gained;
+    combo = Math.min(combo + 1, 5); comboTimer = 4;
+    floats.push({ x: calf.x, y: calf.y - 20, text: '+' + gained + (perfect ? ' PERFECT!' : ''), t: 1.4 });
+    for (var i = 0; i < 14; i++) {
+      particles.push({ x: calf.x, y: calf.y, vx: rand(-120, 120), vy: rand(-160, -20), t: rand(0.4, 0.8), color: '#ffd166' });
+    }
+    successSound();
+    msgEl.textContent = perfect ? 'Perfect loop! +' + gained + ' points!' : 'Roped a ' + calf.kind + ' calf! +' + gained;
+    if (score >= 600) { updateHUD(); endGame(true); }
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    elapsed += dt; timeLeft -= dt;
+    if (timeLeft <= 0) { timeLeft = 0; updateHUD(); endGame(false); return; }
+    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 1; }
+
+    if (keys.ArrowLeft || keys.a || keys.A) player.x -= player.speed * dt;
+    if (keys.ArrowRight || keys.d || keys.D) player.x += player.speed * dt;
+    player.x = Math.max(40, Math.min(W - 40, player.x));
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnCalf(); spawnTimer = rand(0.9, 1.8); }
+
+    for (var i = calves.length - 1; i >= 0; i--) {
+      var c = calves[i];
+      c.wob += dt * 4;
+      c.x += c.vx * dt;
+      c.y += Math.sin(c.wob) * 12 * dt;
+      if (c.caught) { calves.splice(i, 1); continue; }
+      if ((c.vx > 0 && c.x > W + 50) || (c.vx < 0 && c.x < -50)) calves.splice(i, 1);
+    }
+
+    if (charging) {
+      charge += chargeDir * dt * 0.9;
+      if (charge >= 1) { charge = 1; chargeDir = -1; }
+      if (charge <= 0.1) { charge = 0.1; chargeDir = 1; }
+    }
+
+    if (lasso) {
+      lasso.x += lasso.vx * dt; lasso.y += lasso.vy * dt; lasso.dist += 620 * dt;
+      var hit = false;
+      for (var j = calves.length - 1; j >= 0; j--) {
+        var cf = calves[j];
+        var ddx = cf.x - lasso.x, ddy = cf.y - lasso.y;
+        var dd = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (dd < lasso.r + cf.r * 0.7) { catchCalf(cf, lasso.r); hit = true; break; }
+      }
+      if (hit || lasso.dist >= lasso.maxDist || lasso.x < 0 || lasso.x > W || lasso.y < 0 || lasso.y > H) {
+        if (!hit) { failSound(); msgEl.textContent = 'Missed! Time your loop size better.'; combo = 1; }
+        lasso = null;
+      }
+    }
+
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx * dt; particles[p].y += particles[p].vy * dt;
+      particles[p].vy += 300 * dt; particles[p].t -= dt;
+      if (particles[p].t <= 0) particles.splice(p, 1);
+    }
+    for (var f = floats.length - 1; f >= 0; f--) {
+      floats[f].y -= 30 * dt; floats[f].t -= dt;
+      if (floats[f].t <= 0) floats.splice(f, 1);
+    }
+    updateHUD();
+  }
+
+  function drawGround() {
+    ctx.fillStyle = '#7ec850'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#8fd95e';
+    for (var i = 0; i < 12; i++) { ctx.beginPath(); ctx.ellipse((i * 173) % W, (i * 97) % H, 60, 18, 0, 0, Math.PI * 2); ctx.fill(); }
+    // sunset sky band and fence
+    ctx.fillStyle = '#ffcf7d'; ctx.fillRect(0, 0, W, 46);
+    ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.arc(W - 90, 30, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6b4423'; ctx.fillRect(0, H - 34, W, 10);
+    for (var x = 10; x < W; x += 90) { ctx.fillRect(x, H - 52, 10, 30); }
+    // time bar as sun sinking
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(20, 14, 200, 14);
+    ctx.fillStyle = '#ff7b54'; ctx.fillRect(20, 14, 200 * Math.max(timeLeft, 0) / 90, 14);
+  }
+
+  function drawCalf(c) {
+    ctx.save(); ctx.translate(c.x, c.y);
+    var flip = c.vx < 0 ? -1 : 1; ctx.scale(flip, 1);
+    ctx.fillStyle = c.color;
+    ctx.beginPath(); ctx.ellipse(0, 0, c.r, c.r * 0.72, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(c.r * 0.85, -c.r * 0.25, c.r * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(c.r * 0.95, -c.r * 0.35, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(c.r * 0.97, -c.r * 0.35, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.color === '#ffd700' ? '#b8860b' : '#5b3a1a';
+    ctx.beginPath(); ctx.ellipse(-c.r * 0.3, -c.r * 0.2, 8, 5, 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(c.r * 0.2, c.r * 0.3, 7, 4, -0.3, 0, Math.PI * 2); ctx.fill();
+    if (c.kind === 'golden') { ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Georgia'; ctx.fillText('★', -5, -c.r - 6); }
+    ctx.restore();
+    // target hint ring showing ideal loop size
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(c.x, c.y, c.r + 12, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  function drawPlayer() {
+    var px = player.x, py = player.y;
+    // cowboy
+    ctx.fillStyle = '#3b5bd6'; ctx.fillRect(px - 12, py - 26, 24, 34);
+    ctx.fillStyle = '#f2c79b'; ctx.beginPath(); ctx.arc(px, py - 36, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5b3a1a'; ctx.beginPath(); ctx.ellipse(px, py - 44, 20, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5b3a1a'; ctx.beginPath(); ctx.arc(px, py - 48, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2b2b2b'; ctx.fillRect(px - 14, py + 8, 12, 16); ctx.fillRect(px + 2, py + 8, 12, 16);
+    // aim line
+    if (state === 'playing') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+      ctx.beginPath(); ctx.moveTo(px, py - 30); ctx.lineTo(aim.x, aim.y); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // swinging loop above head
+    if (charging) {
+      var lr = 14 + charge * 46;
+      var ang = performance.now() / 90;
+      var lx = px + Math.cos(ang) * 26, ly = py - 52 + Math.sin(ang) * 10;
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(lx, ly, lr * 0.55, 0, Math.PI * 2); ctx.stroke();
+    }
+    // flying lasso rope
+    if (lasso) {
+      ctx.strokeStyle = '#e8c9a0'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(px, py - 30); ctx.lineTo(lasso.x, lasso.y); ctx.stroke();
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(lasso.x, lasso.y, lasso.r, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  function draw() {
+    drawGround();
+    calves.forEach(drawCalf);
+    drawPlayer();
+    particles.forEach(function (pt) {
+      ctx.globalAlpha = Math.max(pt.t, 0); ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+    ctx.font = 'bold 18px Georgia'; ctx.fillStyle = '#fff';
+    floats.forEach(function (fl) {
+      ctx.globalAlpha = Math.min(fl.t, 1); ctx.fillText(fl.text, fl.x - 30, fl.y); ctx.globalAlpha = 1;
+    });
+    if (state === 'playing') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(10, H - 70, 300, 26);
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px Georgia';
+      ctx.fillText('Goal: 600 pts  •  ' + Math.max(score, 0) + ' pts so far', 18, H - 52);
+    }
+  }
+
+  function loop(now) {
+    var dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+    if (state === 'playing') update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, touch
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); startCharge(); }
+    if ((e.key === 'r' || e.key === 'R') && state === 'over') startGame();
+    if ((e.key === 'Enter') && state === 'title') startGame();
+  });
+  document.addEventListener('keyup', function (e) {
+    keys[e.key] = false;
+    if (e.key === ' ' || e.key === 'Spacebar') releaseThrow();
+  });
+  canvas.addEventListener('mousemove', function (e) { aim = canvasPos(e); });
+  canvas.addEventListener('mousedown', function (e) { aim = canvasPos(e); startCharge(); });
+  canvas.addEventListener('mouseup', function (e) { aim = canvasPos(e); releaseThrow(); });
+  canvas.addEventListener('mouseleave', function () { if (charging) releaseThrow(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); aim = canvasPos(e); startCharge(); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); aim = canvasPos(e); }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); releaseThrow(); }, { passive: false });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  resetGame();
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
