@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Harbor Crane Stacker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b2a3a; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; }
+  #wrap { width: 100%; max-width: 640px; text-align: center; }
+  h1 { font-size: 28px; margin-bottom: 6px; color: #ffd166; text-shadow: 2px 2px 0 #123; }
+  p { font-size: 14px; line-height: 1.5; color: #d7ecf5; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0; font-weight: bold; font-size: 15px; }
+  #hud div { background: #123f54; border: 2px solid #2a7ba6; border-radius: 8px; padding: 7px 10px; flex: 1; }
+  canvas { width: 100%; height: auto; background: linear-gradient(#7ec8e3, #3a7ca5); border: 4px solid #ffd166; border-radius: 12px; display: block; touch-action: none; }
+  .overlay { position: relative; }
+  .panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 86%; background: rgba(5, 30, 45, 0.93); border: 3px solid #ffd166; border-radius: 14px; padding: 20px 16px; }
+  .panel h2 { color: #ffd166; margin-bottom: 10px; font-size: 26px; }
+  .panel p { margin-bottom: 10px; }
+  button { background: #ffd166; color: #123; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 8px; }
+  button:hover, button:active { background: #ffe08a; transform: scale(1.03); }
+  .hidden { display: none; }
+  .small { font-size: 12px; color: #b8d8e8; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🏗️ Harbor Crane Stacker</h1>
+  <p>Stack crates on the pier tower before the harbor tower topples!</p>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Stacked: <span id="stacked">0</span> / 12</div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <div class="overlay">
+    <canvas id="game" width="640" height="480"></canvas>
+    <div id="titlePanel" class="panel">
+      <h2>Harbor Crane Stacker</h2>
+      <p><strong>How to Play:</strong> A crane swings a crate back and forth above the pier. Press <strong>SPACE</strong>, click, or tap to drop it at just the right moment.</p>
+      <p>Land squarely for a perfect stack and bonus points. A misaligned drop shrinks the next crate and shifts the tower. If a crate becomes too narrow, or the tower leans too far, it collapses!</p>
+      <p>Stack <strong>12 crates</strong> to win the harbor contract.</p>
+      <button id="startBtn" type="button">▶ Start Game</button>
+      <p class="small">Keyboard: Space / Arrow keys to drop &amp; nudge. Mouse: click to drop. Touch: tap to drop.</p>
+    </div>
+    <div id="endPanel" class="panel hidden">
+      <h2 id="endTitle">Game Over</h2>
+      <p id="endText"></p>
+      <p>Final Score: <strong id="finalScore">0</strong></p>
+      <button id="restartBtn" type="button">↻ Restart Instantly</button>
+    </div>
+  </div>
+  <p class="small">Tip: perfect landings score 100 points; good landings score 50. Watch the tower lean meter!</p>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var stackedEl = document.getElementById('stacked');
+  var statusEl = document.getElementById('status');
+  var titlePanel = document.getElementById('titlePanel');
+  var endPanel = document.getElementById('endPanel');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+
+  var W = 640, H = 480;
+  var groundY = 430;
+  var state = 'title'; // title, playing, won, over
+  var score = 0, stacked = 0, lives = 3;
+  var tower = []; // {x, w, y, h}
+  var crate = null;
+  var direction = 1, speed = 2.2;
+  var lean = 0, shake = 0, flash = '';
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function beep(freq, dur, type) {
+    var ac = audio(); if (!ac) return;
+    try {
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.18, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+      o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+    } catch (e) {}
+  }
+
+  function reset() {
+    score = 0; stacked = 0; lives = 3; lean = 0; shake = 0; flash = '';
+    tower = [{ x: 250, w: 140, y: groundY - 28, h: 28 }];
+    spawnCrate();
+    updateHUD('Playing');
+  }
+  function spawnCrate() {
+    var top = tower[tower.length - 1];
+    var w = top.w;
+    // Crate width never grows; it only shrinks after misaligned drops.
+    crate = { x: 30, y: top.y - 150, w: w, h: 28, vy: 0, falling: false };
+    direction = 1;
+    speed = 2.0 + stacked * 0.28;
+  }
+  function updateHUD(s) {
+    scoreEl.textContent = score;
+    stackedEl.textContent = stacked;
+    statusEl.textContent = s || (state === 'playing' ? 'Playing' : state);
+  }
+  function startGame() {
+    reset();
+    state = 'playing';
+    titlePanel.classList.add('hidden');
+    endPanel.classList.add('hidden');
+    beep(520, 0.15, 'square'); beep(780, 0.2, 'square');
+    updateHUD('Playing');
+  }
+  function endGame(won, msg) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '🏆 YOU WIN!' : '💥 Tower Collapsed!';
+    endText.textContent = msg;
+    finalScore.textContent = score;
+    endPanel.classList.remove('hidden');
+    updateHUD(won ? 'WINNER!' : 'Game Over');
+    beep(won ? 880 : 160, won ? 0.5 : 0.6, won ? 'triangle' : 'sawtooth');
+  }
+  function drop() {
+    if (state !== 'playing' || !crate || crate.falling) return;
+    crate.falling = true;
+    beep(300, 0.1, 'sine');
+    updateHUD('Dropping...');
+  }
+  function nudge(dir) {
+    if (state === 'playing' && crate && !crate.falling) crate.x += dir * 12;
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    if (!crate) return;
+    if (!crate.falling) {
+      crate.x += direction * speed;
+      if (crate.x <= 20) { crate.x = 20; direction = 1; }
+      if (crate.x + crate.w >= W - 20) { crate.x = W - 20 - crate.w; direction = -1; }
+    } else {
+      crate.vy += 0.9;
+      crate.y += crate.vy;
+      var top = tower[tower.length - 1];
+      if (crate.y + crate.h >= top.y) {
+        crate.y = top.y - crate.h;
+        var overlapL = Math.max(crate.x, top.x);
+        var overlapR = Math.min(crate.x + crate.w, top.x + top.w);
+        var overlap = overlapR - overlapL;
+        if (overlap <= 0) {
+          lives = 0; shake = 14; flash = 'MISSED THE TOWER!';
+          endGame(false, 'The crate splashed into the harbor. The tower crew calls it a day.');
+          return;
+        }
+        var centerDiff = Math.abs((crate.x + crate.w / 2) - (top.x + top.w / 2));
+        var perfect = centerDiff <= 8;
+        if (perfect) { score += 100; flash = 'PERFECT! +100'; beep(880, 0.18, 'triangle'); }
+        else { score += 50; flash = 'Good landing! +50'; beep(620, 0.14, 'triangle'); }
+        // New crate is the overlapping slice, shifted by the misalignment.
+        var newCrate = { x: overlapL, w: overlap, y: crate.y, h: crate.h };
+        tower.push(newCrate);
+        stacked += 1;
+        lean += centerDiff * 0.06;
+        if (overlap < 34) {
+          endGame(false, 'The crate is now too narrow to stack safely. The tower collapses!');
+          return;
+        }
+        if (lean > 42 || stacked > 1 && Math.abs(newCrate.x - tower[0].x) > 150) {
+          shake = 16;
+          endGame(false, 'The tower leaned too far and toppled into the harbor!');
+          return;
+        }
+        if (stacked >= 12) {
+          endGame(true, 'Twelve crates stacked high! The harbor contract is yours, crane master.');
+          return;
+        }
+        spawnCrate();
+        updateHUD('Playing');
+      }
+    }
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#7ec8e3'; ctx.fillRect(0, 0, W, 200);
+    ctx.fillStyle = '#3a7ca5'; ctx.fillRect(0, 200, W, 230);
+    ctx.fillStyle = '#f4d35e'; ctx.beginPath(); ctx.arc(560, 60, 30, 0, Math.PI * 2); ctx.fill();
+    // Sea and pier
+    ctx.fillStyle = '#1d5f7a'; ctx.fillRect(0, 380, W, 50);
+    ctx.fillStyle = '#8a5a2b'; ctx.fillRect(0, groundY, W, 50);
+    ctx.fillStyle = '#5d3a1a'; ctx.fillRect(0, groundY, W, 8);
+    ctx.fillStyle = '#ffffff';
+    for (var i = 0; i < 5; i++) { ctx.fillRect(20 + i * 130, 395 + (i % 2) * 8, 46, 4); }
+  }
+  function drawCrate(x, y, w, h, color) {
+    ctx.fillStyle = color; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#123'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath();
+    ctx.moveTo(x, y + h / 2); ctx.lineTo(x + w, y + h / 2);
+    ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + h); ctx.stroke();
+  }
+  function draw() {
+    ctx.save();
+    if (shake > 0) { ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); shake *= 0.85; if (shake < 0.5) shake = 0; }
+    drawBackground();
+    // Crane gantry
+    ctx.fillStyle = '#2f3e46'; ctx.fillRect(40, 40, 18, 390); ctx.fillRect(580, 40, 18, 390);
+    ctx.fillStyle = '#e63946'; ctx.fillRect(40, 40, 558, 22);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 14px Arial'; ctx.fillText('HARBOR CRANE', 250, 56);
+    // Tower
+    var colors = ['#ef476f', '#ffd166', '#06d6a0', '#118ab2', '#f78c6b'];
+    tower.forEach(function (c, i) { drawCrate(c.x, c.y, c.w, c.h, colors[i % colors.length]); });
+    // Moving / falling crate with cable
+    if (crate && state !== 'over' && state !== 'won') {
+      ctx.strokeStyle = '#222'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(crate.x + crate.w / 2, 62); ctx.lineTo(crate.x + crate.w / 2, crate.y); ctx.stroke();
+      drawCrate(crate.x, crate.y, crate.w, crate.h, '#ff9f1c');
+      // Drop guide
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.setLineDash([6, 6]); ctx.beginPath();
+      ctx.moveTo(crate.x + crate.w / 2, crate.y + crate.h); ctx.lineTo(crate.x + crate.w / 2, tower[tower.length - 1].y); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // Lean meter
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(20, 78, 170, 26);
+    ctx.fillStyle = '#ffd166'; ctx.fillText('Tower lean: ' + Math.round(lean), 28, 96);
+    if (flash) { ctx.fillStyle = '#fff'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.fillText(flash, W / 2, 130); ctx.textAlign = 'left'; }
+    if (state === 'title') { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(0, 0, W, H); }
+    ctx.restore();
+  }
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (state === 'title' || state === 'won' || state === 'over') startGame(); else drop(); }
+    if (e.code === 'ArrowLeft') nudge(-1);
+    if (e.code === 'ArrowRight') nudge(1);
+  });
+  canvas.addEventListener('click', function () { if (state === 'playing') drop(); });
+  canvas.addEventListener('mousedown', function () { if (state === 'playing') drop(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (state === 'playing') drop(); }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); }, { passive: false });
+
+  reset();
+  state = 'title';
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

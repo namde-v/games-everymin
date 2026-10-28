@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Mosaic Mender</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; background: #141821; color: #f2f0e8; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display: flex; justify-content: center; padding: 16px; }
+  #wrap { width: min(560px, 100%); text-align: center; }
+  h1 { margin: 8px 0 4px; font-size: 34px; letter-spacing: 1px; color: #ffd166; }
+  .tag { color: #b8c0d8; margin: 0 0 12px; font-size: 15px; }
+  #hud { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 10px 0; }
+  .pill { background: #232a3d; border: 1px solid #3a4563; border-radius: 999px; padding: 7px 12px; font-weight: 700; font-size: 14px; }
+  .pill b { color: #ffd166; }
+  #stage { position: relative; width: min(520px, 100%); margin: 0 auto; aspect-ratio: 1 / 1; background: #1e2436; border: 3px solid #3a4563; border-radius: 16px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; background: rgba(10, 13, 22, 0.92); }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0; font-size: 32px; color: #ffd166; }
+  .overlay p { margin: 4px 0; line-height: 1.55; color: #dfe3f0; max-width: 420px; }
+  .overlay .how { background: #232a3d; border: 1px solid #3a4563; border-radius: 12px; padding: 12px 14px; text-align: left; font-size: 14px; }
+  .overlay .how strong { color: #7bd389; }
+  button { border: 0; border-radius: 12px; padding: 14px 26px; font-size: 19px; font-weight: 800; background: #ffd166; color: #1a1a1a; cursor: pointer; box-shadow: 0 4px 0 #b8932e; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #7bd389; box-shadow: 0 4px 0 #4a9e5a; }
+  #msg { min-height: 26px; font-weight: 700; color: #7bd389; margin: 8px 0 0; }
+  .hint { color: #9aa3bd; font-size: 13px; line-height: 1.5; margin: 10px 0 0; }
+  .swatches { font-size: 22px; letter-spacing: 6px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🧩 Mosaic Mender</h1>
+  <p class="tag">Memorise it. Mend it. Before your moves run out.</p>
+  <div id="hud">
+    <span class="pill">Score: <b id="score">0</b></span>
+    <span class="pill">Mosaic: <b id="mosaic">1 / 5</b></span>
+    <span class="pill">Moves left: <b id="moves">—</b></span>
+    <span class="pill">Lives: <b id="lives">❤️❤️❤️</b></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="520" height="520"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Mosaic Mender</h2>
+      <p class="swatches">🟦 🟨 🟥 🟪</p>
+      <div class="how">
+        <strong>How to Play:</strong><br>
+        1. A mosaic pattern appears — memorise it! You have a few seconds.<br>
+        2. Some tiles are then scrambled to the wrong colours.<br>
+        3. Click or tap a tile to cycle its colour. Use arrow keys to move the yellow frame and <strong>Space</strong> to cycle the selected tile.<br>
+        4. Restore the exact pattern before your moves run out.<br>
+        5. Finish all 5 mosaics to win. Running out of moves costs 1 life. You have 3 lives.
+      </div>
+      <button id="startBtn" type="button">▶ Start Game</button>
+      <p>Tip: each colour also has its own shape, so you can memorise by shape as well as colour.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn" type="button" class="secondary">↻ Play Again</button>
+      <p>Press Enter or Space to restart.</p>
+    </div>
+  </div>
+  <p id="msg">Press Start and watch carefully!</p>
+  <p class="hint">Mouse: click a tile to cycle it &nbsp;•&nbsp; Touch: tap a tile &nbsp;•&nbsp; Keyboard: Arrow keys + Space<br>Clicking a correct tile will spoil it, so only change tiles you are sure are wrong.</p>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var msgEl = document.getElementById('msg');
+  var scoreEl = document.getElementById('score');
+  var mosaicEl = document.getElementById('mosaic');
+  var movesEl = document.getElementById('moves');
+  var livesEl = document.getElementById('lives');
+
+  // Four colours, each with a distinct inner shape for memory support.
+  var COLORS = ['#2ec4b6', '#ffb703', '#ef476f', '#7b5cff'];
+  var COLOR_NAMES = ['Teal circle', 'Amber diamond', 'Coral triangle', 'Violet square'];
+  var GRID = 4;
+  var TOTAL_MOSAICS = 5;
+  var SCRAMBLED = 6;
+
+  var state = 'title'; // title | memorize | play | pause | win | gameover
+  var score = 0;
+  var mosaicNum = 1;
+  var lives = 3;
+  var movesLeft = 0;
+  var target = [];
+  var current = [];
+  var cursor = { x: 0, y: 0 };
+  var memorizeUntil = 0;
+  var pauseUntil = 0;
+  var pauseNext = null;
+  var flash = 0;
+  var flashColor = '#7bd389';
+
+  // ---- Procedural audio: created only after a user gesture ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.12));
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + (dur || 0.12));
+    } catch (e) {}
+  }
+  function soundClick() { beep(520 + current[cursor.y][cursor.x] * 90, 0.07, 'triangle', 0.10); }
+  function soundGood() { beep(660, 0.12, 'sine', 0.14); setTimeout(function () { beep(880, 0.16, 'sine', 0.14); }, 110); }
+  function soundBad() { beep(180, 0.22, 'sawtooth', 0.10); setTimeout(function () { beep(130, 0.25, 'sawtooth', 0.10); }, 130); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.22, 'triangle', 0.14); }, i * 130); }); }
+
+  function emptyGrid() {
+    var g = [];
+    for (var y = 0; y < GRID; y++) { g.push([0, 0, 0, 0]); }
+    return g;
+  }
+  function randomTarget() {
+    var g = emptyGrid();
+    for (var y = 0; y < GRID; y++) {
+      for (var x = 0; x < GRID; x++) g[y][x] = Math.floor(Math.random() * 4);
+    }
+    return g;
+  }
+  function makeScrambled(t) {
+    var g = [];
+    for (var y = 0; y < GRID; y++) g.push(t[y].slice());
+    var cells = [];
+    for (var y2 = 0; y2 < GRID; y2++) for (var x2 = 0; x2 < GRID; x2++) cells.push([x2, y2]);
+    for (var i = cells.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = cells[i]; cells[i] = cells[j]; cells[j] = tmp;
+    }
+    for (var k = 0; k < SCRAMBLED; k++) {
+      var c = cells[k];
+      var old = g[c[1]][c[0]];
+      var nw = (old + 1 + Math.floor(Math.random() * 3)) % 4;
+      g[c[1]][c[0]] = nw;
+    }
+    return g;
+  }
+  function gridsEqual(a, b) {
+    for (var y = 0; y < GRID; y++) for (var x = 0; x < GRID; x++) if (a[y][x] !== b[y][x]) return false;
+    return true;
+  }
+  function countWrong() {
+    var n = 0;
+    for (var y = 0; y < GRID; y++) for (var x = 0; x < GRID; x++) if (current[y][x] !== target[y][x]) n++;
+    return n;
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = String(score);
+    mosaicEl.textContent = mosaicNum + ' / ' + TOTAL_MOSAICS;
+    movesEl.textContent = (state === 'play' || state === 'memorize' || state === 'pause') ? String(movesLeft) : '—';
+    var hearts = '';
+    for (var i = 0; i < 3; i++) hearts += (i < lives) ? '❤️' : '🖤';
+    livesEl.textContent = hearts;
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function startMosaic() {
+    target = randomTarget();
+    current = makeScrambled(target);
+    // Moves: worst case 3 cycles per scrambled tile, plus a little slack.
+    movesLeft = SCRAMBLED * 3 + 4;
+    cursor = { x: 0, y: 0 };
+    state = 'memorize';
+    memorizeUntil = performance.now() + 5000;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    setMsg('Mosaic ' + mosaicNum + ': memorise this pattern!');
+    updateHUD();
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; mosaicNum = 1; lives = 3;
+    state = 'title';
+    startMosaic();
+    beep(440, 0.12, 'triangle', 0.12);
+  }
+
+  function showEnd(win) {
+    state = win ? 'win' : 'gameover';
+    endTitle.textContent = win ? '🏆 You Win!' : '💔 Game Over';
+    endText.textContent = win
+      ? 'You mended all 5 mosaics! Final score: ' + score + '. Brilliant memory work.'
+      : 'Out of lives on mosaic ' + mosaicNum + '. Final score: ' + score + '. Try again — the next pattern is waiting.';
+    endScreen.classList.remove('hidden');
+    if (win) soundWin(); else soundBad();
+    setMsg(win ? 'All mosaics mended!' : 'Game over. Press Play Again to retry.');
+    updateHUD();
+  }
+
+  function afterPause() {
+    var next = pauseNext;
+    pauseNext = null;
+    if (next === 'next') {
+      mosaicNum++;
+      startMosaic();
+    } else if (next === 'retry') {
+      startMosaic();
+    } else if (next === 'win') {
+      showEnd(true);
+    } else if (next === 'gameover') {
+      showEnd(false);
+    }
+  }
+
+  function cycleTile(x, y) {
+    if (state !== 'play') return;
+    ensureAudio();
+    cursor = { x: x, y: y };
+    current[y][x] = (current[y][x] + 1) % 4;
+    movesLeft--;
+    soundClick();
+    flash = 1; flashColor = '#ffd166';
+    if (gridsEqual(current, target)) {
+      var bonus = movesLeft * 10;
+      score += 100 + bonus;
+      soundGood();
+      setMsg('Mosaic ' + mosaicNum + ' mended! +' + (100 + bonus) + ' points.');
+      if (mosaicNum >= TOTAL_MOSAICS) {
+        state = 'pause'; pauseNext = 'win'; pauseUntil = performance.now() + 1200;
+      } else {
+        state = 'pause'; pauseNext = 'next'; pauseUntil = performance.now() + 1200;
+      }
+    } else if (movesLeft <= 0) {
+      lives--;
+      soundBad();
+      if (lives <= 0) {
+        setMsg('Out of moves — and out of lives.');
+        state = 'pause'; pauseNext = 'gameover'; pauseUntil = performance.now() + 1200;
+      } else {
+        setMsg('Out of moves! You lose a life. Mosaic ' + mosaicNum + ' will be shown again.');
+        state = 'pause'; pauseNext = 'retry'; pauseUntil = performance.now() + 1400;
+      }
+    } else {
+      setMsg('Tiles still wrong: ' + countWrong() + ' — ' + movesLeft + ' moves left.');
+    }
+    updateHUD();
+  }
+
+  // ---- Input: mouse, touch, keyboard ----
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var px = (e.clientX - rect.left) * (canvas.width / rect.width);
+    var py = (e.clientY - rect.top) * (canvas.height / rect.height);
+    var cell = canvas.width / GRID;
+    var x = Math.max(0, Math.min(GRID - 1, Math.floor(px / cell)));
+    var y = Math.max(0, Math.min(GRID - 1, Math.floor(py / cell)));
+    return { x: x, y: y };
+  }
+  canvas.addEventListener('click', function (e) {
+    if (state !== 'play') return;
+    var c = cellFromEvent(e);
+    cycleTile(c.x, c.y);
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    // Keep mouse users responsive; click handler does the work, this only moves the frame.
+    if (state === 'play') { var c = cellFromEvent(e); cursor = c; }
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state !== 'play') return;
+    var t = e.changedTouches[0];
+    var c = cellFromEvent(t);
+    cycleTile(c.x, c.y);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+
+  window.addEventListener('keydown', function (e) {
+    if (state === 'title' || state === 'win' || state === 'gameover') {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startGame(); }
+      return;
+    }
+    if (state !== 'play') return;
+    if (e.key === 'ArrowLeft') { cursor.x = Math.max(0, cursor.x - 1); e.preventDefault(); beep(300, 0.05, 'sine', 0.06); }
+    else if (e.key === 'ArrowRight') { cursor.x = Math.min(GRID - 1, cursor.x + 1); e.preventDefault(); beep(300, 0.05, 'sine', 0.06); }
+    else if (e.key === 'ArrowUp') { cursor.y = Math.max(0, cursor.y - 1); e.preventDefault(); beep(300, 0.05, 'sine', 0.06); }
+    else if (e.key === 'ArrowDown') { cursor.y = Math.min(GRID - 1, cursor.y + 1); e.preventDefault(); beep(300, 0.05, 'sine', 0.06); }
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); cycleTile(cursor.x, cursor.y); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('startBtn').addEventListener('touchstart', function (e) { e.preventDefault(); startGame(); }, { passive: false });
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('touchstart', function (e) { e.preventDefault(); startGame(); }, { passive: false });
+
+  // ---- Drawing ----
+  function drawShape(cx, cy, r, kind) {
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.beginPath();
+    if (kind === 0) { // circle
+      ctx.arc(cx, cy, r * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === 1) { // diamond
+      ctx.moveTo(cx, cy - r * 0.55); ctx.lineTo(cx + r * 0.55, cy); ctx.lineTo(cx, cy + r * 0.55); ctx.lineTo(cx - r * 0.55, cy); ctx.closePath(); ctx.fill();
+    } else if (kind === 2) { // triangle
+      ctx.moveTo(cx, cy - r * 0.55); ctx.lineTo(cx + r * 0.55, cy + r * 0.45); ctx.lineTo(cx - r * 0.55, cy + r * 0.45); ctx.closePath(); ctx.fill();
+    } else { // square
+      ctx.fillRect(cx - r * 0.42, cy - r * 0.42, r * 0.84, r * 0.84);
+    }
+  }
+  function drawGrid(grid, showCursor) {
+    var cell = canvas.width / GRID;
+    var pad = 8;
+    for (var y = 0; y < GRID; y++) {
+      for (var x = 0; x < GRID; x++) {
+        var px = x * cell + pad;
+        var py = y * cell + pad;
+        var size = cell - pad * 2;
+        ctx.fillStyle = COLORS[grid[y][x]];
+        ctx.beginPath();
+        ctx.roundRect(px, py, size, size, 14);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        ctx.beginPath();
+        ctx.roundRect(px, py, size, 10, 8);
+        ctx.fill();
+        drawShape(px + size / 2, py + size / 2, size / 2, grid[y][x]);
+        if (showCursor && cursor.x === x && cursor.y === y) {
+          ctx.strokeStyle = '#ffd166';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.roundRect(px - 3, py - 3, size + 6, size + 6, 16);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+  function drawBanner(text, sub) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, canvas.width, 64);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 26px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, canvas.width / 2, 30);
+    if (sub) {
+      ctx.font = '15px system-ui, sans-serif';
+      ctx.fillStyle = '#ffd166';
+      ctx.fillText(sub, canvas.width / 2, 54);
+    }
+  }
+
+  function render(now) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#1e2436';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (flash > 0) flash = Math.max(0, flash - 0.03);
+
+    if (state === 'title') {
+      ctx.fillStyle = '#2a3248';
+      for (var i = 0; i < 16; i++) {
+        var gx = (i % 4) * 130 + 30, gy = Math.floor(i / 4) * 130 + 30;
+        ctx.fillStyle = COLORS[(i * 7 + 1) % 4];
+        ctx.beginPath(); ctx.roundRect(gx, gy, 74, 74, 12); ctx.fill();
+      }
+      drawBanner('MOSAIC MENDER', 'Press Start — then memorise fast!');
+    } else if (state === 'memorize') {
+      var remain = Math.max(0, memorizeUntil - now);
+      drawGrid(target, false);
+      drawBanner('MEMORISE THIS!', 'Mosaic ' + mosaicNum + ' of ' + TOTAL_MOSAICS + '  •  ' + Math.ceil(remain / 1000) + 's left');
+      ctx.fillStyle = '#ffd166';
+      ctx.fillRect(0, canvas.height - 10, canvas.width * (remain / 5000), 10);
+      if (remain <= 0) {
+        state = 'play';
+        setMsg('Now mend it! Click or tap a tile to cycle its colour. ' + movesLeft + ' moves left.');
+        updateHUD();
+      }
+    } else if (state === 'play') {
+      drawGrid(current, true);
+      drawBanner('MEND THE MOSAIC', 'Wrong tiles: ' + countWrong() + '  •  Moves: ' + movesLeft);
+    } else if (state === 'pause') {
+      drawGrid(current, false);
+      drawBanner('Nice work — get ready…', 'Next mosaic coming up');
+      if (now >= pauseUntil) afterPause();
+    } else if (state === 'win' || state === 'gameover') {
+      drawGrid(current, false);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function loop(now) {
+    render(now);
+    requestAnimationFrame(loop);
+  }
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Herbalist's Potion Lab</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #1a1420; color: #f5eeda; font-family: Georgia, serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; color: #c9f2a8; text-shadow: 0 0 12px #7bc043; margin: 8px 0 4px; text-align: center; }
+  p.sub { color: #d8c9a3; font-size: 14px; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 760px; margin-bottom: 8px; }
+  .stat { background: #2d2438; border: 2px solid #7bc043; border-radius: 10px; padding: 6px 12px; font-size: 15px; font-weight: bold; }
+  .stat span { color: #ffe066; }
+  #wrap { position: relative; width: 100%; max-width: 760px; }
+  canvas { display: block; width: 100%; height: auto; background: #241b2e; border: 3px solid #7bc043; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(20, 12, 28, 0.92); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; text-align: center; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #c9f2a8; font-size: 30px; }
+  .overlay p { color: #e8dcc0; font-size: 16px; line-height: 1.5; max-width: 560px; }
+  .overlay .howto { background: #2d2438; border: 1px solid #7bc043; border-radius: 10px; padding: 12px 16px; font-size: 15px; text-align: left; }
+  button { background: #7bc043; color: #14200a; border: none; border-radius: 10px; padding: 12px 26px; font-size: 18px; font-weight: bold; cursor: pointer; font-family: inherit; }
+  button:hover { background: #a4e878; }
+  button.secondary { background: #ffe066; }
+  #controls { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  #message { min-height: 24px; margin-top: 8px; font-size: 16px; font-weight: bold; color: #ffe066; text-align: center; }
+  #clues { width: 100%; max-width: 760px; background: #2d2438; border: 2px solid #b48ae0; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
+  #clues h3 { color: #d9b8ff; font-size: 16px; margin-bottom: 4px; }
+  #clues ul { padding-left: 20px; font-size: 15px; line-height: 1.5; color: #f5eeda; }
+  .hint { font-size: 13px; color: #b8a88f; margin-top: 6px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>🌿 Herbalist's Potion Lab 🌿</h1>
+<p class="sub">A deduction puzzle — read the clues, pick the exact herbs, brew the remedy!</p>
+
+<div id="hud">
+  <div class="stat">Score: <span id="score">0</span></div>
+  <div class="stat">Remedy: <span id="remedy">1</span> / 6</div>
+  <div class="stat">Stock: <span id="stock">8</span></div>
+  <div class="stat">Selected: <span id="selCount">0</span> / 3</div>
+</div>
+
+<div id="clues">
+  <h3>📜 Customer Request — Clues</h3>
+  <ul id="clueList"><li>Press Start to meet your first customer.</li></ul>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="460"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Herbalist's Potion Lab</h2>
+    <p>Welcome, herbalist! Customers arrive with mysterious ailments. Each one gives you clues about the herbs their remedy needs. Deduce the exact combination and brew it!</p>
+    <div class="howto">
+      <strong>How to Play:</strong><br>
+      • Read the clues in the panel above the lab bench.<br>
+      • Tap / click up to 3 herbs on the grid to select them (selected herbs glow).<br>
+      • Keyboard: Arrow keys move the highlight, Space or Enter selects, B brews, C clears.<br>
+      • Press <strong>Brew Potion</strong> when you have exactly 3 herbs selected.<br>
+      • A correct brew scores points and the next customer arrives.<br>
+      • A wrong brew wastes 1 unit of ingredient stock. Run out of stock and the shop closes!<br>
+      • Brew all 6 remedies correctly to WIN.
+    </div>
+    <button id="startBtn">Start Brewing</button>
+    <p class="hint">Mouse, touch, and keyboard all work. Sound starts after you press Start.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="brewBtn" class="secondary">Brew Potion</button>
+  <button id="clearBtn">Clear Selection</button>
+</div>
+<div id="message"></div>
+<p class="hint">Tip: clues describe categories, colours and traits. An exclusion clue rules a herb out entirely — use it to narrow the grid!</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var remedyEl = document.getElementById('remedy');
+  var stockEl = document.getElementById('stock');
+  var selEl = document.getElementById('selCount');
+  var clueList = document.getElementById('clueList');
+  var msgEl = document.getElementById('message');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  // ---- Audio: procedural only, created after user interaction ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundGood() { beep(523, 0.15, 'sine', 0.18); setTimeout(function(){ beep(659, 0.15, 'sine', 0.18); }, 120); setTimeout(function(){ beep(784, 0.25, 'sine', 0.18); }, 240); }
+  function soundBad() { beep(220, 0.2, 'sawtooth', 0.12); setTimeout(function(){ beep(165, 0.3, 'sawtooth', 0.12); }, 150); }
+  function soundPick() { beep(440, 0.08, 'triangle', 0.12); }
+
+  // ---- Herb catalogue: name, category, colour, trait, emoji, colour hex ----
+  var HERBS = [
+    { name: 'Mint',      cat: 'Leaf',     color: 'Green',  trait: 'Minty',  icon: '🌱', hex: '#5fbf5f' },
+    { name: 'Basil',     cat: 'Leaf',     color: 'Green',  trait: 'Sweet',  icon: '🍃', hex: '#4caf50' },
+    { name: 'Sage',      cat: 'Leaf',     color: 'Purple', trait: 'Earthy', icon: '🌿', hex: '#9b7ed9' },
+    { name: 'Ginger',    cat: 'Root',     color: 'Yellow', trait: 'Spicy',  icon: '🫚', hex: '#e8c547' },
+    { name: 'Turmeric',  cat: 'Root',     color: 'Orange', trait: 'Earthy', icon: '🥕', hex: '#f39c3a' },
+    { name: 'Lavender',  cat: 'Flower',   color: 'Purple', trait: 'Floral', icon: '💜', hex: '#b48ae0' },
+    { name: 'Chamomile', cat: 'Flower',   color: 'Yellow', trait: 'Sweet',  icon: '🌼', hex: '#ffe066' },
+    { name: 'Rosehip',   cat: 'Berry',    color: 'Red',    trait: 'Sweet',  icon: '🌹', hex: '#e85d75' },
+    { name: 'Elderberry',cat: 'Berry',    color: 'Purple', trait: 'Bitter', icon: '🫐', hex: '#7a5fc0' },
+    { name: 'Chilli',    cat: 'Seed',     color: 'Red',    trait: 'Spicy',  icon: '🌶️', hex: '#e74c3c' },
+    { name: 'Mushroom',  cat: 'Fungus',   color: 'Brown',  trait: 'Earthy', icon: '🍄', hex: '#a67c52' },
+    { name: 'Lemon Balm',cat: 'Leaf',     color: 'Yellow', trait: 'Minty',  icon: '🍋', hex: '#d4e157' }
+  ];
+  var CUSTOMERS = ['Mira the Baker', 'Old Tomas', 'Sailor Finn', 'Farmer Ada', 'Bard Lute', 'Knight Rowan'];
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, remedyNum = 1, stock = 8, selected = [], target = [], clues = [];
+  var highlight = 0, cauldron = 0, sparkles = [], flash = 0, flashColor = '#7bc043';
+
+  function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function newRemedy() {
+    selected = [];
+    var idx = shuffle(HERBS.map(function (h, i) { return i; })).slice(0, 3);
+    target = idx.map(function (i) { return HERBS[i]; });
+    clues = [];
+    // One descriptive clue per target herb, drawn from a different attribute each time.
+    var attrs = shuffle(['cat', 'color', 'trait']);
+    for (var k = 0; k < 3; k++) {
+      var h = target[k], a = attrs[k];
+      if (a === 'cat') clues.push('One herb is a ' + h.cat.toLowerCase() + ' herb.');
+      else if (a === 'color') clues.push('One herb is ' + h.color.toLowerCase() + ' in colour.');
+      else clues.push('One herb is ' + h.trait.toLowerCase() + ' in character.');
+    }
+    // One exclusion clue naming a herb that is NOT in the remedy.
+    var outsiders = HERBS.filter(function (h) { return target.indexOf(h) === -1; });
+    var out = pick(outsiders);
+    clues.push('The remedy does NOT use ' + out.name + ' (not a ' + out.cat.toLowerCase() + ' herb).');
+    // Extra flavour clue that is always true of the set, to help narrow it down.
+    clues.push('The remedy needs exactly 3 different herbs — no repeats.');
+    renderClues();
+    updateHUD();
+    setMessage('Customer ' + CUSTOMERS[remedyNum - 1] + ' needs a remedy. Study the clues!');
+  }
+
+  function renderClues() {
+    clueList.innerHTML = '';
+    clues.forEach(function (c) {
+      var li = document.createElement('li');
+      li.textContent = c;
+      clueList.appendChild(li);
+    });
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    remedyEl.textContent = Math.min(remedyNum, 6);
+    stockEl.textContent = stock;
+    selEl.textContent = selected.length;
+  }
+
+  function setMessage(t) { msgEl.textContent = t; }
+
+  function toggleHerb(i) {
+    if (state !== 'playing') return;
+    var pos = selected.indexOf(i);
+    if (pos >= 0) { selected.splice(pos, 1); }
+    else {
+      if (selected.length >= 3) { setMessage('You already have 3 herbs — clear one first, or brew!'); soundBad(); return; }
+      selected.push(i);
+    }
+    soundPick();
+    updateHUD();
+  }
+
+  function brew() {
+    if (state !== 'playing') return;
+    if (selected.length !== 3) { setMessage('Select exactly 3 herbs before brewing!'); soundBad(); return; }
+    var chosen = selected.map(function (i) { return HERBS[i].name; }).sort().join('|');
+    var wanted = target.map(function (h) { return h.name; }).sort().join('|');
+    if (chosen === wanted) {
+      score += 100 + stock * 5;
+      cauldron = 1;
+      flash = 1; flashColor = '#7bc043';
+      for (var s = 0; s < 26; s++) sparkles.push({ x: 380 + (Math.random() - 0.5) * 220, y: 200 + (Math.random() - 0.5) * 80, vx: (Math.random() - 0.5) * 3, vy: -Math.random() * 3 - 1, life: 1 });
+      soundGood();
+      if (remedyNum >= 6) {
+        state = 'won';
+        endTitle.textContent = 'You Win! The Shop Thrives!';
+        endText.textContent = 'You brewed all 6 remedies! Final score: ' + score + '. The whole village trusts your potion lab now.';
+        endScreen.classList.remove('hidden');
+      } else {
+        remedyNum++;
+        setMessage('Perfect brew! ' + target.map(function (h) { return h.name; }).join(', ') + ' — correct!');
+        newRemedy();
+      }
+    } else {
+      stock--;
+      flash = 1; flashColor = '#e74c3c';
+      soundBad();
+      selected = [];
+      updateHUD();
+      if (stock <= 0) {
+        state = 'over';
+        endTitle.textContent = 'Game Over — Out of Stock!';
+        endText.textContent = 'Your ingredient stock ran out after a wrong brew. Final score: ' + score + '. Restock and try again!';
+        endScreen.classList.remove('hidden');
+      } else {
+        setMessage('Wrong brew — that mixture fizzled away. Stock wasted! ' + stock + ' left. Re-read the clues.');
+      }
+    }
+    updateHUD();
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; remedyNum = 1; stock = 8; selected = []; highlight = 0; cauldron = 0;
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    newRemedy();
+    soundGood();
+  }
+
+  // ---- Canvas layout: 4 columns x 3 rows of herb cards ----
+  function cellRect(i) {
+    var col = i % 4, row = Math.floor(i / 4);
+    var w = 172, h = 92, gapX = 14, gapY = 12, x0 = 14, y0 = 10;
+    return { x: x0 + col * (w + gapX), y: y0 + row * (h + gapY), w: w, h: h };
+  }
+  function herbAtPoint(px, py) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (px - rect.left) * (canvas.width / rect.width);
+    var y = (py - rect.top) * (canvas.height / rect.height);
+    for (var i = 0; i < HERBS.length; i++) {
+      var r = cellRect(i);
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
+    }
+    return -1;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Bench background
+    ctx.fillStyle = '#241b2e'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#332642'; ctx.fillRect(0, 310, canvas.width, 150);
+    // Herb cards
+    for (var i = 0; i < HERBS.length; i++) {
+      var r = cellRect(i), h = HERBS[i];
+      var isSel = selected.indexOf(i) >= 0;
+      var isHi = (i === highlight && state === 'playing');
+      ctx.fillStyle = isSel ? '#3d5a26' : '#2d2438';
+      ctx.strokeStyle = isSel ? '#ffe066' : (isHi ? '#ffffff' : h.hex);
+      ctx.lineWidth = isSel || isHi ? 4 : 2;
+      ctx.beginPath(); ctx.roundRect(r.x, r.y, r.w, r.h, 12); ctx.fill(); ctx.stroke();
+      ctx.font = '34px serif'; ctx.textAlign = 'center';
+      ctx.fillText(h.icon, r.x + r.w / 2, r.y + 42);
+      ctx.font = 'bold 15px Georgia, serif'; ctx.fillStyle = '#f5eeda';
+      ctx.fillText(h.name, r.x + r.w / 2, r.y + 66);
+      ctx.font = '12px Georgia, serif'; ctx.fillStyle = '#b8a88f';
+      ctx.fillText(h.cat + ' • ' + h.color + ' • ' + h.trait, r.x + r.w / 2, r.y + 84);
+      if (isSel) { ctx.font = 'bold 20px serif'; ctx.fillStyle = '#ffe066'; ctx.fillText('✓', r.x + r.w - 18, r.y + 24); }
+    }
+    // Cauldron
+    var cx = 380, cy = 385;
+    ctx.fillStyle = '#1b1b2e'; ctx.beginPath(); ctx.ellipse(cx, cy + 28, 90, 22, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = cauldron > 0 ? '#7bc043' : '#4a3a5e';
+    ctx.beginPath(); ctx.ellipse(cx, cy + 8, 78, 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2d2438'; ctx.beginPath(); ctx.ellipse(cx, cy + 12, 70, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.font = '52px serif'; ctx.fillText('⚗️', cx, cy + 30);
+    ctx.font = 'bold 15px Georgia, serif'; ctx.fillStyle = '#f5eeda';
+    ctx.fillText(state === 'playing' ? 'Cauldron — brew your 3 herbs here' : 'Herbalist\'s Potion Lab', cx, cy + 62);
+    if (flash > 0) {
+      ctx.fillStyle = flashColor; ctx.globalAlpha = flash * 0.25;
+      ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.globalAlpha = 1;
+      flash -= 0.02;
+    }
+    if (cauldron > 0) cauldron = Math.max(0, cauldron - 0.01);
+    // Sparkles
+    sparkles = sparkles.filter(function (p) { return p.life > 0; });
+    sparkles.forEach(function (p) {
+      p.x += p.vx; p.y += p.vy; p.life -= 0.02;
+      ctx.fillStyle = '#ffe066'; ctx.globalAlpha = Math.max(0, p.life);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+  }
+
+  function loop() { draw(); requestAnimationFrame(loop); }
+
+  // ---- Input: mouse, touch, keyboard ----
+  canvas.addEventListener('click', function (e) {
+    var i = herbAtPoint(e.clientX, e.clientY);
+    if (i >= 0) { highlight = i; toggleHerb(i); }
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    var i = herbAtPoint(e.clientX, e.clientY);
+    if (i >= 0) highlight = i;
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var t = e.changedTouches[0];
+    var i = herbAtPoint(t.clientX, t.clientY);
+    if (i >= 0) { highlight = i; toggleHerb(i); }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (state !== 'playing') {
+      if ((e.key === 'Enter' || e.key === ' ') && (state === 'title' || state === 'won' || state === 'over')) { e.preventDefault(); startGame(); }
+      return;
+    }
+    if (e.key === 'ArrowLeft') highlight = (highlight + 11) % 12;
+    else if (e.key === 'ArrowRight') highlight = (highlight + 1) % 12;
+    else if (e.key === 'ArrowUp') highlight = (highlight + 8) % 12;
+    else if (e.key === 'ArrowDown') highlight = (highlight + 4) % 12;
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggleHerb(highlight); }
+    else if (e.key === 'b' || e.key === 'B') brew();
+    else if (e.key === 'c' || e.key === 'C') { selected = []; updateHUD(); setMessage('Selection cleared.'); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('brewBtn').addEventListener('click', function () { ensureAudio(); brew(); });
+  document.getElementById('clearBtn').addEventListener('click', function () { selected = []; updateHUD(); setMessage('Selection cleared.'); });
+
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

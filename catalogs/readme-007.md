@@ -34,3 +34,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0628 | Clockwork Catapult | Precision / Catapult Trajectory | Mouse/touch aim and launch, Arrow Keys adjust angle/power | [Play](./../games/game-0628.html) |
 | 0629 | Storm Chaser Drone | Arcade / Storm Drone Flying | Arrow Keys/WASD fly, mouse/touch steer | [Play](./../games/game-0629.html) |
 | 0630 | Marble Magnet Maze | Precision / Magnetic Maze Navigation | Mouse/touch switch magnets, Arrow Keys steer | [Play](./../games/game-0630.html) |
+| 0631 | Harbor Crane Stacker | Arcade / Harbor Crane Stacking | Space/click/tap time crate drop | [Play](./../games/game-0631.html) |
+| 0632 | Mosaic Mender | Puzzle / Mosaic Pattern Restoration | Mouse/touch click tiles, Arrow Keys select, Space confirm | [Play](./../games/game-0632.html) |
+| 0633 | Tide Mill Operator | Strategy / Tide Mill Management | Mouse/touch open gates and route grain, Keys select | [Play](./../games/game-0633.html) |
+| 0634 | Samba Street Parade | Rhythm / Samba Parade Timing | Arrow Keys tap pads, mouse/touch tap pads | [Play](./../games/game-0634.html) |
+| 0635 | Geyser Hopper | Arcade / Geyser Platform Hopping | Space/Up jump, Arrow Keys move, mouse/touch tap | [Play](./../games/game-0635.html) |
+| 0636 | Herbalist's Potion Lab | Puzzle / Herbal Remedy Deduction | Mouse/touch select herbs, Arrow Keys select, Space brew | [Play](./../games/game-0636.html) |
+| 0637 | Railway Junction Tycoon | Strategy / Railway Junction Routing | Mouse/touch switch tracks, Keys 1-4 select | [Play](./../games/game-0637.html) |
+| 0638 | Metronome Mechanic | Rhythm / Metronome Repair Timing | Space/click/tap on tick, mouse/touch tap | [Play](./../games/game-0638.html) |
+| 0639 | Paper Plane Postman | Arcade / Paper Plane Delivery | Arrow Keys/WASD steer, Space drop letter, mouse/touch drag | [Play](./../games/game-0639.html) |
+| 0640 | Glassblower's Breath | Precision / Glassblowing Breath Control | Hold Space/mouse/touch to blow, release to shape | [Play](./../games/game-0640.html) |

@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glassblower's Breath</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #0d0f1a; overflow: hidden; font-family: Georgia, 'Times New Roman', serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; padding: 10px; }
+  h1 { color: #ffb86b; font-size: clamp(26px, 5vw, 44px); text-shadow: 0 0 18px rgba(255,150,60,.6); letter-spacing: 1px; }
+  .sub { color: #c9d4ff; font-size: 14px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: min(720px, 96vw); }
+  .pill { background: #1c2240; border: 1px solid #3b4a7d; color: #eaf0ff; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-family: Arial, sans-serif; }
+  .pill b { color: #ffd166; }
+  .pill.warn b { color: #ff6b6b; }
+  canvas { background: radial-gradient(circle at 50% 30%, #2a1f3d 0%, #141828 55%, #0b0d18 100%); border: 2px solid #4a3a6b; border-radius: 14px; width: min(720px, 96vw); height: auto; touch-action: none; display: block; }
+  #overlay { position: relative; width: min(720px, 96vw); }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(8,10,22,.86); border-radius: 14px; text-align: center; padding: 22px; color: #eef2ff; }
+  .screen.hidden { display: none; }
+  .screen h2 { font-size: 30px; color: #ffd166; }
+  .screen p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #d7def5; }
+  .screen .how { background: #171c33; border: 1px solid #35406e; border-radius: 10px; padding: 12px 16px; font-size: 14px; line-height: 1.6; }
+  button { cursor: pointer; background: linear-gradient(180deg, #ff9a3d, #e56b1f); border: none; color: #1a0f00; font-weight: 800; font-size: 18px; padding: 12px 30px; border-radius: 999px; box-shadow: 0 4px 0 #8a3a08; font-family: Arial, sans-serif; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #8a3a08; }
+  button.secondary { background: #2a335c; color: #eaf0ff; box-shadow: 0 4px 0 #12172e; }
+  #holdBtn { width: min(720px, 96vw); padding: 14px; font-size: 18px; background: #24365e; color: #fff; box-shadow: 0 4px 0 #0e1730; }
+  #holdBtn.holding { background: #e56b1f; color: #fff; }
+  #msg { color: #ffd166; font-size: 17px; min-height: 24px; font-family: Arial, sans-serif; }
+  #targetBar { width: min(720px, 96vw); height: 12px; background: #1c2240; border-radius: 999px; overflow: hidden; border: 1px solid #3b4a7d; }
+  #targetFill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffb86b, #ff5e7a); transition: width .05s linear; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Glassblower's Breath</h1>
+  <div class="sub">A precision glassblowing game &mdash; steady hands, steady breath.</div>
+  <div id="hud">
+    <span class="pill">Score: <b id="score">0</b></span>
+    <span class="pill">Pieces shaped: <b id="pieces">0</b> / 6</span>
+    <span class="pill" id="crackPill">Cracks: <b id="cracks">0</b> / 3</span>
+    <span class="pill">Target size: <b id="target">--</b></span>
+    <span class="pill">Piece: <b id="pieceName">--</b></span>
+  </div>
+  <div id="overlay">
+    <canvas id="game" width="720" height="460"></canvas>
+    <div class="screen" id="titleScreen">
+      <h2>Glassblower's Breath</h2>
+      <p>Welcome to the furnace, apprentice. A glowing blob of molten glass waits on your pipe. Shape it to the exact size the master ordered &mdash; no more, no less.</p>
+      <div class="how">
+        <b>How to Play</b><br>
+        HOLD <b>Space</b>, the <b>mouse button</b>, the <b>Hold Breath</b> button, or your <b>finger on the canvas</b> to blow air into the glass and make it grow.<br>
+        RELEASE when the blob matches the dashed target ring. Land inside the glowing tolerance band for a perfect piece.<br>
+        Over-blow or under-blow and the piece <b>cracks</b>. Blow past the red burst line and it shatters instantly.<br>
+        Shape <b>6 perfect pieces</b> to win. <b>3 cracks</b> and the shift is over.
+      </div>
+      <button id="startBtn">Start Blowing</button>
+      <p style="font-size:13px;color:#9fb0dd;">Tip: watch the size meter and release gently &mdash; the glass grows faster the longer you hold.</p>
+    </div>
+    <div class="screen hidden" id="endScreen">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">Restart</button>
+      <button class="secondary" id="againBtn">Play Again</button>
+    </div>
+  </div>
+  <div id="targetBar"><div id="targetFill"></div></div>
+  <button id="holdBtn">Hold Breath (or hold Space / Mouse / Touch)</button>
+  <div id="msg">Press Start, then hold your breath to shape the glass.</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var scoreEl = document.getElementById('score');
+  var piecesEl = document.getElementById('pieces');
+  var cracksEl = document.getElementById('cracks');
+  var crackPill = document.getElementById('crackPill');
+  var targetEl = document.getElementById('target');
+  var pieceNameEl = document.getElementById('pieceName');
+  var msgEl = document.getElementById('msg');
+  var fillEl = document.getElementById('targetFill');
+  var holdBtn = document.getElementById('holdBtn');
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, pieces = 0, cracks = 0;
+  var radius = 18, target = 60, tolerance = 9, burstLimit = 150;
+  var holding = false, blowTime = 0, lastTime = 0;
+  var flash = 0, flashColor = '#ffd166', wobble = 0;
+  var pieceNames = ['Vase', 'Goblet', 'Bowl', 'Ornament', 'Decanter', 'Lantern'];
+  var pieceIndex = 0;
+  var audioCtx = null, blowOsc = null, blowGain = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AC();
+      } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function startBlowSound() {
+    if (!audioCtx) return;
+    try {
+      stopBlowSound();
+      blowOsc = audioCtx.createOscillator();
+      blowGain = audioCtx.createGain();
+      blowOsc.type = 'triangle';
+      blowOsc.frequency.setValueAtTime(140, audioCtx.currentTime);
+      blowGain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+      blowOsc.connect(blowGain); blowGain.connect(audioCtx.destination);
+      blowOsc.start();
+    } catch (e) {}
+  }
+  function stopBlowSound() {
+    if (blowOsc) {
+      try { blowOsc.stop(); } catch (e) {}
+      blowOsc = null; blowGain = null;
+    }
+  }
+  function crackSound() {
+    if (!audioCtx) return;
+    tone(220, 0.35, 'sawtooth', 0.22, 45);
+    tone(90, 0.3, 'square', 0.12, 40);
+  }
+  function perfectSound() {
+    if (!audioCtx) return;
+    tone(523, 0.18, 'sine', 0.18);
+    setTimeout(function () { tone(659, 0.18, 'sine', 0.18); }, 110);
+    setTimeout(function () { tone(784, 0.3, 'sine', 0.2); }, 220);
+  }
+
+  function newTarget() {
+    // Targets stay clearly distinct and inside the safe range.
+    var options = [42, 52, 62, 72, 84, 96, 108, 118];
+    target = options[Math.floor(Math.random() * options.length)];
+    tolerance = 9;
+    pieceNameEl.textContent = pieceNames[pieceIndex % pieceNames.length];
+    targetEl.textContent = target + ' px';
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    piecesEl.textContent = pieces;
+    cracksEl.textContent = cracks;
+    crackPill.className = 'pill' + (cracks >= 2 ? ' warn' : '');
+    fillEl.style.width = Math.min(100, (radius / burstLimit) * 100) + '%';
+  }
+  function resetGame() {
+    score = 0; pieces = 0; cracks = 0; pieceIndex = 0;
+    radius = 18; blowTime = 0; holding = false; flash = 0;
+    newTarget();
+    updateHUD();
+    msgEl.textContent = 'Hold your breath to grow the glass. Release on the target ring!';
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    msgEl.textContent = 'Blowing piece 1: ' + pieceNames[0] + ' — target ' + target + ' px.';
+  }
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    stopBlowSound();
+    endScreen.classList.remove('hidden');
+    if (win) {
+      endTitle.textContent = 'Master Glassblower!';
+      endText.textContent = 'You shaped all 6 pieces perfectly with a final score of ' + score + '. The master nods in approval — flawless work at the furnace.';
+      tone(523, 0.25, 'sine', 0.2); setTimeout(function(){ tone(659,0.25,'sine',0.2); },150); setTimeout(function(){ tone(784,0.4,'sine',0.2); },300);
+    } else {
+      endTitle.textContent = 'Game Over';
+      endText.textContent = 'Three pieces cracked at the furnace. You shaped ' + pieces + ' perfect piece(s) and scored ' + score + ' points. Take a breath and try again.';
+    }
+  }
+  function judgePiece() {
+    var diff = Math.abs(radius - target);
+    if (diff <= tolerance) {
+      var bonus = Math.round((1 - diff / tolerance) * 50);
+      var gained = 100 + bonus;
+      score += gained; pieces++; pieceIndex++;
+      flash = 1; flashColor = '#7dff9a';
+      msgEl.textContent = 'Perfect! +' + gained + ' points — that ' + pieceNames[(pieceIndex - 1) % pieceNames.length] + ' is flawless.';
+      perfectSound();
+      if (pieces >= 6) { updateHUD(); endGame(true); return; }
+      radius = 18; blowTime = 0; newTarget();
+      msgEl.textContent += ' Next: ' + pieceNames[pieceIndex % pieceNames.length] + ' — target ' + target + ' px.';
+    } else {
+      cracks++;
+      flash = 1; flashColor = '#ff6b6b';
+      var why = radius < target ? 'under-blown' : 'over-blown';
+      msgEl.textContent = 'Crack! The piece was ' + why + ' (' + Math.round(radius) + ' vs target ' + target + '). ' + (3 - cracks) + ' crack(s) left.';
+      crackSound();
+      if (cracks >= 3) { updateHUD(); endGame(false); return; }
+      radius = 18; blowTime = 0; newTarget();
+    }
+    updateHUD();
+  }
+  function pressStart(e) {
+    if (state !== 'playing') return;
+    if (holding) return;
+    ensureAudio();
+    holding = true; blowTime = 0;
+    holdBtn.classList.add('holding');
+    holdBtn.textContent = 'Blowing... release to shape!';
+    startBlowSound();
+    if (e && e.preventDefault) e.preventDefault();
+  }
+  function pressEnd(e) {
+    if (!holding) return;
+    holding = false;
+    holdBtn.classList.remove('holding');
+    holdBtn.textContent = 'Hold Breath (or hold Space / Mouse / Touch)';
+    stopBlowSound();
+    if (state === 'playing') judgePiece();
+    if (e && e.preventDefault) e.preventDefault();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('againBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.key === ' ') {
+      if (state === 'title' && document.activeElement !== document.getElementById('startBtn')) { startGame(); }
+      else { pressStart(e); }
+      e.preventDefault();
+    }
+    if ((e.key === 'Enter') && (state === 'win' || state === 'over')) { startGame(); }
+  });
+  document.addEventListener('keyup', function (e) {
+    if (e.code === 'Space' || e.key === ' ') { pressEnd(e); e.preventDefault(); }
+  });
+  canvas.addEventListener('mousedown', function (e) { pressStart(e); });
+  document.addEventListener('mouseup', function (e) { pressEnd(e); });
+  canvas.addEventListener('touchstart', function (e) { pressStart(e); }, { passive: false });
+  document.addEventListener('touchend', function (e) { pressEnd(e); }, { passive: false });
+  holdBtn.addEventListener('mousedown', function (e) { pressStart(e); });
+  holdBtn.addEventListener('mouseup', function (e) { pressEnd(e); });
+  holdBtn.addEventListener('touchstart', function (e) { pressStart(e); }, { passive: false });
+  holdBtn.addEventListener('touchend', function (e) { pressEnd(e); }, { passive: false });
+  holdBtn.addEventListener('mouseleave', function (e) { if (holding) pressEnd(e); });
+
+  function draw(now) {
+    var cx = 360, cy = 300;
+    ctx.clearRect(0, 0, 720, 460);
+    // Furnace glow at the back
+    var glow = ctx.createRadialGradient(cx, 430, 10, cx, 430, 260);
+    glow.addColorStop(0, 'rgba(255,120,40,0.35)');
+    glow.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, 720, 460);
+    // Pipe
+    ctx.strokeStyle = '#8a93b8'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx, 452); ctx.lineTo(cx, cy + radius + 10); ctx.stroke();
+    ctx.strokeStyle = '#c7cede'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(cx, 452); ctx.lineTo(cx, cy + radius + 10); ctx.stroke();
+    // Burst line
+    ctx.strokeStyle = 'rgba(255,80,80,0.75)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
+    ctx.beginPath(); ctx.arc(cx, cy, burstLimit, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ff6b6b'; ctx.font = '13px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('BURST LINE', cx, cy - burstLimit - 8);
+    // Tolerance band + target ring
+    ctx.fillStyle = 'rgba(255,209,102,0.16)';
+    ctx.beginPath(); ctx.arc(cx, cy, target + tolerance, 0, Math.PI * 2);
+    ctx.arc(cx, cy, Math.max(5, target - tolerance), 0, Math.PI * 2, true); ctx.fill();
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.setLineDash([10, 7]);
+    ctx.beginPath(); ctx.arc(cx, cy, target, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    // Glass blob with wobble and shine
+    wobble += 0.06;
+    var wob = holding ? Math.sin(wobble * 2) * 2 : 0;
+    var heat = Math.min(1, radius / burstLimit);
+    var grad = ctx.createRadialGradient(cx - radius * 0.35, cy - radius * 0.4, radius * 0.1, cx, cy, radius + 6);
+    grad.addColorStop(0, 'rgba(255,240,200,0.95)');
+    grad.addColorStop(0.4, 'rgba(255,' + Math.round(170 - heat * 60) + ',90,0.85)');
+    grad.addColorStop(1, 'rgba(255,90,60,0.75)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, radius + wob, radius - wob * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.65)';
+    ctx.beginPath(); ctx.ellipse(cx - radius * 0.4, cy - radius * 0.45, radius * 0.16, radius * 0.28, -0.5, 0, Math.PI * 2); ctx.fill();
+    // Flash ring on judge
+    if (flash > 0) {
+      ctx.strokeStyle = flashColor; ctx.globalAlpha = flash; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(cx, cy, target + 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1; flash = Math.max(0, flash - 0.02);
+    }
+    // Labels
+    ctx.fillStyle = '#eaf0ff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Current size: ' + Math.round(radius) + ' px', cx, 34);
+    ctx.font = '13px Arial'; ctx.fillStyle = '#9fb0dd';
+    ctx.fillText('Target: ' + target + ' px  •  Tolerance: ±' + tolerance + ' px', cx, 54);
+    if (state === 'playing') {
+      ctx.fillStyle = holding ? '#ffb86b' : '#c9d4ff';
+      ctx.font = '15px Arial';
+      ctx.fillText(holding ? 'Blowing... release when you reach the ring!' : 'Hold Space / mouse / touch to blow', cx, 78);
+    }
+    if (state === 'title' || state === 'win' || state === 'over') {
+      // Keep the glass visible behind the overlay for atmosphere.
+    }
+    requestAnimationFrame(draw);
+  }
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime) / 1000);
+    lastTime = ts;
+    if (state === 'playing' && holding) {
+      blowTime += dt;
+      // Growth accelerates gently so timing stays a skill, not a guess.
+      radius += (26 + blowTime * 55) * dt;
+      if (blowOsc && audioCtx) {
+        try { blowOsc.frequency.setValueAtTime(140 + radius, audioCtx.currentTime); } catch (e) {}
+      }
+      if (radius >= burstLimit) {
+        radius = burstLimit;
+        holding = false;
+        holdBtn.classList.remove('holding');
+        holdBtn.textContent = 'Hold Breath (or hold Space / Mouse / Touch)';
+        stopBlowSound();
+        cracks++;
+        flash = 1; flashColor = '#ff6b6b';
+        msgEl.textContent = 'Shattered! You blew past the burst line. ' + (3 - cracks) + ' crack(s) left.';
+        crackSound();
+        if (cracks >= 3) { updateHUD(); endGame(false); }
+        else { radius = 18; blowTime = 0; newTarget(); updateHUD(); }
+      }
+      updateHUD();
+    }
+    requestAnimationFrame(loop);
+  }
+  resetGame();
+  updateHUD();
+  requestAnimationFrame(draw);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

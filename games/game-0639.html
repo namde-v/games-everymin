@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Paper Plane Postman</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a2b4a; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 28px; margin: 8px 0 4px; text-shadow: 2px 2px 0 #0b1526; letter-spacing: 1px; }
+  .sub { color: #cfe6ff; margin-bottom: 10px; font-size: 14px; }
+  #wrap { position: relative; width: min(900px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#7ec8ff, #cfeaff 55%, #b8e6a8 55%, #8fd07a); border: 3px solid #fff; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .pill { background: #0f1f3d; border: 2px solid #fff; border-radius: 20px; padding: 7px 13px; font-weight: bold; font-size: 14px; }
+  .pill span { color: #ffd54a; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10, 25, 50, 0.82); border-radius: 12px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; color: #eaf4ff; }
+  .overlay .big { font-size: 20px; font-weight: bold; color: #ffd54a; }
+  button { margin-top: 16px; padding: 13px 26px; font-size: 18px; font-weight: bold; border: none; border-radius: 10px; background: #ffd54a; color: #1a2b4a; cursor: pointer; box-shadow: 0 4px 0 #b8931a; }
+  button:hover { background: #ffe082; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8931a; }
+  .keys { background: rgba(255,255,255,0.12); border-radius: 10px; padding: 10px 14px; margin-top: 12px; font-size: 14px; line-height: 1.6; }
+  #msg { min-height: 22px; margin-top: 6px; font-weight: bold; color: #ffd54a; text-align: center; }
+  .hint { color: #cfe6ff; font-size: 13px; margin-top: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>&#9992; Paper Plane Postman</h1>
+<div class="sub">Glide, dodge, and deliver the mail across the neighborhood!</div>
+<div id="wrap">
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>&#9992; Paper Plane Postman</h2>
+    <p class="big">Deliver 10 letters to WIN!</p>
+    <p><strong>How to Play:</strong> Steer your paper plane with Arrow Keys / WASD, or drag with mouse or touch. Ride the glowing updrafts to climb without losing speed. Dodge trees and kites — a crash costs a life. You have 3 lives.</p>
+    <p>When a red mailbox slides by below, press <strong>Space</strong> or <strong>Click / Tap</strong> to drop a letter. Land it in the mailbox to deliver it and score 100 points. Near misses still earn 10 points. Watch the wind — it pushes your plane sideways!</p>
+    <div class="keys">Controls: Arrows / WASD = steer &nbsp;|&nbsp; Mouse / Touch drag = steer &nbsp;|&nbsp; Space / Click / Tap = drop letter &nbsp;|&nbsp; P = pause</div>
+    <button id="startBtn" type="button">Start Delivery Route</button>
+  </div>
+  <div id="winScreen" class="overlay hidden">
+    <h2>&#127881; Route Complete!</h2>
+    <p class="big">You delivered all 10 letters!</p>
+    <p id="winScore">Final score: 0</p>
+    <p>The neighborhood is happy and every mailbox is full. Great flying, Postman!</p>
+    <button id="winRestartBtn" type="button">Fly Again (Restart)</button>
+  </div>
+  <div id="overScreen" class="overlay hidden">
+    <h2>&#128165; Game Over</h2>
+    <p class="big">Your plane ran out of lives.</p>
+    <p id="overScore">Letters delivered: 0</p>
+    <p>Shake off the crashes and try the route again — the mail must go through!</p>
+    <button id="overRestartBtn" type="button">Restart</button>
+  </div>
+</div>
+<div id="hud">
+  <div class="pill">Score: <span id="scoreVal">0</span></div>
+  <div class="pill">Letters: <span id="deliveredVal">0</span> / 10</div>
+  <div class="pill">Lives: <span id="livesVal">&#10084;&#10084;&#10084;</span></div>
+  <div class="pill">Wind: <span id="windVal">Calm</span></div>
+  <div class="pill">Updraft: <span id="upVal">-</span></div>
+</div>
+<div id="msg"></div>
+<div class="hint">Tip: fly through a golden updraft to gain lift and a small speed boost. Drop letters just before the mailbox passes under you.</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height, GROUND = 500;
+  var scoreEl = document.getElementById('scoreVal');
+  var delEl = document.getElementById('deliveredVal');
+  var livesEl = document.getElementById('livesVal');
+  var windEl = document.getElementById('windVal');
+  var upEl = document.getElementById('upVal');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  var state = 'title'; // title, playing, paused, win, over
+  var score = 0, delivered = 0, lives = 3;
+  var plane = { x: 150, y: 220, vx: 0, vy: 0, tilt: 0 };
+  var keys = {};
+  var target = null; // mouse/touch target
+  var obstacles = [], mailboxes = [], letters = [], updrafts = [], clouds = [], houses = [];
+  var scroll = 0, spawnTimer = 0, wind = 0, windTimer = 0, invuln = 0, time = 0;
+  var audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundDeliver() { beep(880, 0.12, 'sine', 0.15); setTimeout(function(){ beep(1320, 0.18, 'sine', 0.15); }, 90); }
+  function soundCrash() { beep(160, 0.35, 'sawtooth', 0.15); }
+  function soundDrop() { beep(520, 0.08, 'triangle', 0.1); }
+  function soundWin() { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f,0.25,'triangle',0.15); }, i*140); }); }
+
+  function reset() {
+    score = 0; delivered = 0; lives = 3;
+    plane = { x: 150, y: 220, vx: 0, vy: 0, tilt: 0 };
+    obstacles = []; mailboxes = []; letters = []; updrafts = []; clouds = []; houses = [];
+    scroll = 0; spawnTimer = 0; wind = 0; windTimer = 0; invuln = 0; time = 0; target = null;
+    for (var i = 0; i < 8; i++) clouds.push({ x: Math.random()*W, y: 30+Math.random()*140, s: 0.5+Math.random()*0.8 });
+    for (var j = 0; j < 6; j++) houses.push({ x: j*170, w: 110, h: 70+Math.random()*40, c: ['#e8a0a0','#a0c8e8','#ffe08a','#b8e6b8'][j%4] });
+    updateHUD(); msgEl.textContent = '';
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    delEl.textContent = delivered;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, lives));
+    var wlabel = wind === 0 ? 'Calm' : (wind > 0 ? 'East +' + wind.toFixed(1) : 'West ' + wind.toFixed(1));
+    windEl.textContent = wlabel;
+    upEl.textContent = updrafts.length ? 'Active' : '-';
+  }
+  function showScreen(name) {
+    titleScreen.classList.toggle('hidden', name !== 'title');
+    winScreen.classList.toggle('hidden', name !== 'win');
+    overScreen.classList.toggle('hidden', name !== 'over');
+  }
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    showScreen('none');
+    msgEl.textContent = 'Go! Deliver 10 letters.';
+    beep(660, 0.15, 'triangle', 0.12);
+  }
+  function winGame() {
+    state = 'win';
+    document.getElementById('winScore').textContent = 'Final score: ' + score + ' | Lives left: ' + lives;
+    showScreen('win'); soundWin();
+  }
+  function gameOver() {
+    state = 'over';
+    document.getElementById('overScore').textContent = 'Letters delivered: ' + delivered + ' | Score: ' + score;
+    showScreen('over'); soundCrash();
+  }
+  function dropLetter() {
+    if (state !== 'playing') return;
+    initAudio(); soundDrop();
+    letters.push({ x: plane.x + 20, y: plane.y + 10, vy: 2.5 });
+    msgEl.textContent = 'Letter away!';
+  }
+  function spawn() {
+    // obstacle: tree (ground) or kite (air)
+    var kind = Math.random() < 0.5 ? 'tree' : 'kite';
+    if (kind === 'tree') obstacles.push({ kind: 'tree', x: W + 40, y: GROUND - 70, w: 46, h: 70 });
+    else obstacles.push({ kind: 'kite', x: W + 40, y: 90 + Math.random()*280, w: 52, h: 40, bob: Math.random()*6.28 });
+    if (Math.random() < 0.75) mailboxes.push({ x: W + 120, y: GROUND - 34, w: 44, h: 34, hit: false });
+    if (Math.random() < 0.6) updrafts.push({ x: W + 60, y: 120 + Math.random()*260, w: 70, h: 150 });
+  }
+  function crash() {
+    if (invuln > 0) return;
+    lives--; invuln = 120; soundCrash();
+    msgEl.textContent = 'Crash! Lives left: ' + lives;
+    plane.y = Math.min(GROUND - 80, Math.max(80, plane.y - 40));
+    if (lives <= 0) { updateHUD(); gameOver(); return; }
+    updateHUD();
+  }
+  function update() {
+    time++;
+    if (invuln > 0) invuln--;
+    windTimer--;
+    if (windTimer <= 0) { wind = (Math.random()*2 - 1) * 1.4; windTimer = 240 + Math.floor(Math.random()*180); }
+    var speed = 2.2;
+    // steering: keyboard
+    var ax = 0, ay = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) ax += 1;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) ay -= 1;
+    if (keys['ArrowDown'] || keys['s'] || keys['S']) ay += 1;
+    if (ax || ay) {
+      plane.vx += ax * 0.35; plane.vy += ay * 0.35; target = null;
+    } else if (target) {
+      plane.vx += (target.x - plane.x) * 0.02;
+      plane.vy += (target.y - plane.y) * 0.02;
+    } else {
+      plane.vx *= 0.94; plane.vy *= 0.94;
+    }
+    plane.vx += wind * 0.02;
+    // updraft lift
+    var inUp = false;
+    for (var u = 0; u < updrafts.length; u++) {
+      var d = updrafts[u];
+      if (plane.x > d.x - 20 && plane.x < d.x + d.w + 20 && plane.y > d.y - 20 && plane.y < d.y + d.h + 20) { inUp = true; plane.vy -= 0.45; }
+    }
+    plane.vx = Math.max(-4, Math.min(4, plane.vx));
+    plane.vy = Math.max(-4.5, Math.min(4.5, plane.vy));
+    plane.x += plane.vx; plane.y += plane.vy;
+    plane.tilt = Math.max(-0.5, Math.min(0.5, plane.vy * 0.12));
+    if (plane.x < 30) plane.x = 30;
+    if (plane.x > W - 40) plane.x = W - 40;
+    if (plane.y < 40) plane.y = 40;
+    if (plane.y > GROUND - 30) { plane.y = GROUND - 30; if (invuln === 0) crash(); }
+    scroll += speed;
+    spawnTimer--;
+    if (spawnTimer <= 0) { spawn(); spawnTimer = 110 + Math.floor(Math.random()*70); }
+    // move world
+    function moveLeft(arr) { for (var i = arr.length-1; i >= 0; i--) { arr[i].x -= speed; if (arr[i].x < -120) arr.splice(i,1); } }
+    moveLeft(obstacles); moveLeft(mailboxes); moveLeft(updrafts);
+    for (var c = 0; c < clouds.length; c++) { clouds[c].x -= 0.4; if (clouds[c].x < -80) { clouds[c].x = W + 40; clouds[c].y = 30+Math.random()*140; } }
+    for (var h = 0; h < houses.length; h++) { houses[h].x -= speed * 0.5; if (houses[h].x < -130) houses[h].x = W + 20; }
+    // kite bobbing
+    for (var k = 0; k < obstacles.length; k++) if (obstacles[k].kind === 'kite') obstacles[k].y += Math.sin(time/20 + obstacles[k].bob) * 0.6;
+    // letters fall
+    for (var l = letters.length-1; l >= 0; l--) {
+      var lt = letters[l]; lt.vy += 0.18; lt.y += lt.vy; lt.x += wind * 0.3;
+      var deliveredHere = false;
+      for (var m = 0; m < mailboxes.length; m++) {
+        var mb = mailboxes[m];
+        if (!mb.hit && lt.y >= mb.y - 6 && lt.y <= mb.y + mb.h + 10 && lt.x >= mb.x - 8 && lt.x <= mb.x + mb.w + 8) {
+          mb.hit = true; delivered++; score += 100; deliveredHere = true; soundDeliver();
+          msgEl.textContent = 'Delivered! ' + delivered + ' / 10 letters.';
+          break;
+        }
+      }
+      if (deliveredHere) { letters.splice(l,1); continue; }
+      if (lt.y >= GROUND - 4) {
+        if (lt.y < GROUND + 20) { score += 10; msgEl.textContent = 'Near miss (+10). Aim for the mailbox!'; }
+        letters.splice(l,1);
+      }
+    }
+    // collisions
+    if (invuln <= 0) {
+      for (var o = 0; o < obstacles.length; o++) {
+        var ob = obstacles[o];
+        if (plane.x + 22 > ob.x - ob.w/2 && plane.x - 22 < ob.x + ob.w/2 && plane.y + 14 > ob.y - ob.h/2 && plane.y - 14 < ob.y + ob.h/2) { crash(); break; }
+      }
+    }
+    updateHUD();
+    if (delivered >= 10) { winGame(); return; }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // sky, sun, clouds
+    ctx.fillStyle = '#ffd54a'; ctx.beginPath(); ctx.arc(810, 70, 34, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    for (var i = 0; i < clouds.length; i++) { var cl = clouds[i]; ctx.beginPath(); ctx.arc(cl.x, cl.y, 22*cl.s, 0, Math.PI*2); ctx.arc(cl.x+24*cl.s, cl.y-8, 18*cl.s, 0, Math.PI*2); ctx.arc(cl.x+48*cl.s, cl.y, 20*cl.s, 0, Math.PI*2); ctx.fill(); }
+    // ground and houses
+    ctx.fillStyle = '#8fd07a'; ctx.fillRect(0, GROUND, W, H-GROUND);
+    ctx.fillStyle = '#6b4a2f'; ctx.fillRect(0, GROUND, W, 8);
+    for (var h = 0; h < houses.length; h++) { var hs = houses[h]; ctx.fillStyle = hs.c; ctx.fillRect(hs.x, GROUND - hs.h, hs.w, hs.h); ctx.fillStyle = '#7a3b2e'; ctx.beginPath(); ctx.moveTo(hs.x-6, GROUND-hs.h); ctx.lineTo(hs.x+hs.w/2, GROUND-hs.h-28); ctx.lineTo(hs.x+hs.w+6, GROUND-hs.h); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(hs.x+hs.w/2-12, GROUND-44, 24, 44); }
+    // updrafts
+    for (var u = 0; u < updrafts.length; u++) { var d = updrafts[u]; ctx.fillStyle = 'rgba(255,213,74,0.35)'; ctx.fillRect(d.x, d.y, d.w, d.h); ctx.fillStyle = '#ff8f00'; ctx.font = 'bold 22px Arial'; ctx.fillText('\u2191', d.x + d.w/2 - 7, d.y + 30); ctx.fillText('\u2191', d.x + d.w/2 - 7, d.y + d.h - 12); }
+    // mailboxes
+    for (var m = 0; m < mailboxes.length; m++) { var mb = mailboxes[m]; ctx.fillStyle = '#5a3a22'; ctx.fillRect(mb.x+18, mb.y+mb.h, 6, GROUND-(mb.y+mb.h)); ctx.fillStyle = mb.hit ? '#9e9e9e' : '#d32f2f'; ctx.beginPath(); ctx.arc(mb.x+mb.w/2, mb.y+10, 20, Math.PI, 0); ctx.fill(); ctx.fillRect(mb.x, mb.y+8, mb.w, 22); ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('MAIL', mb.x+4, mb.y+24); }
+    // obstacles: trees and kites
+    for (var o = 0; o < obstacles.length; o++) {
+      var ob = obstacles[o];
+      if (ob.kind === 'tree') { ctx.fillStyle = '#6b4a2f'; ctx.fillRect(ob.x-5, ob.y+20, 10, 50); ctx.fillStyle = '#2e7d32'; ctx.beginPath(); ctx.arc(ob.x, ob.y, 30, 0, Math.PI*2); ctx.arc(ob.x-18, ob.y+18, 20, 0, Math.PI*2); ctx.arc(ob.x+18, ob.y+18, 20, 0, Math.PI*2); ctx.fill(); }
+      else { ctx.strokeStyle = '#333'; ctx.beginPath(); ctx.moveTo(ob.x, ob.y); ctx.lineTo(ob.x-30, ob.y+50); ctx.stroke(); ctx.fillStyle = '#e91e63'; ctx.save(); ctx.translate(ob.x, ob.y); ctx.rotate(0.6); ctx.fillRect(-18, -14, 36, 28); ctx.restore(); ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.fillText('\u2726', ob.x-7, ob.y+5); }
+    }
+    // letters
+    for (var l = 0; l < letters.length; l++) { var lt = letters[l]; ctx.fillStyle = '#fff'; ctx.fillRect(lt.x-9, lt.y-6, 18, 12); ctx.strokeStyle = '#d32f2f'; ctx.strokeRect(lt.x-9, lt.y-6, 18, 12); ctx.fillStyle = '#d32f2f'; ctx.font = 'bold 9px Arial'; ctx.fillText('\u2709', lt.x-5, lt.y+4); }
+    // plane (blink while invulnerable)
+    if (!(invuln > 0 && Math.floor(time/6) % 2 === 0)) {
+      ctx.save(); ctx.translate(plane.x, plane.y); ctx.rotate(plane.tilt);
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(30, 0); ctx.lineTo(-18, -14); ctx.lineTo(-8, 0); ctx.lineTo(-18, 14); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#90a4ae'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-18, -14); ctx.moveTo(8, 0); ctx.lineTo(-18, 14); ctx.stroke();
+      ctx.fillStyle = '#d32f2f'; ctx.font = 'bold 11px Arial'; ctx.fillText('\u2709', -2, -14);
+      ctx.restore();
+    }
+    if (state === 'paused') { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0,0,W,H); ctx.fillStyle = '#fff'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('PAUSED — press P to resume', W/2, H/2); ctx.textAlign = 'left'; }
+  }
+  function loop() {
+    if (state === 'playing') update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX);
+    var cy = (e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ') { e.preventDefault(); dropLetter(); }
+    if (e.key === 'p' || e.key === 'P') { if (state === 'playing') state = 'paused'; else if (state === 'paused') state = 'playing'; }
+    if (e.key === 'Enter' && (state === 'title' || state === 'win' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function (e) { if (state === 'playing') target = canvasPos(e); });
+  canvas.addEventListener('mousedown', function (e) { initAudio(); if (state === 'playing') { target = canvasPos(e); dropLetter(); } });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); if (state === 'playing') { target = canvasPos(e); dropLetter(); } }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); if (state === 'playing') target = canvasPos(e); }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); }, { passive: false });
+  reset();
+  showScreen('title');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Geyser Hopper</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0b2233; color: #eaf7ff; font-family: Verdana, Geneva, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 10px; overflow: hidden;
+    -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  h1 { font-size: 30px; letter-spacing: 1px; text-shadow: 2px 2px 0 #123; margin-bottom: 6px; }
+  #wrap { position: relative; width: min(920px, 96vw); }
+  canvas {
+    display: block; width: 100%; height: auto; background: #7ec8e3;
+    border: 4px solid #123c52; border-radius: 12px; box-shadow: 0 8px 0 #071a26;
+  }
+  #hud {
+    display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap;
+    background: #123c52; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-weight: bold; font-size: 15px;
+  }
+  #hud span { white-space: nowrap; }
+  .screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(6, 28, 42, 0.88); border-radius: 12px; text-align: center; padding: 20px; gap: 10px;
+  }
+  .screen.hidden { display: none; }
+  .screen h2 { font-size: 34px; }
+  .screen p { max-width: 560px; line-height: 1.55; font-size: 15px; }
+  .screen .small { font-size: 13px; opacity: 0.9; }
+  button {
+    cursor: pointer; font-size: 20px; font-weight: bold; color: #07202f; background: #ffd23f;
+    border: 3px solid #fff; border-radius: 12px; padding: 12px 30px; margin-top: 6px;
+    box-shadow: 0 4px 0 #b8930a;
+  }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #hint { margin-top: 8px; font-size: 13px; opacity: 0.85; text-align: center; }
+  #timer { color: #ffd23f; }
+</style>
+</head>
+<body>
+<h1>🌋 Geyser Hopper</h1>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>💎 Crystals: <b id="crystals">0</b></span>
+    <span>❤️ Lives: <b id="lives">3</b></span>
+    <span>Distance: <b id="dist">0</b> / 600 m</span>
+    <span>Geyser: <b id="timer">—</b></span>
+  </div>
+  <canvas id="game" width="920" height="520"></canvas>
+
+  <div id="titleScreen" class="screen">
+    <h2>🌋 Geyser Hopper</h2>
+    <p><b>How to Play:</b> Leap across erupting geysers to reach the far ridge, 600 metres away.
+    Each geyser runs on a visible timer: it bubbles, then <b>ERUPTS</b> in a tall jet of steam.
+    Jump <b>while your geyser is erupting</b> and the blast launches you safely to the next rock —
+    a perfectly timed jump near the peak scores a bonus. Jump too early or too late and you
+    splash into the water and lose a life. Grab the floating steam crystals for extra points.</p>
+    <p class="small">Controls: <b>Space / Arrow Up</b> or <b>Click / Tap</b> = Jump &nbsp;|&nbsp; <b>R</b> = Restart &nbsp;|&nbsp; You have 3 lives.</p>
+    <button id="startBtn" type="button">▶ Start Hopping</button>
+    <p class="small">Tip: watch the gauge above your geyser — jump when it flashes ERUPTING!</p>
+  </div>
+
+  <div id="winScreen" class="screen hidden">
+    <h2>🏆 You Reached the Far Ridge!</h2>
+    <p id="winText">Victory!</p>
+    <p class="small">Every geyser, every crystal, one fearless hopper. Play again for a higher score!</p>
+    <button id="winRestartBtn" type="button">↻ Play Again</button>
+  </div>
+
+  <div id="overScreen" class="screen hidden">
+    <h2>💦 Splashed Out!</h2>
+    <p id="overText">Out of lives.</p>
+    <p class="small">The geysers are still bubbling — time your next run better and ride the steam!</p>
+    <button id="overRestartBtn" type="button">↻ Try Again</button>
+  </div>
+</div>
+<p id="hint">SPACE / CLICK / TAP to jump — only jump while your geyser is ERUPTING!</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var crystalEl = document.getElementById('crystals');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var timerEl = document.getElementById('timer');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  // ---- Procedural Web Audio (OscillatorNode only, after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) { osc.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur); }
+      gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+  function sfxJump() { beep(220, 0.35, 'sine', 0.22, 880); }
+  function sfxPerfect() { beep(660, 0.15, 'triangle', 0.2); setTimeout(function(){ beep(990, 0.2, 'triangle', 0.2); }, 90); }
+  function sfxCrystal() { beep(1320, 0.12, 'sine', 0.18); setTimeout(function(){ beep(1760, 0.18, 'sine', 0.18); }, 80); }
+  function sfxSplash() { beep(400, 0.4, 'sawtooth', 0.18, 90); }
+  function sfxWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.2); }, i * 140); }); }
+  function sfxLose() { beep(300, 0.5, 'sawtooth', 0.15, 80); }
+
+  // ---- Game state ----
+  var TOTAL = 12;            // geysers 0..11, index 11 is the far ridge
+  var state = 'title';       // title | playing | won | over
+  var score = 0, crystals = 0, lives = 3;
+  var current = 0;           // geyser index the player stands on
+  var geysers = [];          // per-geyser cycle state
+  var player = { x: 0, y: 0, vx: 0, vy: 0, jumping: false, target: 0, splash: 0 };
+  var particles = [];
+  var message = '';
+  var messageT = 0;
+  var time = 0, lastTs = 0;
+
+  function buildGeysers() {
+    geysers = [];
+    for (var i = 0; i < TOTAL; i++) {
+      // Stagger phases so neighbouring geysers are never in sync.
+      geysers.push({
+        phase: (i * 1.35) % 4.4,
+        hasCrystal: (i > 0 && i < TOTAL - 1 && i % 3 === 1),
+        crystalTaken: false
+      });
+    }
+  }
+  function geyserX(i) { return 70 + i * 72; }
+  function geyserY() { return 400; }
+  // Cycle: 0-2.4 idle/bubbling, 2.4-3.6 ERUPTING (peak near 3.0), 3.6-4.4 cooling.
+  function geyserStage(g) {
+    var t = g.phase % 4.4;
+    if (t < 2.4) return { name: 'BUBBLING', erupting: false, power: t / 2.4, peak: false };
+    if (t < 3.6) return { name: 'ERUPTING', erupting: true, power: 1, peak: Math.abs(t - 3.0) < 0.35 };
+    return { name: 'COOLING', erupting: false, power: (4.4 - t) / 0.8, peak: false };
+  }
+  function resetGame() {
+    score = 0; crystals = 0; lives = 3; current = 0;
+    buildGeysers();
+    player.jumping = false; player.splash = 0;
+    player.x = geyserX(0); player.y = geyserY() - 46;
+    particles = []; message = ''; messageT = 0;
+    updateHud();
+  }
+  function updateHud() {
+    scoreEl.textContent = score;
+    crystalEl.textContent = crystals;
+    livesEl.textContent = lives;
+    distEl.textContent = current * 50;
+    var st = geyserStage(geysers[current]);
+    timerEl.textContent = st.name + (st.erupting ? ' — JUMP NOW!' : '');
+    timerEl.style.color = st.erupting ? '#7dff7a' : '#ffd23f';
+  }
+  function showMessage(text) { message = text; messageT = 2.2; }
+  function burst(x, y, n, color) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 160, vy: -Math.random() * 220 - 40, life: 0.6 + Math.random() * 0.5, color: color });
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+    showMessage('Watch the gauge — jump on ERUPTING!');
+    beep(440, 0.15, 'triangle', 0.2);
+  }
+
+  function winGame() {
+    state = 'won';
+    document.getElementById('winText').textContent =
+      'Final score: ' + score + ' | Crystals: ' + crystals + ' | Lives left: ' + lives;
+    winScreen.classList.remove('hidden');
+    sfxWin();
+  }
+  function loseGame() {
+    state = 'over';
+    document.getElementById('overText').textContent =
+      'You reached ' + (current * 50) + ' m with ' + score + ' points and ' + crystals + ' crystals.';
+    overScreen.classList.remove('hidden');
+    sfxLose();
+  }
+
+  function jump() {
+    if (state !== 'playing' || player.jumping) return;
+    var g = geysers[current];
+    var st = geyserStage(g);
+    if (!st.erupting) {
+      // Mistimed jump: splash into the water, lose a life.
+      lives -= 1;
+      player.jumping = true; player.splash = 1;
+      player.vx = 40; player.vy = -160;
+      burst(player.x, player.y + 20, 26, '#4db8e8');
+      sfxSplash();
+      showMessage('Too early / too late — SPLASH! A life is lost.');
+      updateHud();
+      return;
+    }
+    // Successful launch.
+    var perfect = st.peak;
+    var pts = perfect ? 150 : 100;
+    score += pts;
+    player.jumping = true;
+    player.target = Math.min(current + 1, TOTAL - 1);
+    player.vx = 230;
+    player.vy = perfect ? -520 : -430;
+    burst(player.x, player.y + 20, 20, '#ffffff');
+    if (perfect) { sfxPerfect(); showMessage('PERFECT LAUNCH! +' + pts); }
+    else { sfxJump(); showMessage('Great launch! +' + pts); }
+    // Crystal above the destination geyser is collected on a good landing.
+    var dest = geysers[player.target];
+    if (dest.hasCrystal && !dest.crystalTaken) {
+      dest.crystalTaken = true;
+      crystals += 1; score += 50;
+      setTimeout(sfxCrystal, 350);
+    }
+    updateHud();
+  }
+
+  // ---- Input: keyboard, mouse, touch ----
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      e.preventDefault();
+      if (state === 'title') startGame();
+      else if (state === 'playing') jump();
+      else if (state === 'won' || state === 'over') startGame();
+    } else if (e.code === 'KeyR') {
+      if (state !== 'title') startGame();
+    }
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    if (state === 'playing') { ensureAudio(); jump(); }
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state === 'playing') { ensureAudio(); jump(); }
+  }, { passive: false });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+  // Taps on the canvas during title also count as interaction (but Start button is primary).
+  document.addEventListener('touchstart', function () { ensureAudio(); }, { passive: true });
+
+  // ---- Update ----
+  function update(dt) {
+    time += dt;
+    for (var i = 0; i < geysers.length; i++) {
+      geysers[i].phase += dt;
+      if (geysers[i].phase >= 4.4) geysers[i].phase -= 4.4;
+    }
+    // Ambient steam particles from erupting geysers.
+    for (var k = 0; k < geysers.length; k++) {
+      var st = geyserStage(geysers[k]);
+      if (st.erupting && Math.random() < 0.5) {
+        particles.push({ x: geyserX(k) + (Math.random() - 0.5) * 22, y: geyserY() - 10, vx: (Math.random() - 0.5) * 30, vy: -140 - Math.random() * 120, life: 0.9, color: '#eaf7ff' });
+      }
+    }
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx * dt;
+      particles[p].y += particles[p].vy * dt;
+      particles[p].life -= dt;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    if (messageT > 0) messageT -= dt;
+
+    if (state === 'playing' && player.jumping) {
+      player.vy += 1250 * dt;
+      player.x += player.vx * dt;
+      player.y += player.vy * dt;
+      if (player.splash) {
+        // Fell into the water.
+        if (player.y > geyserY() + 40) {
+          player.jumping = false; player.splash = 0;
+          if (lives <= 0) { loseGame(); }
+          else {
+            player.x = geyserX(current); player.y = geyserY() - 46;
+            showMessage('Back on geyser ' + (current + 1) + ' — wait for ERUPTING!');
+          }
+        }
+      } else if (player.vy > 0 && player.y >= geyserY() - 46 && player.x >= geyserX(player.target) - 12) {
+        // Landed on the next geyser.
+        player.jumping = false;
+        current = player.target;
+        player.x = geyserX(current); player.y = geyserY() - 46;
+        burst(player.x, player.y + 20, 10, '#ffd23f');
+        if (current >= TOTAL - 1) { winGame(); }
+        else { showMessage('Landed! Geyser ' + (current + 1) + ' of ' + TOTAL); }
+      }
+      // Safety: never fall forever.
+      if (player.y > H + 80) {
+        player.jumping = false; player.splash = 0;
+        player.x = geyserX(current); player.y = geyserY() - 46;
+      }
+    }
+    updateHud();
+  }
+
+  // ---- Draw ----
+  function draw() {
+    // Sky
+    var sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#8ed6f2'); sky.addColorStop(0.62, '#cdeefb'); sky.addColorStop(1, '#2f7fa8');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    // Sun and clouds
+    ctx.fillStyle = '#fff3a0'; ctx.beginPath(); ctx.arc(830, 70, 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    [[140, 80], [300, 55], [560, 90]].forEach(function (c) {
+      ctx.beginPath();
+      ctx.arc(c[0], c[1], 26, 0, Math.PI * 2);
+      ctx.arc(c[0] + 26, c[1] + 6, 20, 0, Math.PI * 2);
+      ctx.arc(c[0] - 26, c[1] + 6, 20, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // Distant ridge (goal)
+    ctx.fillStyle = '#5b7a4a';
+    ctx.beginPath(); ctx.moveTo(830, 400); ctx.lineTo(920, 300); ctx.lineTo(920, 400); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Verdana'; ctx.fillText('FAR RIDGE', 832, 320);
+    ctx.fillStyle = '#ffd23f'; ctx.fillText('★', 870, 345);
+    // Water
+    ctx.fillStyle = '#2b7fb8'; ctx.fillRect(0, 400, W, 120);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (var w = 0; w < 14; w++) {
+      var wx = ((w * 70 + Math.floor(time * 30)) % 980) - 30;
+      ctx.fillRect(wx, 420 + (w % 3) * 26, 44, 4);
+    }
+    // Geysers, rocks and crystals
+    for (var i = 0; i < TOTAL; i++) {
+      var gx = geyserX(i), gy = geyserY();
+      var g = geysers[i], s = geyserStage(g);
+      // Steam jet
+      if (s.erupting) {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(gx - 18, gy); ctx.lineTo(gx - 10, gy - 150); ctx.lineTo(gx + 10, gy - 150); ctx.lineTo(gx + 18, gy);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.beginPath(); ctx.arc(gx, gy - 155, 22, 0, Math.PI * 2); ctx.fill();
+      } else if (s.name === 'BUBBLING') {
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath(); ctx.arc(gx - 8, gy - 8, 5 + s.power * 4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(gx + 9, gy - 4, 4 + s.power * 3, 0, Math.PI * 2); ctx.fill();
+      }
+      // Rock
+      ctx.fillStyle = (i === TOTAL - 1) ? '#6b7a52' : '#7a6a55';
+      ctx.beginPath(); ctx.ellipse(gx, gy + 4, 34, 14, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#5d5342'; ctx.beginPath(); ctx.ellipse(gx, gy + 2, 26, 8, 0, 0, Math.PI * 2); ctx.fill();
+      // Crystal
+      if (g.hasCrystal && !g.crystalTaken) {
+        var bob = Math.sin(time * 3 + i) * 8;
+        ctx.fillStyle = '#7df9ff';
+        ctx.save(); ctx.translate(gx, gy - 110 + bob); ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-10, -10, 20, 20); ctx.restore();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Verdana'; ctx.fillText('◆', gx - 6, gy - 104 + bob);
+      }
+      // Timer gauge above the geyser the player stands on
+      if (i === current && state === 'playing') {
+        ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(gx - 34, gy - 200, 68, 16);
+        ctx.fillStyle = s.erupting ? '#7dff7a' : '#ffd23f';
+        ctx.fillRect(gx - 34, gy - 200, 68 * (g.phase / 4.4), 16);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Verdana'; ctx.textAlign = 'center';
+        ctx.fillText(s.erupting ? 'ERUPTING!' : s.name, gx, gy - 208);
+        ctx.textAlign = 'left';
+      }
+      // Geyser number
+      ctx.fillStyle = '#123c52'; ctx.font = 'bold 12px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(String(i + 1), gx, gy + 30); ctx.textAlign = 'left';
+    }
+    // Particles
+    particles.forEach(function (pt) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, pt.life));
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Player: a cheerful hopper
+    var px = player.x, py = player.y;
+    ctx.fillStyle = '#3fbf5f';
+    ctx.beginPath(); ctx.arc(px, py, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2e8f47'; ctx.beginPath(); ctx.arc(px - 8, py - 14, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 8, py - 14, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px - 8, py - 14, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 8, py - 14, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.beginPath(); ctx.arc(px - 8, py - 14, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 8, py - 14, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1d6b34'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(px + 2, py + 4, 8, 0.15, Math.PI - 0.15); ctx.stroke();
+    // Message banner
+    if (messageT > 0 && message) {
+      ctx.fillStyle = 'rgba(6,28,42,0.85)';
+      ctx.fillRect(190, 12, 540, 34);
+      ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 16px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(message, 460, 35); ctx.textAlign = 'left';
+    }
+  }
+
+  function loop(ts) {
+    if (!lastTs) lastTs = ts;
+    var dt = Math.min(0.033, (ts - lastTs) / 1000);
+    lastTs = ts;
+    if (state === 'playing') update(dt);
+    else if (state === 'title' || state === 'won' || state === 'over') {
+      time += dt;
+      for (var i = 0; i < geysers.length; i++) {
+        geysers[i].phase += dt;
+        if (geysers[i].phase >= 4.4) geysers[i].phase -= 4.4;
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
