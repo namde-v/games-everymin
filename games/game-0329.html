@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Cinder Climber</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #140a08; color: #fff; font-family: system-ui, -apple-system, Segoe UI, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 12px; overflow: hidden; }
+  #wrap { width: min(96vw, 520px); }
+  h1 { text-align: center; font-size: 28px; letter-spacing: 1px; color: #ffb347; text-shadow: 0 2px 0 #7a2300; margin-bottom: 6px; }
+  p.sub { text-align: center; color: #e8c9a8; font-size: 13px; margin-bottom: 8px; }
+  #hud { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+  .pill { flex: 1; background: #2a130c; border: 1px solid #7a3a1a; border-radius: 10px; padding: 7px 4px; text-align: center; font-size: 13px; font-weight: 700; }
+  .pill span { color: #ffd166; }
+  canvas { display: block; width: 100%; height: 620px; background: linear-gradient(#1c0f2e, #5b1a0e 55%, #8a2408); border: 3px solid #ffb347; border-radius: 14px; touch-action: none; }
+  #overlay { position: relative; margin-top: -620px; height: 620px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  .card { pointer-events: auto; background: rgba(20,8,5,.92); border: 2px solid #ffb347; border-radius: 16px; padding: 22px; width: 86%; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+  .card h2 { color: #ffb347; font-size: 30px; margin-bottom: 10px; }
+  .card p { color: #f3e2cf; line-height: 1.55; font-size: 15px; margin: 8px 0; }
+  .card .small { font-size: 13px; color: #d8b99a; }
+  button { pointer-events: auto; cursor: pointer; background: #ff6b1a; color: #fff; border: 0; border-radius: 11px; padding: 13px 22px; font-size: 18px; font-weight: 800; margin-top: 14px; box-shadow: 0 4px 0 #9c3200; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #374151; box-shadow: 0 4px 0 #111827; }
+  #controls { display: flex; gap: 8px; margin-top: 10px; }
+  #controls button { flex: 1; margin-top: 0; padding: 14px 4px; font-size: 22px; }
+  .hidden { display: none !important; }
+  @media (max-height: 760px) { canvas, #overlay { height: 540px; } #overlay { margin-top: -540px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🌋 CINDER CLIMBER</h1>
+  <p class="sub">Scale the volcano. Dodge embers. Reach the summit.</p>
+  <div id="hud">
+    <div class="pill">Score: <span id="score">0</span></div>
+    <div class="pill">❤️ Lives: <span id="lives">3</span></div>
+    <div class="pill">Height: <span id="height">0</span>m</div>
+    <div class="pill">💎 Gems: <span id="gems">0</span></div>
+  </div>
+  <canvas id="game" width="520" height="620"></canvas>
+  <div id="overlay">
+    <div class="card" id="titleCard">
+      <h2>🌋 Cinder Climber</h2>
+      <p><strong>How to Play</strong></p>
+      <p>Jump from ledge to ledge up the volcano. Collect glowing gems for bonus points. Avoid falling embers and lava bursts — each hit costs a life.</p>
+      <p class="small">⌨️ Arrow keys / A &amp; D to move, Space / W / ↑ to jump<br>🖱️ Click left or right side to move, click the climber to jump<br>📱 Touch: tap left/right to move, tap the climber to jump</p>
+      <p class="small">Reach the glowing summit flag to WIN. Falling off-screen or an ember hit loses a life. You have 3 lives.</p>
+      <button id="startBtn">▶ Start Climb</button>
+    </div>
+    <div class="card hidden" id="endCard">
+      <h2 id="endTitle">Game Over</h2>
+      <p id="endText"></p>
+      <p class="small" id="endStats"></p>
+      <button id="restartBtn">↻ Restart</button>
+    </div>
+  </div>
+  <div id="controls">
+    <button id="leftBtn" aria-label="Move left">◀</button>
+    <button id="jumpBtn" aria-label="Jump">⬆ JUMP</button>
+    <button id="rightBtn" aria-label="Move right">▶</button>
+  </div>
+</div>
+<script>
+(function() {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var heightEl = document.getElementById('height');
+  var gemsEl = document.getElementById('gems');
+  var overlay = document.getElementById('overlay');
+  var titleCard = document.getElementById('titleCard');
+  var endCard = document.getElementById('endCard');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  var audioCtx = null, masterGain = null;
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfxJump() { tone(280, 0.16, 'square', 0.35, 620); }
+  function sfxGem() { tone(880, 0.12, 'sine', 0.5); setTimeout(function(){ tone(1320, 0.16, 'sine', 0.5); }, 70); }
+  function sfxHit() { tone(180, 0.3, 'sawtooth', 0.6, 60); }
+  function sfxWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.25, 'triangle', 0.6); }, i * 130); }); }
+
+  var state = 'title'; // title | playing | over | won
+  var player, platforms, embers, gems, particles, cameraY, keys, maxHeight, score, lives, gemCount, spawnTimer, shake;
+
+  function buildLevel() {
+    platforms = [];
+    gems = [];
+    var y = H - 40;
+    platforms.push({ x: 40, y: y, w: 180, h: 18, lava: false });
+    for (var i = 1; i < 46; i++) {
+      y -= 52 + Math.random() * 22;
+      var w = 110 + Math.random() * 70;
+      var x = 20 + Math.random() * (W - w - 40);
+      var lava = (i % 6 === 0);
+      platforms.push({ x: x, y: y, w: w, h: 18, lava: lava });
+      if (Math.random() < 0.55) gems.push({ x: x + w / 2, y: y - 26, taken: false, bob: Math.random() * 6 });
+    }
+    // Summit platform
+    platforms.push({ x: W / 2 - 90, y: y - 70, w: 180, h: 20, lava: false, summit: true });
+  }
+
+  function reset() {
+    buildLevel();
+    player = { x: 110, y: H - 90, w: 30, h: 38, vx: 0, vy: 0, onGround: false, facing: 1 };
+    embers = []; particles = []; keys = {};
+    cameraY = 0; maxHeight = 0; score = 0; lives = 3; gemCount = 0; spawnTimer = 0; shake = 0;
+    updateHUD();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    heightEl.textContent = Math.floor(maxHeight / 10);
+    gemsEl.textContent = gemCount;
+  }
+
+  function loseLife(reason) {
+    if (state !== 'playing') return;
+    lives--; sfxHit(); shake = 14;
+    burst(player.x + 15, player.y + 10, '#ff5533', 18);
+    updateHUD();
+    if (lives <= 0) { endGame(false); return; }
+    // Respawn on nearest safe platform below
+    var best = platforms[0];
+    for (var i = 0; i < platforms.length; i++) {
+      if (platforms[i].y > player.y - 10 && !platforms[i].lava) { best = platforms[i]; break; }
+    }
+    player.x = best.x + best.w / 2 - 15;
+    player.y = best.y - 40;
+    player.vx = 0; player.vy = 0;
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    overlay.classList.remove('hidden');
+    titleCard.classList.add('hidden');
+    endCard.classList.remove('hidden');
+    endTitle.textContent = won ? '🏆 SUMMIT REACHED!' : '💀 Game Over';
+    endText.textContent = won
+      ? 'You conquered the volcano! The summit flag is yours.'
+      : 'The volcano claims another climber. Try again!';
+    endStats.textContent = 'Score: ' + score + '  •  Gems: ' + gemCount + '  •  Height: ' + Math.floor(maxHeight / 10) + 'm';
+    if (won) sfxWin();
+  }
+
+  function startGame() {
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    reset();
+    state = 'playing';
+    overlay.classList.add('hidden');
+    titleCard.classList.add('hidden');
+    endCard.classList.add('hidden');
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 4, life: 30 + Math.random() * 20, color: color });
+    }
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    var speed = 4.6;
+    if (keys.left) { player.vx = -speed; player.facing = -1; }
+    else if (keys.right) { player.vx = speed; player.facing = 1; }
+    else player.vx *= 0.72;
+    player.vy += 0.55;
+    if (player.vy > 15) player.vy = 15;
+    player.x += player.vx;
+    player.y += player.vy;
+    if (player.x < 8) player.x = 8;
+    if (player.x > W - player.w - 8) player.x = W - player.w - 8;
+
+    player.onGround = false;
+    for (var i = 0; i < platforms.length; i++) {
+      var p = platforms[i];
+      if (player.vy >= 0 && player.x + player.w > p.x + 4 && player.x < p.x + p.w - 4 &&
+          player.y + player.h >= p.y && player.y + player.h <= p.y + 20) {
+        player.y = p.y - player.h;
+        player.vy = 0; player.onGround = true;
+        if (p.lava) { loseLife('lava'); return; }
+        if (p.summit) { score += 500; endGame(true); return; }
+      }
+    }
+    if (keys.jump && player.onGround) { player.vy = -14.5; sfxJump(); burst(player.x + 15, player.y + 38, '#cccccc', 5); }
+
+    // Camera follows upward progress
+    var targetCam = Math.min(0, -(player.y - 380));
+    if (targetCam < cameraY) cameraY = targetCam;
+    var height = -cameraY;
+    if (height > maxHeight) { score += Math.floor((height - maxHeight) / 20); maxHeight = height; updateHUD(); }
+
+    // Gems
+    for (var g = 0; g < gems.length; g++) {
+      var gem = gems[g];
+      if (!gem.taken && Math.abs(player.x + 15 - gem.x) < 26 && Math.abs(player.y + 19 - gem.y) < 30) {
+        gem.taken = true; gemCount++; score += 50; sfxGem(); burst(gem.x, gem.y, '#4de8ff', 12); updateHUD();
+      }
+    }
+
+    // Falling embers
+    spawnTimer--;
+    if (spawnTimer <= 0) {
+      spawnTimer = 45 + Math.floor(Math.random() * 55);
+      embers.push({ x: 20 + Math.random() * (W - 40), y: cameraY - 20, vy: 3 + Math.random() * 2.5, r: 7 + Math.random() * 5, drift: Math.random() * 2 - 1 });
+    }
+    for (var e = embers.length - 1; e >= 0; e--) {
+      var em = embers[e];
+      em.y += em.vy; em.x += em.drift;
+      if (em.y > cameraY + H + 30) { embers.splice(e, 1); continue; }
+      if (player.x < em.x + em.r && player.x + player.w > em.x - em.r &&
+          player.y < em.y + em.r && player.y + player.h > em.y - em.r) {
+        embers.splice(e, 1); loseLife('ember'); return;
+      }
+    }
+    // Lava bursts from volcano sides near the player
+    if (Math.random() < 0.004) {
+      embers.push({ x: Math.random() < 0.5 ? 20 : W - 20, y: player.y - 40, vy: 2.5, r: 9, drift: Math.random() < 0.5 ? 1.2 : -1.2 });
+    }
+
+    for (var p2 = particles.length - 1; p2 >= 0; p2--) {
+      var pt = particles[p2];
+      pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.15; pt.life--;
+      if (pt.life <= 0) particles.splice(p2, 1);
+    }
+    if (shake > 0) shake--;
+
+    // Fell off the bottom of the visible screen
+    if (player.y > cameraY + H + 60) { loseLife('fall'); }
+  }
+
+  function drawLedge(p, offY) {
+    var y = p.y - offY;
+    if (y < -40 || y > H + 40) return;
+    ctx.fillStyle = p.summit ? '#ffd166' : (p.lava ? '#c22a08' : '#3d2b1f');
+    ctx.beginPath();
+    ctx.roundRect(p.x, y, p.w, p.h, 7);
+    ctx.fill();
+    ctx.fillStyle = p.summit ? '#fff3b0' : (p.lava ? '#ff7a1a' : '#6b4a2f');
+    ctx.fillRect(p.x + 4, y, p.w - 8, 5);
+    if (p.lava) {
+      ctx.fillStyle = '#ffcc00';
+      ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('LAVA', p.x + p.w / 2, y + 14);
+    }
+    if (p.summit) {
+      ctx.fillStyle = '#ff2d55';
+      ctx.fillRect(p.x + p.w / 2 - 2, y - 42, 4, 42);
+      ctx.beginPath(); ctx.moveTo(p.x + p.w / 2 + 2, y - 42); ctx.lineTo(p.x + p.w / 2 + 34, y - 32); ctx.lineTo(p.x + p.w / 2 + 2, y - 22); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#111'; ctx.font = 'bold 11px sans-serif'; ctx.fillText('SUMMIT', p.x + p.w / 2, y - 48);
+    }
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    var offY = -cameraY;
+    // Sky + volcano silhouette
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#1c0f2e'); grad.addColorStop(0.55, '#5b1a0e'); grad.addColorStop(1, '#8a2408');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ff6b1a';
+    for (var s = 0; s < 14; s++) {
+      var sx = (s * 67 + 13) % W, sy = (s * 89) % 220;
+      ctx.globalAlpha = 0.35; ctx.fillRect(sx, sy, 2, 2); ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = '#2a130c';
+    ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(W * 0.32, 90); ctx.lineTo(W * 0.68, 90); ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff4400';
+    ctx.beginPath(); ctx.ellipse(W / 2, 92, 62, 16, 0, 0, Math.PI * 2); ctx.fill();
+
+    for (var i = 0; i < platforms.length; i++) drawLedge(platforms[i], offY);
+    for (var g = 0; g < gems.length; g++) {
+      var gem = gems[g];
+      if (gem.taken) continue;
+      var gy = gem.y - offY + Math.sin(Date.now() / 300 + gem.bob) * 4;
+      if (gy < -20 || gy > H + 20) continue;
+      ctx.fillStyle = '#4de8ff';
+      ctx.save(); ctx.translate(gem.x, gy); ctx.rotate(Math.PI / 4); ctx.fillRect(-8, -8, 16, 16); ctx.restore();
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(gem.x - 2, gy - 2, 4, 4);
+    }
+    for (var e = 0; e < embers.length; e++) {
+      var em = embers[e];
+      var ey = em.y - offY;
+      ctx.fillStyle = '#ff7a1a';
+      ctx.beginPath(); ctx.arc(em.x, ey, em.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffe066';
+      ctx.beginPath(); ctx.arc(em.x, ey, em.r * 0.45, 0, Math.PI * 2); ctx.fill();
+    }
+    // Player
+    var py = player.y - offY;
+    ctx.fillStyle = '#ffb347';
+    ctx.beginPath(); ctx.arc(player.x + 15, py + 10, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1f2937'; ctx.fillRect(player.x + 5, py + 18, 20, 18);
+    ctx.fillStyle = '#ff6b1a'; ctx.fillRect(player.x + 3, py + 30, 8, 8); ctx.fillRect(player.x + 19, py + 30, 8, 8);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(player.x + (player.facing > 0 ? 18 : 8), py + 8, 4, 4);
+    for (var p = 0; p < particles.length; p++) {
+      var pt = particles[p];
+      ctx.globalAlpha = Math.max(0, pt.life / 40);
+      ctx.fillStyle = pt.color; ctx.fillRect(pt.x - 2, pt.y - offY - 2, 5, 5);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = '13px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('Climb to the SUMMIT flag!', 10, 20);
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('leftBtn').addEventListener('mousedown', function(){ keys.left = true; });
+  document.getElementById('leftBtn').addEventListener('mouseup', function(){ keys.left = false; });
+  document.getElementById('leftBtn').addEventListener('mouseleave', function(){ keys.left = false; });
+  document.getElementById('leftBtn').addEventListener('touchstart', function(e){ e.preventDefault(); keys.left = true; }, { passive: false });
+  document.getElementById('leftBtn').addEventListener('touchend', function(){ keys.left = false; });
+  document.getElementById('rightBtn').addEventListener('mousedown', function(){ keys.right = true; });
+  document.getElementById('rightBtn').addEventListener('mouseup', function(){ keys.right = false; });
+  document.getElementById('rightBtn').addEventListener('mouseleave', function(){ keys.right = false; });
+  document.getElementById('rightBtn').addEventListener('touchstart', function(e){ e.preventDefault(); keys.right = true; }, { passive: false });
+  document.getElementById('rightBtn').addEventListener('touchend', function(){ keys.right = false; });
+  document.getElementById('jumpBtn').addEventListener('click', function(){ keys.jump = true; setTimeout(function(){ keys.jump = false; }, 120); });
+  document.getElementById('jumpBtn').addEventListener('touchstart', function(e){ e.preventDefault(); keys.jump = true; setTimeout(function(){ keys.jump = false; }, 120); }, { passive: false });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = true;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') { keys.jump = true; e.preventDefault(); }
+    if (e.key === 'Enter' && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function(e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') keys.jump = false;
+  });
+  canvas.addEventListener('click', function(e) {
+    if (state !== 'playing') return;
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / rect.width * W;
+    var y = (e.clientY - rect.top) / rect.height * H;
+    if (Math.abs(x - (player.x + 15)) < 45 && Math.abs(y - (player.y - cameraY + 19)) < 45) {
+      keys.jump = true; setTimeout(function(){ keys.jump = false; }, 120);
+    } else if (x < W / 2) { keys.left = true; setTimeout(function(){ keys.left = false; }, 180); }
+    else { keys.right = true; setTimeout(function(){ keys.right = false; }, 180); }
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (state !== 'playing' || !e.touches[0]) return;
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.touches[0].clientX - rect.left) / rect.width * W;
+    if (x < W / 2) { keys.left = true; setTimeout(function(){ keys.left = false; }, 180); }
+    else { keys.right = true; setTimeout(function(){ keys.right = false; }, 180); }
+  }, { passive: false });
+
+  reset();
+  loop();
+})();
+</script>
+</body>
+</html>

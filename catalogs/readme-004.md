@@ -24,6 +24,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0318 | Starlight Skater | Arcade / Cosmic Skating | Arrow Keys / WASD move and jump, mouse click jump, touch tap jump, Space spin trick, R restart | [Play](./../games/game-0318.html) |
 | 0319 | Pendulum Pilot | Precision / Swing Physics | Space/click/tap grab and release, Arrow Keys steer, touch drag aim, R restart | [Play](./../games/game-0319.html) |
 | 0320 | Fossil Finder | Puzzle / Archaeology Dig | Mouse/touch click cells to dig, Arrow Keys move cursor, Space/Enter dig, B brush, R restart | [Play](./../games/game-0320.html) |
+| 0321 | Solar Swooper | Arcade / Sun-Diving Collector | Arrow Keys / WASD move, mouse steer, touch drag, Space dive | [Play](./../games/game-0321.html) |
+| 0322 | Prism Pipes | Puzzle / Light-Routing | Mouse/touch click rotate pipes, Arrow Keys move cursor, Space/Enter rotate, R restart | [Play](./../games/game-0322.html) |
+| 0323 | Vineyard Baron | Strategy / Vineyard Management | Mouse/touch click plots, Arrow Keys move cursor, Space/Enter confirm, N next season, R restart | [Play](./../games/game-0323.html) |
+| 0324 | Beat Blacksmith | Rhythm / Hammer Beat | D/F/J/K rhythm lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0324.html) |
+| 0325 | Geyser Glider | Arcade / Geyser Gliding | Space/Up flap, mouse hold, touch hold, P pause, R restart | [Play](./../games/game-0325.html) |
+| 0326 | Cipher Canyon | Puzzle / Symbol Cipher | Mouse/touch select symbol and letter, Arrow Keys navigate, A-Z guess, Enter start/restart | [Play](./../games/game-0326.html) |
+| 0327 | Aurora Outpost | Strategy / Arctic Station | Mouse/touch click assign crew, Arrow Keys move selection, Space/Enter confirm, End Day button, R restart | [Play](./../games/game-0327.html) |
+| 0328 | Tempo Tailor | Rhythm / Sewing Beat | D/F/J/K rhythm lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0328.html) |
+| 0329 | Cinder Climber | Arcade / Volcano Climbing | Arrow Keys / WASD move and jump, mouse click jump, touch tap jump, R restart | [Play](./../games/game-0329.html) |
+| 0330 | Lantern Logic | Puzzle / Lantern Grid | Mouse/touch click cycle lantern, Arrow Keys move cursor, Space/Enter place, H hint, R restart | [Play](./../games/game-0330.html) |
 
 ## Batch notes
 
@@ -31,3 +41,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 
 - Batch 032: 10 games, produced in one cycle (0311–0320).
+
+- Batch 033: 10 games, produced in one cycle (0321–0330).

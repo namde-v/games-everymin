@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Geyser Glider</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#1a0f0a; color:#fff; font-family:Verdana, Geneva, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:12px; overflow:hidden; }
+  h1 { font-size:26px; letter-spacing:2px; color:#ffb347; text-shadow:0 2px 0 #7a2e00, 0 0 18px rgba(255,140,0,.6); margin-bottom:8px; text-align:center; }
+  #wrap { position:relative; width:min(860px, 96vw); }
+  canvas { display:block; width:100%; height:auto; background:linear-gradient(#2b1a4d,#7a2e1a 55%,#3d1508); border:3px solid #ffb347; border-radius:12px; box-shadow:0 0 30px rgba(255,140,0,.35); touch-action:none; }
+  #hud { display:flex; justify-content:space-between; gap:8px; padding:8px 4px 0; font-weight:bold; font-size:15px; flex-wrap:wrap; }
+  #hud span { background:#2d1a12; border:1px solid #ffb347; border-radius:8px; padding:5px 10px; }
+  #hud .lives { color:#ff6b6b; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:rgba(10,4,2,.82); border-radius:12px; text-align:center; padding:20px; z-index:5; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { font-size:30px; color:#ffb347; }
+  .overlay p { max-width:520px; line-height:1.55; font-size:15px; color:#ffe9d6; }
+  .overlay .big { font-size:20px; font-weight:bold; color:#7CFC9A; }
+  button { font-size:19px; font-weight:bold; padding:13px 30px; border:none; border-radius:12px; background:#ff8c00; color:#fff; cursor:pointer; box-shadow:0 4px 0 #a35400; }
+  button:hover { background:#ffa733; } button:active { transform:translateY(3px); box-shadow:0 1px 0 #a35400; }
+  .keys { font-size:13px; color:#ffd9a0; background:rgba(255,140,0,.15); border-radius:8px; padding:8px 12px; }
+  #hint { text-align:center; font-size:13px; color:#ffcc99; margin-top:8px; }
+  @media (max-width:560px){ h1{font-size:21px;} .overlay h2{font-size:24px;} .overlay p{font-size:14px;} }
+</style>
+</head>
+<body>
+<h1>🌋 GEYSER GLIDER 🪶</h1>
+<div id="wrap">
+  <canvas id="game" width="860" height="460"></canvas>
+  <div id="hud">
+    <span id="score">Score: 0</span>
+    <span id="dist">Distance: 0 m</span>
+    <span id="rings">Rings: 0</span>
+    <span id="lives" class="lives">Lives: ❤❤❤</span>
+    <span id="status">Status: Ready</span>
+  </div>
+  <div id="titleScreen" class="overlay">
+    <h2>🌋 Geyser Glider</h2>
+    <p><b>How to Play:</b> You are a winged glider soaring over a volcanic valley. Hold <b>SPACE / ↑ / mouse / touch</b> to flap and climb, release to dive. Fly through the glowing <b>geyser updrafts</b> — they shoot you skyward for free! Collect golden <b>rings</b> (+100) and glowing feathers (+25) for points.</p>
+    <p>Watch out for jagged <b>rock spires</b> — a crash costs one life. You have 3 lives.</p>
+    <p class="big">🏆 WIN by flying 3,500 m &nbsp;•&nbsp; 💥 GAME OVER at 0 lives</p>
+    <div class="keys">SPACE / ↑ = flap &nbsp;•&nbsp; Mouse hold = flap &nbsp;•&nbsp; Touch &amp; hold = flap &nbsp;•&nbsp; P = pause</div>
+    <button id="startBtn" type="button">▶ START GLIDING</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn" type="button">↻ RESTART</button>
+  </div>
+</div>
+<p id="hint">Tip: ride a geyser column all the way up, then dive through a line of rings for a big combo.</p>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var distEl = document.getElementById('dist');
+  var ringsEl = document.getElementById('rings');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  var state = 'title'; // title | playing | paused | win | over
+  var player, geysers, rings, feathers, spires, particles, clouds, embers;
+  var score, distance, ringCount, lives, combo, invuln, frame, speed, audioCtx, thrusting, paused;
+
+  function reset(){
+    player = { x:130, y:200, vy:0, r:16, wing:0 };
+    geysers = []; rings = []; feathers = []; spires = []; particles = []; clouds = []; embers = [];
+    for (var i=0;i<8;i++) clouds.push({ x: Math.random()*W, y: 20+Math.random()*120, s: 0.4+Math.random()*0.7, w: 60+Math.random()*80 });
+    for (var j=0;j<40;j++) embers.push({ x: Math.random()*W, y: Math.random()*H, s: 1+Math.random()*2, v: 0.3+Math.random()*0.8 });
+    score = 0; distance = 0; ringCount = 0; lives = 3; combo = 0; invuln = 0; frame = 0; speed = 2.6; thrusting = false; paused = false;
+    spawnAhead(W);
+    updateHUD('Flying!');
+  }
+  function spawnAhead(startX){
+    var x = startX;
+    while (x < startX + W + 200){
+      var kind = Math.random();
+      if (kind < 0.30){
+        geysers.push({ x: x, w: 56, phase: Math.random()*6.28, active: true, h: 300 });
+      } else if (kind < 0.58){
+        rings.push({ x: x, y: 90 + Math.random()*260, r: 22, taken:false, spin:0 });
+      } else if (kind < 0.74){
+        feathers.push({ x: x, y: 90 + Math.random()*260, taken:false, bob: Math.random()*6.28 });
+      } else {
+        spires.push({ x: x, w: 46 + Math.random()*22, h: 90 + Math.random()*130 });
+      }
+      x += 150 + Math.random()*130;
+    }
+  }
+  function ensureAudio(){
+    if (!audioCtx){
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, slide){
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(name){
+    if (name === 'ring'){ tone(880, .18, 'sine', .16); setTimeout(function(){ tone(1320, .22, 'sine', .14); }, 70); }
+    else if (name === 'feather'){ tone(660, .12, 'triangle', .12, 990); }
+    else if (name === 'crash'){ tone(180, .35, 'sawtooth', .18, 60); }
+    else if (name === 'geyser'){ tone(220, .3, 'sine', .08, 520); }
+    else if (name === 'win'){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f,.3,'triangle',.15); }, i*130); }); }
+    else if (name === 'over'){ [392,330,262,196].forEach(function(f,i){ setTimeout(function(){ tone(f,.3,'sawtooth',.12); }, i*150); }); }
+  }
+  function updateHUD(status){
+    scoreEl.textContent = 'Score: ' + score;
+    distEl.textContent = 'Distance: ' + Math.floor(distance) + ' m';
+    ringsEl.textContent = 'Rings: ' + ringCount;
+    livesEl.textContent = 'Lives: ' + ('❤'.repeat(Math.max(lives,0)) || '—');
+    if (status) statusEl.textContent = 'Status: ' + status;
+  }
+  function burst(x, y, color, n){
+    for (var i=0;i<n;i++) particles.push({ x:x, y:y, vx:(Math.random()-0.5)*5, vy:(Math.random()-0.5)*5, life:26+Math.random()*14, color:color });
+  }
+  function crash(){
+    if (invuln > 0) return;
+    lives--; invuln = 90; combo = 0;
+    burst(player.x, player.y, '#ff5533', 26); sfx('crash');
+    player.vy = -4;
+    if (lives <= 0){ endGame(false); }
+    else updateHUD('Ouch! ' + lives + (lives===1 ? ' life' : ' lives') + ' left');
+  }
+  function endGame(won){
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    endText.textContent = won ? 'You soared 3,500 m across the volcanic valley like a true sky-master!' : 'Your glider ran out of lives among the rock spires. The valley claims another pilot...';
+    endStats.textContent = 'Final score: ' + score + '  •  Distance: ' + Math.floor(distance) + ' m  •  Rings: ' + ringCount;
+    endScreen.classList.remove('hidden');
+    if (won) sfx('win'); else sfx('over');
+    updateHUD(won ? 'Victory!' : 'Game Over');
+  }
+  function startGame(){
+    ensureAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Flying!');
+  }
+  function drawGround(){
+    ctx.fillStyle = '#2a1206';
+    ctx.beginPath(); ctx.moveTo(0, H);
+    for (var x=0;x<=W;x+=40) ctx.lineTo(x, H-26 - Math.sin(x*0.02+frame*0.01)*6);
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff6a00';
+    for (var x=0;x<W;x+=90){ ctx.fillRect(x + (frame%90), H-6, 26, 4); }
+  }
+  function drawPlayer(){
+    var p = player;
+    ctx.save(); ctx.translate(p.x, p.y);
+    var tilt = Math.max(-0.5, Math.min(0.5, p.vy * 0.06));
+    ctx.rotate(tilt);
+    ctx.globalAlpha = invuln > 0 && Math.floor(frame/6)%2===0 ? 0.45 : 1;
+    // glider wings
+    ctx.fillStyle = '#ffb347';
+    var flap = Math.sin(frame*0.5) * (thrusting ? 10 : 4);
+    ctx.beginPath(); ctx.moveTo(-4,-4); ctx.quadraticCurveTo(-26,-22-flap, -34,-8); ctx.quadraticCurveTo(-14,2, -4,4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff8c00';
+    ctx.beginPath(); ctx.moveTo(-4,-4); ctx.quadraticCurveTo(24,-20-flap, 32,-6); ctx.quadraticCurveTo(14,2, -4,4); ctx.closePath(); ctx.fill();
+    // body
+    ctx.fillStyle = '#ffe9d6';
+    ctx.beginPath(); ctx.ellipse(0, 0, 17, 9, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(10, -2, 3, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff5533'; ctx.beginPath(); ctx.moveTo(17, 0); ctx.lineTo(24, 2); ctx.lineTo(17, 4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function draw(){
+    // sky
+    var grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'#2b1a4d'); grad.addColorStop(0.55,'#7a2e1a'); grad.addColorStop(1,'#3d1508');
+    ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#ffcc88';
+    ctx.beginPath(); ctx.arc(730, 60, 26, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,200,130,0.25)';
+    ctx.beginPath(); ctx.arc(730, 60, 44, 0, Math.PI*2); ctx.fill();
+    clouds.forEach(function(c){ ctx.fillStyle='rgba(255,220,190,0.18)'; ctx.beginPath(); ctx.ellipse(c.x, c.y, c.w, 16, 0, 0, Math.PI*2); ctx.fill(); });
+    embers.forEach(function(e){ ctx.fillStyle='rgba(255,140,0,0.7)'; ctx.fillRect(e.x, e.y, e.s, e.s); });
+    // distant volcano
+    ctx.fillStyle = '#4a1a10';
+    ctx.beginPath(); ctx.moveTo(60, H-30); ctx.lineTo(190, 130); ctx.lineTo(320, H-30); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff6a00'; ctx.beginPath(); ctx.ellipse(190, 132, 26, 10, 0, 0, Math.PI*2); ctx.fill();
+    // geysers
+    geysers.forEach(function(g){
+      var cycle = (Math.sin(frame*0.03 + g.phase) + 1) / 2;
+      g.active = cycle > 0.35;
+      if (g.active){
+        var grd = ctx.createLinearGradient(0, H, 0, H - g.h);
+        grd.addColorStop(0, 'rgba(120,220,255,0.85)'); grd.addColorStop(1, 'rgba(120,220,255,0.05)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(g.x - g.w/2, H - 30 - g.h * cycle, g.w, g.h * cycle);
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        for (var i=0;i<8;i++){ var bx = g.x - g.w/2 + Math.random()*g.w; ctx.fillRect(bx, H - 30 - Math.random()*g.h*cycle, 3, 3); }
+      } else {
+        ctx.fillStyle = '#6b4a2a'; ctx.beginPath(); ctx.ellipse(g.x, H-28, 26, 9, 0, 0, Math.PI*2); ctx.fill();
+      }
+    });
+    // rings
+    rings.forEach(function(r){
+      if (r.taken) return;
+      r.spin += 0.08;
+      ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.ellipse(r.x, r.y, Math.abs(Math.cos(r.spin))*20+4, 22, 0, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,215,0,0.25)'; ctx.beginPath(); ctx.arc(r.x, r.y, 10, 0, Math.PI*2); ctx.fill();
+    });
+    // feathers
+    feathers.forEach(function(f){
+      if (f.taken) return;
+      f.bob += 0.06;
+      var fy = f.y + Math.sin(f.bob)*6;
+      ctx.fillStyle = '#7CFC9A'; ctx.save(); ctx.translate(f.x, fy); ctx.rotate(0.5);
+      ctx.beginPath(); ctx.ellipse(0, 0, 12, 5, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+    });
+    // spires
+    spires.forEach(function(s){
+      ctx.fillStyle = '#3a3a44';
+      ctx.beginPath(); ctx.moveTo(s.x - s.w/2, H-26); ctx.lineTo(s.x, H-26-s.h); ctx.lineTo(s.x + s.w/2, H-26); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#5a5a6a';
+      ctx.beginPath(); ctx.moveTo(s.x - s.w/2, H-26); ctx.lineTo(s.x, H-26-s.h); ctx.lineTo(s.x - s.w*0.1, H-26); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffdddd'; ctx.beginPath(); ctx.moveTo(s.x-4, H-26-s.h); ctx.lineTo(s.x, H-26-s.h-12); ctx.lineTo(s.x+4, H-26-s.h); ctx.closePath(); ctx.fill();
+    });
+    drawGround();
+    // particles
+    particles.forEach(function(p){ ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(p.life/30, 0); ctx.fillRect(p.x, p.y, 4, 4); ctx.globalAlpha = 1; });
+    drawPlayer();
+    if (state === 'paused'){
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 34px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED — press P to resume', W/2, H/2); ctx.textAlign = 'left';
+    }
+  }
+  function update(){
+    if (state !== 'playing') return;
+    frame++;
+    distance += speed * 0.55;
+    score += 1; // distance trickle
+    if (frame % 20 === 0) speed = Math.min(4.4, speed + 0.01);
+    // physics
+    if (thrusting) player.vy -= 0.55; else player.vy += 0.34;
+    player.vy = Math.max(-7.5, Math.min(8, player.vy));
+    player.y += player.vy;
+    // geyser lift
+    var overGeyser = false;
+    geysers.forEach(function(g){
+      if (g.active && Math.abs(player.x - g.x) < g.w/2 + 10 && player.y > H - 30 - g.h){
+        player.vy -= 0.9; overGeyser = true;
+      }
+    });
+    if (overGeyser && frame % 30 === 0) sfx('geyser');
+    if (invuln > 0) invuln--;
+    // bounds = crash on ground / ceiling
+    if (player.y > H - 42 || player.y < 14){
+      player.y = Math.max(20, Math.min(H - 48, player.y));
+      crash();
+      if (state !== 'playing') return;
+    }
+    // scroll world
+    var all = geysers.concat(rings, feathers, spires);
+    geysers.forEach(function(o){ o.x -= speed; });
+    rings.forEach(function(o){ o.x -= speed; });
+    feathers.forEach(function(o){ o.x -= speed; });
+    spires.forEach(function(o){ o.x -= speed; });
+    clouds.forEach(function(c){ c.x -= speed*0.25; if (c.x < -100){ c.x = W + 60; c.y = 20+Math.random()*120; } });
+    embers.forEach(function(e){ e.y -= e.v; e.x -= speed*0.3; if (e.y < 0){ e.y = H; e.x = Math.random()*W; } });
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    // prune + spawn
+    geysers = geysers.filter(function(o){ return o.x > -80; });
+    rings = rings.filter(function(o){ return o.x > -80; });
+    feathers = feathers.filter(function(o){ return o.x > -80; });
+    spires = spires.filter(function(o){ return o.x > -80; });
+    var maxX = 0;
+    [geysers, rings, feathers, spires].forEach(function(arr){ arr.forEach(function(o){ if (o.x > maxX) maxX = o.x; }); });
+    if (maxX < W + 150) spawnAhead(maxX + 120);
+    // pickups
+    rings.forEach(function(r){
+      if (!r.taken && Math.hypot(player.x - r.x, player.y - r.y) < 34){
+        r.taken = true; ringCount++; combo++;
+        var pts = 100 + (combo > 1 ? (combo-1)*25 : 0);
+        score += pts; burst(r.x, r.y, '#ffd700', 14); sfx('ring');
+      }
+    });
+    feathers.forEach(function(f){
+      if (!f.taken && Math.hypot(player.x - f.x, player.y - f.y) < 30){
+        f.taken = true; score += 25; burst(f.x, f.y, '#7CFC9A', 10); sfx('feather');
+      }
+    });
+    // spire collision (triangle approx as rect near tip zone)
+    spires.forEach(function(s){
+      var top = H - 26 - s.h;
+      if (Math.abs(player.x - s.x) < s.w/2 && player.y + 10 > top && player.y < H - 26){
+        var frac = (player.y - top) / s.h; // near tip = narrow
+        if (Math.abs(player.x - s.x) < (s.w/2) * (1 - frac*0.55) + 6) crash();
+      }
+    });
+    if (frame % 15 === 0) updateHUD(overGeyser ? 'Riding a geyser!' : (thrusting ? 'Flapping' : 'Gliding'));
+    if (distance >= 3500){ endGame(true); return; }
+    if (lives <= 0) return;
+  }
+  function loop(){ update(); draw(); requestAnimationFrame(loop); }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function(e){
+    if (e.code === 'Space' || e.code === 'ArrowUp'){ thrusting = true; e.preventDefault(); }
+    if (e.code === 'KeyP' && state === 'playing'){ state = 'paused'; updateHUD('Paused'); }
+    else if (e.code === 'KeyP' && state === 'paused'){ state = 'playing'; updateHUD('Flying!'); }
+  });
+  document.addEventListener('keyup', function(e){
+    if (e.code === 'Space' || e.code === 'ArrowUp') thrusting = false;
+  });
+  canvas.addEventListener('mousedown', function(e){ ensureAudio(); thrusting = true; e.preventDefault(); });
+  document.addEventListener('mouseup', function(){ thrusting = false; });
+  canvas.addEventListener('touchstart', function(e){ ensureAudio(); thrusting = true; e.preventDefault(); }, { passive:false });
+  canvas.addEventListener('touchend', function(e){ thrusting = false; e.preventDefault(); }, { passive:false });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); }, { passive:false });
+  reset();
+  state = 'title';
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

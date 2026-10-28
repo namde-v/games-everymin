@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Solar Swooper</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { background: #050510; color: #fff; font-family: "Segoe UI", Arial, sans-serif; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+  #wrap { position: relative; width: 100%; max-width: 720px; height: 100vh; max-height: 900px; background: #070722; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; background: radial-gradient(circle at 50% 108%, #ff6a00 0%, #c22a00 18%, #1a0533 45%, #050510 75%); touch-action: none; }
+  #hud { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; gap: 8px; padding: 10px 14px; font-size: 16px; font-weight: 700; text-shadow: 0 2px 4px #000; background: linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,0)); pointer-events: none; z-index: 5; }
+  #hud span { white-space: nowrap; }
+  #hud .gold { color: #ffd54a; }
+  #hud .red { color: #ff6b6b; }
+  #barWrap { position: absolute; top: 42px; left: 14px; right: 14px; height: 10px; background: rgba(255,255,255,.18); border-radius: 6px; overflow: hidden; z-index: 5; }
+  #bar { height: 100%; width: 0%; background: linear-gradient(90deg, #ffd54a, #ff8c1a); transition: width .25s; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; background: rgba(3,3,18,.78); z-index: 10; }
+  .overlay.hidden { display: none; }
+  h1 { font-size: clamp(36px, 9vw, 64px); letter-spacing: 2px; color: #ffd54a; text-shadow: 0 0 24px #ff8c1a, 0 4px 0 #7a2b00; margin-bottom: 6px; }
+  h2 { font-size: clamp(28px, 7vw, 44px); color: #ffd54a; margin-bottom: 10px; }
+  .tag { font-size: 15px; color: #ffe9a8; margin-bottom: 16px; }
+  .how { background: rgba(255,255,255,.09); border: 1px solid rgba(255,213,74,.45); border-radius: 14px; padding: 14px 18px; max-width: 480px; font-size: 15px; line-height: 1.6; margin-bottom: 18px; }
+  .how b { color: #ffd54a; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 14px 34px; font-size: 20px; font-weight: 800; color: #2b1200; background: linear-gradient(#ffe066, #ff8c1a); box-shadow: 0 6px 0 #8a2f00, 0 10px 24px rgba(0,0,0,.5); }
+  button:active { transform: translateY(4px); box-shadow: 0 2px 0 #8a2f00; }
+  button.small { padding: 10px 24px; font-size: 16px; margin-top: 14px; }
+  .score { font-size: 22px; font-weight: 800; margin: 8px 0 4px; }
+  .hint { font-size: 13px; color: #cfd2ff; margin-top: 14px; }
+  .sun-emoji { font-size: 44px; margin-bottom: 4px; }
+  @media (max-width: 480px) { #hud { font-size: 14px; } .how { font-size: 14px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="720" height="900"></canvas>
+  <div id="hud">
+    <span>Score: <span id="score" class="gold">0</span></span>
+    <span>Goal: <span class="gold">200</span></span>
+    <span>Lives: <span id="lives" class="red">3</span></span>
+    <span id="status">Ready</span>
+  </div>
+  <div id="barWrap"><div id="bar"></div></div>
+
+  <div id="titleScreen" class="overlay">
+    <div class="sun-emoji">&#9728;&#65039;</div>
+    <h1>SOLAR SWOOPER</h1>
+    <p class="tag">Dive toward the sun. Grab its fire. Dodge the rocks.</p>
+    <div class="how">
+      <b>How to Play</b><br>
+      Fly your ship and collect glowing <b>solar orbs (+10 points)</b> as they stream up from the sun.<br>
+      Avoid <b>asteroids</b> &mdash; each hit costs <b>1 life</b>.<br>
+      Reach <b>200 points to win</b>. Lose all 3 lives and the run is over.<br>
+      <b>Controls:</b> Arrow keys / WASD to fly &bull; Mouse to steer &bull; Touch &amp; drag to fly.<br>
+      Near the sun? Orbs are worth more there &mdash; but asteroids fly faster!
+    </div>
+    <button id="startBtn" type="button">START DIVE</button>
+    <p class="hint">Sound starts only after you press Start. Best on keyboard, mouse, or touch.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div class="sun-emoji" id="endEmoji">&#127775;</div>
+    <h2 id="endTitle">You Win!</h2>
+    <p class="score" id="endScore">Score: 0</p>
+    <p id="endText">You harnessed the power of the sun!</p>
+    <button id="restartBtn" type="button">PLAY AGAIN</button>
+    <button id="menuBtn" class="small" type="button">Back to Title</button>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById("score");
+  var livesEl = document.getElementById("lives");
+  var statusEl = document.getElementById("status");
+  var barEl = document.getElementById("bar");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endScore = document.getElementById("endScore");
+  var endText = document.getElementById("endText");
+  var endEmoji = document.getElementById("endEmoji");
+  var startBtn = document.getElementById("startBtn");
+  var restartBtn = document.getElementById("restartBtn");
+  var menuBtn = document.getElementById("menuBtn");
+
+  var WIN_SCORE = 200;
+  var state = "title"; // title | playing | won | over
+  var score = 0, lives = 3, frame = 0, spawnTimer = 0, shake = 0;
+  var keys = {};
+  var pointer = { active: false, x: W / 2, y: H / 2 };
+  var ship = { x: W / 2, y: H * 0.55, vx: 0, vy: 0, r: 20, inv: 0, tilt: 0 };
+  var orbs = [], rocks = [], stars = [], particles = [], flames = [];
+  var audioCtx = null, muted = false;
+
+  for (var i = 0; i < 90; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H * 0.75, s: Math.random() * 2 + 0.5, tw: Math.random() * Math.PI * 2 });
+  }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, slide), audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    if (kind === "orb") tone(660, 0.22, "sine", 0.14, 1320);
+    else if (kind === "bonus") { tone(880, 0.18, "triangle", 0.14, 1760); setTimeout(function () { tone(1320, 0.22, "sine", 0.12, 1980); }, 70); }
+    else if (kind === "hit") tone(220, 0.35, "sawtooth", 0.18, 55);
+    else if (kind === "win") { [523, 659, 784, 1047].forEach(function (f, k) { setTimeout(function () { tone(f, 0.3, "triangle", 0.14); }, k * 130); }); }
+    else if (kind === "lose") { [330, 262, 196, 131].forEach(function (f, k) { setTimeout(function () { tone(f, 0.3, "sawtooth", 0.12); }, k * 140); }); }
+  }
+
+  function resetGame() {
+    score = 0; lives = 3; frame = 0; spawnTimer = 0; shake = 0;
+    orbs = []; rocks = []; particles = []; flames = [];
+    ship.x = W / 2; ship.y = H * 0.55; ship.vx = 0; ship.vy = 0; ship.inv = 0; ship.tilt = 0;
+    pointer.active = false; pointer.x = ship.x; pointer.y = ship.y;
+    updateHUD("Diving!");
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    if (status) statusEl.textContent = status;
+    barEl.style.width = Math.min(100, Math.round(score / WIN_SCORE * 100)) + "%";
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 7, vy: (Math.random() - 0.5) * 7, life: 26 + Math.random() * 14, color: color });
+    }
+  }
+  function spawnOrb() {
+    var nearSun = Math.random() < 0.35;
+    orbs.push({
+      x: 30 + Math.random() * (W - 60),
+      y: nearSun ? H - 130 - Math.random() * 90 : 60 + Math.random() * (H * 0.55),
+      r: 13, vy: -(0.4 + Math.random() * 0.8), pulse: Math.random() * Math.PI * 2,
+      bonus: nearSun
+    });
+  }
+  function spawnRock() {
+    var speed = 1.4 + Math.min(2.2, frame / 3600) + Math.random() * 1.2;
+    rocks.push({
+      x: 30 + Math.random() * (W - 60), y: -40,
+      r: 18 + Math.random() * 18, vy: speed, vx: (Math.random() - 0.5) * 1.4,
+      rot: Math.random() * Math.PI * 2, vr: (Math.random() - 0.5) * 0.06
+    });
+  }
+  function endGame(won) {
+    state = won ? "won" : "over";
+    endTitle.textContent = won ? "YOU WIN!" : "GAME OVER";
+    endEmoji.innerHTML = won ? "&#127775;" : "&#128293;";
+    endScore.textContent = "Final Score: " + score + "  |  Lives left: " + lives;
+    endText.textContent = won
+      ? "You collected enough solar fire to power a whole world. Brilliant flying!"
+      : "The asteroids got you this time. The sun is still waiting — dive again!";
+    endScreen.classList.remove("hidden");
+    updateHUD(won ? "Victory!" : "Game Over");
+    sfx(won ? "win" : "lose");
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    state = "playing";
+    tone(440, 0.2, "triangle", 0.12, 880);
+  }
+
+  // --- Input: keyboard, mouse, touch ---
+  document.addEventListener("keydown", function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].indexOf(e.key.toLowerCase()) >= 0) e.preventDefault();
+    if (state === "title" && (e.key === "Enter" || e.key === " ")) startGame();
+    if ((state === "won" || state === "over") && e.key === "Enter") startGame();
+  });
+  document.addEventListener("keyup", function (e) { keys[e.key.toLowerCase()] = false; });
+  canvas.addEventListener("mousemove", function (e) {
+    var r = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - r.left) * (W / r.width);
+    pointer.y = (e.clientY - r.top) * (H / r.height);
+    pointer.active = true;
+  });
+  canvas.addEventListener("mousedown", function (e) {
+    var r = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - r.left) * (W / r.width);
+    pointer.y = (e.clientY - r.top) * (H / r.height);
+    pointer.active = true;
+  });
+  canvas.addEventListener("mouseup", function () { pointer.active = false; });
+  canvas.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    var t = e.touches[0], r = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - r.left) * (W / r.width);
+    pointer.y = (t.clientY - r.top) * (H / r.height);
+    pointer.active = true;
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) {
+    e.preventDefault();
+    var t = e.touches[0], r = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - r.left) * (W / r.width);
+    pointer.y = (t.clientY - r.top) * (H / r.height);
+    pointer.active = true;
+  }, { passive: false });
+  canvas.addEventListener("touchend", function (e) { e.preventDefault(); pointer.active = false; }, { passive: false });
+  startBtn.addEventListener("click", startGame);
+  restartBtn.addEventListener("click", startGame);
+  menuBtn.addEventListener("click", function () {
+    state = "title"; endScreen.classList.add("hidden"); titleScreen.classList.remove("hidden"); updateHUD("Ready");
+  });
+
+  function update() {
+    frame++;
+    if (state !== "playing") return;
+    var speed = 5.2;
+    var ax = 0, ay = 0;
+    if (keys["arrowleft"] || keys["a"]) ax -= 1;
+    if (keys["arrowright"] || keys["d"]) ax += 1;
+    if (keys["arrowup"] || keys["w"]) ay -= 1;
+    if (keys["arrowdown"] || keys["s"]) ay += 1;
+    if (pointer.active) {
+      var dx = pointer.x - ship.x, dy = pointer.y - ship.y, d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 8) { ship.vx += dx / d * 0.9; ship.vy += dy / d * 0.9; }
+    } else {
+      ship.vx += ax * 0.9; ship.vy += ay * 0.9;
+    }
+    ship.vx *= 0.88; ship.vy *= 0.88;
+    ship.x += ship.vx; ship.y += ship.vy;
+    ship.x = Math.max(24, Math.min(W - 24, ship.x));
+    ship.y = Math.max(60, Math.min(H - 90, ship.y));
+    ship.tilt = Math.max(-0.5, Math.min(0.5, ship.vx * 0.08));
+    if (ship.inv > 0) ship.inv--;
+    if (frame % 3 === 0) flames.push({ x: ship.x + (Math.random() - 0.5) * 8, y: ship.y + 22, vy: 3 + Math.random() * 2, life: 14 });
+
+    spawnTimer++;
+    var interval = Math.max(26, 62 - Math.floor(frame / 600) * 6);
+    if (spawnTimer % interval === 0) spawnOrb();
+    if (spawnTimer % Math.max(34, 78 - Math.floor(frame / 900) * 7) === 0) spawnRock();
+
+    for (var i = orbs.length - 1; i >= 0; i--) {
+      var o = orbs[i]; o.y += o.vy; o.pulse += 0.12;
+      var odx = o.x - ship.x, ody = o.y - ship.y;
+      if (Math.sqrt(odx * odx + ody * ody) < o.r + ship.r) {
+        var pts = o.bonus ? 20 : 10;
+        score += pts;
+        burst(o.x, o.y, o.bonus ? "#ff9d2e" : "#ffd54a", 14);
+        sfx(o.bonus ? "bonus" : "orb");
+        orbs.splice(i, 1);
+        updateHUD(score >= WIN_SCORE ? "Victory!" : "Collected +" + pts);
+        if (score >= WIN_SCORE) { endGame(true); return; }
+      } else if (o.y < -30 || o.y > H) { orbs.splice(i, 1); }
+    }
+    for (var j = rocks.length - 1; j >= 0; j--) {
+      var r = rocks[j]; r.y += r.vy; r.x += r.vx; r.rot += r.vr;
+      if (r.x < 20 || r.x > W - 20) r.vx *= -1;
+      var rdx = r.x - ship.x, rdy = r.y - ship.y;
+      if (ship.inv === 0 && Math.sqrt(rdx * rdx + rdy * rdy) < r.r + ship.r - 4) {
+        lives--; shake = 14; ship.inv = 90;
+        burst(ship.x, ship.y, "#ff5533", 22);
+        sfx("hit");
+        rocks.splice(j, 1);
+        updateHUD(lives > 0 ? "Hit! " + lives + " left" : "Game Over");
+        if (lives <= 0) { endGame(false); return; }
+      } else if (r.y > H + 50) { rocks.splice(j, 1); }
+    }
+    for (var k = particles.length - 1; k >= 0; k--) {
+      var p = particles[k]; p.x += p.vx; p.y += p.vy; p.life--;
+      if (p.life <= 0) particles.splice(k, 1);
+    }
+    for (var m = flames.length - 1; m >= 0; m--) {
+      var f = flames[m]; f.y += f.vy; f.life--;
+      if (f.life <= 0) flames.splice(m, 1);
+    }
+  }
+
+  function drawSun() {
+    var g = ctx.createRadialGradient(W / 2, H + 40, 20, W / 2, H + 40, 300);
+    g.addColorStop(0, "#fff3b0"); g.addColorStop(0.25, "#ffd54a");
+    g.addColorStop(0.55, "#ff8c1a"); g.addColorStop(1, "rgba(255,60,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(W / 2, H + 40, 300, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffd54a";
+    ctx.beginPath(); ctx.arc(W / 2, H + 40, 150, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawShip() {
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(ship.tilt);
+    if (ship.inv > 0 && Math.floor(frame / 5) % 2 === 0) ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "#38e1ff";
+    ctx.beginPath(); ctx.moveTo(0, -26); ctx.lineTo(17, 14); ctx.lineTo(8, 22); ctx.lineTo(-8, 22); ctx.lineTo(-17, 14); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ff5d8f";
+    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(8, 8); ctx.lineTo(-8, 8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(0, -4, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    flames.forEach(function (f) {
+      ctx.globalAlpha = Math.max(0, f.life / 14);
+      ctx.fillStyle = "#ff9d2e";
+      ctx.beginPath(); ctx.arc(f.x, f.y, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var sx = shake > 0 ? (Math.random() - 0.5) * shake : 0;
+    var sy = shake > 0 ? (Math.random() - 0.5) * shake : 0;
+    if (shake > 0) shake--;
+    ctx.save(); ctx.translate(sx, sy);
+    stars.forEach(function (s) {
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(frame * 0.02 + s.tw));
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(s.x, s.y, s.s, s.s);
+    });
+    ctx.globalAlpha = 1;
+    drawSun();
+    orbs.forEach(function (o) {
+      var glow = 20 + Math.sin(o.pulse) * 5;
+      ctx.fillStyle = o.bonus ? "rgba(255,157,46,0.35)" : "rgba(255,213,74,0.3)";
+      ctx.beginPath(); ctx.arc(o.x, o.y, o.r + glow * 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = o.bonus ? "#ff9d2e" : "#ffd54a";
+      ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff8d6";
+      ctx.beginPath(); ctx.arc(o.x - 3, o.y - 3, 5, 0, Math.PI * 2); ctx.fill();
+    });
+    rocks.forEach(function (r) {
+      ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.rot);
+      ctx.fillStyle = "#6b5a73"; ctx.beginPath();
+      for (var a = 0; a < 8; a++) {
+        var ang = a * Math.PI / 4, rr = r.r * (0.85 + (a % 3) * 0.1);
+        var px = Math.cos(ang) * rr, py = Math.sin(ang) * rr;
+        if (a === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#9a86a3"; ctx.beginPath(); ctx.arc(-r.r * 0.3, -r.r * 0.2, r.r * 0.25, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    });
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 30);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    if (state !== "title") drawShip();
+    ctx.restore();
+    if (state === "title") {
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.font = "bold 18px Arial"; ctx.textAlign = "center";
+      ctx.fillText("Press START to begin your dive", W / 2, H - 30);
+    }
+  }
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+  updateHUD("Ready");
+  loop();
+})();
+</script>
+</body>
+</html>

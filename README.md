@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 320
-- **Latest game:** 0320 — Fossil Finder
+- **Total games:** 330
+- **Latest game:** 0330 — Lantern Logic
 - **Current volume:** 004 (Games 0301 to 0400)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -16,7 +16,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
-| 004 | 0301–0400 (20 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
+| 004 | 0301–0400 (30 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -30,20 +30,21 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 032
+## Latest batch — Batch 033
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0311 | Ember Escape | Arcade / Flame Runner | [Play](./games/game-0311.html) |
-| 0312 | Mirror Maze | Puzzle / Laser Reflection | [Play](./games/game-0312.html) |
-| 0313 | Sandstone Sovereign | Strategy / Desert Kingdom | [Play](./games/game-0313.html) |
-| 0314 | Drum Grove | Rhythm / Percussion Garden | [Play](./games/game-0314.html) |
-| 0315 | Anchor Ace | Precision / Docking Timing | [Play](./games/game-0315.html) |
-| 0316 | Rune Riddle | Puzzle / Rune Decoding | [Play](./games/game-0316.html) |
-| 0317 | Lighthouse Keeper | Strategy / Coastal Management | [Play](./games/game-0317.html) |
-| 0318 | Starlight Skater | Arcade / Cosmic Skating | [Play](./games/game-0318.html) |
-| 0319 | Pendulum Pilot | Precision / Swing Physics | [Play](./games/game-0319.html) |
-| 0320 | Fossil Finder | Puzzle / Archaeology Dig | [Play](./games/game-0320.html) |
+| 0321 | Solar Swooper | Arcade / Sun-Diving Collector | [Play](./games/game-0321.html) |
+| 0322 | Prism Pipes | Puzzle / Light-Routing | [Play](./games/game-0322.html) |
+| 0323 | Vineyard Baron | Strategy / Vineyard Management | [Play](./games/game-0323.html) |
+| 0324 | Beat Blacksmith | Rhythm / Hammer Beat | [Play](./games/game-0324.html) |
+| 0325 | Geyser Glider | Arcade / Geyser Gliding | [Play](./games/game-0325.html) |
+| 0326 | Cipher Canyon | Puzzle / Symbol Cipher | [Play](./games/game-0326.html) |
+| 0327 | Aurora Outpost | Strategy / Arctic Station | [Play](./games/game-0327.html) |
+| 0328 | Tempo Tailor | Rhythm / Sewing Beat | [Play](./games/game-0328.html) |
+| 0329 | Cinder Climber | Arcade / Volcano Climbing | [Play](./games/game-0329.html) |
+| 0330 | Lantern Logic | Puzzle / Lantern Grid | [Play](./games/game-0330.html) |
+
 
 ## Quality standard
 
