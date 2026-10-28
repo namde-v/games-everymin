@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mirror Maze</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1026; color: #eef2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 12px; }
+  h1 { font-size: 28px; letter-spacing: 1px; margin: 6px 0 2px; text-align: center; }
+  .sub { color: #9fb0ff; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px; width: 100%; max-width: 560px; }
+  .pill { background: #1b2350; border: 1px solid #3b4a9e; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 700; }
+  .pill.warn { background: #4a2418; border-color: #e07a3f; color: #ffd9b8; }
+  #wrap { position: relative; width: min(92vw, 520px); }
+  canvas { display: block; width: 100%; height: auto; background: #10163a; border: 2px solid #4a5bd6; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(6,10,30,.92); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { font-size: 14px; line-height: 1.55; color: #cbd5ff; max-width: 420px; }
+  .big { font-size: 18px; color: #ffe066; font-weight: 800; }
+  button { background: #ffd166; color: #1a1200; border: 0; border-radius: 10px; padding: 12px 22px; font-size: 16px; font-weight: 800; cursor: pointer; }
+  button:active { transform: scale(.97); }
+  button.secondary { background: #2d3a8a; color: #fff; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+  #msg { min-height: 22px; font-size: 14px; color: #ffe066; text-align: center; margin-top: 8px; font-weight: 700; }
+  .keys { font-size: 12px; color: #aab6ff; line-height: 1.6; text-align: center; margin-top: 10px; max-width: 560px; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; font-size: 12px; color: #cbd5ff; margin-top: 6px; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+</style>
+</head>
+<body>
+<h1>🪞 Mirror Maze</h1>
+<div class="sub">Bend the beam. Light every crystal. Reach the target.</div>
+<div id="hud">
+  <span class="pill">Score: <span id="score">0</span></span>
+  <span class="pill">Lives: <span id="lives">3</span></span>
+  <span class="pill" id="movesPill">Moves left: <span id="moves">24</span></span>
+  <span class="pill">Level: <span id="level">1</span> / 3</span>
+  <span class="pill">Crystals: <span id="crystals">0 / 3</span></span>
+  <span class="pill">Status: <span id="status">Ready</span></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="520" height="520"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>🪞 Mirror Maze</h2>
+    <p><strong>How to Play:</strong> A light beam leaves the yellow source. Rotate the mirrors so the beam reaches the green target. Light all 3 crystals for a big bonus. You have limited moves — every rotation costs one move.</p>
+    <p>Arrow Keys move the selection cursor &bull; Space or R rotates the selected mirror &bull; Click or tap a mirror to select it, tap again to rotate it.</p>
+    <p>Complete all 3 levels to win. Running out of moves costs a life and resets the level.</p>
+    <button id="startBtn">▶ Start Game</button>
+    <button class="secondary" id="howBtn">How to Play</button>
+    <p id="howText" style="display:none">Mirrors: <b>/</b> and <b>\</b> reflect the beam 90&deg;. Walls block it. Crystals glow when lit. Watch the beam path — it updates live as you rotate!</p>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p class="big" id="endScore"></p>
+    <div class="row">
+      <button id="restartBtn">↻ Restart</button>
+      <button class="secondary" id="playAgainBtn">Play Again</button>
+    </div>
+  </div>
+</div>
+<div id="msg">Press Start, then rotate mirrors to guide the beam!</div>
+<div class="legend">
+  <span><span class="sw" style="background:#ffd166"></span>Source</span>
+  <span><span class="sw" style="background:#22c55e"></span>Target</span>
+  <span><span class="sw" style="background:#67e8f9"></span>Crystal</span>
+  <span><span class="sw" style="background:#94a3b8"></span>Wall</span>
+  <span><span class="sw" style="background:#f472b6"></span>Beam</span>
+</div>
+<div class="keys">Keyboard: Arrows select &bull; Space / R rotate &bull; Enter start/restart &bull; Mouse: click to select, click again to rotate &bull; Touch: tap to select, tap again to rotate</div>
+<script>
+(function(){
+  "use strict";
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var GRID = 8, CELL = 65;
+  var levels = [
+    { source:{x:0,y:3,dx:1,dy:0}, target:{x:7,y:3},
+      walls:[{x:3,y:1},{x:3,y:5},{x:5,y:6}],
+      crystals:[{x:4,y:1},{x:2,y:5},{x:6,y:2}],
+      mirrors:[{x:2,y:3,o:0},{x:2,y:1,o:1},{x:4,y:1,o:0},{x:4,y:5,o:1},{x:6,y:5,o:0},{x:6,y:2,o:1},{x:6,y:3,o:0}],
+      moves:24 },
+    { source:{x:0,y:0,dx:1,dy:0}, target:{x:7,y:7},
+      walls:[{x:2,y:2},{x:5,y:3},{x:3,y:6}],
+      crystals:[{x:5,y:0},{x:1,y:6},{x:7,y:3}],
+      mirrors:[{x:1,y:0,o:1},{x:1,y:3,o:0},{x:3,y:3,o:1},{x:5,y:3,o:0},{x:5,y:6,o:1},{x:7,y:6,o:0},{x:3,y:6,o:1}],
+      moves:26 },
+    { source:{x:7,y:0,dx:0,dy:1}, target:{x:0,y:7},
+      walls:[{x:4,y:2},{x:2,y:4},{x:5,y:5}],
+      crystals:[{x:2,y:0},{x:7,y:4},{x:0,y:2}],
+      mirrors:[{x:7,y:2,o:0},{x:4,y:2,o:1},{x:4,y:4,o:0},{x:2,y:4,o:1},{x:2,y:7,o:0},{x:0,y:7,o:1},{x:5,y:2,o:0}],
+      moves:28 }
+  ];
+  var state = { playing:false, over:false, level:0, score:0, lives:3, moves:24, sel:{x:1,y:1}, mirrors:[], litCrystals:{}, beam:[], reached:false, flash:0 };
+  var audioCtx = null;
+  function audio(){ if(!audioCtx){ try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); } return audioCtx; }
+  function beep(freq, dur, type){ var ac=audio(); if(!ac) return; try{ var o=ac.createOscillator(), g=ac.createGain(); o.type=type||'sine'; o.frequency.value=freq; g.gain.setValueAtTime(0.12, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur); o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+dur); }catch(e){} }
+  function setHUD(){
+    document.getElementById('score').textContent = state.score;
+    document.getElementById('lives').textContent = state.lives;
+    document.getElementById('moves').textContent = state.moves;
+    document.getElementById('level').textContent = (state.level+1);
+    var lit = Object.keys(state.litCrystals).length;
+    document.getElementById('crystals').textContent = lit + ' / 3';
+    document.getElementById('movesPill').className = 'pill' + (state.moves<=5 ? ' warn' : '');
+  }
+  function setStatus(t){ document.getElementById('status').textContent = t; }
+  function msg(t){ document.getElementById('msg').textContent = t; }
+  function loadLevel(idx){
+    var L = levels[idx];
+    state.level = idx; state.moves = L.moves; state.sel = {x:1,y:1};
+    state.mirrors = L.mirrors.map(function(m){ return {x:m.x,y:m.y,o:m.o}; });
+    state.litCrystals = {}; state.reached = false; state.flash = 0;
+    traceBeam(); setHUD(); setStatus('Level ' + (idx+1));
+    msg('Level ' + (idx+1) + ': rotate mirrors to reach the green target!');
+  }
+  function mirrorAt(x,y){ for(var i=0;i<state.mirrors.length;i++){ if(state.mirrors[i].x===x && state.mirrors[i].y===y) return state.mirrors[i]; } return null; }
+  function wallAt(x,y){ var L=levels[state.level]; for(var i=0;i<L.walls.length;i++){ if(L.walls[i].x===x && L.walls[i].y===y) return true; } return false; }
+  function traceBeam(){
+    var L = levels[state.level];
+    var path = []; var lit = {};
+    var x=L.source.x, y=L.source.y, dx=L.source.dx, dy=L.source.dy;
+    path.push({x:x,y:y});
+    var guard=0;
+    while(guard++ < 200){
+      var nx=x+dx, ny=y+dy;
+      if(nx<0||ny<0||nx>=GRID||ny>=GRID) break;
+      x=nx; y=ny; path.push({x:x,y:y});
+      for(var c=0;c<L.crystals.length;c++){ if(L.crystals[c].x===x && L.crystals[c].y===y) lit[x+','+y]=true; }
+      if(x===L.target.x && y===L.target.y) break;
+      if(wallAt(x,y)) break;
+      var m = mirrorAt(x,y);
+      if(m){
+        if(m.o===0){ // slash /
+          var t=dx; dx=-dy; dy=-t;
+        } else { // backslash
+          var t2=dx; dx=dy; dy=t2;
+        }
+      }
+    }
+    state.beam = path; state.litCrystals = lit;
+    state.reached = (x===L.target.x && y===L.target.y);
+    var litCount = Object.keys(lit).length;
+    if(state.reached && litCount===3) setStatus('Target reached — all crystals!');
+    else if(state.reached) setStatus('Target reached!');
+    else setStatus('Beam in progress');
+  }
+  function rotateSelected(){
+    if(!state.playing || state.over) return;
+    var m = mirrorAt(state.sel.x, state.sel.y);
+    if(!m){ msg('No mirror here — select a mirror cell.'); beep(160,0.12,'square'); return; }
+    m.o = 1 - m.o;
+    state.moves--; state.score += 5;
+    beep(520,0.1,'triangle'); state.flash = 6;
+    traceBeam(); setHUD();
+    var litCount = Object.keys(state.litCrystals).length;
+    if(litCount>0) state.score += 0; // score bonus applied on win
+    if(state.reached){
+      var bonus = 100 + litCount*50 + state.moves*10;
+      state.score += bonus;
+      beep(880,0.25,'sine'); setTimeout(function(){ beep(1100,0.3,'sine'); },120);
+      msg('Beam reached the target! Bonus +' + bonus);
+      setHUD();
+      if(state.level >= levels.length-1){ winGame(); }
+      else { setTimeout(function(){ loadLevel(state.level+1); }, 900); }
+      return;
+    }
+    if(state.moves<=0){
+      state.lives--; beep(140,0.3,'sawtooth'); setHUD();
+      if(state.lives<=0){ gameOver(); }
+      else { msg('Out of moves! A life is lost — level resets.'); setTimeout(function(){ loadLevel(state.level); }, 900); }
+    }
+  }
+  function winGame(){
+    state.playing=false; state.over=true;
+    document.getElementById('endTitle').textContent = '🏆 You Win!';
+    document.getElementById('endText').textContent = 'You guided the beam through all 3 mirror mazes and lit the crystals. Brilliant reflecting!';
+    document.getElementById('endScore').textContent = 'Final Score: ' + state.score;
+    document.getElementById('endScreen').classList.remove('hidden');
+    beep(660,0.2,'sine'); setTimeout(function(){ beep(880,0.2,'sine'); },150); setTimeout(function(){ beep(1100,0.35,'sine'); },300);
+  }
+  function gameOver(){
+    state.playing=false; state.over=true;
+    document.getElementById('endTitle').textContent = 'Game Over';
+    document.getElementById('endText').textContent = 'Out of lives! The beam faded. Try again — the mirrors are waiting.';
+    document.getElementById('endScore').textContent = 'Final Score: ' + state.score;
+    document.getElementById('endScreen').classList.remove('hidden');
+  }
+  function startGame(){
+    audio();
+    state.score=0; state.lives=3; state.over=false; state.playing=true;
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    loadLevel(0); beep(440,0.15,'triangle');
+    msg('Rotate mirrors to guide the beam to the green target!');
+  }
+  function draw(){
+    ctx.clearRect(0,0,520,520);
+    ctx.fillStyle='#10163a'; ctx.fillRect(0,0,520,520);
+    var L = levels[state.level];
+    // grid
+    ctx.strokeStyle='rgba(120,140,255,0.18)'; ctx.lineWidth=1;
+    for(var i=0;i<=GRID;i++){ ctx.beginPath(); ctx.moveTo(i*CELL,0); ctx.lineTo(i*CELL,520); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,i*CELL); ctx.lineTo(520,i*CELL); ctx.stroke(); }
+    // selection
+    if(state.playing && !state.over){
+      ctx.strokeStyle='#ffe066'; ctx.lineWidth=3;
+      ctx.strokeRect(state.sel.x*CELL+3, state.sel.y*CELL+3, CELL-6, CELL-6);
+    }
+    // walls
+    L.walls.forEach(function(w){ ctx.fillStyle='#64748b'; ctx.fillRect(w.x*CELL+4, w.y*CELL+4, CELL-8, CELL-8); ctx.fillStyle='#334155'; ctx.fillRect(w.x*CELL+12, w.y*CELL+12, CELL-24, CELL-24); });
+    // crystals
+    L.crystals.forEach(function(c){
+      var lit = !!state.litCrystals[c.x+','+c.y];
+      var cx=c.x*CELL+CELL/2, cy=c.y*CELL+CELL/2;
+      ctx.fillStyle = lit ? '#67e8f9' : '#155e75';
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(Math.PI/4); ctx.fillRect(-13,-13,26,26); ctx.restore();
+      ctx.fillStyle = lit ? '#ffffff' : '#67e8f9'; ctx.beginPath(); ctx.arc(cx,cy,6,0,Math.PI*2); ctx.fill();
+    });
+    // mirrors
+    state.mirrors.forEach(function(m){
+      var cx=m.x*CELL+CELL/2, cy=m.y*CELL+CELL/2;
+      ctx.fillStyle='#1e293b'; ctx.beginPath(); ctx.arc(cx,cy,26,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#e2e8f0'; ctx.lineWidth=5; ctx.lineCap='round'; ctx.beginPath();
+      if(m.o===0){ ctx.moveTo(cx-18,cy+18); ctx.lineTo(cx+18,cy-18); } else { ctx.moveTo(cx-18,cy-18); ctx.lineTo(cx+18,cy+18); }
+      ctx.stroke();
+    });
+    // beam
+    if(state.beam.length>1){
+      ctx.strokeStyle = state.reached ? '#4ade80' : '#f472b6'; ctx.lineWidth=5; ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 12;
+      ctx.beginPath();
+      state.beam.forEach(function(p,i){ var px=p.x*CELL+CELL/2, py=p.y*CELL+CELL/2; if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py); });
+      ctx.stroke(); ctx.shadowBlur=0;
+    }
+    // source + target
+    var sx=L.source.x*CELL+CELL/2, sy=L.source.y*CELL+CELL/2;
+    ctx.fillStyle='#ffd166'; ctx.beginPath(); ctx.arc(sx,sy,18,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#1a1200'; ctx.font='bold 20px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('◉', sx, sy);
+    var tx=L.target.x*CELL+CELL/2, ty=L.target.y*CELL+CELL/2;
+    ctx.fillStyle = state.reached ? '#4ade80' : '#22c55e'; ctx.beginPath(); ctx.arc(tx,ty,20,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#052e16'; ctx.fillText('◎', tx, ty);
+    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    if(state.flash>0){ state.flash--; ctx.fillStyle='rgba(255,224,102,0.08)'; ctx.fillRect(0,0,520,520); }
+    requestAnimationFrame(draw);
+  }
+  function cellFromEvent(e){
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX!==undefined?e.clientX:(e.touches&&e.touches[0]?e.touches[0].clientX:0));
+    var cy = (e.clientY!==undefined?e.clientY:(e.touches&&e.touches[0]?e.touches[0].clientY:0));
+    var x = Math.floor((cx-r.left)/r.width*GRID), y = Math.floor((cy-r.top)/r.height*GRID);
+    return {x:Math.max(0,Math.min(GRID-1,x)), y:Math.max(0,Math.min(GRID-1,y))};
+  }
+  canvas.addEventListener('click', function(e){ audio(); if(!state.playing) return; var c=cellFromEvent(e); if(c.x===state.sel.x && c.y===state.sel.y){ rotateSelected(); } else { state.sel=c; beep(300,0.06,'triangle'); } });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); audio(); if(!state.playing) return; var c=cellFromEvent(e); if(c.x===state.sel.x && c.y===state.sel.y){ rotateSelected(); } else { state.sel=c; beep(300,0.06,'triangle'); } }, {passive:false});
+  canvas.addEventListener('mousemove', function(e){ if(!state.playing) return; var c=cellFromEvent(e); state.hover=c; });
+  document.addEventListener('keydown', function(e){
+    if(e.key==='Enter' && (!state.playing || state.over)){ startGame(); return; }
+    if(!state.playing || state.over) return;
+    if(e.key==='ArrowUp'){ state.sel.y=Math.max(0,state.sel.y-1); e.preventDefault(); beep(300,0.05,'triangle'); }
+    else if(e.key==='ArrowDown'){ state.sel.y=Math.min(GRID-1,state.sel.y+1); e.preventDefault(); beep(300,0.05,'triangle'); }
+    else if(e.key==='ArrowLeft'){ state.sel.x=Math.max(0,state.sel.x-1); e.preventDefault(); beep(300,0.05,'triangle'); }
+    else if(e.key==='ArrowRight'){ state.sel.x=Math.min(GRID-1,state.sel.x+1); e.preventDefault(); beep(300,0.05,'triangle'); }
+    else if(e.key===' ' || e.key==='r' || e.key==='R'){ e.preventDefault(); rotateSelected(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function(){ var t=document.getElementById('howText'); t.style.display = t.style.display==='none' ? 'block' : 'none'; });
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('playAgainBtn').addEventListener('click', startGame);
+  loadLevel(0); state.playing=false; setHUD();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

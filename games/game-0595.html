@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Meteor Miner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #070b1e; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #eef2ff; }
+  #wrap { position: relative; width: 100vw; height: 100dvh; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 50% 20%, #16224d 0%, #070b1e 55%, #03040c 100%); }
+  canvas { display: block; background: #0a1028; border: 2px solid #334155; border-radius: 12px; max-width: 96vw; max-height: 92dvh; touch-action: none; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; pointer-events: none; z-index: 5; }
+  .pill { background: rgba(2,6,23,.82); border: 1px solid #475569; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 700; letter-spacing: .02em; }
+  .pill b { color: #facc15; }
+  #panel { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  .card { background: rgba(2,6,23,.93); border: 1px solid #64748b; border-radius: 16px; padding: 24px 22px; max-width: 520px; width: 100%; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.7); }
+  .card h1 { font-size: 34px; margin-bottom: 6px; color: #fde68a; letter-spacing: .02em; }
+  .card h2 { font-size: 28px; margin-bottom: 8px; }
+  .card p { color: #cbd5e1; line-height: 1.55; margin: 8px 0; font-size: 15px; }
+  .card .big { font-size: 18px; color: #fff; }
+  button { cursor: pointer; border: 0; border-radius: 999px; padding: 13px 26px; font-size: 17px; font-weight: 800; background: #f59e0b; color: #111827; margin-top: 14px; }
+  button:hover, button:focus-visible { background: #fbbf24; outline: 3px solid #fff; outline-offset: 2px; }
+  button.secondary { background: #334155; color: #fff; margin-left: 8px; }
+  kbd { background: #1e293b; border: 1px solid #64748b; border-bottom-width: 3px; border-radius: 6px; padding: 1px 6px; font-family: inherit; font-weight: 700; }
+  .aimbar { height: 12px; background: #1e293b; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+  .aimbar i { display: block; height: 100%; background: linear-gradient(90deg,#22c55e,#facc15,#ef4444); width: 55%; }
+  #hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 13px; color: #94a3b8; text-align: center; z-index: 5; pointer-events: none; padding: 0 12px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="600" aria-label="Meteor Miner game canvas"></canvas>
+  <div id="hud" aria-live="polite">
+    <span class="pill">Score: <b id="score">0</b></span>
+    <span class="pill">Cores: <b id="cores">0</b> / 8</span>
+    <span class="pill">Shots left: <b id="shots">18</b></span>
+    <span class="pill">Status: <b id="status">Aim!</b></span>
+  </div>
+  <div id="panel">
+    <div class="card" id="card">
+      <h1>☄️ Meteor Miner</h1>
+      <p class="big">Aim the mining cannon. Crack asteroids. Grab 8 glowing ore cores.</p>
+      <p><strong>How to Play</strong><br>
+      <kbd>←</kbd> <kbd>→</kbd> aim angle &nbsp; <kbd>↑</kbd> <kbd>↓</kbd> power &nbsp; <kbd>Space</kbd> fire<br>
+      Or drag with mouse / touch from the cannon and release to fire.<br>
+      Shots bounce off the side and top walls. Hit an asteroid twice to crack it open, then fly through a core to collect it. You have 18 shots — make them count!</p>
+      <div style="text-align:left"><small>Angle &amp; Power</small><div class="aimbar"><i></i></div></div>
+      <button id="startBtn" type="button">▶ Start Mining</button>
+      <button id="howBtn" type="button" class="secondary">How to Play</button>
+      <p id="howExtra" class="hidden">Tip: a gentle low-power shot can bounce into a far asteroid. Watch drifting rocks — they move! A core is worth 100 points, cracking a rock is worth 25, and a bounce shot bonus adds 15. Collect 8 cores to win before your shots run out.</p>
+    </div>
+  </div>
+  <div id="hint">Arrow keys aim &amp; set power • Space fires • Drag from cannon &amp; release to fire • Touch supported</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var panel = document.getElementById('panel');
+  var card = document.getElementById('card');
+  var startBtn = document.getElementById('startBtn');
+  var howBtn = document.getElementById('howBtn');
+  var howExtra = document.getElementById('howExtra');
+  var scoreEl = document.getElementById('score');
+  var coresEl = document.getElementById('cores');
+  var shotsEl = document.getElementById('shots');
+  var statusEl = document.getElementById('status');
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, cores = 0, shots = 18;
+  var angle = -Math.PI / 2; // straight up
+  var power = 11;
+  var cannon = { x: W / 2, y: H - 34 };
+  var bullets = [];
+  var rocks = [];
+  var coreItems = [];
+  var particles = [];
+  var stars = [];
+  var dragging = false;
+  var dragPos = null;
+  var audioCtx = null;
+  var rafId = 0;
+  var lastTime = 0;
+  var shake = 0;
+
+  for (var i = 0; i < 90; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.8 + 0.4, tw: Math.random() * Math.PI * 2 });
+  }
+
+  function ensureAudio() {
+    try {
+      if (!audioCtx) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { /* audio is optional */ }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, slide), audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur + 0.02);
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (name === 'fire') tone(220, 0.18, 'square', 0.10, 90);
+    else if (name === 'hit') tone(160, 0.12, 'sawtooth', 0.12, 70);
+    else if (name === 'crack') { tone(320, 0.25, 'triangle', 0.16, 60); tone(90, 0.3, 'sawtooth', 0.10, 45); }
+    else if (name === 'core') { tone(660, 0.14, 'sine', 0.14); setTimeout(function(){ tone(880, 0.18, 'sine', 0.14); }, 90); }
+    else if (name === 'bounce') tone(440, 0.08, 'sine', 0.07, 520);
+    else if (name === 'win') { [523,659,784,1046].forEach(function(f, k){ setTimeout(function(){ tone(f, 0.25, 'triangle', 0.14); }, k * 130); }); }
+    else if (name === 'lose') { [330,262,196,131].forEach(function(f, k){ setTimeout(function(){ tone(f, 0.25, 'sawtooth', 0.09); }, k * 140); }); }
+  }
+
+  function spawnRocks() {
+    rocks = [];
+    var spots = [
+      { x: 140, y: 110 }, { x: 320, y: 80 }, { x: 520, y: 120 }, { x: 720, y: 90 },
+      { x: 220, y: 230 }, { x: 430, y: 200 }, { x: 650, y: 240 }, { x: 110, y: 330 },
+      { x: 330, y: 340 }, { x: 560, y: 330 }, { x: 780, y: 320 }, { x: 460, y: 150 }
+    ];
+    spots.forEach(function (s, idx) {
+      rocks.push({
+        x: s.x, y: s.y, r: 30 + (idx % 3) * 6,
+        vx: (Math.random() < 0.5 ? -1 : 1) * (0.25 + Math.random() * 0.55),
+        vy: (Math.random() - 0.5) * 0.35,
+        hp: 2, rot: Math.random() * Math.PI * 2, vr: (Math.random() - 0.5) * 0.02,
+        seed: idx * 1.7 + 0.6
+      });
+    });
+  }
+  function resetGame() {
+    score = 0; cores = 0; shots = 18;
+    angle = -Math.PI / 2; power = 11;
+    bullets = []; coreItems = []; particles = [];
+    spawnRocks();
+    updateHud('Aim!');
+  }
+  function updateHud(status) {
+    scoreEl.textContent = score;
+    coresEl.textContent = cores;
+    shotsEl.textContent = shots;
+    if (status) statusEl.textContent = status;
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) {
+      var a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 3;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 26 + Math.random() * 18, color: color });
+    }
+  }
+  function fire() {
+    if (state !== 'playing') return;
+    if (shots <= 0) { endGame(false); return; }
+    shots--;
+    bullets.push({
+      x: cannon.x + Math.cos(angle) * 30, y: cannon.y + Math.sin(angle) * 30,
+      vx: Math.cos(angle) * power, vy: Math.sin(angle) * power,
+      bounces: 0, life: 600
+    });
+    sfx('fire');
+    updateHud(shots === 0 ? 'Last shot!' : 'Fired!');
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    if (won) sfx('win'); else sfx('lose');
+    panel.classList.remove('hidden');
+    var title = won ? '🏆 You Win!' : '💥 Out of Shots';
+    var msg = won
+      ? 'You collected all 8 ore cores with ' + shots + ' shot(s) to spare. Final score: ' + score + '.'
+      : 'The asteroids drift on without you. You collected ' + cores + ' of 8 cores. Final score: ' + score + '.';
+    card.innerHTML = '<h2>' + title + '</h2><p class="big">' + msg + '</p>' +
+      '<p>Press Restart to mine again — new asteroid drift, same 18 shots.</p>' +
+      '<button id="restartBtn" type="button">↻ Restart</button>';
+    document.getElementById('restartBtn').addEventListener('click', function () {
+      ensureAudio(); startGame();
+    });
+    updateHud(won ? 'You Win!' : 'Game Over');
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    panel.classList.add('hidden');
+    updateHud('Aim!');
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var clientX = evt.clientX, clientY = evt.clientY;
+    if (evt.touches && evt.touches.length) { clientX = evt.touches[0].clientX; clientY = evt.touches[0].clientY; }
+    return {
+      x: (clientX - rect.left) * (W / rect.width),
+      y: (clientY - rect.top) * (H / rect.height)
+    };
+  }
+  function aimFromPoint(p) {
+    var dx = p.x - cannon.x, dy = p.y - cannon.y;
+    if (Math.sqrt(dx * dx + dy * dy) < 12) return;
+    angle = Math.atan2(dy, dx);
+    // Keep the cannon aiming upward-ish: clamp to upper hemisphere.
+    if (angle > -0.12) angle = -0.12;
+    if (angle < -Math.PI + 0.12) angle = -Math.PI + 0.12;
+    var dist = Math.min(240, Math.sqrt(dx * dx + dy * dy));
+    power = 6 + (dist / 240) * 10;
+  }
+
+  startBtn.addEventListener('click', startGame);
+  howBtn.addEventListener('click', function () {
+    howExtra.classList.toggle('hidden');
+    howBtn.textContent = howExtra.classList.contains('hidden') ? 'How to Play' : 'Hide Tips';
+  });
+  document.addEventListener('keydown', function (e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startGame(); return; }
+    if (state !== 'playing') {
+      if ((state === 'won' || state === 'over') && (e.key === 'Enter' || e.key === 'r' || e.key === 'R')) startGame();
+      return;
+    }
+    ensureAudio();
+    if (e.key === 'ArrowLeft') { angle = Math.max(-Math.PI + 0.12, angle - 0.07); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { angle = Math.min(-0.12, angle + 0.07); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { power = Math.min(16, power + 0.7); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { power = Math.max(6, power - 0.7); e.preventDefault(); }
+    else if (e.key === ' ') { e.preventDefault(); fire(); }
+    updateHud('Angle ' + Math.round((angle + Math.PI / 2) * 57.3) + '° • Power ' + Math.round(power));
+  });
+  canvas.addEventListener('mousedown', function (e) { ensureAudio(); dragging = true; dragPos = canvasPos(e); aimFromPoint(dragPos); });
+  canvas.addEventListener('mousemove', function (e) { if (dragging) { dragPos = canvasPos(e); aimFromPoint(dragPos); } });
+  canvas.addEventListener('mouseup', function (e) { if (dragging) { dragging = false; aimFromPoint(canvasPos(e)); fire(); } });
+  canvas.addEventListener('mouseleave', function () { dragging = false; });
+  canvas.addEventListener('touchstart', function (e) { ensureAudio(); e.preventDefault(); dragging = true; dragPos = canvasPos(e); aimFromPoint(dragPos); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { if (dragging) { e.preventDefault(); dragPos = canvasPos(e); aimFromPoint(dragPos); } }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { if (dragging) { e.preventDefault(); dragging = false; fire(); } }, { passive: false });
+  canvas.addEventListener('click', function () { ensureAudio(); });
+
+  function drawRock(r) {
+    ctx.save();
+    ctx.translate(r.x, r.y); ctx.rotate(r.rot);
+    ctx.fillStyle = r.hp === 2 ? '#64748b' : '#94a3b8';
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var k = 0; k < 9; k++) {
+      var a = (k / 9) * Math.PI * 2;
+      var rad = r.r * (0.82 + 0.18 * Math.sin(r.seed + k * 2.1));
+      if (k === 0) ctx.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
+      else ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    if (r.hp === 1) {
+      ctx.strokeStyle = '#facc15'; ctx.beginPath();
+      ctx.moveTo(-r.r * 0.6, -r.r * 0.2); ctx.lineTo(r.r * 0.2, r.r * 0.4); ctx.lineTo(r.r * 0.7, -r.r * 0.5);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var t = Date.now() / 1000;
+    stars.forEach(function (s) {
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(t + s.tw));
+      ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (shake > 0) { ctx.save(); ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); }
+    // Aim guide
+    if (state === 'playing' || state === 'title') {
+      ctx.strokeStyle = 'rgba(250,204,21,0.55)'; ctx.setLineDash([6, 8]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cannon.x, cannon.y);
+      ctx.lineTo(cannon.x + Math.cos(angle) * power * 9, cannon.y + Math.sin(angle) * power * 9);
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    // Cannon base + barrel
+    ctx.fillStyle = '#334155'; ctx.beginPath(); ctx.arc(cannon.x, cannon.y, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cannon.x, cannon.y);
+    ctx.lineTo(cannon.x + Math.cos(angle) * 30, cannon.y + Math.sin(angle) * 30); ctx.stroke();
+    ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cannon.x, cannon.y, 10, 0, Math.PI * 2); ctx.fill();
+    rocks.forEach(drawRock);
+    coreItems.forEach(function (c) {
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(t * 2);
+      ctx.fillStyle = '#22d3ee'; ctx.strokeStyle = '#fef08a'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(10, 0); ctx.lineTo(0, 13); ctx.lineTo(-10, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    });
+    bullets.forEach(function (b) {
+      ctx.fillStyle = '#fb923c'; ctx.strokeStyle = '#fff7ed'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    });
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 40);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (shake > 0) ctx.restore();
+    // Power meter
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(20, H - 20, 180, 10);
+    ctx.fillStyle = power > 12 ? '#ef4444' : '#22c55e';
+    ctx.fillRect(20, H - 20, 180 * ((power - 6) / 10), 10);
+    ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 13px system-ui, sans-serif';
+    ctx.fillText('POWER', 20, H - 26);
+    ctx.fillText('Drag to aim, release to fire', W - 230, H - 26);
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    if (shake > 0) shake *= 0.88;
+    rocks.forEach(function (r) {
+      r.x += r.vx; r.y += r.vy; r.rot += r.vr;
+      if (r.x < r.r || r.x > W - r.r) r.vx *= -1;
+      if (r.y < r.r + 52 || r.y > H - 180) r.vy *= -1;
+    });
+    coreItems.forEach(function (c) { c.y += c.vy; c.x += c.vx; if (c.y > H - 40 || c.y < 50) c.vy *= -1; if (c.x < 14 || c.x > W - 14) c.vx *= -1; });
+    // Collect cores by touching them with the cannon's collection field: any bullet passing near, or simply flying a bullet through.
+    bullets = bullets.filter(function (b) { return b.life > 0; });
+    bullets.forEach(function (b) {
+      b.x += b.vx; b.y += b.vy; b.vy += 0.02; b.life--;
+      if (b.x < 6 || b.x > W - 6) { b.vx *= -1; b.bounces++; sfx('bounce'); }
+      if (b.y < 56) { b.vy *= -1; b.bounces++; sfx('bounce'); }
+      if (b.y > H - 8) { b.life = 0; }
+      rocks.forEach(function (r) {
+        var dx = b.x - r.x, dy = b.y - r.y;
+        if (dx * dx + dy * dy < (r.r + 7) * (r.r + 7) && b.life > 0) {
+          b.life = 0; r.hp--; shake = 7;
+          if (r.hp <= 0) {
+            score += 25 + (b.bounces > 0 ? 15 : 0);
+            burst(r.x, r.y, '#facc15', 22); sfx('crack');
+            coreItems.push({ x: r.x, y: r.y, vx: (Math.random() - 0.5) * 1.2, vy: 0.6 });
+          } else { score += 10; burst(r.x, r.y, '#94a3b8', 10); sfx('hit'); }
+          updateHud('Cracked rock!');
+        }
+      });
+      coreItems.forEach(function (c) {
+        if (!c.taken) {
+          var dx = b.x - c.x, dy = b.y - c.y;
+          if (dx * dx + dy * dy < 22 * 22) {
+            c.taken = true; cores++; score += 100;
+            burst(c.x, c.y, '#22d3ee', 20); sfx('core');
+            updateHud('Core collected!');
+            if (cores >= 8) { setTimeout(function () { endGame(true); }, 450); }
+          }
+        }
+      });
+    });
+    coreItems = coreItems.filter(function (c) { return !c.taken; });
+    // Also allow collecting a core by clicking/tapping it directly is NOT allowed; bullets only, per design.
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    if (bullets.length === 0 && shots <= 0 && cores < 8 && state === 'playing') {
+      // Wait a beat so the last core/bounce can still register, then end.
+      setTimeout(function () { if (state === 'playing' && bullets.length === 0 && shots <= 0 && cores < 8) endGame(false); }, 600);
+    }
+  }
+
+  function loop(ts) {
+    rafId = requestAnimationFrame(loop);
+    var dt = Math.min(50, ts - (lastTime || ts));
+    lastTime = ts;
+    update(dt);
+    draw();
+  }
+  resetGame();
+  state = 'title';
+  updateHud('Press Start');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

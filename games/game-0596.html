@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sky Kite Surfer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e3a; font-family: Arial, Helvetica, sans-serif; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 28px; margin: 6px 0 2px; text-align: center; text-shadow: 0 2px 0 #1a5fb4; letter-spacing: 1px; }
+  .subtitle { color: #a8d8ff; font-size: 14px; margin-bottom: 8px; text-align: center; }
+  #hud { width: 100%; max-width: 860px; display: flex; justify-content: space-between; align-items: center; background: #122a4d; border: 2px solid #3a7bd5; border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; font-weight: bold; font-size: 15px; flex-wrap: wrap; gap: 8px; }
+  #hud span { white-space: nowrap; }
+  #status { color: #ffd75e; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { display: block; width: 100%; height: 520px; background: linear-gradient(180deg, #7ec8ff 0%, #bfe8ff 45%, #ffe9a8 100%); border: 3px solid #3a7bd5; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(6, 20, 45, 0.72); border-radius: 12px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; color: #eaf6ff; }
+  .overlay .keys { background: rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 14px; margin: 10px 0; font-size: 14px; }
+  button { cursor: pointer; background: #ffca2e; color: #1a1a1a; border: none; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: bold; margin-top: 14px; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #fff; }
+  .hint { margin-top: 8px; font-size: 13px; color: #cfe8ff; text-align: center; max-width: 860px; line-height: 1.5; }
+  .lives { color: #ff6b81; letter-spacing: 2px; }
+  @media (max-width: 560px) { canvas { height: 430px; } h1 { font-size: 24px; } }
+</style>
+</head>
+<body>
+<h1>🪁 Sky Kite Surfer</h1>
+<div class="subtitle">Ride the wind, dodge the storm, chase the stars!</div>
+<div id="hud">
+  <span>Score: <span id="score">0</span> / 1200</span>
+  <span>Lives: <span id="lives" class="lives">♥♥♥</span></span>
+  <span>Wind: <span id="wind">Calm</span></span>
+  <span>Status: <span id="status">Ready</span></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🪁 Sky Kite Surfer</h2>
+    <p><strong>How to Play:</strong> You are flying a kite high above the hills. Hold to climb, release to dive — and let the wind do the rest!</p>
+    <div class="keys">
+      <strong>Hold</strong> SPACE / ↑ / Mouse Hold / Touch Hold = Climb &nbsp;•&nbsp; <strong>Release</strong> = Dive<br>
+      ⭐ Collect stars (+50) &nbsp;•&nbsp; 🌬️ Ride green gust currents (+10/sec) &nbsp;•&nbsp; ☁️🐦 Avoid storm clouds &amp; birds<br>
+      Win at <strong>1200 points</strong>. You have <strong>3 lives</strong>. One hit loses a life and briefly shields you.
+    </div>
+    <p>Tip: gusts push you forward and lift you — surf along them for big bonus points. Watch the wind meter!</p>
+    <button id="startBtn">▶ Start Flying</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<p class="hint">Keyboard: Space / Arrow Up to climb. Mouse: hold left button to climb. Touch: hold anywhere on the sky to climb. P pauses. M mutes sound. Works fully offline — no downloads needed.</p>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var windEl = document.getElementById('wind');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var W = canvas.width, H = canvas.height;
+  var running = false, paused = false, over = false;
+  var holding = false, muted = false;
+  var score = 0, lives = 3, distance = 0;
+  var time = 0, spawnTimer = 0, gustTimer = 0, invuln = 0, gustBonusTimer = 0;
+  var stars = [], clouds = [], birds = [], gusts = [], particles = [];
+  var audioCtx = null;
+
+  var kite = { x: 140, y: 240, vy: 0, angle: 0 };
+  var runner = { x: 70, y: 452 };
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function playStar() { beep(880, 0.12, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.15, 'sine', 0.12); }, 70); }
+  function playHit() { beep(180, 0.3, 'sawtooth', 0.16); }
+  function playWin() { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.15); }, i*130); }); }
+
+  function reset() {
+    score = 0; lives = 3; distance = 0; time = 0;
+    spawnTimer = 0; gustTimer = 0; invuln = 0; gustBonusTimer = 0;
+    stars = []; clouds = []; birds = []; gusts = []; particles = [];
+    kite.x = 140; kite.y = 240; kite.vy = 0;
+    updateHUD('Flying!');
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = Math.floor(score);
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    if (status) statusEl.textContent = status;
+    var w = 'Calm';
+    if (gusts.length) w = 'Gusting! +bonus';
+    else if (time % 10 < 3) w = 'Breezy';
+    windEl.textContent = w;
+  }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function spawnStar() { stars.push({ x: W + 30, y: rand(50, 400), r: 13, spin: rand(0, 6) }); }
+  function spawnCloud() { clouds.push({ x: W + 60, y: rand(40, 380), w: rand(70, 110), h: rand(42, 62), speed: rand(1.6, 2.8), zap: Math.random() < 0.5 }); }
+  function spawnBird() { birds.push({ x: W + 40, y: rand(70, 400), flap: 0, speed: rand(2.4, 3.8), amp: rand(12, 30), baseY: 0 }); birds[birds.length-1].baseY = birds[birds.length-1].y; }
+  function spawnGust() { gusts.push({ x: W + 80, y: rand(70, 390), w: rand(150, 230), h: rand(55, 85) }); }
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) particles.push({ x: x, y: y, vx: rand(-3, 3), vy: rand(-3, 1), life: 30, color: color });
+  }
+  function drawHills() {
+    ctx.fillStyle = '#3f9e4d'; ctx.beginPath(); ctx.moveTo(0, H);
+    ctx.lineTo(0, 452); ctx.quadraticCurveTo(200, 420, 430, 455); ctx.quadraticCurveTo(620, 430, 860, 458); ctx.lineTo(860, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#2e7d3a'; ctx.fillRect(0, 485, W, 35);
+    ctx.fillStyle = '#7a4a21'; ctx.fillRect(52, 440, 8, 26); ctx.fillRect(88, 440, 8, 26);
+    ctx.strokeStyle = '#7a4a21'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(56, 440); ctx.lineTo(92, 440); ctx.stroke();
+    // runner
+    ctx.fillStyle = '#ff5252'; ctx.beginPath(); ctx.arc(runner.x, runner.y - 14, 8, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(runner.x, runner.y - 6); ctx.lineTo(runner.x, runner.y + 12); ctx.moveTo(runner.x, runner.y + 12); ctx.lineTo(runner.x - 7, runner.y + 24); ctx.moveTo(runner.x, runner.y + 12); ctx.lineTo(runner.x + 7, runner.y + 24); ctx.stroke();
+    ctx.fillStyle = '#ffd54f'; ctx.fillRect(runner.x - 12, runner.y + 24, 26, 5);
+  }
+  function drawKite() {
+    // string from runner hand to kite
+    ctx.strokeStyle = 'rgba(30,30,30,0.85)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(runner.x + 2, runner.y - 4);
+    ctx.quadraticCurveTo((runner.x + kite.x)/2, (runner.y + kite.y)/2 + 45, kite.x, kite.y + 10);
+    ctx.stroke();
+    ctx.save(); ctx.translate(kite.x, kite.y); ctx.rotate(kite.angle);
+    ctx.fillStyle = '#ff4081'; ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(20, 0); ctx.lineTo(0, 22); ctx.lineTo(-20, 0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(0, 22); ctx.moveTo(-20, 0); ctx.lineTo(20, 0); ctx.stroke();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    // tail
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, 22);
+    for (var i = 1; i <= 4; i++) ctx.lineTo(Math.sin(time*0.18 + i)*6, 22 + i*11);
+    ctx.stroke();
+    ctx.fillStyle = '#40c4ff';
+    for (var j = 1; j <= 4; j++) { ctx.beginPath(); ctx.arc(Math.sin(time*0.18 + j)*6, 22 + j*11, 3.5, 0, Math.PI*2); ctx.fill(); }
+    ctx.restore();
+    if (invuln > 0 && Math.floor(time*10) % 2 === 0) {
+      ctx.strokeStyle = 'rgba(255,213,79,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(kite.x, kite.y, 34, 0, Math.PI*2); ctx.stroke();
+    }
+  }
+  function drawStar(s) {
+    ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.spin);
+    ctx.fillStyle = '#ffca2e'; ctx.strokeStyle = '#ff8f00'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var r = (i % 2 === 0) ? 14 : 6, a = -Math.PI/2 + i * Math.PI/5;
+      var x = Math.cos(a)*r, y = Math.sin(a)*r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+  function drawCloud(c) {
+    ctx.fillStyle = c.zap ? '#5b657d' : '#ffffff';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.h*0.55, 0, Math.PI*2);
+    ctx.arc(c.x + c.w*0.28, c.y - 10, c.h*0.5, 0, Math.PI*2);
+    ctx.arc(c.x - c.w*0.28, c.y - 6, c.h*0.48, 0, Math.PI*2);
+    ctx.fill();
+    if (c.zap) { ctx.fillStyle = '#ffeb3b'; ctx.beginPath(); ctx.moveTo(c.x, c.y + 12); ctx.lineTo(c.x - 6, c.y + 32); ctx.lineTo(c.x + 2, c.y + 32); ctx.lineTo(c.x - 2, c.y + 50); ctx.lineTo(c.x + 10, c.y + 26); ctx.lineTo(c.x + 2, c.y + 26); ctx.closePath(); ctx.fill(); }
+    ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+    if (c.zap) ctx.fillText('⚡', c.x, c.y - c.h*0.5);
+  }
+  function drawBird(b) {
+    var wing = Math.sin(b.flap) * 9;
+    ctx.strokeStyle = '#263238'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(b.x - 14, b.y - wing); ctx.quadraticCurveTo(b.x, b.y + 4, b.x + 14, b.y - wing); ctx.stroke();
+    ctx.fillStyle = '#263238'; ctx.beginPath(); ctx.arc(b.x + 12, b.y - 2, 4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff7043'; ctx.beginPath(); ctx.moveTo(b.x + 16, b.y - 2); ctx.lineTo(b.x + 22, b.y); ctx.lineTo(b.x + 16, b.y + 2); ctx.closePath(); ctx.fill();
+  }
+  function drawGust(g) {
+    ctx.fillStyle = 'rgba(76, 255, 140, 0.20)'; ctx.strokeStyle = 'rgba(0, 200, 90, 0.75)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(g.x, g.y, g.w/2, g.h/2, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,120,60,0.9)'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('🌬️ GUST +10/sec', g.x, g.y + 5);
+    for (var i = 0; i < 3; i++) {
+      var yy = g.y - 18 + i*18, xx = g.x - g.w/2 + 20 + ((time*60 + i*40) % (g.w - 40));
+      ctx.strokeStyle = 'rgba(0,150,70,0.6)'; ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx + 18, yy); ctx.stroke();
+    }
+  }
+  function hitTest(ax, ay, ar, bx, by, br) {
+    var dx = ax - bx, dy = ay - by; return dx*dx + dy*dy < (ar + br)*(ar + br);
+  }
+  function endGame(won) {
+    running = false; over = true;
+    endScreen.classList.remove('hidden');
+    if (won) { endTitle.textContent = '🏆 You Win!'; endText.textContent = 'Your kite surfed all the way to 1200 points — a true master of the sky!'; playWin(); }
+    else { endTitle.textContent = '💥 Game Over'; endText.textContent = 'The storm got your kite this time. Shake it off and fly again!'; playHit(); }
+    endScore.textContent = 'Final Score: ' + Math.floor(score) + '  •  Distance: ' + Math.floor(distance) + 'm';
+    updateHUD(won ? 'You Win!' : 'Game Over');
+  }
+  function startGame() {
+    initAudio(); reset();
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    running = true; paused = false; over = false;
+    updateHUD('Flying!');
+    beep(523, 0.15, 'triangle', 0.14);
+  }
+  function update(dt) {
+    if (!running || paused) return;
+    time += dt; distance += dt * 22;
+    if (invuln > 0) invuln -= dt;
+    // physics: hold climbs, release dives
+    if (holding) kite.vy -= 620 * dt; else kite.vy += 460 * dt;
+    kite.vy = Math.max(-320, Math.min(360, kite.vy));
+    kite.y += kite.vy * dt;
+    kite.angle = Math.max(-0.45, Math.min(0.45, kite.vy / 700));
+    runner.x = 70 + Math.sin(time * 1.2) * 3;
+    // passive trickle + distance score
+    score += dt * 2;
+    // gusts
+    var inGust = false;
+    for (var gi = 0; gi < gusts.length; gi++) {
+      var g = gusts[gi];
+      if (Math.abs(kite.x - g.x) < g.w/2 && Math.abs(kite.y - g.y) < g.h/2) { inGust = true; kite.vy -= 90 * dt; score += dt * 10; gustBonusTimer += dt; }
+    }
+    if (inGust) { if (Math.random() < 0.3) particles.push({ x: kite.x - 10, y: kite.y + rand(-10, 10), vx: -2, vy: rand(-1, 1), life: 20, color: '#4cff8c' }); }
+    // spawns
+    spawnTimer -= dt; gustTimer -= dt;
+    if (spawnTimer <= 0) {
+      var r = Math.random();
+      if (r < 0.35) spawnStar(); else if (r < 0.68) spawnCloud(); else spawnBird();
+      spawnTimer = rand(0.7, 1.4);
+    }
+    if (gustTimer <= 0) { spawnGust(); gustTimer = rand(4, 7); }
+    // move world
+    var speed = 2.6;
+    stars.forEach(function(s){ s.x -= speed; s.spin += dt*2; });
+    clouds.forEach(function(c){ c.x -= c.speed; });
+    birds.forEach(function(b){ b.x -= b.speed; b.flap += dt*12; b.y = b.baseY + Math.sin(time*3 + b.x*0.02) * b.amp * 0.4; });
+    gusts.forEach(function(g){ g.x -= 2.0; });
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    stars = stars.filter(function(s){ return s.x > -30; });
+    clouds = clouds.filter(function(c){ return c.x > -90; });
+    birds = birds.filter(function(b){ return b.x > -40; });
+    gusts = gusts.filter(function(g){ return g.x > -160; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    // ceiling / ground
+    if (kite.y < 18) { kite.y = 18; kite.vy = Math.max(0, kite.vy); }
+    if (kite.y > 435) { kite.y = 435; kite.vy = Math.min(0, kite.vy); }
+    // star pickup
+    for (var i = stars.length - 1; i >= 0; i--) {
+      if (hitTest(kite.x, kite.y, 20, stars[i].x, stars[i].y, 14)) {
+        score += 50; burst(stars[i].x, stars[i].y, '#ffca2e'); playStar(); stars.splice(i, 1);
+      }
+    }
+    // hazards
+    if (invuln <= 0) {
+      var hit = false;
+      clouds.forEach(function(c){ if (Math.abs(kite.x - c.x) < c.w*0.42 && Math.abs(kite.y - c.y) < c.h*0.6) hit = true; });
+      birds.forEach(function(b){ if (hitTest(kite.x, kite.y, 18, b.x, b.y, 14)) hit = true; });
+      if (hit) {
+        lives--; invuln = 2; burst(kite.x, kite.y, '#ff5252'); playHit();
+        kite.y = 240; kite.vy = 0;
+        updateHUD(lives > 0 ? 'Ouch! Shield up!' : 'Game Over');
+        if (lives <= 0) { endGame(false); return; }
+      }
+    }
+    if (score >= 1200) { score = 1200; endGame(true); return; }
+    updateHUD();
+  }
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    // sky extras: sun + drifting puffs
+    ctx.fillStyle = '#ffeb3b'; ctx.beginPath(); ctx.arc(770, 62, 34, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    for (var i = 0; i < 3; i++) {
+      var px = ((i * 300 - time * 8) % (W + 120) + W + 120) % (W + 120) - 60;
+      ctx.beginPath(); ctx.arc(px, 60 + i*38, 22, 0, Math.PI*2); ctx.arc(px + 22, 66 + i*38, 17, 0, Math.PI*2); ctx.fill();
+    }
+    gusts.forEach(drawGust);
+    stars.forEach(drawStar);
+    clouds.forEach(drawCloud);
+    birds.forEach(drawBird);
+    particles.forEach(function(p){ ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); });
+    drawHills();
+    drawKite();
+    if (paused && running) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 34px Arial'; ctx.textAlign = 'center'; ctx.fillText('PAUSED — press P to resume', W/2, H/2);
+    }
+  }
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000); last = now;
+    update(dt); render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function(e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); holding = true; initAudio(); if (!running && !over) startGame(); }
+    if (e.code === 'KeyP' && running) { paused = !paused; updateHUD(paused ? 'Paused' : 'Flying!'); }
+    if (e.code === 'KeyM') { muted = !muted; }
+  });
+  document.addEventListener('keyup', function(e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp') holding = false;
+  });
+  canvas.addEventListener('mousedown', function(e) { e.preventDefault(); holding = true; initAudio(); if (!running && !over) startGame(); });
+  document.addEventListener('mouseup', function() { holding = false; });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); holding = true; initAudio(); if (!running && !over) startGame(); }, { passive: false });
+  canvas.addEventListener('touchend', function(e) { e.preventDefault(); holding = false; }, { passive: false });
+  canvas.addEventListener('touchcancel', function() { holding = false; });
+  document.addEventListener('mouseleave', function() { holding = false; });
+  updateHUD('Ready');
+})();
+</script>
+</body>
+</html>

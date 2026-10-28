@@ -94,3 +94,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0588 | Harvest Haven | Strategy / Farm Season Planning | Mouse/touch click plots, Arrow Keys select, Enter plant/harvest | [Play](./../games/game-0588.html) |
 | 0589 | Metronome Meadow | Rhythm / Tempo Matching | Space tap beat, mouse click, touch tap | [Play](./../games/game-0589.html) |
 | 0590 | Polar Plunge | Precision / Ice Dive Aim | Arrow Keys aim/power, Space dive, mouse/touch drag aim | [Play](./../games/game-0590.html) |
+| 0591 | Canyon River Run | Arcade / River Rapids Delivery | Arrow Keys/A/D steer, mouse/touch drag steer | [Play](./../games/game-0591.html) |
+| 0592 | Mirror Maze | Puzzle / Mirror Beam Logic | Arrow Keys select, Space/R rotate, mouse/touch tap | [Play](./../games/game-0592.html) |
+| 0593 | Lighthouse Logistics | Strategy / Harbor Signal Planning | 1-4 assign, Arrow Keys select, Enter confirm, mouse/touch click | [Play](./../games/game-0593.html) |
+| 0594 | Samba Step Studio | Rhythm / Dance Step Timing | Arrow Keys dance steps, mouse/touch tap arrows | [Play](./../games/game-0594.html) |
+| 0595 | Meteor Miner | Precision / Asteroid Cannon Aim | Arrow Keys aim/power, Space fire, mouse/touch drag aim | [Play](./../games/game-0595.html) |
+| 0596 | Sky Kite Surfer | Arcade / Wind Kite Flight | Hold Space/Up climb, mouse/touch hold climb | [Play](./../games/game-0596.html) |
+| 0597 | Tide Pipe Puzzle | Puzzle / Water Pipe Flow Logic | Arrow Keys select, Space/R rotate, mouse/touch tap | [Play](./../games/game-0597.html) |
+| 0598 | Glacier Expedition | Strategy / Expedition Route Planning | Arrow Keys move cursor, Enter place camp, mouse/touch click tiles | [Play](./../games/game-0598.html) |
+| 0599 | Beat Box Bakery | Rhythm / Baking Beat Timing | D/F/J/K hit lanes, mouse click, touch tap lanes | [Play](./../games/game-0599.html) |
+| 0600 | Aurora Archery | Precision / Wind Archery Aim | Arrow Keys aim/power, Space release, mouse/touch drag aim | [Play](./../games/game-0600.html) |
