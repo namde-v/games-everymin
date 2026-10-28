@@ -15,3 +15,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0508 | Cobalt Cartographer | Puzzle / Map Tile Rotation | Mouse/touch click tiles to rotate, Arrow Keys select, Enter rotate | [Play](./../games/game-0508.html) |
 | 0509 | Mirage Drummer | Rhythm / Desert Drum Timing | Keys strike drums on beat, mouse/touch tap drums, Arrow Keys select | [Play](./../games/game-0509.html) |
 | 0510 | Pyro Plant Planner | Strategy / Volcano Power Plant Simulation | Mouse/touch click valves and turbines, Arrow Keys select, Keys adjust flow | [Play](./../games/game-0510.html) |
+| 0511 | Quartz Quarry Dash | Arcade / Mine Cart Runner | Arrow Keys/WASD jump/duck/switch tracks, Space jump, mouse/touch steer | [Play](./../games/game-0511.html) |
+| 0512 | Lunar Librarian | Puzzle / Moon Phase Sequence Logic | Mouse/touch click tiles to swap, Arrow Keys select, Enter confirm | [Play](./../games/game-0512.html) |
+| 0513 | Tidal Turbine Tycoon | Strategy / Coastal Energy Management | Mouse/touch click grid to place/upgrade, 1-3 select, R repair, N next day | [Play](./../games/game-0513.html) |
+| 0514 | Bongo Bazaar | Rhythm / Market Beat Timing | D/F/J/K hit lanes, mouse click, touch tap lanes | [Play](./../games/game-0514.html) |
+| 0515 | Falcon Ferry | Arcade / Wind Glider Delivery | Arrow Keys/WASD steer/glide, Space pickup/drop, mouse/touch drag steer | [Play](./../games/game-0515.html) |
+| 0516 | Glyph Geyser | Puzzle / Water Glyph Flow Logic | Mouse/touch click tiles to rotate, Arrow Keys select, Enter/Space rotate | [Play](./../games/game-0516.html) |
+| 0517 | Cactus Cantina | Strategy / Desert Tavern Management | Mouse/touch click customers/drinks, 1-4 serve, N next day | [Play](./../games/game-0517.html) |
+| 0518 | Steelpan Serenade | Rhythm / Steel Drum Melody | 1-8 / A/S/D/F/G/H/J/K play pans, mouse click, touch tap pans | [Play](./../games/game-0518.html) |
+| 0519 | Asteroid Angler | Precision / Star Fishing Aim | Mouse/touch drag aim and release, Arrow Keys aim, Space cast/reel | [Play](./../games/game-0519.html) |
+| 0520 | Amber Archivist | Puzzle / Fossil Sequence Deduction | Mouse/touch click fossils/clues, Arrow Keys select, Enter guess, 1-6 keys | [Play](./../games/game-0520.html) |

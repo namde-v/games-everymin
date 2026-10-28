@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Glyph Geyser</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(160deg, #0b2a3a, #123f52 55%, #0e3a2e);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #eaf7ff; }
+  .wrap { width: min(680px, 96vw); padding: 14px; }
+  h1 { margin: 4px 0 2px; text-align: center; font-size: 34px; letter-spacing: 1px; text-shadow: 0 2px 0 rgba(0,0,0,.4); }
+  .tag { text-align: center; opacity: .85; margin-bottom: 10px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 10px 0; }
+  .pill { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25); border-radius: 999px;
+    padding: 6px 12px; font-weight: 700; font-size: 14px; }
+  .pill b { color: #7ee7ff; }
+  .pill.warn b { color: #ffb347; }
+  #stage { position: relative; background: #0d2431; border: 2px solid #2f7ea6; border-radius: 16px;
+    padding: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+  canvas { display: block; width: 100%; height: auto; border-radius: 10px; background: #173e2e; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 10px; border-radius: 10px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; gap: 10px; padding: 22px;
+    background: rgba(6, 28, 40, .92); }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0; font-size: 30px; }
+  .overlay p { margin: 0; line-height: 1.55; max-width: 480px; }
+  .howto { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.2); border-radius: 12px;
+    padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  button { font: inherit; font-weight: 800; font-size: 17px; color: #062233; background: #7ee7ff;
+    border: 0; border-radius: 12px; padding: 12px 22px; cursor: pointer; box-shadow: 0 4px 0 #2f7ea6; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #2f7ea6; }
+  button.secondary { background: #ffd166; box-shadow: 0 4px 0 #b8860b; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .legend { text-align: center; font-size: 13px; opacity: .85; margin-top: 10px; line-height: 1.6; }
+  .big { font-size: 44px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>&#128167; Glyph Geyser</h1>
+  <div class="tag">Puzzle / Water Glyph Flow Logic &mdash; route the geyser to every flower!</div>
+  <div id="hud">
+    <span class="pill">Level: <b id="hudLevel">1</b></span>
+    <span class="pill">Score: <b id="hudScore">0</b></span>
+    <span class="pill warn">Pressure: <b id="hudPressure">18</b></span>
+    <span class="pill">Flowers: <b id="hudFlowers">0 / 2</b></span>
+    <span class="pill">Status: <b id="hudStatus">Ready</b></span>
+  </div>
+  <div id="stage">
+    <canvas id="cv" width="600" height="600"></canvas>
+    <div id="titleScreen" class="overlay">
+      <div class="big">&#128167;&#127799;&#128167;</div>
+      <h2>Glyph Geyser</h2>
+      <p>Rotate the glyph pipes so geyser water flows from the spring to <b>every flower</b> before your pressure runs out.</p>
+      <div class="howto">
+        <b>How to Play</b><br>
+        &#8226; <b>Mouse / Touch:</b> tap a pipe tile to rotate it 90&deg;.<br>
+        &#8226; <b>Keyboard:</b> Arrow Keys move the glowing selector, <b>Enter</b> or <b>Space</b> rotates the selected tile.<br>
+        &#8226; Each rotation costs <b>1 pressure</b>. Rocks cannot move. Locked valve tiles need one tap to unlock, then they rotate.<br>
+        &#8226; Win by watering all flowers. Lose if pressure reaches 0 first. Press <b>R</b> to restart a level.
+      </div>
+      <button id="startBtn">Start Game</button>
+    </div>
+    <div id="winScreen" class="overlay hidden">
+      <div class="big">&#127799;&#127881;</div>
+      <h2 id="winTitle">All Flowers Watered!</h2>
+      <p id="winText"></p>
+      <div class="row">
+        <button id="nextBtn">Next Level</button>
+        <button id="winRestartBtn" class="secondary">Play Again</button>
+      </div>
+    </div>
+    <div id="overScreen" class="overlay hidden">
+      <div class="big">&#128164;</div>
+      <h2>Pressure Exhausted!</h2>
+      <p id="overText">The geyser sputtered out before every flower was watered. Try a different route!</p>
+      <button id="overRestartBtn">Restart Level</button>
+    </div>
+  </div>
+  <div class="legend">Click / tap a tile to rotate &nbsp;|&nbsp; Arrow Keys select &nbsp;|&nbsp; Enter / Space rotates &nbsp;|&nbsp; R restarts<br>
+  Blue pipes carry water &nbsp;|&nbsp; Grey rocks are blocked &nbsp;|&nbsp; Gold valves start locked</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var hudLevel = document.getElementById('hudLevel');
+  var hudScore = document.getElementById('hudScore');
+  var hudPressure = document.getElementById('hudPressure');
+  var hudFlowers = document.getElementById('hudFlowers');
+  var hudStatus = document.getElementById('hudStatus');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+  var startBtn = document.getElementById('startBtn');
+  var nextBtn = document.getElementById('nextBtn');
+  var winRestartBtn = document.getElementById('winRestartBtn');
+  var overRestartBtn = document.getElementById('overRestartBtn');
+
+  // Directions: 0 up, 1 right, 2 down, 3 left
+  var DX = [0, 1, 0, -1];
+  var DY = [-1, 0, 1, 0];
+  var DIR_CHAR = { '^': 0, '>': 1, 'v': 2, '<': 3 };
+
+  function baseOpenings(kind) {
+    if (kind === 'I') return [0, 2];
+    if (kind === 'L') return [0, 1];
+    if (kind === 'T') return [0, 1, 2];
+    if (kind === '+') return [0, 1, 2, 3];
+    if (kind === 'V') return [0, 2];
+    return [];
+  }
+
+  // Each level: rows of tokens. S + direction char = spring, F + direction char = flower
+  // (the direction is the opening pointing toward its neighbour pipe).
+  // I/L/T/+ rotate, V is a locked valve pipe, X is rock, . is grass.
+  // A trailing digit on a rotating token is its starting rotation.
+  var LEVELS = [
+    { pressure: 18, rows: [
+      ['.', '.', 'Fv', '.', '.'],
+      ['.', '.', 'I1', '.', '.'],
+      ['S>', 'I0', 'T1', 'I0', 'F<'],
+      ['.', 'X', '.', '.', '.'],
+      ['.', '.', 'L2', '.', '.']
+    ]},
+    { pressure: 26, rows: [
+      ['.', '.', '.', 'L1', '.', '.'],
+      ['S>', 'V0', 'I0', 'T0', 'I0', 'F<'],
+      ['.', '.', '.', 'I1', '.', 'X'],
+      ['.', 'X', '.', 'I1', '.', '.'],
+      ['.', '.', '.', 'I1', '.', '.'],
+      ['.', '.', '.', 'F^', '.', '.']
+    ]},
+    { pressure: 30, rows: [
+      ['.', '.', 'Fv', '.', '.', '.'],
+      ['.', '.', 'I1', '.', 'X', '.'],
+      ['.', 'X', 'I1', '.', '.', '.'],
+      ['S>', 'I0', 'T1', 'I0', 'V0', 'F<'],
+      ['.', '.', '.', '.', '.', 'L3'],
+      ['L0', '.', '.', '.', '.', '.']
+    ]}
+  ];
+
+  var levelIndex = 0;
+  var grid = [];       // cells: {kind, rot, locked, fixedDir}
+  var cols = 0, rows = 0;
+  var score = 0, pressure = 18, playing = false, won = false, over = false;
+  var selX = 0, selY = 0;
+  var visited = {};    // "x,y" -> true when water reaches the cell
+  var lastTouch = 0;
+  var audioCtx = null;
+
+  function ensureAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function soundRotate() { beep(320, 0.08, 'triangle', 0.10); }
+  function soundWater() { beep(520, 0.12, 'sine', 0.10); setTimeout(function () { beep(660, 0.14, 'sine', 0.10); }, 70); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.22, 'sine', 0.12); }, i * 110); }); }
+  function soundLose() { [300, 220, 160, 110].forEach(function (f, i) { setTimeout(function () { beep(f, 0.22, 'sawtooth', 0.08); }, i * 110); }); }
+  function soundUnlock() { beep(880, 0.10, 'square', 0.08); setTimeout(function () { beep(1175, 0.12, 'square', 0.08); }, 80); }
+
+  function parseLevel(idx) {
+    var def = LEVELS[idx];
+    rows = def.rows.length; cols = def.rows[0].length;
+    grid = [];
+    for (var y = 0; y < rows; y++) {
+      grid[y] = [];
+      for (var x = 0; x < cols; x++) {
+        var tok = def.rows[y][x];
+        var cell = { kind: '.', rot: 0, locked: false, fixedDir: -1 };
+        if (tok === 'X') cell.kind = 'X';
+        else if (tok === '.') cell.kind = '.';
+        else if (tok.charAt(0) === 'S') { cell.kind = 'S'; cell.fixedDir = DIR_CHAR[tok.charAt(1)]; }
+        else if (tok.charAt(0) === 'F') { cell.kind = 'F'; cell.fixedDir = DIR_CHAR[tok.charAt(1)]; }
+        else {
+          cell.kind = tok.charAt(0);
+          cell.rot = tok.length > 1 ? parseInt(tok.charAt(1), 10) : 0;
+          if (cell.kind === 'V') cell.locked = true;
+        }
+        grid[y][x] = cell;
+      }
+    }
+    pressure = def.pressure;
+    selX = 0; selY = 0;
+    // Put the selector on the first rotating tile.
+    outer: for (var yy = 0; yy < rows; yy++) {
+      for (var xx = 0; xx < cols; xx++) {
+        if (isRotatable(grid[yy][xx])) { selX = xx; selY = yy; break outer; }
+      }
+    }
+    computeFlow();
+  }
+
+  function isRotatable(cell) {
+    return cell.kind === 'I' || cell.kind === 'L' || cell.kind === 'T' || cell.kind === '+' || cell.kind === 'V';
+  }
+  function openings(cell) {
+    if (cell.kind === 'S' || cell.kind === 'F') return [cell.fixedDir];
+    if (cell.kind === 'X' || cell.kind === '.') return [];
+    var base = baseOpenings(cell.kind);
+    var out = [];
+    for (var i = 0; i < base.length; i++) out.push((base[i] + cell.rot) % 4);
+    return out;
+  }
+  function hasOpen(cell, dir) {
+    var ops = openings(cell);
+    for (var i = 0; i < ops.length; i++) if (ops[i] === dir) return true;
+    return false;
+  }
+  function countFlowers() {
+    var n = 0;
+    for (var y = 0; y < rows; y++) for (var x = 0; x < cols; x++) if (grid[y][x].kind === 'F') n++;
+    return n;
+  }
+  function computeFlow() {
+    visited = {};
+    var sx = -1, sy = -1;
+    for (var y = 0; y < rows; y++) for (var x = 0; x < cols; x++) if (grid[y][x].kind === 'S') { sx = x; sy = y; }
+    if (sx < 0) return;
+    var queue = [[sx, sy]];
+    visited[sx + ',' + sy] = true;
+    while (queue.length) {
+      var cur = queue.shift();
+      var cx = cur[0], cy = cur[1];
+      var cell = grid[cy][cx];
+      for (var d = 0; d < 4; d++) {
+        if (!hasOpen(cell, d)) continue;
+        var nx = cx + DX[d], ny = cy + DY[d];
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+        if (visited[nx + ',' + ny]) continue;
+        if (hasOpen(grid[ny][nx], (d + 2) % 4)) { visited[nx + ',' + ny] = true; queue.push([nx, ny]); }
+      }
+    }
+  }
+  function wateredCount() {
+    var n = 0;
+    for (var y = 0; y < rows; y++) for (var x = 0; x < cols; x++) {
+      if (grid[y][x].kind === 'F' && visited[x + ',' + y]) n++;
+    }
+    return n;
+  }
+
+  function updateHUD(status) {
+    hudLevel.textContent = levelIndex + 1;
+    hudScore.textContent = score;
+    hudPressure.textContent = pressure;
+    hudFlowers.textContent = wateredCount() + ' / ' + countFlowers();
+    hudStatus.textContent = status || (won ? 'Won!' : over ? 'Out of pressure' : playing ? 'Flowing' : 'Ready');
+  }
+
+  function hideOverlays() {
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+  }
+  function startGame() {
+    ensureAudio();
+    levelIndex = 0; score = 0; won = false; over = false; playing = true;
+    parseLevel(0); hideOverlays(); updateHUD('Flowing'); soundWater();
+  }
+  function restartLevel() {
+    ensureAudio();
+    won = false; over = false; playing = true;
+    parseLevel(levelIndex); hideOverlays(); updateHUD('Flowing');
+  }
+  function nextLevel() {
+    ensureAudio();
+    if (levelIndex + 1 >= LEVELS.length) { startGame(); return; }
+    levelIndex++; won = false; over = false; playing = true;
+    parseLevel(levelIndex); hideOverlays(); updateHUD('Flowing'); soundWater();
+  }
+
+  function rotateAt(x, y) {
+    if (!playing || won || over) return;
+    if (x < 0 || y < 0 || x >= cols || y >= rows) return;
+    var cell = grid[y][x];
+    if (!isRotatable(cell)) { beep(140, 0.07, 'square', 0.06); return; }
+    selX = x; selY = y;
+    if (cell.locked) { cell.locked = false; pressure--; soundUnlock(); }
+    else { cell.rot = (cell.rot + 1) % 4; pressure--; soundRotate(); }
+    computeFlow();
+    var watered = wateredCount(), total = countFlowers();
+    if (watered === total) {
+      won = true; playing = false;
+      var bonus = pressure * 10 + 500;
+      score += bonus;
+      document.getElementById('winTitle').textContent = levelIndex + 1 >= LEVELS.length ? 'You Finished Every Geyser!' : 'All Flowers Watered!';
+      document.getElementById('winText').textContent = 'Level ' + (levelIndex + 1) + ' complete! Pressure bonus: ' + bonus + ' points. Total score: ' + score + '.';
+      nextBtn.textContent = levelIndex + 1 >= LEVELS.length ? 'Play Again' : 'Next Level';
+      winScreen.classList.remove('hidden');
+      updateHUD('Won!'); soundWin();
+    } else if (pressure <= 0) {
+      over = true; playing = false;
+      document.getElementById('overText').textContent = 'The geyser sputtered out with ' + watered + ' of ' + total + ' flowers watered. Try a different route!';
+      overScreen.classList.remove('hidden');
+      updateHUD('Out of pressure'); soundLose();
+    } else {
+      if (watered > 0) soundWater();
+      updateHUD('Flowing');
+    }
+  }
+
+  function cellFromEvent(ev) {
+    var rect = cv.getBoundingClientRect();
+    var px = (ev.clientX - rect.left) * (cv.width / rect.width);
+    var py = (ev.clientY - rect.top) * (cv.height / rect.height);
+    var cell = Math.floor(600 / Math.max(cols, rows));
+    var off = (600 - cell * Math.max(cols, rows)) / 2;
+    return { x: Math.floor((px - off) / cell), y: Math.floor((py - off) / cell) };
+  }
+
+  cv.addEventListener('click', function (ev) {
+    if (Date.now() - lastTouch < 500) return; // touch already handled this tap
+    ensureAudio();
+    var c = cellFromEvent(ev);
+    rotateAt(c.x, c.y);
+  });
+  cv.addEventListener('mousedown', function () { ensureAudio(); });
+  cv.addEventListener('touchstart', function (ev) {
+    ev.preventDefault();
+    ensureAudio();
+    lastTouch = Date.now();
+    var t = ev.touches[0];
+    var c = cellFromEvent(t);
+    rotateAt(c.x, c.y);
+  }, { passive: false });
+  document.addEventListener('keydown', function (ev) {
+    if (!playing && ev.key !== 'r' && ev.key !== 'R') {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        if (!winScreen.classList.contains('hidden')) nextLevel();
+        else if (!overScreen.classList.contains('hidden')) restartLevel();
+      }
+      return;
+    }
+    if (ev.key === 'ArrowLeft') { selX = Math.max(0, selX - 1); ev.preventDefault(); }
+    else if (ev.key === 'ArrowRight') { selX = Math.min(cols - 1, selX + 1); ev.preventDefault(); }
+    else if (ev.key === 'ArrowUp') { selY = Math.max(0, selY - 1); ev.preventDefault(); }
+    else if (ev.key === 'ArrowDown') { selY = Math.min(rows - 1, selY + 1); ev.preventDefault(); }
+    else if (ev.key === 'Enter' || ev.key === ' ') { ensureAudio(); rotateAt(selX, selY); ev.preventDefault(); }
+    else if (ev.key === 'r' || ev.key === 'R') { restartLevel(); }
+  });
+
+  startBtn.addEventListener('click', function () { startGame(); });
+  nextBtn.addEventListener('click', function () { nextLevel(); });
+  winRestartBtn.addEventListener('click', function () { startGame(); });
+  overRestartBtn.addEventListener('click', function () { restartLevel(); });
+
+  // ---- Drawing ----
+  function drawTile(x, y, t) {
+    var cellSize = Math.floor(600 / Math.max(cols, rows));
+    var off = (600 - cellSize * Math.max(cols, rows)) / 2;
+    var px = off + x * cellSize, py = off + y * cellSize;
+    var cx = px + cellSize / 2, cy = py + cellSize / 2;
+    var wet = !!visited[x + ',' + y];
+    ctx.fillStyle = (x + y) % 2 ? '#1d4d38' : '#224f3a';
+    ctx.fillRect(px + 2, py + 2, cellSize - 4, cellSize - 4);
+    if (playing && selX === x && selY === y) {
+      ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 3;
+      ctx.strokeRect(px + 4, py + 4, cellSize - 8, cellSize - 8);
+    }
+    var cell = grid[y][x];
+    if (cell.kind === 'X') {
+      ctx.fillStyle = '#5a6b75';
+      ctx.beginPath(); ctx.arc(cx, cy, cellSize * 0.30, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7d8f99';
+      ctx.beginPath(); ctx.arc(cx - 6, cy - 6, cellSize * 0.13, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    if (cell.kind === '.') {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    var ops = openings(cell);
+    // Pipe body
+    ctx.strokeStyle = wet ? '#3ec6ff' : '#9db8c4';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(10, cellSize * 0.20);
+    ctx.beginPath();
+    for (var i = 0; i < ops.length; i++) {
+      var d = ops[i];
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + DX[d] * cellSize * 0.46, cy + DY[d] * cellSize * 0.46);
+    }
+    ctx.stroke();
+    if (wet) {
+      var pulse = 0.55 + 0.45 * Math.sin(t / 180 + x + y);
+      ctx.strokeStyle = 'rgba(190,240,255,' + pulse.toFixed(2) + ')';
+      ctx.lineWidth = Math.max(4, cellSize * 0.08);
+      ctx.beginPath();
+      for (var j = 0; j < ops.length; j++) {
+        var dd = ops[j];
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + DX[dd] * cellSize * 0.46, cy + DY[dd] * cellSize * 0.46);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle = wet ? '#bfefff' : '#d7e6ec';
+    ctx.beginPath(); ctx.arc(cx, cy, cellSize * 0.17, 0, Math.PI * 2); ctx.fill();
+    if (cell.kind === 'S') {
+      ctx.fillStyle = '#7ee7ff';
+      for (var b = 0; b < 4; b++) {
+        var bx = cx + Math.sin(t / 300 + b * 1.7) * 9;
+        var by = cy - 6 - ((t / 14 + b * 9) % 22);
+        ctx.beginPath(); ctx.arc(bx, by, 3.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = '#062233'; ctx.font = 'bold ' + Math.floor(cellSize * 0.28) + 'px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('S', cx, cy + 1);
+    }
+    if (cell.kind === 'F') {
+      var bloom = wet;
+      var petals = bloom ? '#ff8fb3' : '#c9a0ad';
+      ctx.fillStyle = petals;
+      for (var p = 0; p < 6; p++) {
+        var ang = p * Math.PI / 3 + Math.sin(t / 900) * 0.15;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(ang) * cellSize * 0.20, cy + Math.sin(ang) * cellSize * 0.20, cellSize * 0.11, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = bloom ? '#ffd166' : '#8a7a4a';
+      ctx.beginPath(); ctx.arc(cx, cy, cellSize * 0.12, 0, Math.PI * 2); ctx.fill();
+      if (bloom) {
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.beginPath(); ctx.arc(cx - 8, cy - 12, 2, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    if (cell.kind === 'V') {
+      ctx.strokeStyle = cell.locked ? '#ffd166' : '#8be38b';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cx, cy, cellSize * 0.30, 0, Math.PI * 2); ctx.stroke();
+      if (cell.locked) {
+        ctx.fillStyle = '#ffd166'; ctx.font = 'bold ' + Math.floor(cellSize * 0.22) + 'px sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('L', cx, cy + 1);
+      }
+    }
+  }
+
+  function frame(t) {
+    ctx.clearRect(0, 0, 600, 600);
+    ctx.fillStyle = '#173e2e'; ctx.fillRect(0, 0, 600, 600);
+    for (var y = 0; y < rows; y++) for (var x = 0; x < cols; x++) drawTile(x, y, t);
+    requestAnimationFrame(frame);
+  }
+
+  parseLevel(0);
+  updateHUD('Ready');
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
