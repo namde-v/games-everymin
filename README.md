@@ -48,15 +48,6 @@ games-everymin/
 | 0748 | Flamenco Castanet Tempo | Rhythm / Castanet Timing | [Play](./games/game-0748.html) |
 | 0749 | Windmill Blade Balancer | Precision / Windmill Balance Timing | [Play](./games/game-0749.html) |
 | 0750 | Meteor Shower Defender | Arcade / Meteor Defense Shooter | [Play](./games/game-0750.html) |
-| 0732 | Clockwork Beetle Maze | Puzzle / Gear Path Logic | [Play](./games/game-0732.html) |
-| 0733 | Harbor Lighthouse Keeper | Strategy / Ship Guidance | [Play](./games/game-0733.html) |
-| 0734 | Drumline Parade March | Rhythm / Marching Beat | [Play](./games/game-0734.html) |
-| 0735 | Ice Sculptor Chisel Master | Precision / Carving Timing | [Play](./games/game-0735.html) |
-| 0736 | Storm Cloud Sailor | Arcade / Storm Sailing | [Play](./games/game-0736.html) |
-| 0737 | Tidepool Shell Sorter | Puzzle / Shell Sorting | [Play](./games/game-0737.html) |
-| 0738 | Arctic Research Station Manager | Strategy / Station Management | [Play](./games/game-0738.html) |
-| 0739 | Firefly Lantern Beat | Rhythm / Firefly Catch Beat | [Play](./games/game-0739.html) |
-| 0740 | Tightrope Acrobatic Balance | Precision / Balance | [Play](./games/game-0740.html) |
 ## Quality standard
 
 Every game must have: a title screen, Start button, How-to-Play instructions, a score/lives/status HUD, a definitive Win / Game Over state with instant Restart, and keyboard + mouse + touch controls.
