@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cipher Courier</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #0d1420; overflow: hidden; }
+  body { font-family: "Courier New", Courier, monospace; color: #e8eef7; display: flex; flex-direction: column; align-items: center; }
+  #hud { width: 100%; max-width: 900px; display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 15px; flex-wrap: wrap; gap: 6px; }
+  #hud span { background: #1b2a44; border: 1px solid #3a5a8a; border-radius: 8px; padding: 4px 10px; }
+  #hud .warn { color: #ffb020; border-color: #ffb020; }
+  #hud .bad { color: #ff5a5a; border-color: #ff5a5a; }
+  #wrap { position: relative; width: 100%; max-width: 900px; aspect-ratio: 3 / 2; background: #16233a; border: 2px solid #3a5a8a; border-radius: 12px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(6, 12, 24, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; gap: 12px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  h1 { font-size: 42px; letter-spacing: 3px; color: #ffd166; text-shadow: 0 0 14px rgba(255, 209, 102, 0.5); }
+  h2 { font-size: 34px; color: #ffd166; }
+  p { max-width: 640px; line-height: 1.55; font-size: 15px; color: #cfd9ea; }
+  .code { color: #7ee2a8; font-weight: bold; }
+  .panel { background: #1b2a44; border: 1px solid #3a5a8a; border-radius: 10px; padding: 12px 16px; max-width: 640px; text-align: left; font-size: 14px; line-height: 1.6; }
+  button { font-family: inherit; font-size: 20px; font-weight: bold; color: #0d1420; background: #ffd166; border: none; border-radius: 10px; padding: 12px 30px; cursor: pointer; }
+  button:hover { background: #ffdf8a; }
+  button:active { transform: scale(0.97); }
+  #parcelBar { width: 100%; max-width: 900px; padding: 8px 12px; font-size: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  #parcelBar .tag { background: #24365a; border: 1px solid #7ee2a8; color: #7ee2a8; border-radius: 8px; padding: 4px 10px; }
+  #msg { min-height: 22px; font-weight: bold; color: #ffd166; }
+  @media (max-width: 600px) { h1 { font-size: 30px; } p, .panel { font-size: 13px; } }
+</style>
+</head>
+<body>
+<div id="hud">
+  <span id="scoreHud">Score: 0</span>
+  <span id="livesHud">Lives: 3</span>
+  <span id="timeHud">Time: 180</span>
+  <span id="delivHud">Delivered: 0 / 8</span>
+  <span id="statusHud">Status: Waiting</span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="900" height="600"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h1>CIPHER COURIER</h1>
+    <p>Secret messages hide every delivery address! A Caesar cipher shifts each letter. Decode the address, then race the courier to the right house before the clock runs out.</p>
+    <div class="panel">
+      <b>HOW TO PLAY</b><br>
+      1. Read the encoded address in the parcel bar below the map.<br>
+      2. Use the cipher key: each letter is shifted back by the shown number to reveal the real house name.<br>
+      3. Move with <b>Arrow Keys / WASD</b>, or <b>click / tap</b> anywhere to set a waypoint — the courier rides there.<br>
+      4. Drive into the correct house to deliver. A wrong house costs a life!<br>
+      5. Deliver all 8 parcels to win. Timer expiry or 3 wrong deliveries ends the run.<br>
+      Example: shift 3, code <span class="code">PDLO</span> decodes to <span class="code">MAIL</span>.
+    </div>
+    <button id="startBtn">START DELIVERY RUN</button>
+    <p>Sound starts only after you press Start. No network needed — everything runs on this device.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">RESTART</button>
+  </div>
+</div>
+<div id="parcelBar">
+  <span>Parcel:</span>
+  <span class="tag" id="parcelCode">—</span>
+  <span id="parcelHint">Press Start to begin your route.</span>
+</div>
+<div id="msg"></div>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+
+  var houses = [
+    { name: "MAPLE", x: 110, y: 120, color: "#e2607a" },
+    { name: "CEDAR", x: 330, y: 95,  color: "#7ec8e2" },
+    { name: "WILLOW", x: 560, y: 115, color: "#a8e07e" },
+    { name: "OAKEN", x: 780, y: 130, color: "#f2a65a" },
+    { name: "BIRCH", x: 160, y: 360, color: "#c792ea" },
+    { name: "ASPEN", x: 400, y: 400, color: "#ff8a7a" },
+    { name: "ELDER", x: 620, y: 380, color: "#7ee2a8" },
+    { name: "ROWAN", x: 800, y: 420, color: "#ffe066" }
+  ];
+  var roads = [
+    [0, 1], [1, 2], [2, 3], [4, 5], [5, 6], [6, 7],
+    [0, 4], [1, 5], [2, 6], [3, 7], [1, 4], [2, 5]
+  ];
+
+  var state = "title"; // title | playing | win | over
+  var courier = { x: 450, y: 300, vx: 0, vy: 0, tx: null, ty: null };
+  var keys = {};
+  var score = 0, lives = 3, delivered = 0, totalParcels = 8;
+  var timeLeft = 180, lastTick = 0, elapsed = 0;
+  var queue = [], current = null, shift = 3;
+  var flash = 0, flashColor = "#ffffff";
+  var deliveredHouses = {};
+  var particles = [];
+
+  // ---- Audio: procedural only, created after user gesture ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+  function soundGood() { beep(660, 0.12, "square", 0.12); setTimeout(function () { beep(880, 0.18, "square", 0.12); }, 110); }
+  function soundBad() { beep(180, 0.25, "sawtooth", 0.14); setTimeout(function () { beep(120, 0.3, "sawtooth", 0.14); }, 160); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.25, "triangle", 0.15); }, i * 150); }); }
+
+  // ---- Cipher ----
+  function encode(word, s) {
+    var out = "";
+    for (var i = 0; i < word.length; i++) {
+      var c = word.charCodeAt(i) - 65;
+      out += String.fromCharCode(65 + ((c + s) % 26));
+    }
+    return out;
+  }
+  function shuffle(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+  function buildQueue() {
+    var order = shuffle(houses);
+    queue = [];
+    for (var i = 0; i < totalParcels; i++) {
+      var h = order[i];
+      var s = 1 + Math.floor(Math.random() * 9); // shift 1..9
+      queue.push({ house: h, shift: s, code: encode(h.name, s) });
+    }
+  }
+  function nextParcel() {
+    current = queue.shift() || null;
+    if (current) {
+      shift = current.shift;
+      document.getElementById("parcelCode").textContent = current.code + "  (shift " + shift + ")";
+      document.getElementById("parcelHint").textContent = "Decode it: shift each letter back by " + shift + ", then deliver to that house.";
+    }
+  }
+  function setMsg(text, color) {
+    var m = document.getElementById("msg");
+    m.textContent = text;
+    m.style.color = color || "#ffd166";
+  }
+
+  // ---- Game flow ----
+  function updateHud() {
+    document.getElementById("scoreHud").textContent = "Score: " + score;
+    document.getElementById("livesHud").textContent = "Lives: " + lives;
+    var t = document.getElementById("timeHud");
+    t.textContent = "Time: " + Math.max(0, Math.ceil(timeLeft));
+    t.className = timeLeft <= 30 ? "warn" : "";
+    document.getElementById("delivHud").textContent = "Delivered: " + delivered + " / " + totalParcels;
+    document.getElementById("statusHud").textContent = "Status: " + (state === "playing" ? "Delivering" : state === "win" ? "Complete!" : state === "over" ? "Failed" : "Waiting");
+  }
+  function startGame() {
+    ensureAudio();
+    courier.x = 450; courier.y = 300; courier.tx = null; courier.ty = null;
+    score = 0; lives = 3; delivered = 0; timeLeft = 180; elapsed = 0;
+    deliveredHouses = {}; particles = []; flash = 0;
+    buildQueue(); nextParcel();
+    state = "playing";
+    document.getElementById("titleScreen").classList.add("hidden");
+    document.getElementById("endScreen").classList.add("hidden");
+    setMsg("Parcel 1: decode the code and ride to the right house!");
+    updateHud();
+  }
+  function endGame(win) {
+    state = win ? "win" : "over";
+    document.getElementById("endTitle").textContent = win ? "YOU WIN!" : "GAME OVER";
+    document.getElementById("endText").textContent = win
+      ? "All " + totalParcels + " parcels delivered! Final score: " + score + " with " + lives + " life" + (lives === 1 ? "" : "s") + " left and " + Math.ceil(timeLeft) + " seconds to spare."
+      : "The route failed. You delivered " + delivered + " of " + totalParcels + " parcels. Score: " + score + ". Try again and watch the cipher shift!";
+    document.getElementById("endScreen").classList.remove("hidden");
+    if (win) soundWin(); else soundBad();
+    updateHud();
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 22; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 260, vy: (Math.random() - 0.5) * 260, life: 0.7, color: color });
+    }
+  }
+  function checkDelivery() {
+    if (!current) return;
+    for (var i = 0; i < houses.length; i++) {
+      var h = houses[i];
+      var dx = courier.x - h.x, dy = courier.y - h.y;
+      if (dx * dx + dy * dy < 52 * 52) {
+        if (h === current.house) {
+          delivered++;
+          score += 100 + Math.max(0, Math.floor(timeLeft)) ;
+          deliveredHouses[h.name] = true;
+          burst(h.x, h.y, "#7ee2a8");
+          soundGood();
+          setMsg("Delivered to " + h.name + "! +points. Next parcel incoming.", "#7ee2a8");
+          if (delivered >= totalParcels) { endGame(true); }
+          else { nextParcel(); }
+          courier.tx = null; courier.ty = null;
+        } else {
+          lives--;
+          flash = 0.35; flashColor = "rgba(255,60,60,0.35)";
+          burst(h.x, h.y, "#ff5a5a");
+          soundBad();
+          setMsg("Wrong house! That was " + h.name + ", not the decoded address. Lives left: " + lives, "#ff5a5a");
+          courier.x = Math.max(60, courier.x - 70); courier.y = Math.max(60, courier.y - 40);
+          if (lives <= 0) { endGame(false); }
+        }
+        updateHud();
+        return;
+      }
+    }
+  }
+
+  // ---- Input ----
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  document.addEventListener("keydown", function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].indexOf(e.key.toLowerCase()) >= 0) e.preventDefault();
+    if ((e.key === "Enter") && state !== "playing") startGame();
+  });
+  document.addEventListener("keyup", function (e) { keys[e.key.toLowerCase()] = false; });
+  function setWaypoint(clientX, clientY) {
+    if (state !== "playing") return;
+    var r = canvas.getBoundingClientRect();
+    courier.tx = (clientX - r.left) * (W / r.width);
+    courier.ty = (clientY - r.top) * (H / r.height);
+  }
+  canvas.addEventListener("mousedown", function (e) { setWaypoint(e.clientX, e.clientY); });
+  canvas.addEventListener("mousemove", function (e) { if (e.buttons === 1) setWaypoint(e.clientX, e.clientY); });
+  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); var t = e.touches[0]; setWaypoint(t.clientX, t.clientY); }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); var t = e.touches[0]; setWaypoint(t.clientX, t.clientY); }, { passive: false });
+
+  // ---- Update + draw ----
+  function update(dt) {
+    if (state !== "playing") return;
+    elapsed += dt;
+    if (elapsed - lastTick >= 1) { lastTick = Math.floor(elapsed); timeLeft = Math.max(0, 180 - Math.floor(elapsed)); }
+    if (timeLeft <= 0) { endGame(false); return; }
+    var speed = 260;
+    var mx = 0, my = 0;
+    if (keys["arrowleft"] || keys["a"]) mx -= 1;
+    if (keys["arrowright"] || keys["d"]) mx += 1;
+    if (keys["arrowup"] || keys["w"]) my -= 1;
+    if (keys["arrowdown"] || keys["s"]) my += 1;
+    if (mx !== 0 || my !== 0) {
+      courier.tx = null; courier.ty = null;
+      var len = Math.sqrt(mx * mx + my * my);
+      courier.x += (mx / len) * speed * dt;
+      courier.y += (my / len) * speed * dt;
+    } else if (courier.tx !== null) {
+      var dx = courier.tx - courier.x, dy = courier.ty - courier.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 8) { courier.tx = null; courier.ty = null; }
+      else { courier.x += (dx / d) * speed * dt; courier.y += (dy / d) * speed * dt; }
+    }
+    courier.x = Math.max(20, Math.min(W - 20, courier.x));
+    courier.y = Math.max(20, Math.min(H - 20, courier.y));
+    checkDelivery();
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    if (flash > 0) flash -= dt;
+    updateHud();
+  }
+  function drawHouse(h) {
+    ctx.save();
+    ctx.translate(h.x, h.y);
+    ctx.fillStyle = h.color;
+    ctx.fillRect(-26, -12, 52, 34);
+    ctx.beginPath(); ctx.moveTo(-32, -12); ctx.lineTo(0, -34); ctx.lineTo(32, -12); ctx.closePath();
+    ctx.fillStyle = "#2a3a5e"; ctx.fill();
+    ctx.fillStyle = "#0d1420"; ctx.fillRect(-8, 2, 16, 20);
+    ctx.fillStyle = "#ffffff"; ctx.font = "bold 13px monospace"; ctx.textAlign = "center";
+    ctx.fillText(h.name, 0, -40);
+    if (deliveredHouses[h.name]) { ctx.font = "bold 22px monospace"; ctx.fillStyle = "#7ee2a8"; ctx.fillText("✓", 30, -30); }
+    ctx.restore();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#16233a"; ctx.fillRect(0, 0, W, H);
+    // grass patches
+    ctx.fillStyle = "#1d3a2a";
+    for (var gx = 0; gx < 6; gx++) for (var gy = 0; gy < 4; gy++) {
+      ctx.fillRect(gx * 150 + 20, gy * 150 + 30, 90, 60);
+    }
+    // roads
+    ctx.strokeStyle = "#4a5a7a"; ctx.lineWidth = 14; ctx.lineCap = "round";
+    roads.forEach(function (r) {
+      ctx.beginPath(); ctx.moveTo(houses[r[0]].x, houses[r[0]].y); ctx.lineTo(houses[r[1]].x, houses[r[1]].y); ctx.stroke();
+    });
+    ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = 2; ctx.setLineDash([10, 10]);
+    roads.forEach(function (r) {
+      ctx.beginPath(); ctx.moveTo(houses[r[0]].x, houses[r[0]].y); ctx.lineTo(houses[r[1]].x, houses[r[1]].y); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    houses.forEach(drawHouse);
+    // waypoint marker
+    if (courier.tx !== null) {
+      ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(courier.tx, courier.ty, 10, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(courier.tx - 14, courier.ty); ctx.lineTo(courier.tx + 14, courier.ty);
+      ctx.moveTo(courier.tx, courier.ty - 14); ctx.lineTo(courier.tx, courier.ty + 14); ctx.stroke();
+    }
+    // courier: bike + rider
+    ctx.save(); ctx.translate(courier.x, courier.y);
+    ctx.fillStyle = "#ffd166"; ctx.beginPath(); ctx.arc(-12, 12, 8, 0, Math.PI * 2); ctx.arc(12, 12, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#e8eef7"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-12, 12); ctx.lineTo(0, -4); ctx.lineTo(12, 12); ctx.stroke();
+    ctx.fillStyle = "#7ee2a8"; ctx.beginPath(); ctx.arc(0, -12, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ff5a5a"; ctx.fillRect(-14, -26, 28, 8);
+    ctx.restore();
+    // parcel indicator above courier
+    if (current) {
+      ctx.fillStyle = "#ffd166"; ctx.font = "bold 14px monospace"; ctx.textAlign = "center";
+      ctx.fillText("📦 " + current.code, courier.x, courier.y - 36);
+    }
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    if (flash > 0) { ctx.fillStyle = flashColor; ctx.fillRect(0, 0, W, H); }
+    if (state === "title") {
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "16px monospace"; ctx.textAlign = "center";
+      ctx.fillText("Press START and decode your first parcel!", W / 2, H - 16);
+    }
+  }
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

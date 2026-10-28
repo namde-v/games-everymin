@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 430
-- **Latest game:** 0430 — Timber Trapper
+- **Total games:** 440
+- **Latest game:** 0440 — Drift Diver
 - **Current volume:** 005 (Games 0401 to 0500)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -17,7 +17,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 | 004 | 0301–0400 (100, complete) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
-| 005 | 0401–0500 (30 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
+| 005 | 0401–0500 (40 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -31,20 +31,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 043
+## Latest batch — Batch 044
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0421 | Kelp Captain | Strategy / Kelp Farm Simulation | [Play](./games/game-0421.html) |
-| 0422 | Lightning Locksmith | Puzzle / Circuit Lock Picking | [Play](./games/game-0422.html) |
-| 0423 | Comet Cutter | Arcade / Asteroid Mining Dash | [Play](./games/game-0423.html) |
-| 0424 | Night Navigator | Puzzle / Constellation Pathfinding | [Play](./games/game-0424.html) |
-| 0425 | Opal Outpost | Strategy / Supply Route Trading | [Play](./games/game-0425.html) |
-| 0426 | Prism Piper | Rhythm / Melody Memory Sequence | [Play](./games/game-0426.html) |
-| 0427 | Quarry Quester | Action / Digging Platformer | [Play](./games/game-0427.html) |
-| 0428 | Rune Runner | Arcade / Word Rune Collector | [Play](./games/game-0428.html) |
-| 0429 | Solar Shepherd | Strategy / Herding Simulation | [Play](./games/game-0429.html) |
-| 0430 | Timber Trapper | Action / Trap Setting Defense | [Play](./games/game-0430.html) |
+| 0431 | Umbra Umbrella | Arcade / Rain Shield Defense | [Play](./games/game-0431.html) |
+| 0432 | Velvet Voyager | Puzzle / Gravity Slingshot Orbit | [Play](./games/game-0432.html) |
+| 0433 | Willow Warden | Strategy / Forest Tower Defense | [Play](./games/game-0433.html) |
+| 0434 | Xenon Xylophone | Rhythm / Falling Note Precision | [Play](./games/game-0434.html) |
+| 0435 | Yeti Yodeler | Action / Avalanche Echo Climber | [Play](./games/game-0435.html) |
+| 0436 | Zephyr Zealot | Puzzle / Wind Maze Airflow | [Play](./games/game-0436.html) |
+| 0437 | Atlas Acrobat | Action / Grappling Swing Platformer | [Play](./games/game-0437.html) |
+| 0438 | Beacon Builder | Strategy / Lighthouse Signal Network | [Play](./games/game-0438.html) |
+| 0439 | Cipher Courier | Puzzle / Code-Breaking Delivery | [Play](./games/game-0439.html) |
+| 0440 | Drift Diver | Arcade / Deep-Sea Current Dodging | [Play](./games/game-0440.html) |
 
 ## Quality standard
 

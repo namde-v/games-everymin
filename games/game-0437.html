@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Atlas Acrobat — Grappling Swing Platformer</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0b1020; font-family:Arial, Helvetica, sans-serif; }
+  #wrap { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 50% 20%, #1b2a55 0%, #0b1020 65%); }
+  canvas { display:block; background:linear-gradient(#16224d, #0b1020); border:3px solid #ffd166; border-radius:12px; max-width:98vw; max-height:98vh; touch-action:none; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; color:#fff; background:rgba(5,8,20,0.82); padding:20px; z-index:5; }
+  .overlay.hidden { display:none; }
+  h1 { font-size:52px; color:#ffd166; text-shadow:0 4px 0 #b3541e; letter-spacing:2px; margin-bottom:6px; }
+  h2 { font-size:44px; color:#ffd166; margin-bottom:10px; }
+  .sub { font-size:18px; color:#cfe3ff; margin-bottom:14px; }
+  .card { background:rgba(255,255,255,0.10); border:1px solid rgba(255,255,255,0.25); border-radius:12px; padding:14px 18px; max-width:560px; line-height:1.55; font-size:16px; text-align:left; }
+  .card b { color:#ffd166; }
+  button { margin-top:18px; font-size:22px; font-weight:bold; padding:14px 34px; border:none; border-radius:999px; background:#ffd166; color:#1a1200; cursor:pointer; box-shadow:0 5px 0 #b3541e; }
+  button:active { transform:translateY(3px); box-shadow:0 2px 0 #b3541e; }
+  button.secondary { background:#6ee7ff; box-shadow:0 5px 0 #1d6f8a; }
+  #hud { position:absolute; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:10px; z-index:4; flex-wrap:wrap; justify-content:center; width:96%; pointer-events:none; }
+  .pill { background:rgba(0,0,0,0.65); color:#fff; border:1px solid #ffd166; border-radius:999px; padding:7px 14px; font-weight:bold; font-size:15px; }
+  #msg { position:absolute; bottom:14px; left:50%; transform:translateX(-50%); color:#ffe9a8; font-weight:bold; text-shadow:0 2px 4px #000; z-index:4; }
+  @media (max-width:600px){ h1{font-size:36px;} h2{font-size:32px;} .card{font-size:14px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="hud" class="hidden">
+    <span class="pill" id="hudScore">Score: 0</span>
+    <span class="pill" id="hudLives">Lives: 3</span>
+    <span class="pill" id="hudMedals">Medals: 0 / 6</span>
+    <span class="pill" id="hudStatus">Swing to the golden flag!</span>
+  </div>
+  <div id="msg"></div>
+
+  <div id="titleScreen" class="overlay">
+    <h1>ATLAS ACROBAT</h1>
+    <p class="sub">A grappling swing platformer across the canyon</p>
+    <div class="card">
+      <b>How to Play:</b><br>
+      &bull; <b>Hold SPACE</b>, hold the <b>mouse button</b>, or <b>touch and hold</b> to fire your grappling rope to the nearest anchor above you.<br>
+      &bull; <b>Release</b> to let go and fly with your momentum. Swing, build speed, and cross every chasm.<br>
+      &bull; <b>Arrow keys / A D</b> add a little push while swinging or in the air. <b>W / Up</b> shortens the rope.<br>
+      &bull; Collect <b>gold medals</b> for points. Avoid red <b>spikes</b> and falling into the canyon.<br>
+      &bull; Reach the <b>golden flag platform</b> at the far right to WIN. You have 3 lives.
+    </div>
+    <button id="startBtn">▶ START GAME</button>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>🏆 YOU WIN!</h2>
+    <p class="sub" id="winText">Atlas reached the flag!</p>
+    <button id="winRestartBtn">↻ PLAY AGAIN</button>
+  </div>
+
+  <div id="gameOverScreen" class="overlay hidden">
+    <h2>💥 GAME OVER</h2>
+    <p class="sub" id="overText">Atlas tumbled into the canyon.</p>
+    <button id="overRestartBtn">↻ TRY AGAIN</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('gameOverScreen');
+  var hud = document.getElementById('hud');
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudMedals = document.getElementById('hudMedals');
+  var hudStatus = document.getElementById('hudStatus');
+  var msgEl = document.getElementById('msg');
+
+  var state = 'title'; // title, playing, win, over
+  var score = 0, lives = 3, medalsGot = 0;
+  var camX = 0;
+  var keys = {};
+  var audioCtx = null;
+  var swingHeld = false;
+
+  // World: platforms (x, y, w, h, kind), spikes sit on some platforms.
+  var platforms = [
+    {x:0, y:460, w:220, h:80, kind:'start'},
+    {x:300, y:460, w:170, h:80, kind:'ground'},
+    {x:550, y:420, w:150, h:40, kind:'ground'},
+    {x:780, y:460, w:170, h:80, kind:'ground'},
+    {x:1030, y:410, w:150, h:40, kind:'ground'},
+    {x:1260, y:460, w:180, h:80, kind:'ground'},
+    {x:1520, y:400, w:150, h:40, kind:'ground'},
+    {x:1750, y:460, w:180, h:80, kind:'ground'},
+    {x:2010, y:410, w:160, h:40, kind:'ground'},
+    {x:2260, y:460, w:220, h:80, kind:'finish'}
+  ];
+  var anchors = [
+    {x:250, y:120}, {x:470, y:100}, {x:640, y:90}, {x:870, y:100},
+    {x:1110, y:90}, {x:1350, y:100}, {x:1600, y:90}, {x:1840, y:100},
+    {x:2090, y:90}, {x:2330, y:110}
+  ];
+  var spikes = [
+    {x:830, y:440, w:60, h:20}, {x:1310, y:440, w:70, h:20}, {x:1800, y:440, w:70, h:20}
+  ];
+  var medals = [
+    {x:380, y:380, taken:false}, {x:620, y:340, taken:false}, {x:860, y:380, taken:false},
+    {x:1100, y:330, taken:false}, {x:1590, y:320, taken:false}, {x:2080, y:330, taken:false}
+  ];
+  var startPos = {x:90, y:400};
+
+  var player = { x:startPos.x, y:startPos.y, vx:0, vy:0, r:16, onGround:false, anchor:null, ropeLen:0 };
+
+  function ensureAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol){
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function sfx(name){
+    if (name === 'grab') tone(520, 0.12, 'triangle', 0.18);
+    if (name === 'medal') { tone(880, 0.12, 'sine', 0.2); setTimeout(function(){ tone(1320, 0.18, 'sine', 0.2); }, 90); }
+    if (name === 'hurt') tone(140, 0.3, 'sawtooth', 0.22);
+    if (name === 'win') { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.25, 'triangle', 0.2); }, i*130); }); }
+    if (name === 'jump') tone(300, 0.1, 'square', 0.1);
+  }
+
+  function showMsg(t){ msgEl.textContent = t; setTimeout(function(){ if (msgEl.textContent === t) msgEl.textContent = ''; }, 2200); }
+  function updateHUD(){
+    hudScore.textContent = 'Score: ' + score;
+    hudLives.textContent = 'Lives: ' + lives;
+    hudMedals.textContent = 'Medals: ' + medalsGot + ' / 6';
+    hudStatus.textContent = player.anchor ? 'SWINGING! Release to fly!' : 'Hold SPACE / click / touch to grapple';
+  }
+
+  function resetGame(){
+    score = 0; lives = 3; medalsGot = 0; camX = 0;
+    medals.forEach(function(m){ m.taken = false; });
+    respawn(false);
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+    hud.classList.remove('hidden');
+    state = 'playing';
+    updateHUD();
+  }
+  function respawn(lostLife){
+    player.x = startPos.x; player.y = startPos.y; player.vx = 0; player.vy = 0;
+    player.anchor = null; player.onGround = false;
+    camX = 0;
+    if (lostLife) { lives--; sfx('hurt'); updateHUD(); }
+  }
+  function loseLife(reason){
+    if (state !== 'playing') return;
+    showMsg(reason);
+    if (lives - 1 <= 0) {
+      lives = 0; updateHUD();
+      state = 'over';
+      document.getElementById('overText').textContent = 'Score: ' + score + '  •  Medals: ' + medalsGot + ' / 6. Atlas needs another run!';
+      overScreen.classList.remove('hidden');
+    } else {
+      respawn(true);
+    }
+  }
+  function winGame(){
+    if (state !== 'playing') return;
+    state = 'win'; sfx('win');
+    score += 500;
+    document.getElementById('winText').textContent = 'Final score: ' + score + '  •  Medals: ' + medalsGot + ' / 6. Brilliant swinging!';
+    winScreen.classList.remove('hidden');
+    updateHUD();
+  }
+
+  function nearestAnchor(){
+    var best = null, bestD = 1e9;
+    anchors.forEach(function(a){
+      var dx = a.x - player.x, dy = a.y - player.y;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if (dy < 20 && d < 420 && d < bestD) { bestD = d; best = a; }
+    });
+    return best;
+  }
+  function attach(){
+    if (state !== 'playing' || player.anchor) return;
+    var a = nearestAnchor();
+    if (a) {
+      player.anchor = a;
+      player.ropeLen = Math.sqrt(Math.pow(a.x-player.x,2) + Math.pow(a.y-player.y,2));
+      sfx('grab');
+    }
+  }
+  function detach(){
+    if (player.anchor) { player.anchor = null; player.vy -= 40; }
+  }
+
+  function update(){
+    if (state !== 'playing') return;
+    // Horizontal push
+    var push = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) push -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) push += 1;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) {
+      if (player.anchor && player.ropeLen > 90) player.ropeLen -= 3;
+    }
+    player.vx += push * (player.anchor ? 0.55 : 0.35);
+    player.vx *= 0.985;
+    player.vy += 0.55; // gravity
+    if (player.vy > 16) player.vy = 16;
+
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Rope constraint: keep player on circle around anchor
+    if (player.anchor) {
+      var dx = player.x - player.anchor.x, dy = player.y - player.anchor.y;
+      var d = Math.sqrt(dx*dx + dy*dy) || 1;
+      if (d > player.ropeLen) {
+        player.x = player.anchor.x + dx / d * player.ropeLen;
+        player.y = player.anchor.y + dy / d * player.ropeLen;
+        // Remove radial velocity component so motion stays tangential
+        var nx = dx / d, ny = dy / d;
+        var radial = player.vx * nx + player.vy * ny;
+        if (radial > 0) { player.vx -= radial * nx; player.vy -= radial * ny; }
+      }
+    }
+
+    // Platform collisions (land on top)
+    player.onGround = false;
+    platforms.forEach(function(p){
+      if (player.vy >= 0 && player.x + player.r > p.x && player.x - player.r < p.x + p.w) {
+        var prevBottom = player.y - player.vy + player.r;
+        if (prevBottom <= p.y + 6 && player.y + player.r >= p.y && player.y + player.r <= p.y + 30) {
+          player.y = p.y - player.r; player.vy = 0; player.onGround = true;
+          if (p.kind === 'finish') winGame();
+        }
+      }
+    });
+
+    // Spikes
+    spikes.forEach(function(s){
+      if (player.x + player.r > s.x && player.x - player.r < s.x + s.w &&
+          player.y + player.r > s.y && player.y - player.r < s.y + s.h) {
+        loseLife('Ouch! Spikes! One life lost.');
+      }
+    });
+
+    // Medals
+    medals.forEach(function(m){
+      if (!m.taken) {
+        var dx = player.x - m.x, dy = player.y - m.y;
+        if (Math.sqrt(dx*dx + dy*dy) < 42) { m.taken = true; medalsGot++; score += 100; sfx('medal'); showMsg('Medal! +100 points'); }
+      }
+    });
+
+    // Falling into canyon
+    if (player.y > 620) loseLife('Fell into the canyon! One life lost.');
+    if (player.x < 10) { player.x = 10; player.vx = 0; }
+
+    // Camera follows, clamped to world
+    var target = player.x - 300;
+    if (target < 0) target = 0;
+    if (target > 2480 - 960) target = 2480 - 960;
+    camX += (target - camX) * 0.12;
+    updateHUD();
+  }
+
+  function draw(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Sky decorations
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    for (var i = 0; i < 8; i++) {
+      var cx = (i * 330 - camX * 0.3) % 1100; if (cx < 0) cx += 1100;
+      ctx.beginPath(); ctx.arc(cx, 60 + (i % 3) * 30, 26, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.save();
+    ctx.translate(-Math.round(camX), 0);
+
+    // Anchors and rope
+    anchors.forEach(function(a){
+      ctx.fillStyle = '#6ee7ff';
+      ctx.beginPath(); ctx.arc(a.x, a.y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(a.x, a.y, 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#0b1020'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('⚓', a.x, a.y + 4);
+    });
+    if (player.anchor) {
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(player.anchor.x, player.anchor.y); ctx.lineTo(player.x, player.y); ctx.stroke();
+    }
+
+    // Platforms
+    platforms.forEach(function(p){
+      ctx.fillStyle = p.kind === 'finish' ? '#2e9e5b' : (p.kind === 'start' ? '#3b5bd6' : '#7a4a2b');
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.fillStyle = p.kind === 'finish' ? '#7be495' : '#a8e063';
+      ctx.fillRect(p.x, p.y, p.w, 12);
+      if (p.kind === 'finish') {
+        ctx.fillStyle = '#ffd166'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('🏁 FLAG', p.x + p.w / 2, p.y - 14);
+      }
+    });
+
+    // Spikes
+    ctx.fillStyle = '#ff4d5e';
+    spikes.forEach(function(s){
+      for (var sx = s.x; sx < s.x + s.w; sx += 14) {
+        ctx.beginPath(); ctx.moveTo(sx, s.y + s.h); ctx.lineTo(sx + 7, s.y); ctx.lineTo(sx + 14, s.y + s.h); ctx.closePath(); ctx.fill();
+      }
+    });
+
+    // Medals
+    medals.forEach(function(m){
+      if (m.taken) return;
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(m.x, m.y, 14, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#7a4a00'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('★', m.x, m.y + 6);
+    });
+
+    // Player: little acrobat
+    ctx.fillStyle = '#ff6b6b';
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('🤸', player.x, player.y + 6);
+    ctx.restore();
+
+    // Controls hint while playing
+    if (state === 'playing') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Hold SPACE / mouse / touch to grapple — release to fly', canvas.width / 2, 22);
+    }
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input: keyboard ----
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); if (!swingHeld) { swingHeld = true; attach(); } }
+    if ((e.key === 'Enter') && (state === 'win' || state === 'over')) resetGame();
+  });
+  document.addEventListener('keyup', function(e){
+    keys[e.key] = false;
+    if (e.key === ' ' || e.key === 'Spacebar') { swingHeld = false; detach(); }
+  });
+  // ---- Input: mouse ----
+  canvas.addEventListener('mousedown', function(e){ e.preventDefault(); ensureAudio(); attach(); });
+  document.addEventListener('mouseup', function(){ detach(); });
+  canvas.addEventListener('mousemove', function(){});
+  // ---- Input: touch ----
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); ensureAudio(); attach(); }, {passive:false});
+  document.addEventListener('touchend', function(){ detach(); });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); }, {passive:false});
+
+  // ---- Buttons ----
+  document.getElementById('startBtn').addEventListener('click', function(){ ensureAudio(); sfx('jump'); resetGame(); });
+  document.getElementById('winRestartBtn').addEventListener('click', function(){ ensureAudio(); resetGame(); });
+  document.getElementById('overRestartBtn').addEventListener('click', function(){ ensureAudio(); resetGame(); });
+
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

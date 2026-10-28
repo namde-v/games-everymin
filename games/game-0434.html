@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Xenon Xylophone</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0a0a1a; color:#fff; font-family:Arial, Helvetica, sans-serif; display:flex; flex-direction:column; align-items:center; min-height:100vh; overflow:hidden; user-select:none; }
+  h1 { margin:10px 0 2px; font-size:26px; letter-spacing:3px; text-shadow:0 0 12px #0ff, 0 0 24px #f0f; }
+  .sub { color:#aaa; font-size:13px; margin-bottom:8px; }
+  #hud { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; font-size:15px; font-weight:bold; margin-bottom:6px; }
+  #hud span { background:#1a1a33; border:1px solid #444; border-radius:8px; padding:5px 12px; }
+  #energyWrap { width:min(560px,92vw); height:16px; background:#222; border-radius:8px; overflow:hidden; border:1px solid #555; margin-bottom:6px; }
+  #energyBar { height:100%; width:100%; background:linear-gradient(90deg,#0f0,#ff0,#f00); transition:width .2s; }
+  #wrap { position:relative; width:min(560px,92vw); }
+  canvas { display:block; width:100%; height:520px; background:linear-gradient(180deg,#12002e,#050514); border:2px solid #0ff; border-radius:12px; touch-action:none; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:rgba(0,0,0,.82); border-radius:12px; text-align:center; padding:20px; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { font-size:30px; text-shadow:0 0 14px #0ff; }
+  .overlay p { font-size:15px; line-height:1.6; color:#ddd; max-width:420px; }
+  .keys { font-size:14px; color:#0ff; }
+  button { background:#0ff; color:#000; border:none; font-size:20px; font-weight:bold; padding:14px 34px; border-radius:12px; cursor:pointer; box-shadow:0 0 18px #0ff; }
+  button:hover { background:#fff; }
+  button:active { transform:scale(.96); }
+  .small { font-size:13px; color:#999; }
+  #feedback { height:26px; font-size:20px; font-weight:bold; color:#ff0; text-shadow:0 0 10px #ff0; }
+</style>
+</head>
+<body>
+<h1>XENON XYLOPHONE</h1>
+<div class="sub">Rhythm / Falling Note Precision</div>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Combo: <b id="combo">x0</b></span>
+  <span>Hits: <b id="hits">0</b></span>
+  <span>Misses: <b id="misses">0</b></span>
+  <span>Notes: <b id="prog">0 / 0</b></span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+<div id="energyWrap"><div id="energyBar"></div></div>
+<div id="wrap">
+  <canvas id="game" width="560" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>XENON XYLOPHONE</h2>
+    <p><strong>How to Play:</strong> Colored bars fall down four lanes toward the glowing strike line. Press the matching key (or tap the lane) exactly as a note crosses the line. Perfect timing scores more and builds your combo!</p>
+    <p class="keys">A = Pink &nbsp; S = Cyan &nbsp; D = Lime &nbsp; F = Gold<br>Mouse click / touch a lane to strike it too.</p>
+    <p>Missing a note breaks your combo and drains energy. Finish the whole song with energy left to WIN. Lose all energy and it is Game Over.</p>
+    <button id="startBtn">▶ START</button>
+    <p class="small">Headphones recommended. Sound is generated live — no downloads needed.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ RESTART</button>
+  </div>
+</div>
+<div id="feedback"></div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var lanes = [
+    { key:'a', label:'A', color:'#ff4fd8', x:70,  freq:523.25 },
+    { key:'s', label:'S', color:'#00e5ff', x:210, freq:659.25 },
+    { key:'d', label:'D', color:'#a6ff00', x:350, freq:783.99 },
+    { key:'f', label:'F', color:'#ffcc00', x:490, freq:1046.50 }
+  ];
+  var strikeY = 440;
+  var notes = [], particles = [];
+  var running = false, songDone = false, ended = false;
+  var score = 0, combo = 0, bestCombo = 0, hits = 0, misses = 0, energy = 100;
+  var totalNotes = 0, notesResolved = 0, spawnIndex = 0, startTime = 0;
+  var audioCtx = null, flashLane = [-1,-1,-1,-1];
+  var chart = [];
+  // Build a deterministic song chart: 72 notes across 4 lanes, varied rhythm.
+  var pattern = [0,1,2,3,2,1,0,2,3,1,0,3,2,0,1,3,1,2,0,1,3,2,1,0,2,3,0,1,2,3,1,0,2,1,3,0];
+  for (var i = 0; i < 72; i++) {
+    var lane = pattern[i % pattern.length];
+    if (i % 11 === 5) lane = (lane + 1) % 4;
+    if (i % 7 === 3) lane = (lane + 2) % 4;
+    chart.push({ lane: lane, t: 1.2 + i * 0.62 + (i % 5 === 0 ? 0.3 : 0) });
+  }
+  totalNotes = chart.length;
+  function el(id){ return document.getElementById(id); }
+  function setHud(){
+    el('score').textContent = score;
+    el('combo').textContent = 'x' + combo;
+    el('hits').textContent = hits;
+    el('misses').textContent = misses;
+    el('prog').textContent = notesResolved + ' / ' + totalNotes;
+    el('energyBar').style.width = Math.max(0, energy) + '%';
+    el('status').textContent = !running ? (ended ? 'Finished' : 'Ready') : 'Playing';
+  }
+  function ensureAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, vol, type){
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.25, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.5));
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + (dur || 0.5));
+  }
+  function burst(x, y, color){
+    for (var i = 0; i < 14; i++) particles.push({ x:x, y:y, vx:(Math.random()-0.5)*7, vy:(Math.random()-0.7)*7, life:1, color:color });
+  }
+  function showFeedback(txt, color){
+    var f = el('feedback'); f.textContent = txt; f.style.color = color; f.style.textShadow = '0 0 10px ' + color;
+  }
+  function startGame(){
+    ensureAudio();
+    notes = []; particles = [];
+    score = 0; combo = 0; bestCombo = 0; hits = 0; misses = 0; energy = 100;
+    notesResolved = 0; spawnIndex = 0; ended = false; songDone = false;
+    el('titleScreen').classList.add('hidden');
+    el('endScreen').classList.add('hidden');
+    running = true; startTime = performance.now();
+    showFeedback('Get ready...', '#0ff');
+    setHud();
+    requestAnimationFrame(loop);
+  }
+  function endGame(win){
+    running = false; ended = true;
+    el('endTitle').textContent = win ? 'YOU WIN!' : 'GAME OVER';
+    el('endText').textContent = (win ? 'Song complete! You kept the energy alive.' : 'Your energy ran out before the song ended.') +
+      ' Final score: ' + score + ' | Best combo: x' + bestCombo + ' | Hits: ' + hits + ' | Misses: ' + misses;
+    el('endScreen').classList.remove('hidden');
+    if (audioCtx) tone(win ? 1046.5 : 220, 0.8, 0.3, win ? 'triangle' : 'sawtooth');
+    setHud();
+  }
+  function strike(laneIdx){
+    if (!running) return;
+    flashLane[laneIdx] = 0.18;
+    var best = -1, bestDist = 999;
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].lane !== laneIdx) continue;
+      var d = Math.abs(notes[i].y - strikeY);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    var lane = lanes[laneIdx];
+    if (best >= 0 && bestDist <= 70) {
+      var n = notes.splice(best, 1)[0];
+      var pts, label, col;
+      if (bestDist <= 18) { pts = 300; label = 'PERFECT!'; col = '#0f0'; }
+      else if (bestDist <= 38) { pts = 150; label = 'GREAT!'; col = '#0ff'; }
+      else { pts = 75; label = 'GOOD'; col = '#ff0'; }
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      score += pts + combo * 10; hits++; notesResolved++;
+      burst(lane.x, strikeY, lane.color);
+      tone(lane.freq, 0.55, 0.3, 'triangle');
+      tone(lane.freq * 2, 0.3, 0.1, 'sine');
+      showFeedback(label + ' +' + (pts + combo * 10), col);
+    } else {
+      combo = 0; misses++; energy -= 5;
+      tone(160, 0.2, 0.2, 'sawtooth');
+      showFeedback('MISS — off beat!', '#f00');
+      if (energy <= 0) { energy = 0; setHud(); endGame(false); return; }
+    }
+    setHud();
+    checkSongEnd();
+  }
+  function checkSongEnd(){
+    if (notesResolved >= totalNotes && spawnIndex >= chart.length && notes.length === 0) {
+      songDone = true; endGame(energy > 0);
+    }
+  }
+  function loop(now){
+    if (!running) { draw(now || 0, true); return; }
+    var elapsed = (now - startTime) / 1000;
+    while (spawnIndex < chart.length && chart[spawnIndex].t <= elapsed + 1.6) {
+      notes.push({ lane: chart[spawnIndex].lane, y: -30, speed: 275 });
+      spawnIndex++;
+    }
+    for (var i = notes.length - 1; i >= 0; i--) {
+      notes[i].y += notes[i].speed * 0.016;
+      if (notes[i].y > strikeY + 70) {
+        notes.splice(i, 1);
+        combo = 0; misses++; notesResolved++; energy -= 8;
+        showFeedback('MISSED NOTE!', '#f00');
+        tone(140, 0.25, 0.2, 'sawtooth');
+        setHud();
+        if (energy <= 0) { energy = 0; setHud(); endGame(false); return; }
+        checkSongEnd();
+      }
+    }
+    for (var j = 0; j < 4; j++) if (flashLane[j] > 0) flashLane[j] -= 0.016;
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx; particles[p].y += particles[p].vy; particles[p].vy += 0.25; particles[p].life -= 0.03;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    draw(now, false);
+    setHud();
+    if (running) requestAnimationFrame(loop);
+  }
+  function draw(now, idle){
+    ctx.clearRect(0, 0, W, H);
+    for (var i = 0; i < 4; i++) {
+      var lx = lanes[i].x;
+      ctx.fillStyle = flashLane[i] > 0 ? lanes[i].color : '#14143a';
+      ctx.globalAlpha = flashLane[i] > 0 ? 0.55 : 1;
+      ctx.fillRect(lx - 60, 0, 120, H);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#333'; ctx.strokeRect(lx - 60, 0, 120, H);
+      ctx.fillStyle = lanes[i].color; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(lanes[i].label, lx, 28);
+    }
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, strikeY - 2, W, 4);
+    ctx.fillStyle = '#0ff'; ctx.fillRect(0, strikeY - 2, W, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(0, strikeY + 20, W, 40);
+    for (var n = 0; n < notes.length; n++) {
+      var note = notes[n], lane = lanes[note.lane];
+      ctx.fillStyle = lane.color;
+      ctx.shadowColor = lane.color; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.roundRect(lane.x - 52, note.y - 16, 104, 32, 10); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#000'; ctx.font = 'bold 16px Arial'; ctx.fillText('♪', lane.x, note.y + 6);
+    }
+    for (var q = 0; q < particles.length; q++) {
+      var pt = particles[q];
+      ctx.globalAlpha = Math.max(0, pt.life);
+      ctx.fillStyle = pt.color; ctx.fillRect(pt.x - 3, pt.y - 3, 6, 6);
+      ctx.globalAlpha = 1;
+    }
+    if (idle) {
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press START and catch the falling notes!', W / 2, 250);
+    }
+  }
+  function laneFromX(x){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (x - rect.left) * (W / rect.width);
+    var best = 0, bd = 999;
+    for (var i = 0; i < 4; i++) { var d = Math.abs(cx - lanes[i].x); if (d < bd) { bd = d; best = i; } }
+    return best;
+  }
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    for (var i = 0; i < 4; i++) if (lanes[i].key === k) { strike(i); e.preventDefault(); }
+    if (k === 'enter' && !running && !ended) startGame();
+  });
+  canvas.addEventListener('mousedown', function(e){ strike(laneFromX(e.clientX)); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); strike(laneFromX(e.touches[0].clientX)); }, { passive:false });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  setHud(); draw(0, true);
+})();
+</script>
+</body>
+</html>

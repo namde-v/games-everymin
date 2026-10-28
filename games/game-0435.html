@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Yeti Yodeler — Avalanche Echo Climber</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e33; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow: hidden; }
+  h1 { font-size: 26px; margin: 6px 0 2px; text-shadow: 2px 2px 0 #123; letter-spacing: 1px; }
+  p.sub { color: #bfe6ff; font-size: 13px; margin-bottom: 8px; }
+  #wrap { position: relative; width: min(92vw, 720px); aspect-ratio: 4 / 3; max-height: 78vh; }
+  canvas { width: 100%; height: 100%; display: block; background: linear-gradient(#7ec8f7, #e8f7ff); border: 3px solid #eaf6ff; border-radius: 12px; touch-action: none; }
+  #hud { position: absolute; top: 8px; left: 10px; right: 10px; display: flex; justify-content: space-between; font-weight: bold; font-size: 15px; color: #102a43; text-shadow: 0 0 4px #fff; pointer-events: none; z-index: 5; }
+  #hud span { background: rgba(255,255,255,.75); padding: 4px 9px; border-radius: 20px; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(8, 28, 52, .88); border-radius: 12px; padding: 20px; z-index: 10; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; margin-bottom: 8px; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #d9ecff; margin: 4px 0; }
+  .big { font-size: 52px; margin-bottom: 6px; }
+  button { margin-top: 14px; padding: 12px 26px; font-size: 18px; font-weight: bold; border: 0; border-radius: 999px; background: #ffcf3f; color: #1a2b00; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #fff; color: #0b1e33; box-shadow: 0 4px 0 #8aa; }
+  #controls { color: #cfe6ff; font-size: 13px; margin-top: 8px; text-align: center; line-height: 1.5; }
+  #shoutBtn { position: absolute; right: 12px; bottom: 12px; z-index: 6; padding: 10px 16px; font-size: 15px; background: #ff5d8f; color: #fff; box-shadow: 0 4px 0 #a4133c; }
+</style>
+</head>
+<body>
+<h1>❄️ Yeti Yodeler ❄️</h1>
+<p class="sub">Action / Avalanche Echo Climber — shout, climb, and outrun the avalanche!</p>
+<div id="wrap">
+  <canvas id="game" width="720" height="540"></canvas>
+  <div id="hud"><span id="score">Score: 0</span><span id="lives">Lives: ❤️❤️❤️</span><span id="status">Height: 0m</span></div>
+  <button id="shoutBtn" type="button">📣 SHOUT</button>
+  <div id="titleScreen" class="overlay">
+    <div class="big">🦶🏔️</div>
+    <h2>Yeti Yodeler</h2>
+    <p><strong>How to Play:</strong> Climb the mountain and reach the summit flag before the avalanche swallows you!</p>
+    <p>Move with <strong>Arrow keys / A &amp; D</strong>, jump with <strong>W / ArrowUp</strong>. Press <strong>Space</strong>, click, or tap <strong>SHOUT</strong> to yodel — your echo shatters ice blocks above you and scares falling icicles.</p>
+    <p>Collect 💎 echo crystals for points. Dodge falling icicles — 3 hits and the climb ends. If the avalanche touches you, it is Game Over.</p>
+    <p>Touch: drag left / right to move, tap to shout, swipe up to jump.</p>
+    <button id="startBtn" type="button">▶ Start Climb</button>
+  </div>
+  <div id="winScreen" class="overlay hidden">
+    <div class="big">🏆🎉</div>
+    <h2>You Reached the Summit!</h2>
+    <p id="winText">Amazing yodeling! The whole mountain heard you.</p>
+    <button id="winRestart" type="button">↻ Play Again</button>
+  </div>
+  <div id="overScreen" class="overlay hidden">
+    <div class="big">💥🌨️</div>
+    <h2>Game Over</h2>
+    <p id="overText">The mountain wins this time.</p>
+    <button id="overRestart" type="button">↻ Try Again</button>
+  </div>
+</div>
+<div id="controls">← → / A D move &nbsp;•&nbsp; W / ↑ jump &nbsp;•&nbsp; Space / click / tap = SHOUT &nbsp;•&nbsp; Reach the summit flag!</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+  var winText = document.getElementById('winText');
+  var overText = document.getElementById('overText');
+
+  var WORLD_HEIGHT = 5200;
+  var state = 'title';
+  var score = 0, lives = 3, cameraY = 0, avalancheY = 0, time = 0, shoutCooldown = 0;
+  var keys = {};
+  var touchX = null, touchStartY = null;
+  var player, platforms, blocks, crystals, icicles, shouts, particles, summit;
+
+  // ---- Procedural audio: created only after the Start click ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(Math.max(40, freq * 0.6), audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function yodelSound() {
+    if (!audioCtx) return;
+    [660, 880, 990, 1320].forEach(function (f, i) {
+      setTimeout(function () { beep(f, 0.14, 'triangle', 0.16); }, i * 90);
+    });
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function reset() {
+    score = 0; lives = 3; cameraY = 0; time = 0; shoutCooldown = 0;
+    player = { x: W / 2, y: H - 90, w: 44, h: 52, vx: 0, vy: 0, grounded: false, facing: 1, invuln: 0 };
+    avalancheY = H + 220;
+    platforms = []; blocks = []; crystals = []; icicles = []; shouts = []; particles = [];
+    var y = H - 40;
+    platforms.push({ x: 60, y: H - 30, w: W - 120 });
+    while (y > -WORLD_HEIGHT + 200) {
+      y -= rand(72, 105);
+      var pw = rand(110, 210);
+      platforms.push({ x: rand(10, W - pw - 10), y: y, w: pw });
+      if (Math.random() < 0.55) {
+        blocks.push({ x: rand(20, W - 70), y: y - 52, w: 52, h: 36, hp: 1 });
+      }
+      if (Math.random() < 0.75) {
+        crystals.push({ x: rand(30, W - 30), y: y - 46, taken: false, bob: rand(0, 6) });
+      }
+    }
+    summit = { x: W / 2 - 30, y: -WORLD_HEIGHT + 120, w: 60, h: 90 };
+    updateHUD();
+  }
+
+  function shout() {
+    if (state !== 'playing' || shoutCooldown > 0) return;
+    shoutCooldown = 0.35;
+    yodelSound();
+    shouts.push({ x: player.x + player.w / 2, y: player.y - 6, r: 14, life: 0.55 });
+    for (var i = 0; i < 12; i++) {
+      particles.push({ x: player.x + player.w / 2, y: player.y, vx: rand(-90, 90), vy: rand(-260, -60), life: 0.5, color: '#ffe066' });
+    }
+  }
+
+  function damage(reason) {
+    if (player.invuln > 0 || state !== 'playing') return;
+    lives--; player.invuln = 1.6; beep(160, 0.3, 'sawtooth', 0.15);
+    for (var i = 0; i < 16; i++) particles.push({ x: player.x + 22, y: player.y + 20, vx: rand(-160, 160), vy: rand(-220, 0), life: 0.6, color: '#ff6b6b' });
+    if (lives <= 0) { endGame(false, reason); }
+    updateHUD();
+  }
+
+  function endGame(won, reason) {
+    state = won ? 'win' : 'over';
+    if (won) { beep(523, 0.2, 'triangle', 0.15); setTimeout(function () { beep(784, 0.3, 'triangle', 0.15); }, 150); winText.textContent = 'Summit reached with ' + score + ' points and ' + lives + ' lives left. The echo of your yodel rings across the peaks!'; winScreen.classList.remove('hidden'); }
+    else { overText.textContent = reason + ' Final score: ' + score + '. Climb again, brave yeti!'; overScreen.classList.remove('hidden'); }
+    updateHUD();
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+    beep(440, 0.15, 'triangle', 0.14);
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    time += dt; shoutCooldown = Math.max(0, shoutCooldown - dt);
+    if (player.invuln > 0) player.invuln -= dt;
+    var speed = 250;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) { player.vx = -speed; player.facing = -1; }
+    else if (keys['ArrowRight'] || keys['d'] || keys['D']) { player.vx = speed; player.facing = 1; }
+    else if (touchX !== null) { player.vx = (touchX - (player.x + player.w / 2)) * 4; player.vx = Math.max(-speed, Math.min(speed, player.vx)); }
+    else { player.vx *= 0.7; }
+    player.vy += 1500 * dt;
+    if ((keys['ArrowUp'] || keys['w'] || keys['W']) && player.grounded) { player.vy = -640; player.grounded = false; beep(300, 0.12, 'sine', 0.1); }
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+    if (player.x < 8) player.x = 8;
+    if (player.x > W - player.w - 8) player.x = W - player.w - 8;
+    player.grounded = false;
+    platforms.forEach(function (p) {
+      if (player.vy >= 0 && player.x + player.w > p.x && player.x < p.x + p.w && player.y + player.h >= p.y && player.y + player.h <= p.y + 22) {
+        player.y = p.y - player.h; player.vy = 0; player.grounded = true;
+      }
+    });
+    // Camera follows upward climb; avalanche creeps up behind.
+    var targetCam = Math.min(0, Math.max(-WORLD_HEIGHT + H, player.y - H * 0.55));
+    if (targetCam < cameraY) cameraY = targetCam;
+    avalancheY -= (26 + time * 0.9) * dt;
+    var worldPlayerY = player.y + cameraY;
+    if (player.y + player.h > avalancheY) { endGame(false, 'The avalanche caught you!'); return; }
+    // Summit win: reach the flag near the top of the world.
+    if (worldPlayerY < summit.y + 120) { score += 500; endGame(true); return; }
+    // Icicle spawner: faster and more frequent as you climb.
+    if (Math.random() < (0.012 + time * 0.00012)) {
+      icicles.push({ x: rand(20, W - 20), y: cameraY - 20, vy: rand(220, 380), len: rand(28, 52) });
+    }
+    icicles.forEach(function (ic) { ic.y += ic.vy * dt; });
+    icicles = icicles.filter(function (ic) { return ic.y < cameraY + H + 80; });
+    icicles.forEach(function (ic) {
+      if (player.x < ic.x + 14 && player.x + player.w > ic.x - 14 && player.y < ic.y + ic.len && player.y + player.h > ic.y) damage('An icicle bonked you three times!');
+    });
+    // Shout waves shatter blocks and melt nearby icicles.
+    shouts.forEach(function (s) { s.y -= 420 * dt; s.r += 90 * dt; s.life -= dt; });
+    shouts.forEach(function (s) {
+      blocks.forEach(function (b) {
+        var bx = b.x, by = b.y + cameraY;
+        if (Math.abs(s.x - (bx + 26)) < 80 && Math.abs(s.y - by) < 90) { b.hp = 0; score += 25; beep(900, 0.1, 'square', 0.08); }
+      });
+      icicles.forEach(function (ic) { if (Math.abs(s.x - ic.x) < 90 && Math.abs(s.y - ic.y) < 110) ic.y = cameraY + H + 200; });
+    });
+    blocks = blocks.filter(function (b) { return b.hp > 0; });
+    shouts = shouts.filter(function (s) { return s.life > 0; });
+    crystals.forEach(function (c) {
+      c.bob += dt * 3;
+      var cy = c.y + cameraY + Math.sin(c.bob) * 5;
+      if (!c.taken && player.x < c.x + 18 && player.x + player.w > c.x - 18 && player.y < cy + 18 && player.y + player.h > cy - 18) {
+        c.taken = true; score += 50; beep(1200, 0.15, 'sine', 0.12);
+      }
+    });
+    particles.forEach(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    updateHUD();
+  }
+
+  function drawYeti(x, y) {
+    ctx.save();
+    if (player.invuln > 0 && Math.floor(time * 12) % 2 === 0) ctx.globalAlpha = 0.45;
+    ctx.fillStyle = '#f4f8ff'; ctx.beginPath(); ctx.ellipse(x + 22, y + 28, 22, 26, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2b3a4a'; ctx.beginPath(); ctx.arc(x + 12, y + 18, 5, 0, Math.PI * 2); ctx.arc(x + 32, y + 18, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff5d8f'; ctx.beginPath(); ctx.arc(x + 22, y + 34, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#123'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center'; ctx.fillText('🦶', x + 22, y + 52);
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#8fd3ff'); grad.addColorStop(1, '#eaf7ff');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(0, 120); ctx.lineTo(140, 60); ctx.lineTo(300, 130); ctx.lineTo(470, 50); ctx.lineTo(720, 120); ctx.lineTo(720, 0); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill();
+    ctx.save(); ctx.translate(0, -cameraY);
+    platforms.forEach(function (p) {
+      ctx.fillStyle = '#5b7fa6'; ctx.fillRect(p.x, p.y, p.w, 18);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(p.x, p.y, p.w, 7);
+    });
+    blocks.forEach(function (b) {
+      ctx.fillStyle = '#9be7ff'; ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(b.x + 3, b.y + 3, b.w - 6, b.h - 6);
+      ctx.fillStyle = '#0b3d5c'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText('🧊', b.x + 26, b.y + 25);
+    });
+    crystals.forEach(function (c) {
+      if (c.taken) return;
+      var cy = c.y + Math.sin(c.bob) * 5;
+      ctx.fillStyle = '#b967ff'; ctx.font = '26px Arial'; ctx.textAlign = 'center'; ctx.fillText('💎', c.x, cy + 10);
+    });
+    // Summit flag
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(summit.x + 28, summit.y, 5, 90);
+    ctx.fillStyle = '#ff3b30'; ctx.beginPath(); ctx.moveTo(summit.x + 33, summit.y); ctx.lineTo(summit.x + 95, summit.y + 18); ctx.lineTo(summit.x + 33, summit.y + 36); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#102a43'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center'; ctx.fillText('SUMMIT', summit.x + 60, summit.y - 12);
+    icicles.forEach(function (ic) {
+      ctx.fillStyle = '#cfefff'; ctx.beginPath(); ctx.moveTo(ic.x - 12, ic.y); ctx.lineTo(ic.x + 12, ic.y); ctx.lineTo(ic.x, ic.y + ic.len); ctx.closePath(); ctx.fill();
+    });
+    shouts.forEach(function (s) {
+      ctx.strokeStyle = 'rgba(255, 224, 102, 0.9)'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#102a43'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.fillText('YODEL!', s.x, s.y - s.r - 4);
+    });
+    particles.forEach(function (p) { ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 6, 6); });
+    drawYeti(player.x, player.y);
+    ctx.restore();
+    // Avalanche, drawn in screen space so it always threatens from below.
+    var avGrad = ctx.createLinearGradient(0, avalancheY - 60, 0, H);
+    avGrad.addColorStop(0, '#ffffff'); avGrad.addColorStop(1, '#bfe3ff');
+    ctx.fillStyle = avGrad; ctx.beginPath(); ctx.moveTo(0, avalancheY);
+    for (var x = 0; x <= W; x += 40) ctx.lineTo(x, avalancheY + Math.sin(x * 0.05 + time * 6) * 10);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#102a43'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('🌨️ AVALANCHE — KEEP CLIMBING! 🌨️', W / 2, Math.min(H - 12, avalancheY + 34));
+    if (state === 'title') { ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = 'bold 15px Arial'; ctx.fillText('Press Start to begin your climb', W / 2, H - 52); }
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = 'Score: ' + score;
+    livesEl.textContent = 'Lives: ' + '❤️'.repeat(Math.max(0, lives)) + '🤍'.repeat(Math.max(0, 3 - lives));
+    var height = Math.max(0, Math.round((-cameraY + (H - player.y)) / 10));
+    statusEl.textContent = state === 'win' ? 'Status: SUMMIT! 🏆' : state === 'over' ? 'Status: Game Over' : 'Height: ' + height + 'm';
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000); last = now;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input: keyboard, mouse, and touch ----
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); shout(); }
+    if (e.key === 'Enter' && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousedown', function (e) { if (state === 'playing') shout(); });
+  canvas.addEventListener('mousemove', function (e) {
+    var r = canvas.getBoundingClientRect();
+    touchX = (e.clientX - r.left) / r.width * W - 22;
+  });
+  document.getElementById('shoutBtn').addEventListener('click', function () { ensureAudio(); shout(); });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var t = e.changedTouches[0]; var r = canvas.getBoundingClientRect();
+    touchX = (t.clientX - r.left) / r.width * W - 22; touchStartY = t.clientY;
+    if (state === 'playing') shout();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.changedTouches[0]; var r = canvas.getBoundingClientRect();
+    touchX = (t.clientX - r.left) / r.width * W - 22;
+    if (touchStartY !== null && touchStartY - t.clientY > 50 && player && player.grounded) { player.vy = -640; player.grounded = false; touchStartY = t.clientY; }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { touchX = null; touchStartY = null; });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestart').addEventListener('click', startGame);
+  document.getElementById('overRestart').addEventListener('click', startGame);
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

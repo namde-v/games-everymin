@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Velvet Voyager — Gravity Slingshot Puzzle</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b0714; color: #f3e9ff; font-family: Georgia, 'Times New Roman', serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+  h1 { color: #d9a7ff; letter-spacing: 2px; margin: 10px 0 4px; text-align: center; font-size: 26px; text-shadow: 0 0 18px rgba(217,167,255,.6); }
+  #hud { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; font-family: Arial, sans-serif; font-size: 14px; background: #1d1030; border: 1px solid #5b2d8a; border-radius: 10px; padding: 8px 14px; margin-bottom: 8px; width: min(860px, 96vw); }
+  #hud span { color: #ffd166; font-weight: bold; }
+  #wrap { position: relative; width: min(860px, 96vw); }
+  canvas { display: block; width: 100%; height: 520px; background: radial-gradient(circle at 30% 25%, #2b1447 0%, #12081f 55%, #07030d 100%); border: 2px solid #7b3fbf; border-radius: 14px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,4,20,.88); border-radius: 14px; padding: 24px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #e9c6ff; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #d8c7ec; }
+  .overlay .how { background: #1d1030; border: 1px solid #5b2d8a; border-radius: 10px; padding: 12px 16px; text-align: left; font-family: Arial, sans-serif; font-size: 14px; }
+  button { background: #a855f7; color: white; border: none; border-radius: 999px; padding: 13px 26px; font-size: 17px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #6b21a8; }
+  button:hover { background: #c084fc; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #6b21a8; }
+  .small { font-size: 12px; color: #b9a3cf; font-family: Arial, sans-serif; }
+  #msg { min-height: 20px; font-family: Arial, sans-serif; font-size: 14px; color: #ffd166; text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>✦ VELVET VOYAGER ✦</h1>
+<div id="hud">
+  <div>Score: <span id="score">0</span></div>
+  <div>Level: <span id="level">1 / 5</span></div>
+  <div>Launches left: <span id="lives">4</span></div>
+  <div>Orbs: <span id="orbs">0 / 0</span></div>
+  <div>Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Velvet Voyager</h2>
+    <p>Guide a velvet probe through the gravity of strange planets. Slingshot around them, collect every data orb, then glide into the glowing target zone.</p>
+    <div class="how">
+      <b>How to Play</b><br>
+      • Click / touch and drag from the probe to aim — a violet arrow shows your launch.<br>
+      • Release to launch. Planets pull your probe with gravity; use them to curve your path.<br>
+      • Collect ALL data orbs, then reach the golden target ring.<br>
+      • Crashing into a planet or drifting off course costs one launch.<br>
+      • Press <b>R</b> to retry the current level. Mouse, keyboard and touch all work.
+    </div>
+    <button id="startBtn">▶ Start Voyage</button>
+    <div class="small">Sound starts only after you press Start. Fully offline — no downloads needed.</div>
+  </div>
+  <div id="winScreen" class="overlay hidden">
+    <h2>🌟 VOYAGE COMPLETE! 🌟</h2>
+    <p id="winText">You charted every orbit and collected every orb. The Velvet Voyager is a legend of the deep velvet sky.</p>
+    <button id="winRestartBtn">↻ Play Again</button>
+  </div>
+  <div id="overScreen" class="overlay hidden">
+    <h2>💥 OUT OF LAUNCHES 💥</h2>
+    <p id="overText">The probe ran out of launches before finishing its mission. The stars are still waiting — try a new trajectory.</p>
+    <button id="overRestartBtn">↻ Restart Mission</button>
+  </div>
+</div>
+<div id="msg">Drag from the probe to aim, then release to launch.</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var levelEl = document.getElementById('level');
+  var livesEl = document.getElementById('lives');
+  var orbsEl = document.getElementById('orbs');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+
+  // ---------- Audio (procedural, created only after user interaction) ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.18));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.18));
+    } catch (e) {}
+  }
+  function fanfare() { [523, 659, 784, 1047].forEach(function(f, i) { setTimeout(function() { beep(f, 0.28, 'triangle', 0.14); }, i * 130); }); }
+
+  // ---------- Levels ----------
+  // Each level: start, planets {x,y,r,mass}, orbs, target {x,y,r}, launches
+  var LEVELS = [
+    { start: {x: 90, y: 430}, launches: 4,
+      planets: [{x: 430, y: 260, r: 52, mass: 9000, color: '#8b5cf6'}],
+      orbs: [{x: 430, y: 130}, {x: 620, y: 320}],
+      target: {x: 770, y: 100, r: 34} },
+    { start: {x: 90, y: 90}, launches: 4,
+      planets: [{x: 340, y: 260, r: 46, mass: 11000, color: '#ec4899'}, {x: 590, y: 300, r: 40, mass: 8000, color: '#38bdf8'}],
+      orbs: [{x: 340, y: 130}, {x: 590, y: 430}, {x: 730, y: 170}],
+      target: {x: 780, y: 430, r: 34} },
+    { start: {x: 90, y: 430}, launches: 4,
+      planets: [{x: 300, y: 200, r: 42, mass: 10000, color: '#f59e0b'}, {x: 540, y: 330, r: 50, mass: 13000, color: '#8b5cf6'}, {x: 700, y: 150, r: 34, mass: 7000, color: '#22c55e'}],
+      orbs: [{x: 190, y: 180}, {x: 430, y: 430}, {x: 640, y: 250}, {x: 780, y: 90}],
+      target: {x: 770, y: 430, r: 34} },
+    { start: {x: 430, y: 460}, launches: 5,
+      planets: [{x: 250, y: 240, r: 48, mass: 12000, color: '#ec4899'}, {x: 620, y: 240, r: 48, mass: 12000, color: '#38bdf8'}],
+      orbs: [{x: 120, y: 150}, {x: 430, y: 150}, {x: 740, y: 150}, {x: 430, y: 320}],
+      target: {x: 90, y: 90, r: 34} },
+    { start: {x: 90, y: 260}, launches: 5,
+      planets: [{x: 300, y: 140, r: 44, mass: 11000, color: '#a855f7'}, {x: 300, y: 400, r: 44, mass: 11000, color: '#f59e0b'}, {x: 580, y: 260, r: 56, mass: 16000, color: '#ec4899'}],
+      orbs: [{x: 180, y: 90}, {x: 180, y: 430}, {x: 450, y: 260}, {x: 700, y: 90}, {x: 700, y: 430}],
+      target: {x: 790, y: 260, r: 36} }
+  ];
+
+  var levelIndex = 0, score = 0, launchesLeft = 4;
+  var state = 'title'; // title | aiming | flying | won | over
+  var probe = null, trail = [];
+  var dragging = false, dragX = 0, dragY = 0;
+  var collected = 0, totalOrbs = 0;
+  var stars = [];
+  for (var i = 0; i < 90; i++) { stars.push({x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.8 + 0.4, tw: Math.random() * Math.PI * 2}); }
+
+  function currentLevel() { return LEVELS[levelIndex]; }
+  function resetProbe() {
+    var lv = currentLevel();
+    probe = { x: lv.start.x, y: lv.start.y, vx: 0, vy: 0, r: 11 };
+    trail = [];
+  }
+  function loadLevel(idx) {
+    levelIndex = idx;
+    var lv = currentLevel();
+    launchesLeft = lv.launches;
+    collected = 0; totalOrbs = lv.orbs.length;
+    lv.orbs.forEach(function(o) { o.taken = false; });
+    resetProbe();
+    state = 'aiming';
+    setStatus('Aim your launch');
+    msgEl.textContent = 'Level ' + (idx + 1) + ': collect all ' + totalOrbs + ' orbs, then reach the golden ring.';
+    updateHUD();
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    levelEl.textContent = (levelIndex + 1) + ' / ' + LEVELS.length;
+    livesEl.textContent = launchesLeft;
+    orbsEl.textContent = collected + ' / ' + totalOrbs;
+  }
+  function setStatus(t) { statusEl.textContent = t; }
+
+  function loseLaunch(reason) {
+    launchesLeft--;
+    beep(160, 0.35, 'sawtooth', 0.12);
+    updateHUD();
+    if (launchesLeft <= 0) { gameOver(); return; }
+    msgEl.textContent = reason + ' Launches left: ' + launchesLeft + '. Drag to aim again.';
+    resetProbe();
+    state = 'aiming';
+    setStatus('Aim again');
+  }
+  function gameOver() {
+    state = 'over';
+    document.getElementById('overText').textContent = 'Out of launches on level ' + (levelIndex + 1) + ' with a score of ' + score + '. Try a gentler, curving trajectory.';
+    document.getElementById('overScreen').classList.remove('hidden');
+    setStatus('Game Over');
+  }
+  function winGame() {
+    state = 'won';
+    document.getElementById('winText').textContent = 'All ' + LEVELS.length + ' levels charted! Final score: ' + score + '. The Velvet Voyager sails on.';
+    document.getElementById('winScreen').classList.remove('hidden');
+    setStatus('You Win!');
+    fanfare();
+  }
+  function startGame() {
+    ensureAudio();
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('winScreen').classList.add('hidden');
+    document.getElementById('overScreen').classList.add('hidden');
+    score = 0; loadLevel(0);
+    beep(440, 0.2, 'triangle', 0.12);
+  }
+
+  // ---------- Input: mouse + touch + keyboard ----------
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function onDown(e) {
+    if (state !== 'aiming') return;
+    e.preventDefault();
+    var p = canvasPos(e);
+    dragging = true; dragX = p.x; dragY = p.y;
+    setStatus('Aiming...');
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    var p = canvasPos(e);
+    dragX = p.x; dragY = p.y;
+  }
+  function onUp(e) {
+    if (!dragging || state !== 'aiming') { dragging = false; return; }
+    e.preventDefault();
+    dragging = false;
+    // Slingshot: drag away from probe, launch in the opposite direction of the drag is confusing,
+    // so launch directly along the drag vector (probe -> pointer), scaled.
+    var dx = dragX - probe.x, dy = dragY - probe.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 12) { setStatus('Aim your launch'); return; }
+    var power = Math.min(dist, 260) / 260;
+    var speed = 120 + power * 320;
+    probe.vx = (dx / dist) * speed;
+    probe.vy = (dy / dist) * speed;
+    state = 'flying';
+    setStatus('Flying!');
+    msgEl.textContent = 'Flying... gravity will bend your path. Collect orbs, then reach the ring.';
+    beep(520, 0.15, 'sine', 0.12);
+    setTimeout(function() { beep(780, 0.15, 'sine', 0.08); }, 90);
+  }
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('mouseleave', function() { dragging = false; });
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp, { passive: false });
+  canvas.addEventListener('touchcancel', function() { dragging = false; });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'r' || e.key === 'R') {
+      if (state === 'aiming' || state === 'flying') { loadLevel(levelIndex); msgEl.textContent = 'Level restarted. Launches restored for this level.'; }
+    }
+    if (e.key === 'Enter' && state === 'title') { startGame(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+
+  // ---------- Physics + update ----------
+  function update(dt) {
+    if (state !== 'flying' || !probe) return;
+    var lv = currentLevel();
+    // Gravity from each planet
+    lv.planets.forEach(function(pl) {
+      var dx = pl.x - probe.x, dy = pl.y - probe.y;
+      var d2 = dx * dx + dy * dy;
+      var d = Math.sqrt(d2) || 1;
+      var accel = Math.min(pl.mass / Math.max(d2, 900), 420);
+      probe.vx += (dx / d) * accel * dt;
+      probe.vy += (dy / d) * accel * dt;
+    });
+    probe.x += probe.vx * dt;
+    probe.y += probe.vy * dt;
+    trail.push({x: probe.x, y: probe.y});
+    if (trail.length > 90) trail.shift();
+
+    // Planet crash
+    for (var i = 0; i < lv.planets.length; i++) {
+      var pl = lv.planets[i];
+      var dx = probe.x - pl.x, dy = probe.y - pl.y;
+      if (Math.sqrt(dx * dx + dy * dy) < pl.r + probe.r) { loseLaunch('Crashed into a planet!'); return; }
+    }
+    // Off screen / too slow and drifting away
+    if (probe.x < -60 || probe.x > W + 60 || probe.y < -60 || probe.y > H + 60) { loseLaunch('Drifted off course!'); return; }
+    var speed = Math.sqrt(probe.vx * probe.vx + probe.vy * probe.vy);
+    if (speed < 6) { loseLaunch('Probe stalled in orbit!'); return; }
+
+    // Orbs
+    lv.orbs.forEach(function(o) {
+      if (!o.taken) {
+        var dx = probe.x - o.x, dy = probe.y - o.y;
+        if (Math.sqrt(dx * dx + dy * dy) < 26) {
+          o.taken = true; collected++; score += 100;
+          beep(880, 0.18, 'sine', 0.14);
+          msgEl.textContent = 'Data orb collected! ' + collected + ' / ' + totalOrbs;
+          updateHUD();
+        }
+      }
+    });
+    // Target
+    var t = lv.target;
+    var dx = probe.x - t.x, dy = probe.y - t.y;
+    if (Math.sqrt(dx * dx + dy * dy) < t.r + probe.r) {
+      if (collected >= totalOrbs) {
+        score += 250 + launchesLeft * 50;
+        beep(1047, 0.25, 'triangle', 0.14);
+        if (levelIndex + 1 >= LEVELS.length) { updateHUD(); winGame(); }
+        else { msgEl.textContent = 'Level complete! Bonus awarded.'; setTimeout(function() { loadLevel(levelIndex + 1); }, 900); state = 'aiming'; }
+        updateHUD();
+      } else {
+        msgEl.textContent = 'Target reached, but collect all orbs first! (' + collected + ' / ' + totalOrbs + ')';
+      }
+    }
+  }
+
+  // ---------- Draw ----------
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Stars
+    stars.forEach(function(s) {
+      s.tw += 0.02;
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(s.tw));
+      ctx.fillStyle = '#e9d5ff';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (state === 'title') {
+      ctx.fillStyle = '#d8c7ec'; ctx.font = '20px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and chart the velvet sky.', W / 2, H / 2 + 10);
+      return;
+    }
+    var lv = currentLevel();
+    // Target ring
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(lv.target.x, lv.target.y, lv.target.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,209,102,.35)'; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.arc(lv.target.x, lv.target.y, lv.target.r + 6, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('TARGET', lv.target.x, lv.target.y - lv.target.r - 12);
+    // Planets with gravity hint rings
+    lv.planets.forEach(function(pl) {
+      ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r + 38, 0, Math.PI * 2); ctx.stroke();
+      var grad = ctx.createRadialGradient(pl.x - pl.r * 0.3, pl.y - pl.r * 0.3, pl.r * 0.1, pl.x, pl.y, pl.r);
+      grad.addColorStop(0, '#ffffff'); grad.addColorStop(0.35, pl.color); grad.addColorStop(1, '#1a0b2e');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(pl.x, pl.y, pl.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.25)';
+      ctx.beginPath(); ctx.arc(pl.x - pl.r * 0.3, pl.y - pl.r * 0.35, pl.r * 0.18, 0, Math.PI * 2); ctx.fill();
+    });
+    // Orbs
+    lv.orbs.forEach(function(o) {
+      if (o.taken) return;
+      ctx.fillStyle = '#67e8f9';
+      ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.arc(o.x, o.y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#083344'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('◈', o.x, o.y + 4);
+    });
+    // Trail
+    if (trail.length > 1) {
+      ctx.strokeStyle = 'rgba(217,167,255,.7)'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(trail[0].x, trail[0].y);
+      trail.forEach(function(p) { ctx.lineTo(p.x, p.y); });
+      ctx.stroke();
+    }
+    // Probe
+    if (probe) {
+      ctx.fillStyle = '#f5d0fe';
+      ctx.shadowColor = '#d946ef'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(probe.x, probe.y, probe.r, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#701a75'; ctx.beginPath(); ctx.arc(probe.x, probe.y, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('PROBE', probe.x, probe.y - 18);
+    }
+    // Aim arrow
+    if (state === 'aiming' && dragging && probe) {
+      var dx = dragX - probe.x, dy = dragY - probe.y;
+      var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      var len = Math.min(dist, 260);
+      var ex = probe.x + (dx / dist) * len, ey = probe.y + (dy / dist) * len;
+      ctx.strokeStyle = '#d9a7ff'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(probe.x, probe.y); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.fillStyle = '#d9a7ff';
+      ctx.beginPath(); ctx.arc(ex, ey, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Power: ' + Math.round(len / 260 * 100) + '%', probe.x, probe.y + 32);
+    }
+    // Launch pad marker
+    ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '12px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('LAUNCH', lv.start.x, lv.start.y + 32);
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min((now - last) / 1000, 0.033);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  // Initial idle state so the title screen shows over a calm starfield
+  resetProbeForTitle();
+  function resetProbeForTitle() {
+    probe = { x: LEVELS[0].start.x, y: LEVELS[0].start.y, vx: 0, vy: 0, r: 11 };
+    totalOrbs = LEVELS[0].orbs.length;
+    launchesLeft = LEVELS[0].launches;
+    updateHUD();
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

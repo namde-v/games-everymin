@@ -38,8 +38,20 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0429 | Solar Shepherd | Strategy / Herding Simulation | Arrow Keys/WASD move shepherd, mouse/touch drag guide | [Play](./../games/game-0429.html) |
 | 0430 | Timber Trapper | Action / Trap Setting Defense | Mouse/touch place traps, Keys 1/2/3 select trap | [Play](./../games/game-0430.html) |
 
+| 0431 | Umbra Umbrella | Arcade / Rain Shield Defense | Arrow Keys/A-D move, mouse move, touch drag | [Play](./../games/game-0431.html) |
+| 0432 | Velvet Voyager | Puzzle / Gravity Slingshot Orbit | Mouse/touch drag aim, R retry | [Play](./../games/game-0432.html) |
+| 0433 | Willow Warden | Strategy / Forest Tower Defense | Mouse/touch click place, Keys 1/2/3 select tower | [Play](./../games/game-0433.html) |
+| 0434 | Xenon Xylophone | Rhythm / Falling Note Precision | Keys A/S/D/F, mouse/touch tap lanes | [Play](./../games/game-0434.html) |
+| 0435 | Yeti Yodeler | Action / Avalanche Echo Climber | Arrow Keys move, Space shout, mouse/touch tap | [Play](./../games/game-0435.html) |
+| 0436 | Zephyr Zealot | Puzzle / Wind Maze Airflow | Mouse/touch click rotate, Arrow Keys cursor, Space rotate | [Play](./../games/game-0436.html) |
+| 0437 | Atlas Acrobat | Action / Grappling Swing Platformer | Space/click/touch hold grapple, release to fly | [Play](./../games/game-0437.html) |
+| 0438 | Beacon Builder | Strategy / Lighthouse Signal Network | Mouse/touch click place, Arrow Keys select, Enter place | [Play](./../games/game-0438.html) |
+| 0439 | Cipher Courier | Puzzle / Code-Breaking Delivery | Arrow Keys/WASD move, mouse/touch click waypoints | [Play](./../games/game-0439.html) |
+| 0440 | Drift Diver | Arcade / Deep-Sea Current Dodging | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0440.html) |
+
 ## Batch notes
 
 - Batch 041: 10 games, produced in one cycle (0401–0410). Volume 005 opened at game 0401.
 - Batch 042: 10 games, produced in one cycle (0411–0420).
 - Batch 043: 10 games, produced in one cycle (0421–0430).
+- Batch 044: 10 games, produced in one cycle (0431–0440).

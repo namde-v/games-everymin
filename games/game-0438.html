@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Beacon Builder</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06121f; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 28px; letter-spacing: 1px; margin: 6px 0 2px; color: #ffd166; text-shadow: 0 0 12px rgba(255,209,102,.6); }
+  p.tag { color: #9fd8ff; font-size: 14px; margin-bottom: 10px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 8px 0; width: 100%; max-width: 760px; }
+  .stat { background: #0e2a44; border: 1px solid #2a5a84; border-radius: 10px; padding: 8px 14px; font-size: 15px; font-weight: bold; }
+  .stat span { color: #ffd166; }
+  .stat.warn span { color: #ff6b6b; }
+  #wrap { position: relative; width: 720px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: #0b3d66; border: 3px solid #ffd166; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(3,16,30,.88); border-radius: 12px; padding: 22px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; color: #ffd166; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #d8ecff; }
+  .overlay .big { font-size: 20px; font-weight: bold; }
+  button { cursor: pointer; background: #ffd166; color: #102030; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #4ecdc4; box-shadow: 0 4px 0 #2a8a84; }
+  #msg { min-height: 24px; margin-top: 8px; font-weight: bold; color: #ffd166; text-align: center; }
+  #legend { color: #9fd8ff; font-size: 13px; margin-top: 4px; text-align: center; max-width: 720px; line-height: 1.5; }
+  @media (max-width: 600px) { h1 { font-size: 22px; } .overlay h2 { font-size: 26px; } }
+</style>
+</head>
+<body>
+<h1>BEACON BUILDER</h1>
+<p class="tag">Strategy &middot; Lighthouse Signal Network</p>
+<div id="hud">
+  <div class="stat">Score: <span id="score">0</span></div>
+  <div class="stat" id="budgetBox">Budget: <span id="budget">140</span></div>
+  <div class="stat">Ships Lit: <span id="covered">0 / 7</span></div>
+  <div class="stat">Lighthouses: <span id="count">0</span></div>
+  <div class="stat">Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="720" height="480"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>BEACON BUILDER</h2>
+    <p class="big">Light the way home for every ship!</p>
+    <p><strong>How to Play:</strong> Ships are waiting out at sea. Place lighthouses on the golden coastline (row near the bottom) so their light beams reach every ship. Each lighthouse costs 20 budget and shines in a wide circle. Hover or move the cursor over a coastline cell to preview its beam before you build.</p>
+    <p>Mouse / touch: tap a coastline cell to build. Keyboard: Arrow Keys move the glowing cursor, Enter builds. Cover all 7 ships to WIN. If your budget runs out with ships still in the dark, it is Game Over.</p>
+    <button id="startBtn">Start Building</button>
+  </div>
+  <div class="overlay hidden" id="winScreen">
+    <h2>ALL SHIPS SAFE!</h2>
+    <p class="big" id="winText">You lit every ship and guided the fleet home.</p>
+    <p>Your beacons overlap into one brilliant safety net along the coast.</p>
+    <button id="winRestartBtn">Play Again</button>
+  </div>
+  <div class="overlay hidden" id="loseScreen">
+    <h2>DARK WATERS</h2>
+    <p class="big" id="loseText">Budget exhausted and ships are still uncovered.</p>
+    <p>Plan your beams to overlap and cover more ships with fewer towers.</p>
+    <button id="loseRestartBtn">Try Again</button>
+  </div>
+</div>
+<div id="msg">Press Start, then place lighthouses on the golden coastline.</div>
+<p id="legend">Preview: pale yellow circle = beam range &middot; Green ship = lit &middot; Grey ship = still in the dark &middot; Red flash = cannot build there (not coastline, already built, or not enough budget).</p>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 12, ROWS = 8, CELL = 90, COAST_ROW = 5, COST = 20, START_BUDGET = 140;
+  var BEAM_R = 185;
+  var state = 'title';
+  var score = 0, budget = START_BUDGET, coveredCount = 0;
+  var lighthouses = [], ships = [];
+  var cursor = { c: 5, r: COAST_ROW };
+  var hover = null, flash = 0, flashMsg = '';
+  var audioCtx = null, audioOn = false, time = 0, lastTs = 0;
+
+  function $(id) { return document.getElementById(id); }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+    audioOn = !!audioCtx;
+  }
+  function tone(freq, dur, type, vol, delay) {
+    if (!audioOn || !audioCtx) return;
+    var t = audioCtx.currentTime + (delay || 0);
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function sndPlace() { tone(520, 0.18, 'triangle', 0.15); tone(780, 0.25, 'sine', 0.12, 0.08); }
+  function sndBad() { tone(160, 0.25, 'square', 0.08); }
+  function sndWin() { [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.35, 'triangle', 0.14, i * 0.14); }); }
+  function sndLose() { [392, 330, 262, 196].forEach(function (f, i) { tone(f, 0.35, 'sawtooth', 0.07, i * 0.16); }); }
+
+  function cellCenter(c, r) { return { x: c * 60 + 30, y: r * 60 + 30 }; }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function newShips() {
+    var cols = [0, 2, 4, 5, 6, 8, 10];
+    ships = cols.map(function (c, i) {
+      var row = (i % 2 === 0) ? 3 : 4;
+      if (Math.random() < 0.5) row = (row === 3) ? 4 : 3;
+      var p = cellCenter(c, row);
+      return { c: c, r: row, x: p.x, y: p.y, bob: Math.random() * 6.28, lit: false };
+    });
+  }
+  function updateCoverage() {
+    coveredCount = 0;
+    ships.forEach(function (s) {
+      s.lit = lighthouses.some(function (lh) { return dist(s, lh) <= BEAM_R; });
+      if (s.lit) coveredCount++;
+    });
+  }
+  function updateHUD() {
+    $('score').textContent = score;
+    $('budget').textContent = budget;
+    $('covered').textContent = coveredCount + ' / ' + ships.length;
+    $('count').textContent = lighthouses.length;
+    $('budgetBox').className = 'stat' + (budget < COST ? ' warn' : '');
+    $('status').textContent = state === 'playing' ? (coveredCount === ships.length ? 'All Lit!' : 'Building') : (state === 'win' ? 'Victory!' : (state === 'lose' ? 'Out of Budget' : 'Ready'));
+  }
+  function setMsg(t) { $('msg').textContent = t; }
+
+  function resetGame() {
+    score = 0; budget = START_BUDGET; lighthouses = []; newShips(); updateCoverage();
+    cursor = { c: 5, r: COAST_ROW }; hover = null; state = 'playing';
+    $('titleScreen').classList.add('hidden');
+    $('winScreen').classList.add('hidden');
+    $('loseScreen').classList.add('hidden');
+    setMsg('Place a lighthouse on the golden coastline. Preview its beam first!');
+    updateHUD();
+  }
+
+  function tryPlace(c, r) {
+    if (state !== 'playing') return;
+    if (r !== COAST_ROW) { flash = 1; flashMsg = 'Build only on the golden coastline row.'; sndBad(); setMsg(flashMsg); return; }
+    if (lighthouses.some(function (lh) { return lh.c === c; })) { flash = 1; sndBad(); setMsg('A lighthouse already stands there.'); return; }
+    if (budget < COST) { flash = 1; sndBad(); setMsg('Not enough budget.'); return; }
+    var p = cellCenter(c, r);
+    lighthouses.push({ c: c, r: r, x: p.x, y: p.y });
+    budget -= COST;
+    var before = coveredCount;
+    updateCoverage();
+    var newly = coveredCount - before;
+    score += newly * 100 + 10;
+    sndPlace();
+    if (coveredCount >= ships.length) {
+      score += budget; state = 'win';
+      $('winText').textContent = 'You lit all ' + ships.length + ' ships! Final score: ' + score + ' with ' + budget + ' budget to spare.';
+      $('winScreen').classList.remove('hidden'); sndWin();
+    } else if (budget < COST) {
+      state = 'lose';
+      $('loseText').textContent = 'Budget exhausted with ' + (ships.length - coveredCount) + ' ship(s) still in the dark. Final score: ' + score + '.';
+      $('loseScreen').classList.remove('hidden'); sndLose();
+    } else {
+      setMsg(newly > 0 ? 'Beacon built! It lit ' + newly + ' new ship(s).' : 'Beacon built, but it lit no new ships. Aim for overlapping coverage.');
+    }
+    updateHUD();
+  }
+
+  function drawSea() {
+    ctx.fillStyle = '#0b3d66';
+    ctx.fillRect(0, 0, 720, 360);
+    ctx.fillStyle = '#e8b93c';
+    ctx.fillRect(0, 360, 720, 60);
+    ctx.fillStyle = '#2e7d4f';
+    ctx.fillRect(0, 420, 720, 60);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    for (var c = 0; c <= COLS; c++) { ctx.beginPath(); ctx.moveTo(c * 60, 0); ctx.lineTo(c * 60, 480); ctx.stroke(); }
+    for (var r = 0; r <= ROWS; r++) { ctx.beginPath(); ctx.moveTo(0, r * 60); ctx.lineTo(720, r * 60); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    for (var i = 0; i < 18; i++) {
+      var wx = ((i * 97 + time * 18) % 760) - 20, wy = (i * 53 % 340) + 12;
+      ctx.beginPath(); ctx.ellipse(wx, wy, 14, 3, 0, 0, 6.29); ctx.fill();
+    }
+    ctx.fillStyle = '#102030';
+    ctx.font = 'bold 13px Arial';
+    ctx.fillText('SEA', 12, 22);
+    ctx.fillStyle = '#5a3d00';
+    ctx.fillText('COASTLINE  -  BUILD HERE', 12, 352);
+    ctx.fillStyle = '#d8ecff';
+    ctx.fillText('LAND', 12, 442);
+  }
+  function drawShip(s) {
+    var y = s.y + Math.sin(time * 1.6 + s.bob) * 3;
+    ctx.save();
+    ctx.translate(s.x, y);
+    ctx.fillStyle = s.lit ? '#2ecc71' : '#7a8a99';
+    ctx.beginPath(); ctx.moveTo(-22, 0); ctx.lineTo(22, 0); ctx.lineTo(14, 14); ctx.lineTo(-14, 14); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = s.lit ? '#ffd166' : '#c9d6e2';
+    ctx.fillRect(-4, -20, 8, 20);
+    ctx.fillStyle = s.lit ? '#fff3b0' : '#eaf2f8';
+    ctx.beginPath(); ctx.moveTo(4, -18); ctx.lineTo(20, -10); ctx.lineTo(4, -6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = s.lit ? '#1f7a3a' : '#556677';
+    ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(s.lit ? 'LIT' : 'DARK', 0, 30);
+    ctx.restore();
+  }
+  function drawLighthouse(lh) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,209,102,0.18)';
+    ctx.beginPath(); ctx.arc(lh.x, lh.y, BEAM_R, 0, 6.29); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,209,102,0.55)';
+    ctx.beginPath(); ctx.arc(lh.x, lh.y, BEAM_R, 0, 6.29); ctx.stroke();
+    var a = time * 1.1;
+    var grad = ctx.createLinearGradient(lh.x, lh.y, lh.x + Math.cos(a) * BEAM_R, lh.y + Math.sin(a) * BEAM_R);
+    ctx.fillStyle = 'rgba(255,240,170,0.22)';
+    ctx.beginPath(); ctx.moveTo(lh.x, lh.y);
+    ctx.arc(lh.x, lh.y, BEAM_R, a - 0.28, a + 0.28); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e74c3c';
+    ctx.beginPath(); ctx.moveTo(lh.x - 11, lh.y + 22); ctx.lineTo(lh.x - 8, lh.y - 18); ctx.lineTo(lh.x + 8, lh.y - 18); ctx.lineTo(lh.x + 11, lh.y + 22); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(lh.x - 9, lh.y - 8, 18, 8);
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(lh.x, lh.y - 22, 7, 0, 6.29); ctx.fill();
+    ctx.restore();
+  }
+  function drawPreview(cell) {
+    if (!cell || state !== 'playing') return;
+    var p = cellCenter(cell.c, cell.r);
+    var ok = cell.r === COAST_ROW && !lighthouses.some(function (lh) { return lh.c === cell.c; }) && budget >= COST;
+    ctx.save();
+    ctx.fillStyle = ok ? 'rgba(255,209,102,0.16)' : 'rgba(255,80,80,0.16)';
+    ctx.beginPath(); ctx.arc(p.x, p.y, BEAM_R, 0, 6.29); ctx.fill();
+    ctx.strokeStyle = ok ? '#ffd166' : '#ff6b6b'; ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath(); ctx.arc(p.x, p.y, BEAM_R, 0, 6.29); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+    ctx.strokeRect(cell.c * 60 + 2, cell.r * 60 + 2, 56, 56);
+    ctx.restore();
+  }
+  function loop(ts) {
+    if (!lastTs) lastTs = ts;
+    var dt = Math.min(0.05, (ts - lastTs) / 1000); lastTs = ts; time += dt;
+    if (flash > 0) flash -= dt * 2;
+    ctx.clearRect(0, 0, 720, 480);
+    drawSea();
+    drawPreview(hover || cursor);
+    lighthouses.forEach(drawLighthouse);
+    ships.forEach(drawShip);
+    if (state === 'playing') {
+      var cur = cellCenter(cursor.c, cursor.r);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+      ctx.strokeRect(cursor.c * 60 + 3, cursor.r * 60 + 3, 54, 54);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('CURSOR', cur.x, cursor.r * 60 + 14);
+    }
+    requestAnimationFrame(loop);
+  }
+
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (720 / rect.width);
+    var y = (e.clientY - rect.top) * (480 / rect.height);
+    return { c: Math.max(0, Math.min(COLS - 1, Math.floor(x / 60))), r: Math.max(0, Math.min(ROWS - 1, Math.floor(y / 60))) };
+  }
+  canvas.addEventListener('mousemove', function (e) { hover = cellFromEvent(e); cursor = hover; });
+  canvas.addEventListener('mouseleave', function () { hover = null; });
+  canvas.addEventListener('mousedown', function (e) { var cell = cellFromEvent(e); cursor = cell; tryPlace(cell.c, cell.r); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); var t = e.changedTouches[0]; var cell = cellFromEvent(t); cursor = cell; hover = cell; tryPlace(cell.c, cell.r); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); var t = e.changedTouches[0]; hover = cellFromEvent(t); cursor = hover; }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (state !== 'playing') {
+      if (e.key === 'Enter') { var ws = $('winScreen'), ls = $('loseScreen'); if (!ws.classList.contains('hidden') || !ls.classList.contains('hidden')) resetGame(); }
+      return;
+    }
+    if (e.key === 'ArrowLeft') { cursor.c = Math.max(0, cursor.c - 1); hover = cursor; e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { cursor.c = Math.min(COLS - 1, cursor.c + 1); hover = cursor; e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { cursor.r = Math.max(0, cursor.r - 1); hover = cursor; e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { cursor.r = Math.min(ROWS - 1, cursor.r + 1); hover = cursor; e.preventDefault(); }
+    else if (e.key === 'Enter' || e.key === ' ') { tryPlace(cursor.c, cursor.r); e.preventDefault(); }
+  });
+  $('startBtn').addEventListener('click', function () { initAudio(); tone(660, 0.2, 'triangle', 0.14); resetGame(); });
+  $('winRestartBtn').addEventListener('click', function () { initAudio(); resetGame(); });
+  $('loseRestartBtn').addEventListener('click', function () { initAudio(); resetGame(); });
+
+  newShips(); updateCoverage(); updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

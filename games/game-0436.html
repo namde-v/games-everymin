@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Zephyr Zealot — Wind Maze Airflow</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(160deg, #0f2a3d, #123f4a 55%, #1d5c4a);
+    font-family: "Trebuchet MS", Verdana, sans-serif;
+    color: #eafaf2; display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px; user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  }
+  h1 { font-size: 30px; letter-spacing: 2px; text-shadow: 0 2px 0 #0a1f2b; margin: 6px 0 2px; }
+  .tag { font-size: 13px; color: #bfe8d8; margin-bottom: 8px; }
+  #hud {
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    background: rgba(0,0,0,.35); border: 2px solid #7fe3c0; border-radius: 12px;
+    padding: 8px 14px; font-size: 16px; font-weight: bold; width: 100%; max-width: 640px;
+  }
+  #hud span { margin: 0 4px; }
+  #wrap { position: relative; width: 100%; max-width: 640px; margin-top: 10px; }
+  canvas {
+    width: 100%; height: auto; aspect-ratio: 1 / 1; display: block;
+    background: #9fd8c2; border: 3px solid #eafaf2; border-radius: 14px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.45);
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; text-align: center; padding: 24px;
+    background: rgba(8, 30, 40, .88); border-radius: 14px; z-index: 5;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { font-size: 15px; line-height: 1.55; max-width: 480px; color: #d7f5e6; }
+  .overlay .big { font-size: 20px; font-weight: bold; color: #ffe066; }
+  button {
+    font-family: inherit; font-size: 19px; font-weight: bold; cursor: pointer;
+    background: #ffe066; color: #17301f; border: none; border-radius: 12px;
+    padding: 13px 30px; box-shadow: 0 4px 0 #b8932a; transition: transform .08s;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8932a; }
+  button.secondary { background: #7fe3c0; box-shadow: 0 4px 0 #2f8f6a; }
+  .keys { font-size: 13px; color: #bfe8d8; line-height: 1.6; }
+  #msg { margin-top: 8px; min-height: 22px; font-size: 15px; font-weight: bold; color: #ffe066; text-align: center; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+</style>
+</head>
+<body>
+<h1>&#127793; ZEPHYR ZEALOT</h1>
+<div class="tag">Puzzle / Wind Maze Airflow — steer the seed with fans!</div>
+
+<div id="hud">
+  <span>Maze: <span id="hudMaze">1 / 4</span></span>
+  <span>Score: <span id="hudScore">0</span></span>
+  <span>Moves: <span id="hudMoves">0</span></span>
+  <span>Petals: <span id="hudPetals">0</span></span>
+  <span>Status: <span id="hudStatus">Ready</span></span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="640" height="640"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>&#127793; Zephyr Zealot</h2>
+    <p class="big">Guide the floating seed to the flower!</p>
+    <p><b>How to Play:</b> The seed drifts one tile at a time in the direction of the fan it stands on.
+    Click or tap a fan tile to rotate it 90&deg; clockwise. Use <b>Arrow Keys</b> to move the golden cursor
+    and <b>Space</b> to rotate the fan under it. <b>Enter</b> launches the seed along the airflow.
+    Collect breeze petals for bonus points, and reach the flower before your moves run out.</p>
+    <p class="keys">Click / Tap: rotate a fan &nbsp;|&nbsp; Arrows: move cursor &nbsp;|&nbsp; Space: rotate &nbsp;|&nbsp; Enter: launch seed</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>&#127881; YOU WIN!</h2>
+    <p class="big" id="winText">All mazes solved!</p>
+    <p>The seed has bloomed into a meadow of flowers. The wind sings your name, Zealot!</p>
+    <button id="winRestartBtn">Play Again</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <h2>&#129344; GAME OVER</h2>
+    <p class="big" id="overText">Out of moves!</p>
+    <p>The breeze faded before the seed reached the flower. Rotate the fans wisely and try again!</p>
+    <button id="overRestartBtn">Restart</button>
+  </div>
+</div>
+
+<div id="msg">Click Start, then arrange the fans and launch the seed!</div>
+<div class="row" style="margin-top:8px;">
+  <button class="secondary" id="launchBtn">Launch Seed</button>
+  <button class="secondary" id="resetBtn">Reset Maze</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var SIZE = 8, TILE = 80;
+  var DIRS = [{x:1,y:0,a:0},{x:0,y:1,a:Math.PI/2},{x:-1,y:0,a:Math.PI},{x:0,y:-1,a:-Math.PI/2}];
+  var DIR_NAMES = ["RIGHT","DOWN","LEFT","UP"];
+
+  // 0 = wall, 1 = open path, 2 = petal, 3 = flower, 4 = start
+  var MAZES = [
+    { moves: 40, grid: [
+      [0,0,0,0,0,0,0,0],[0,4,1,1,0,2,1,0],[0,0,0,1,0,1,0,0],[0,2,1,1,1,1,1,0],
+      [0,1,0,0,0,0,1,0],[0,1,1,2,1,0,1,0],[0,0,0,1,1,1,3,0],[0,0,0,0,0,0,0,0]] },
+    { moves: 38, grid: [
+      [0,0,0,0,0,0,0,0],[0,4,1,0,2,1,1,0],[0,1,1,0,1,0,1,0],[0,0,1,1,1,0,1,0],
+      [0,2,0,0,1,1,1,0],[0,1,1,0,0,0,1,0],[0,0,1,1,2,1,3,0],[0,0,0,0,0,0,0,0]] },
+    { moves: 36, grid: [
+      [0,0,0,0,0,0,0,0],[0,1,1,1,0,2,3,0],[0,1,0,1,0,1,0,0],[0,4,0,1,1,1,1,0],
+      [0,0,0,0,0,0,1,0],[0,2,1,1,1,1,1,0],[0,1,0,0,0,0,1,0],[0,0,0,0,0,0,0,0]] },
+    { moves: 34, grid: [
+      [0,0,0,0,0,0,0,0],[0,4,1,2,0,1,1,0],[0,0,1,0,0,1,0,0],[0,1,1,1,1,1,2,0],
+      [0,1,0,0,0,0,0,0],[0,1,1,1,0,2,1,0],[0,0,0,1,1,1,3,0],[0,0,0,0,0,0,0,0]] }
+  ];
+
+  var state = "title"; // title | aiming | flying | won | over
+  var mazeIndex = 0, score = 0, movesLeft = 0, petals = 0;
+  var fans = [], startPos = {x:1,y:1}, goalPos = {x:6,y:6};
+  var seed = {x:1, y:1, px:0, py:0, moving:false};
+  var cursor = {x:1, y:1};
+  var particles = [];
+  var audioCtx = null, muted = false;
+
+  function $(id) { return document.getElementById(id); }
+  function show(id, on) { $(id).classList.toggle("hidden", !on); }
+  function setMsg(t) { $("msg").textContent = t; }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx || muted) return;
+    var t = audioCtx.currentTime + (when || 0);
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || "sine"; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function sfx(name) {
+    if (name === "rotate") tone(520, 0.12, "triangle", 0.14);
+    else if (name === "launch") { tone(300, 0.25, "sine", 0.16); tone(600, 0.3, "sine", 0.12, 0.08); }
+    else if (name === "petal") { tone(880, 0.15, "sine", 0.15); tone(1320, 0.2, "sine", 0.12, 0.07); }
+    else if (name === "win") { [523,659,784,1047].forEach(function(f,i){ tone(f,0.35,"triangle",0.14,i*0.12); }); }
+    else if (name === "over") { [400,300,200].forEach(function(f,i){ tone(f,0.3,"sawtooth",0.08,i*0.15); }); }
+    else if (name === "bump") tone(140, 0.15, "square", 0.1);
+  }
+
+  function loadMaze(i) {
+    var m = MAZES[i];
+    fans = []; petals = 0;
+    movesLeft = m.moves;
+    for (var y = 0; y < SIZE; y++) {
+      fans[y] = [];
+      for (var x = 0; x < SIZE; x++) {
+        var cell = m.grid[y][x];
+        if (cell === 4) startPos = {x:x, y:y};
+        if (cell === 3) goalPos = {x:x, y:y};
+        fans[y][x] = { wall: cell === 0, petal: cell === 2, dir: Math.floor(Math.random() * 4) };
+      }
+    }
+    // Aim the start fan roughly along the path so the first launch is fair.
+    fans[startPos.y][startPos.x].dir = 0;
+    seed = {x:startPos.x, y:startPos.y, px:startPos.x*TILE+TILE/2, py:startPos.y*TILE+TILE/2, moving:false};
+    cursor = {x:startPos.x, y:startPos.y};
+    state = "aiming";
+    updateHUD();
+    setMsg("Maze " + (i+1) + ": rotate fans, then Launch Seed!");
+  }
+
+  function isOpen(x, y) {
+    return x >= 0 && y >= 0 && x < SIZE && y < SIZE && !fans[y][x].wall;
+  }
+
+  function rotateAt(x, y) {
+    if (state !== "aiming") return;
+    if (!isOpen(x, y)) { setMsg("That is a rock wall — fans only grow on open tiles."); return; }
+    fans[y][x].dir = (fans[y][x].dir + 1) % 4;
+    sfx("rotate");
+    spawnPuff(x*TILE+TILE/2, y*TILE+TILE/2);
+    setMsg("Fan now blows " + DIR_NAMES[fans[y][x].dir] + ". Launch when ready!");
+  }
+
+  function spawnPuff(x, y) {
+    for (var i = 0; i < 8; i++) {
+      particles.push({x:x, y:y, vx:(Math.random()-0.5)*3, vy:(Math.random()-0.5)*3, life:20});
+    }
+  }
+
+  function launch() {
+    if (state !== "aiming") return;
+    state = "flying"; seed.moving = true;
+    movesLeft--; updateHUD(); sfx("launch");
+    setMsg("The seed rides the wind...");
+  }
+
+  function stepSeed() {
+    var f = fans[seed.y][seed.x];
+    var d = DIRS[f.dir];
+    var nx = seed.x + d.x, ny = seed.y + d.y;
+    if (!isOpen(nx, ny)) {
+      seed.moving = false; state = "aiming"; sfx("bump");
+      setMsg("The wind hit a wall! Rotate a fan and launch again.");
+      checkMoves(); return;
+    }
+    seed.x = nx; seed.y = ny;
+    var cell = fans[ny][nx];
+    if (cell.petal) {
+      cell.petal = false; petals++; score += 50; sfx("petal");
+      spawnPuff(seed.px, seed.py);
+      setMsg("Breeze petal collected! +50 points.");
+    }
+    if (nx === goalPos.x && ny === goalPos.y) {
+      seed.moving = false; score += 200 + movesLeft * 10; sfx("win");
+      updateHUD();
+      if (mazeIndex + 1 >= MAZES.length) {
+        state = "won";
+        $("winText").textContent = "All " + MAZES.length + " mazes solved! Final score: " + score;
+        show("winScreen", true);
+        setMsg("You win! Final score: " + score);
+      } else {
+        mazeIndex++; loadMaze(mazeIndex);
+        setMsg("Flower reached! On to maze " + (mazeIndex+1) + "!");
+      }
+      return;
+    }
+    updateHUD();
+  }
+
+  function checkMoves() {
+    updateHUD();
+    if (movesLeft <= 0 && state === "aiming") {
+      state = "over"; sfx("over");
+      $("overText").textContent = "Out of moves on maze " + (mazeIndex+1) + ". Score: " + score;
+      show("overScreen", true);
+      setMsg("Game Over — out of moves.");
+    }
+  }
+
+  function updateHUD() {
+    $("hudMaze").textContent = (mazeIndex+1) + " / " + MAZES.length;
+    $("hudScore").textContent = score;
+    $("hudMoves").textContent = movesLeft;
+    $("hudPetals").textContent = petals;
+    $("hudStatus").textContent = state === "flying" ? "Flying!" : state === "won" ? "WINNER!" : state === "over" ? "Game Over" : "Aiming";
+  }
+
+  function startGame() {
+    initAudio();
+    mazeIndex = 0; score = 0; petals = 0;
+    show("titleScreen", false); show("winScreen", false); show("overScreen", false);
+    loadMaze(0);
+    sfx("launch");
+  }
+
+  function resetMaze() {
+    if (state === "title") return;
+    show("winScreen", false); show("overScreen", false);
+    loadMaze(mazeIndex);
+  }
+
+  function drawFan(x, y, dir, t) {
+    var cx = x*TILE + TILE/2, cy = y*TILE + TILE/2;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(DIRS[dir].a);
+    ctx.fillStyle = "#2f7a5e"; ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI*2); ctx.fill();
+    for (var i = 0; i < 3; i++) {
+      ctx.save(); ctx.rotate(i * Math.PI*2/3 + Math.sin(t/300 + x + y) * 0.08);
+      ctx.fillStyle = "#eafaf2";
+      ctx.beginPath(); ctx.ellipse(20, 0, 20, 8, 0, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = "#ffe066"; ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI*2); ctx.fill();
+    // airflow arrow
+    ctx.fillStyle = "rgba(255,255,255,.85)";
+    ctx.beginPath(); ctx.moveTo(34, -6); ctx.lineTo(46, 0); ctx.lineTo(34, 6); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw(t) {
+    ctx.clearRect(0, 0, 640, 640);
+    for (var y = 0; y < SIZE; y++) {
+      for (var x = 0; x < SIZE; x++) {
+        var px = x*TILE, py = y*TILE, f = fans[y] ? fans[y][x] : null;
+        if (!f || f.wall) {
+          ctx.fillStyle = "#5b6b5a";
+          ctx.fillRect(px, py, TILE, TILE);
+          ctx.fillStyle = "#46564a";
+          ctx.beginPath(); ctx.arc(px+22, py+24, 10, 0, Math.PI*2); ctx.arc(px+56, py+58, 13, 0, Math.PI*2); ctx.fill();
+        } else {
+          ctx.fillStyle = (x + y) % 2 ? "#a8e0c6" : "#9fd8c2";
+          ctx.fillRect(px, py, TILE, TILE);
+          drawFan(x, y, f.dir, t);
+          if (f.petal) {
+            var bob = Math.sin(t/300 + x*2) * 4;
+            ctx.fillStyle = "#ff8fc7";
+            for (var p = 0; p < 5; p++) {
+              var a = p * Math.PI*2/5;
+              ctx.beginPath(); ctx.ellipse(px+40+Math.cos(a)*10, py+40+bob+Math.sin(a)*10, 8, 5, a, 0, Math.PI*2); ctx.fill();
+            }
+            ctx.fillStyle = "#ffe066"; ctx.beginPath(); ctx.arc(px+40, py+40+bob, 5, 0, Math.PI*2); ctx.fill();
+          }
+        }
+        ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.strokeRect(px+0.5, py+0.5, TILE-1, TILE-1);
+      }
+    }
+    // flower goal
+    var gx = goalPos.x*TILE+40, gy = goalPos.y*TILE+40;
+    ctx.fillStyle = "#ff5fa2";
+    for (var i = 0; i < 6; i++) {
+      var a = i * Math.PI/3 + Math.sin(t/500)*0.1;
+      ctx.beginPath(); ctx.ellipse(gx+Math.cos(a)*20, gy+Math.sin(a)*20, 13, 8, a, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.fillStyle = "#ffe066"; ctx.beginPath(); ctx.arc(gx, gy, 11, 0, Math.PI*2); ctx.fill();
+    // cursor
+    if (state === "aiming") {
+      ctx.strokeStyle = "#ffe066"; ctx.lineWidth = 4;
+      ctx.strokeRect(cursor.x*TILE+4, cursor.y*TILE+4, TILE-8, TILE-8);
+      ctx.lineWidth = 1;
+    }
+    // particles
+    particles = particles.filter(function(p){ return p.life > 0; });
+    particles.forEach(function(p){
+      p.x += p.vx; p.y += p.vy; p.life--;
+      ctx.fillStyle = "rgba(255,255,255," + (p.life/20) + ")";
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill();
+    });
+    // seed
+    var wob = Math.sin(t/250) * 3;
+    ctx.save(); ctx.translate(seed.px, seed.py + wob);
+    ctx.fillStyle = "#fff8dc";
+    ctx.beginPath(); ctx.ellipse(0, 0, 14, 18, 0.4, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 1.5;
+    for (var s = -2; s <= 2; s++) {
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.quadraticCurveTo(s*10, -26, s*14, -34); ctx.stroke();
+    }
+    ctx.fillStyle = "#7a5a2e"; ctx.beginPath(); ctx.arc(3, 3, 3, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  var lastStep = 0, lastTime = 0;
+  function loop(t) {
+    if (seed.moving && t - lastStep > 260) {
+      lastStep = t;
+      var tx = seed.x*TILE+TILE/2, ty = seed.y*TILE+TILE/2;
+      seed.px = tx; seed.py = ty;
+      stepSeed();
+    }
+    if (seed.moving) {
+      // smooth glide toward current tile centre
+      var cx = seed.x*TILE+TILE/2, cy = seed.y*TILE+TILE/2;
+      seed.px += (cx - seed.px) * 0.35; seed.py += (cy - seed.py) * 0.35;
+    }
+    draw(t);
+    requestAnimationFrame(loop);
+  }
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+    var cy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
+    return { x: Math.floor(cx / r.width * SIZE), y: Math.floor(cy / r.height * SIZE) };
+  }
+
+  function onPointer(e) {
+    e.preventDefault();
+    initAudio();
+    var p = canvasPos(e);
+    if (p.x < 0 || p.y < 0 || p.x >= SIZE || p.y >= SIZE) return;
+    cursor = {x:p.x, y:p.y};
+    rotateAt(p.x, p.y);
+  }
+
+  canvas.addEventListener("click", onPointer);
+  canvas.addEventListener("touchstart", onPointer, {passive:false});
+
+  document.addEventListener("keydown", function(e) {
+    if (state === "title") {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); startGame(); }
+      return;
+    }
+    if (e.key === "ArrowUp") { e.preventDefault(); cursor.y = Math.max(0, cursor.y-1); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); cursor.y = Math.min(SIZE-1, cursor.y+1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); cursor.x = Math.max(0, cursor.x-1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); cursor.x = Math.min(SIZE-1, cursor.x+1); }
+    else if (e.key === " ") { e.preventDefault(); initAudio(); rotateAt(cursor.x, cursor.y); }
+    else if (e.key === "Enter") { e.preventDefault(); initAudio(); launch(); }
+  });
+
+  document.addEventListener("keyup", function(e) { if (e.key === "m" || e.key === "M") muted = !muted; });
+
+  $("startBtn").addEventListener("click", startGame);
+  $("winRestartBtn").addEventListener("click", startGame);
+  $("overRestartBtn").addEventListener("click", startGame);
+  $("launchBtn").addEventListener("click", function(){ initAudio(); launch(); });
+  $("resetBtn").addEventListener("click", function(){ initAudio(); resetMaze(); });
+
+  // Title backdrop: draw maze 1 behind the overlay.
+  loadMaze(0);
+  state = "title";
+  $("hudStatus").textContent = "Ready";
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
