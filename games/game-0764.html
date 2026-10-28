@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Rainforest Rain Drummer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#071a12;color:#eafff3;font-family:Arial,Helvetica,sans-serif;overflow:hidden;touch-action:none}
+#wrap{max-width:760px;margin:0 auto;padding:10px;text-align:center}
+h1{font-size:28px;color:#8cffbf;text-shadow:0 0 12px #22cc77}
+p{line-height:1.5;font-size:15px}
+#hud{display:flex;justify-content:space-between;gap:8px;margin:8px 0;font-weight:bold;flex-wrap:wrap}
+#hud div{background:#123d2a;border:1px solid #2f9a66;border-radius:8px;padding:7px 10px;min-width:110px}
+#judge{height:26px;font-size:20px;color:#ffe066}
+canvas{display:block;width:100%;height:520px;background:linear-gradient(#0b3d24,#072b1d 55%,#1a5c36);border:3px solid #45d68a;border-radius:14px}
+#screen{position:absolute;inset:0;background:rgba(2,20,12,.9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px}
+#game{position:relative}
+button{background:#ffd54a;border:0;color:#122b18;padding:13px 24px;border-radius:10px;font-size:18px;font-weight:bold;cursor:pointer}
+button:hover{background:#ffe27a}
+.pads{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.pad{height:72px;border-radius:12px;border:2px solid #fff;color:#fff;font-size:22px;font-weight:bold;cursor:pointer;user-select:none}
+.pad:active,.pad.hit{transform:scale(.94);filter:brightness(1.5)}
+.p1{background:#e74c3c}.p2{background:#f39c12}.p3{background:#2ecc71}.p4{background:#3498db}
+.keys{font-size:13px;color:#bfe9d0}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="wrap">
+<h1>🌧️ Rainforest Rain Drummer</h1>
+<p>Catch the falling rain notes on the drum line. Build your combo and reach 2000 points before 15 misses!</p>
+<div id="hud"><div>Score: <span id="score">0</span></div><div>Combo: <span id="combo">0</span> x<span id="mult">1</span></div><div>Beat: <span id="beat">0</span>/60</div><div>Misses: <span id="miss">0</span>/15</div></div>
+<div id="judge">Ready?</div>
+<div id="game">
+<canvas id="c" width="720" height="520"></canvas>
+<div id="screen">
+<h2 id="stitle">Rainforest Rain Drummer</h2>
+<p id="smsg">Falling rain notes travel down four jungle lanes.<br>Hit each note exactly as it crosses the glowing drum line.<br>Perfect = 100 pts &nbsp; Good = 50 pts &nbsp; Miss = combo lost.<br>Win at 2000 points in 60 beats. 15 misses ends the song.</p>
+<button id="startBtn">Start Drumming</button>
+<p class="keys">Keyboard: A S D F &nbsp;|&nbsp; Mouse: click a drum pad &nbsp;|&nbsp; Touch: tap a drum pad</p>
+</div>
+</div>
+<div class="pads">
+<button class="pad p1" data-lane="0">🥁 A</button>
+<button class="pad p2" data-lane="1">🥁 S</button>
+<button class="pad p3" data-lane="2">🥁 D</button>
+<button class="pad p4" data-lane="3">🥁 F</button>
+</div>
+<p class="keys">Tip: Perfect hits need timing within a small window. Good hits are a little early or late.</p>
+</div>
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),comboEl=document.getElementById('combo'),multEl=document.getElementById('mult'),beatEl=document.getElementById('beat'),missEl=document.getElementById('miss'),judgeEl=document.getElementById('judge'),screen=document.getElementById('screen'),stitle=document.getElementById('stitle'),smsg=document.getElementById('smsg'),startBtn=document.getElementById('startBtn');
+let audio=null,running=false,score=0,combo=0,misses=0,beat=0,notes=[],spawnTimer=0,last=0,flash=[0,0,0,0],rain=[],particles=[];
+const lanes=['#e74c3c','#f39c12','#2ecc71','#3498db'],keys=['a','s','d','f'],hitY=440;
+function initAudio(){if(!audio){try{audio=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}if(audio&&audio.state==='suspended')audio.resume();}
+function drum(freq,type,dur,vol){if(!audio)return;const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.setValueAtTime(freq,audio.currentTime);o.frequency.exponentialRampToValueAtTime(Math.max(30,freq*0.45),audio.currentTime+dur);g.gain.setValueAtTime(vol,audio.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+dur);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+dur);}
+function playHit(perfect){drum(perfect?180:130,'sine',0.18,0.35);drum(perfect?90:70,'triangle',0.25,0.3);}
+function playMiss(){drum(60,'sawtooth',0.2,0.12);}
+function updateHUD(){scoreEl.textContent=score;comboEl.textContent=combo;multEl.textContent=1+Math.floor(combo/10);beatEl.textContent=Math.min(60,beat);missEl.textContent=misses;}
+function spawnNote(){const lane=Math.floor(Math.random()*4);notes.push({lane:lane,y:-20,speed:170+Math.random()*55+beat*1.2,hit:false});}
+function burst(x,y,color){for(let i=0;i<14;i++)particles.push({x:x,y:y,vx:(Math.random()-0.5)*260,vy:(Math.random()-0.7)*220,life:0.55,color:color});}
+function hitLane(lane){if(!running)return;initAudio();flash[lane]=0.22;let best=-1,bestDist=999;notes.forEach((n,i)=>{if(n.lane===lane&&!n.hit){let d=Math.abs(n.y-hitY);if(d<bestDist){bestDist=d;best=i;}}});
+if(best>=0&&bestDist<62){const n=notes[best];n.hit=true;notes.splice(best,1);const perfect=bestDist<28;const mult=1+Math.floor(combo/10);const pts=(perfect?100:50)*mult;score+=pts;combo++;judgeEl.textContent=perfect?'PERFECT! +'+pts:'GOOD! +'+pts;judgeEl.style.color=perfect?'#ffe066':'#8cffbf';playHit(perfect);burst(120+lane*150,hitY,lanes[lane]);if(score>=2000)endGame(true);}else if(best<0||bestDist>=62){judgeEl.textContent='Too early / late!';judgeEl.style.color='#ff8a80';}}
+function missNote(n){misses++;combo=0;judgeEl.textContent='MISS!';judgeEl.style.color='#ff6b6b';playMiss();updateHUD();if(misses>=15)endGame(false);}
+function endGame(win){running=false;stitle.textContent=win?'🏆 You Win!':'💔 Song Over';smsg.innerHTML='Final score: <b>'+score+'</b><br>Best combo: <b>'+combo+'</b><br>Beats played: <b>'+Math.min(60,beat)+'</b><br>'+(win?'The rainforest is dancing to your rhythm!':'The storm faded. Try again and keep your misses under 15.');startBtn.textContent='Play Again';screen.classList.remove('hidden');}
+function reset(){score=0;combo=0;misses=0;beat=0;notes=[];particles=[];spawnTimer=0;judgeEl.textContent='Listen for the beat...';judgeEl.style.color='#ffe066';updateHUD();}
+function loop(t){if(!running)return;const dt=Math.min(0.05,(t-last)/1000||0.016);last=t;spawnTimer-=dt;if(spawnTimer<=0&&beat<60){spawnNote();beat++;spawnTimer=0.72-Math.min(0.25,beat*0.002);updateHUD();if(beat>=60&&notes.length===0)setTimeout(()=>{if(running)endGame(score>=2000);},300);}
+for(let i=notes.length-1;i>=0;i--){notes[i].y+=notes[i].speed*dt;if(notes[i].y>520){notes.splice(i,1);missNote();}}
+for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=300*dt;p.life-=dt;if(p.life<=0)particles.splice(i,1);}
+if(Math.random()<0.25)rain.push({x:Math.random()*720,y:-10,s:280+Math.random()*180});
+for(let i=rain.length-1;i>=0;i--){rain[i].y+=rain[i].s*dt;if(rain[i].y>520)rain.splice(i,1);}
+draw();requestAnimationFrame(loop);}
+function draw(){ctx.clearRect(0,0,720,520);ctx.fillStyle='rgba(255,255,255,.18)';rain.forEach(r=>{ctx.fillRect(r.x,r.y,2,14);});
+for(let i=0;i<4;i++){const x=45+i*150;ctx.fillStyle='rgba(255,255,255,.08)';ctx.fillRect(x,0,150,520);ctx.fillStyle=lanes[i];ctx.globalAlpha=flash[i]>0?0.55:0.2;ctx.fillRect(x,hitY-28,150,56);ctx.globalAlpha=1;if(flash[i]>0)flash[i]-=0.016;}
+ctx.strokeStyle='#ffe066';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(45,hitY);ctx.lineTo(695,hitY);ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.fillText('DRUM LINE',300,hitY-36);
+notes.forEach(n=>{const x=70+n.lane*150;ctx.fillStyle=lanes[n.lane];ctx.beginPath();ctx.arc(x,n.y,26,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.font='bold 20px Arial';ctx.textAlign='center';ctx.fillText(['A','S','D','F'][n.lane],x,n.y+7);ctx.textAlign='left';});
+particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;});
+ctx.fillStyle='rgba(255,255,255,.85)';ctx.font='bold 16px Arial';['A','S','D','F'].forEach((k,i)=>ctx.fillText(k,112+i*150,505));}
+startBtn.addEventListener('click',function(){initAudio();reset();running=true;screen.classList.add('hidden');last=performance.now();requestAnimationFrame(loop);});
+document.addEventListener('keydown',function(e){const i=keys.indexOf(e.key.toLowerCase());if(i>=0)hitLane(i);});
+document.querySelectorAll('.pad').forEach(function(p){const lane=parseInt(p.dataset.lane,10);p.addEventListener('click',function(){hitLane(lane);});p.addEventListener('touchstart',function(ev){ev.preventDefault();hitLane(lane);},{passive:false});});
+canvas.addEventListener('click',function(e){const r=canvas.getBoundingClientRect();const x=(e.clientX-r.left)/r.width*720;const lane=Math.max(0,Math.min(3,Math.floor((x-45)/150)));if(x>=45)hitLane(lane);});
+canvas.addEventListener('touchstart',function(e){e.preventDefault();const r=canvas.getBoundingClientRect();const t=e.touches[0];const x=(t.clientX-r.left)/r.width*720;const lane=Math.max(0,Math.min(3,Math.floor((x-45)/150)));if(x>=45)hitLane(lane);},{passive:false});
+draw();
+</script>
+</body>
+</html>

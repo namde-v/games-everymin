@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Moonlight Firefly Catcher</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #05081a; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow: hidden; }
+  h1 { margin: 10px 0 4px; font-size: 22px; color: #ffe97a; text-shadow: 0 0 14px #ffdd44; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 6px 0; font-weight: bold; font-size: 15px; }
+  #hud span { background: #141b3d; border: 1px solid #3a4a8a; border-radius: 20px; padding: 5px 12px; }
+  #hud .lives { color: #ff7a8a; }
+  #hud .time { color: #8ad8ff; }
+  #hud .score { color: #ffe97a; }
+  #wrap { position: relative; width: min(96vw, 800px); aspect-ratio: 8 / 5; max-height: 70vh; }
+  canvas { width: 100%; height: 100%; display: block; background: #0a1230; border: 3px solid #2a3a7a; border-radius: 14px; touch-action: none; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(3,6,20,0.86); border-radius: 14px; padding: 20px; gap: 12px; }
+  .hidden { display: none !important; }
+  .screen h2 { font-size: 30px; color: #ffe97a; text-shadow: 0 0 16px #ffdd44; }
+  .screen p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #dbe4ff; }
+  .screen .big { font-size: 19px; color: #fff; font-weight: bold; }
+  button { background: #ffd84d; color: #1a1200; border: none; border-radius: 30px; padding: 13px 30px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 0 18px rgba(255,216,77,.6); }
+  button:hover, button:active { background: #fff08a; transform: scale(1.04); }
+  button.secondary { background: #2a3a7a; color: #fff; box-shadow: none; }
+  .keys { font-size: 13px; color: #aebcff; }
+  .badge { background: #ffe97a; color: #1a1200; padding: 2px 9px; border-radius: 12px; font-weight: bold; font-size: 12px; }
+  #flash { position: absolute; inset: 0; pointer-events: none; border-radius: 14px; opacity: 0; }
+  @media (max-width: 520px) { h1 { font-size: 18px; } .screen h2 { font-size: 24px; } .screen p { font-size: 14px; } }
+</style>
+</head>
+<body>
+<h1>🌙 Moonlight Firefly Catcher ✨</h1>
+<div id="hud" aria-live="polite">
+  <span class="score">Score: <b id="score">0</b> / 500</span>
+  <span class="lives">Lives: <b id="lives">❤❤❤</b></span>
+  <span class="time">Time: <b id="time">90</b>s</span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="800" height="500"></canvas>
+  <div id="flash"></div>
+
+  <div id="titleScreen" class="screen">
+    <div class="badge">ARCADE • NIGHT MEADOW</div>
+    <h2>Moonlight Firefly Catcher</h2>
+    <p><strong>How to Play:</strong> Move your glowing jar around the moonlit meadow and catch fireflies for points. Bright fireflies are worth more! Watch out — bats swoop through the night and drain a life if they touch your jar.</p>
+    <p class="big">Reach <span style="color:#ffe97a">500 points</span> in 90 seconds to win.<br>You have 3 lives. Fireflies get faster as the night goes on!</p>
+    <p class="keys">Move: Arrow Keys / WASD • Mouse: move jar to pointer • Touch: drag to move<br>Firefly = +10 to +30 points &nbsp;•&nbsp; Bat = −1 life</p>
+    <button id="startBtn" type="button">▶ Start Catching</button>
+    <button id="howBtn" class="secondary" type="button">How to Play</button>
+    <p id="howText" class="hidden">Tip: Fireflies blink — catch them when they glow brightest for bonus points. Stay away from bats, especially near the top of the meadow where they dive. Your jar catches anything inside its rim.</p>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText" class="big"></p>
+    <p id="endDetail"></p>
+    <button id="restartBtn" type="button">↻ Play Again</button>
+  </div>
+</div>
+<p class="keys" style="margin-top:8px;">Tip: on touch devices, drag anywhere on the meadow to move the jar.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var timeEl = document.getElementById('time');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endDetail = document.getElementById('endDetail');
+  var flash = document.getElementById('flash');
+
+  var state = 'title'; // title | playing | over
+  var score = 0, lives = 3, timeLeft = 90, lastTime = 0, elapsed = 0;
+  var player = { x: W / 2, y: H - 90, r: 34, vx: 0, vy: 0, tx: W / 2, ty: H - 90 };
+  var keys = {};
+  var fireflies = [], bats = [], sparks = [], stars = [], grass = [];
+  var audioCtx = null, muted = false;
+
+  for (var i = 0; i < 70; i++) stars.push({ x: Math.random() * W, y: Math.random() * H * 0.55, r: Math.random() * 1.6 + 0.4, p: Math.random() * Math.PI * 2 });
+  for (var g = 0; g < 46; g++) grass.push({ x: Math.random() * W, y: H - 18 - Math.random() * 34, h: 14 + Math.random() * 22, sway: Math.random() * Math.PI * 2 });
+
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), gn = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      gn.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      gn.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(gn); gn.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function catchSound() { tone(880, 0.18, 'sine', 0.14); setTimeout(function(){ tone(1320, 0.22, 'sine', 0.12); }, 60); }
+  function hurtSound() { tone(160, 0.35, 'sawtooth', 0.14); }
+  function winSound() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.35, 'triangle', 0.14); }, i * 130); }); }
+
+  function speedScale() { return 1 + (90 - timeLeft) / 90 * 1.1; } // fireflies speed up over time
+
+  function spawnFirefly() {
+    var bright = Math.random() < 0.28;
+    fireflies.push({
+      x: 30 + Math.random() * (W - 60), y: 40 + Math.random() * (H - 160),
+      vx: (Math.random() - 0.5) * 70, vy: (Math.random() - 0.5) * 50,
+      r: bright ? 11 : 8, bright: bright, phase: Math.random() * Math.PI * 2,
+      wander: Math.random() * Math.PI * 2, age: 0
+    });
+  }
+  function spawnBat() {
+    var fromLeft = Math.random() < 0.5;
+    bats.push({ x: fromLeft ? -30 : W + 30, y: 40 + Math.random() * 180, vx: (fromLeft ? 1 : -1) * (120 + Math.random() * 90), vy: 0, wing: 0, dive: Math.random() * 0.6 });
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) sparks.push({ x: x, y: y, vx: (Math.random() - 0.5) * 220, vy: (Math.random() - 0.5) * 220, life: 0.5, color: color });
+  }
+  function showFlash(color) {
+    flash.style.background = color; flash.style.opacity = '0.35';
+    setTimeout(function(){ flash.style.opacity = '0'; }, 140);
+  }
+
+  function resetGame() {
+    score = 0; lives = 3; timeLeft = 90; elapsed = 0;
+    player.x = W / 2; player.y = H - 90; player.tx = player.x; player.ty = player.y; player.vx = 0; player.vy = 0;
+    fireflies = []; bats = []; sparks = [];
+    for (var i = 0; i < 8; i++) spawnFirefly();
+    updateHUD(); statusEl.textContent = 'Playing';
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = '❤'.repeat(Math.max(0, lives)) + (lives <= 0 ? ' —' : '');
+    timeEl.textContent = Math.ceil(timeLeft);
+  }
+
+  function endGame(win) {
+    state = 'over';
+    statusEl.textContent = win ? 'You Win!' : 'Game Over';
+    endTitle.textContent = win ? '✨ You Win! ✨' : '🌙 Game Over';
+    endText.textContent = win ? 'You caught ' + score + ' points of moonlight!' : 'The night got the better of you.';
+    endDetail.textContent = 'Final score: ' + score + ' • Lives left: ' + Math.max(0, lives) + ' • Time left: ' + Math.max(0, Math.ceil(timeLeft)) + 's';
+    if (win) winSound(); else hurtSound();
+    endScreen.classList.remove('hidden');
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    elapsed += dt; timeLeft -= dt;
+    if (timeLeft <= 0) { timeLeft = 0; updateHUD(); endGame(score >= 500); return; }
+
+    // Player movement: keyboard velocity + pointer target smoothing
+    var speed = 340;
+    var mx = 0, my = 0;
+    if (keys['arrowleft'] || keys['a']) mx -= 1;
+    if (keys['arrowright'] || keys['d']) mx += 1;
+    if (keys['arrowup'] || keys['w']) my -= 1;
+    if (keys['arrowdown'] || keys['s']) my += 1;
+    if (mx !== 0 || my !== 0) {
+      var len = Math.sqrt(mx * mx + my * my);
+      player.x += mx / len * speed * dt; player.y += my / len * speed * dt;
+      player.tx = player.x; player.ty = player.y;
+    } else {
+      player.x += (player.tx - player.x) * Math.min(1, dt * 14);
+      player.y += (player.ty - player.y) * Math.min(1, dt * 14);
+    }
+    player.x = Math.max(player.r, Math.min(W - player.r, player.x));
+    player.y = Math.max(player.r, Math.min(H - player.r, player.y));
+
+    var sp = speedScale();
+    fireflies.forEach(function(f) {
+      f.age += dt; f.wander += dt * 2.2;
+      f.vx += Math.cos(f.wander) * 55 * dt; f.vy += Math.sin(f.wander * 1.3) * 45 * dt;
+      var vmax = (f.bright ? 95 : 75) * sp;
+      var v = Math.sqrt(f.vx * f.vx + f.vy * f.vy);
+      if (v > vmax) { f.vx = f.vx / v * vmax; f.vy = f.vy / v * vmax; }
+      f.x += f.vx * dt; f.y += f.vy * dt;
+      if (f.x < 15 || f.x > W - 15) f.vx *= -1;
+      if (f.y < 25 || f.y > H - 55) f.vy *= -1;
+      f.x = Math.max(12, Math.min(W - 12, f.x)); f.y = Math.max(22, Math.min(H - 50, f.y));
+    });
+
+    bats.forEach(function(b) {
+      b.wing += dt * 18; b.x += b.vx * dt;
+      b.y += Math.sin(elapsed * 3 + b.dive * 10) * 34 * dt + b.dive * 12 * dt;
+    });
+    bats = bats.filter(function(b){ return b.x > -60 && b.x < W + 60; });
+    sparks.forEach(function(s){ s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt; });
+    sparks = sparks.filter(function(s){ return s.life > 0; });
+
+    // Keep a healthy population, slowly denser as speed rises
+    while (fireflies.length < 8) spawnFirefly();
+    if (elapsed > 12 && Math.random() < dt * 0.45 && bats.length < 4) spawnBat();
+    if (elapsed > 35 && Math.random() < dt * 0.35 && bats.length < 5) spawnBat();
+
+    // Catching: jar rim catches fireflies
+    for (var i = fireflies.length - 1; i >= 0; i--) {
+      var f = fireflies[i];
+      var dx = f.x - player.x, dy = f.y - player.y;
+      if (dx * dx + dy * dy < (player.r + f.r) * (player.r + f.r)) {
+        var glow = 0.5 + 0.5 * Math.sin(f.age * 4 + f.phase);
+        var pts = f.bright ? (glow > 0.3 ? 30 : 20) : (glow > 0.3 ? 20 : 10);
+        score += pts; burst(f.x, f.y, '#ffe97a'); catchSound(); showFlash('#ffe97a');
+        fireflies.splice(i, 1); spawnFirefly();
+        if (score >= 500) { updateHUD(); endGame(true); return; }
+      }
+    }
+    // Bats drain a life
+    for (var j = bats.length - 1; j >= 0; j--) {
+      var b = bats[j];
+      var bdx = b.x - player.x, bdy = b.y - player.y;
+      if (bdx * bdx + bdy * bdy < (player.r + 18) * (player.r + 18)) {
+        lives--; bats.splice(j, 1); burst(player.x, player.y, '#ff7a8a'); hurtSound(); showFlash('#ff5566');
+        statusEl.textContent = 'Ouch! A bat got you!';
+        setTimeout(function(){ if (state === 'playing') statusEl.textContent = 'Playing'; }, 900);
+        if (lives <= 0) { updateHUD(); endGame(false); return; }
+        break;
+      }
+    }
+    updateHUD();
+  }
+
+  function draw() {
+    // Night sky gradient
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#060a24'); grad.addColorStop(0.6, '#0d1740'); grad.addColorStop(1, '#12264a');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // Moon
+    ctx.fillStyle = '#fff3b0'; ctx.beginPath(); ctx.arc(700, 62, 34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,243,176,0.18)'; ctx.beginPath(); ctx.arc(700, 62, 52, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e8d68a'; ctx.beginPath(); ctx.arc(690, 54, 7, 0, Math.PI * 2); ctx.arc(712, 72, 5, 0, Math.PI * 2); ctx.fill();
+    // Stars twinkle
+    stars.forEach(function(s){
+      var tw = 0.5 + 0.5 * Math.sin(elapsed * 2 + s.p);
+      ctx.globalAlpha = 0.35 + tw * 0.65; ctx.fillStyle = '#cdd8ff';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Hills and grass
+    ctx.fillStyle = '#0e2a1a'; ctx.beginPath(); ctx.moveTo(0, H - 40); ctx.quadraticCurveTo(W * 0.3, H - 90, W * 0.6, H - 45); ctx.quadraticCurveTo(W * 0.85, H - 20, W, H - 50); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
+    ctx.strokeStyle = '#2f7a4a'; ctx.lineWidth = 2;
+    grass.forEach(function(gr){
+      var sway = Math.sin(elapsed * 1.5 + gr.sway) * 4;
+      ctx.beginPath(); ctx.moveTo(gr.x, gr.y + gr.h); ctx.quadraticCurveTo(gr.x + sway, gr.y + gr.h / 2, gr.x + sway * 1.6, gr.y); ctx.stroke();
+    });
+    // Fireflies with glow and blink
+    fireflies.forEach(function(f){
+      var glow = 0.5 + 0.5 * Math.sin(f.age * 4 + f.phase);
+      var alpha = 0.35 + glow * 0.65;
+      ctx.globalAlpha = alpha * 0.35; ctx.fillStyle = '#ffe97a';
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r + 14, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = alpha; ctx.fillStyle = f.bright ? '#fff7a0' : '#d8e86a';
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1; ctx.fillStyle = '#223';
+      ctx.beginPath(); ctx.arc(f.x - 2, f.y - 1, 2, 0, Math.PI * 2); ctx.fill();
+    });
+    // Bats
+    bats.forEach(function(b){
+      var flap = Math.sin(b.wing) * 10;
+      ctx.fillStyle = '#1d2138'; ctx.strokeStyle = '#1d2138'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(b.x - 22, b.y - flap); ctx.quadraticCurveTo(b.x - 8, b.y - 12, b.x, b.y);
+      ctx.quadraticCurveTo(b.x + 8, b.y - 12, b.x + 22, b.y - flap);
+      ctx.quadraticCurveTo(b.x + 10, b.y + 8, b.x, b.y + 4);
+      ctx.quadraticCurveTo(b.x - 10, b.y + 8, b.x - 22, b.y - flap);
+      ctx.fill();
+      ctx.fillStyle = '#ff5a6a'; ctx.beginPath(); ctx.arc(b.x - 4, b.y - 2, 1.8, 0, Math.PI * 2); ctx.arc(b.x + 4, b.y - 2, 1.8, 0, Math.PI * 2); ctx.fill();
+    });
+    // Sparks
+    sparks.forEach(function(s){
+      ctx.globalAlpha = Math.max(0, s.life * 2); ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Player jar
+    ctx.save();
+    ctx.shadowColor = '#ffe97a'; ctx.shadowBlur = 18;
+    ctx.fillStyle = 'rgba(180,220,255,0.32)'; ctx.strokeStyle = '#cfe6ff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#8a5a2a'; ctx.fillRect(player.x - player.r * 0.55, player.y - player.r - 10, player.r * 1.1, 12);
+    ctx.fillStyle = '#ffe97a'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('🫙', player.x, player.y + 1);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 11px Arial'; ctx.fillText('CATCH!', player.x, player.y + player.r + 14);
+    ctx.restore();
+    // Progress hint while playing
+    if (state === 'playing') {
+      ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = '12px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Target: 500 pts • Fireflies speed up over time', 12, 20);
+    }
+  }
+
+  function loop(ts) {
+    var dt = 0;
+    if (lastTime) dt = Math.min(0.05, (ts - lastTime) / 1000);
+    lastTime = ts;
+    if (state === 'playing') update(dt);
+    else elapsed += dt; // keep twinkle/grass alive on menus
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    tone(523, 0.2, 'triangle', 0.12);
+  }
+
+  function pointerToGame(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    player.tx = (cx - rect.left) / rect.width * W;
+    player.ty = (cy - rect.top) / rect.height * H;
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function(){
+    ensureAudio();
+    document.getElementById('howText').classList.toggle('hidden');
+  });
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) !== -1) e.preventDefault();
+    if ((k === 'enter' || k === ' ') && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+  canvas.addEventListener('mousemove', function(e){ if (state === 'playing') pointerToGame(e); });
+  canvas.addEventListener('mousedown', function(e){ ensureAudio(); if (state === 'playing') pointerToGame(e); });
+  canvas.addEventListener('touchstart', function(e){ ensureAudio(); if (state === 'playing') { e.preventDefault(); pointerToGame(e); } }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){ if (state === 'playing') { e.preventDefault(); pointerToGame(e); } }, { passive: false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); }, { passive: false });
+
+  resetGame(); state = 'title'; statusEl.textContent = 'Ready';
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

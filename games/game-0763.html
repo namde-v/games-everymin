@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Harbor Ferry Scheduler</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#06283a;color:#eaf6ff;font-family:Verdana,Arial,sans-serif;text-align:center;padding:10px}
+h1{font-size:26px;margin:6px 0 2px;color:#ffd166}
+p.sub{color:#9fd8ef;margin-bottom:8px;font-size:14px}
+#hud{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;max-width:860px;margin:0 auto 8px}
+.pill{background:#0b3d54;border:1px solid #2a7a9e;border-radius:20px;padding:6px 12px;font-weight:bold;font-size:14px}
+.pill b{color:#ffd166}
+#wrap{position:relative;max-width:860px;margin:0 auto}
+canvas{background:#1a6f8f;border:3px solid #ffd166;border-radius:12px;width:100%;height:auto;display:block;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(3,32,48,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:10px}
+.overlay h2{font-size:32px;color:#ffd166}
+.overlay p{max-width:560px;line-height:1.55;font-size:15px}
+button{background:#ffd166;color:#102a43;border:0;border-radius:10px;padding:13px 26px;font-size:18px;font-weight:bold;cursor:pointer}
+button:hover{background:#ffe08a}
+button:active{transform:scale(.97)}
+.keys{background:#0b3d54;border-radius:10px;padding:10px 14px;font-size:13px;line-height:1.6;text-align:left}
+.hidden{display:none!important}
+#msg{height:20px;font-weight:bold;color:#ffd166;margin-top:6px}
+.legend{font-size:13px;color:#cfeeff}
+</style>
+</head>
+<body>
+<h1>⛴ Harbor Ferry Scheduler</h1>
+<p class="sub">Run the harbor shift: pick up waiting passengers and deliver them before patience runs out.</p>
+<div id="hud">
+  <div class="pill">Fare: <b id="fare">$0</b> / $1000</div>
+  <div class="pill">Reputation: <b id="rep">100</b></div>
+  <div class="pill">Delivered: <b id="del">0</b></div>
+  <div class="pill">Waiting: <b id="wait">0</b></div>
+  <div class="pill">Ferry: <b id="sel">1</b> → Dock: <b id="dock">A</b></div>
+</div>
+<div id="wrap">
+  <canvas id="c" width="860" height="540"></canvas>
+  <div class="overlay" id="title">
+    <h2>Harbor Ferry Scheduler</h2>
+    <p><b>Your shift:</b> Passengers queue at 4 docks, each wanting a different dock. Dispatch a ferry to collect them, then send it on to their destination. Every delivery earns fare. Every passenger who gives up waiting costs reputation.</p>
+    <div class="keys">
+      <b>How to play</b><br>
+      • Mouse / touch: tap a ferry, then tap a dock to dispatch it.<br>
+      • Keys 1–4: select ferry &nbsp;• Arrow keys: choose dock &nbsp;• Space: dispatch<br>
+      • Ferries carry up to 4 passengers and drop off anyone whose destination matches.<br>
+      • <b>Win:</b> earn $1000 fare &nbsp;• <b>Game over:</b> reputation reaches 0.
+    </div>
+    <button id="startBtn">▶ Start Shift</button>
+    <p class="legend">Patience bars shrink as passengers wait — red bars are about to leave!</p>
+  </div>
+  <div class="overlay hidden" id="end">
+    <h2 id="endTitle">Shift Complete</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Shift</button>
+  </div>
+</div>
+<div id="msg"></div>
+<p class="legend">Tip: send the nearest empty ferry to the longest queue, and chain deliveries — a full ferry heading to a popular dock earns the most.</p>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+const DOCKS=[
+ {id:0,name:'A',label:'A · North Pier',x:120,y:90,color:'#ffd166'},
+ {id:1,name:'B',label:'B · East Quay',x:740,y:120,color:'#7bd88f'},
+ {id:2,name:'C',label:'C · South Wharf',x:700,y:450,color:'#ff8a7a'},
+ {id:3,name:'D',label:'D · West Marina',x:150,y:430,color:'#8ecbff'}
+];
+const FERRY_NAMES=['Gull','Otter','Seal','Tern'];
+let state='title',fare=0,rep=100,delivered=0,selFerry=0,selDock=0,spawnT=0,elapsed=0,msgT=0;
+let ferries=[],queues=[],audio=null;
+function beep(f,d,type){
+  if(!audio) return;
+  try{
+    const o=audio.createOscillator(),g=audio.createGain();
+    o.type=type||'sine';o.frequency.value=f;g.gain.value=0.08;
+    o.connect(g);g.connect(audio.destination);o.start();
+    g.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+d);o.stop(audio.currentTime+d);
+  }catch(e){}
+}
+function initAudio(){ if(!audio){ try{audio=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(audio&&audio.state==='suspended') audio.resume(); }
+function reset(){
+  fare=0;rep=100;delivered=0;selFerry=0;selDock=0;spawnT=0;elapsed=0;
+  ferries=DOCKS.map((d,i)=>({id:i,name:FERRY_NAMES[i],x:d.x+(i%2?30:-30),y:d.y+(i<2?42:-42),tx:null,ty:null,dock:null,moving:false,pass:[]}));
+  // Start ferries spread out: two at A, one at C, one at D
+  ferries[0].x=160;ferries[0].y=150;ferries[1].x=90;ferries[1].y=150;
+  ferries[2].x=660;ferries[2].y=390;ferries[3].x=190;ferries[3].y=370;
+  queues=DOCKS.map(()=>[]);
+  for(let i=0;i<5;i++) spawnPassenger(true);
+  updateHUD();setMsg('Shift started — dispatch a ferry!');
+}
+function randDest(from){let d;do{d=Math.floor(Math.random()*4);}while(d===from);return d;}
+function spawnPassenger(initial){
+  const from=Math.floor(Math.random()*4);
+  if(queues[from].length>=6) return;
+  const p={from:from,to:randDest(from),patience:initial?100:100,color:['#ffd166','#7bd88f','#ff8a7a','#8ecbff'][randDest(from)]};
+  // Fix color to destination color
+  p.color=DOCKS[p.to].color;
+  queues[from].push(p);
+}
+function setMsg(t){$('msg').textContent=t;msgT=3;}
+function dispatch(f,dock){
+  const fe=ferries[f];
+  fe.tx=DOCKS[dock].x;fe.ty=DOCKS[dock].y;fe.dock=dock;fe.moving=true;
+  selFerry=f;selDock=dock;updateHUD();
+  beep(520,0.12,'triangle');setMsg(fe.name+' sailing to Dock '+DOCKS[dock].name);
+}
+function arrive(fe){
+  fe.moving=false;
+  const d=fe.dock;
+  // Drop off
+  let dropped=0;
+  fe.pass=fe.pass.filter(p=>{
+    if(p.to===d){fare+=p.fare||50;delivered++;dropped++;return false;}
+    return true;
+  });
+  if(dropped) beep(880,0.18,'sine');
+  // Pick up, up to capacity 4
+  while(fe.pass.length<4 && queues[d].length){
+    const p=queues[d].shift();
+    // Fare by distance between docks
+    const dx=DOCKS[p.from].x-DOCKS[p.to].x, dy=DOCKS[p.from].y-DOCKS[p.to].y;
+    p.fare=Math.round(35+Math.sqrt(dx*dx+dy*dy)/22);
+    fe.pass.push(p);
+  }
+  if(dropped||fe.pass.length) setMsg(fe.name+' at Dock '+DOCKS[d].name+': '+dropped+' dropped off, '+fe.pass.length+' aboard.');
+  updateHUD();checkEnd();
+}
+function checkEnd(){
+  if(fare>=1000 && state==='playing'){endGame(true);}
+  else if(rep<=0 && state==='playing'){endGame(false);}
+}
+function endGame(win){
+  state=win?'win':'over';
+  $('endTitle').textContent=win?'🎉 Shift Complete — You Win!':'💔 Shift Failed — Game Over';
+  $('endText').textContent=win
+    ? 'You earned $'+fare+' fare and delivered '+delivered+' passengers. The harbor runs on time thanks to you!'
+    : 'Reputation hit zero after '+delivered+' deliveries and $'+fare+' fare. Try a faster dispatch rhythm next shift!';
+  $('end').classList.remove('hidden');
+  beep(win?1046:220,0.4,win?'sine':'sawtooth');
+}
+function updateHUD(){
+  $('fare').textContent='$'+fare;$('rep').textContent=rep;$('del').textContent=delivered;
+  $('wait').textContent=queues.reduce((a,q)=>a+q.length,0);
+  $('sel').textContent=(selFerry+1);$('dock').textContent=DOCKS[selDock].name;
+}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  // Water
+  const g=ctx.createLinearGradient(0,0,0,540);g.addColorStop(0,'#2a8fb5');g.addColorStop(1,'#155e7d');
+  ctx.fillStyle=g;ctx.fillRect(0,0,860,540);
+  // Routes
+  ctx.strokeStyle='rgba(255,255,255,.22)';ctx.lineWidth=2;ctx.setLineDash([8,8]);
+  for(let i=0;i<4;i++)for(let j=i+1;j<4;j++){ctx.beginPath();ctx.moveTo(DOCKS[i].x,DOCKS[i].y);ctx.lineTo(DOCKS[j].x,DOCKS[j].y);ctx.stroke();}
+  ctx.setLineDash([]);
+  // Docks
+  DOCKS.forEach((d,i)=>{
+    ctx.fillStyle='#8a5a2b';ctx.fillRect(d.x-52,d.y-18,104,36);
+    ctx.fillStyle=d.color;ctx.fillRect(d.x-52,d.y-18,104,8);
+    ctx.fillStyle='#fff';ctx.font='bold 15px Verdana';ctx.textAlign='center';
+    ctx.fillText(d.label,d.x,d.y+34);
+    if(i===selDock){ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.strokeRect(d.x-58,d.y-24,116,48);}
+    // Queue passengers
+    queues[i].forEach((p,k)=>{
+      const px=d.x-42+k*17, py=d.y-58;
+      ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(px,py,7,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#000';ctx.font='bold 8px Verdana';ctx.fillText(DOCKS[p.to].name,px,py+3);
+      ctx.fillStyle='#333';ctx.fillRect(px-8,py-16,16,4);
+      ctx.fillStyle=p.patience>40?'#7bd88f':'#ff5544';ctx.fillRect(px-8,py-16,16*p.patience/100,4);
+    });
+    ctx.fillStyle='#fff';ctx.font='12px Verdana';ctx.fillText(queues[i].length+' waiting',d.x,d.y+52);
+  });
+  // Ferries
+  ferries.forEach((f,i)=>{
+    ctx.fillStyle=i===selFerry?'#ffd166':'#102a43';
+    ctx.beginPath();ctx.arc(f.x,f.y,24,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=i===selFerry?'#102a43':'#fff';ctx.font='bold 16px Verdana';
+    ctx.fillText('⛴',f.x,f.y+6);
+    ctx.font='bold 11px Verdana';ctx.fillText(f.name,f.x,f.y+40);
+    ctx.font='10px Verdana';ctx.fillText(f.pass.length+'/4 aboard',f.x,f.y+54);
+    f.pass.forEach((p,k)=>{
+      ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(f.x-18+k*12,f.y-28,5,0,Math.PI*2);ctx.fill();
+    });
+    if(f.moving){ctx.strokeStyle='rgba(255,255,255,.5)';ctx.beginPath();ctx.moveTo(f.x,f.y);ctx.lineTo(f.tx,f.ty);ctx.stroke();}
+  });
+  // Progress bar
+  ctx.fillStyle='rgba(0,0,0,.35)';ctx.fillRect(20,505,820,18);
+  ctx.fillStyle='#ffd166';ctx.fillRect(20,505,820*Math.min(1,fare/1000),18);
+  ctx.fillStyle='#fff';ctx.font='bold 12px Verdana';ctx.fillText('Fare progress to $1000',430,519);
+}
+function update(dt){
+  if(state!=='playing') return;
+  elapsed+=dt;spawnT+=dt;msgT-=dt;if(msgT<=0)$('msg').textContent='';
+  if(spawnT>2.2){spawnT=0;spawnPassenger(false);if(Math.random()<0.35)spawnPassenger(false);}
+  // Patience decay
+  DOCKS.forEach((d,i)=>{
+    queues[i]=queues[i].filter(p=>{
+      p.patience-=dt*3.2;
+      if(p.patience<=0){rep-=12;beep(180,0.25,'sawtooth');setMsg('A passenger gave up at Dock '+d.name+' — reputation -12');updateHUD();checkEnd();return false;}
+      return true;
+    });
+  });
+  ferries.forEach(f=>{
+    if(!f.moving) return;
+    const dx=f.tx-f.x,dy=f.ty-f.y,dist=Math.sqrt(dx*dx+dy*dy),sp=150*dt;
+    if(dist<=sp){f.x=f.tx;f.y=f.ty;arrive(f);}
+    else{f.x+=dx/dist*sp;f.y+=dy/dist*sp;}
+  });
+  updateHUD();
+}
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  update(dt);draw();
+  requestAnimationFrame(loop);
+}
+function pickAt(x,y){
+  // Ferries first
+  for(let i=0;i<ferries.length;i++){if(Math.hypot(ferries[i].x-x,ferries[i].y-y)<32){selFerry=i;updateHUD();setMsg('Ferry '+ferries[i].name+' selected — now tap a dock');beep(660,0.08,'triangle');return;}}
+  for(let i=0;i<DOCKS.length;i++){if(Math.abs(DOCKS[i].x-x)<60&&Math.abs(DOCKS[i].y-y)<45){selDock=i;dispatch(selFerry,i);return;}}
+}
+function canvasPos(e){
+  const r=cv.getBoundingClientRect();
+  const t=e.touches?e.touches[0]:e;
+  return {x:(t.clientX-r.left)*cv.width/r.width,y:(t.clientY-r.top)*cv.height/r.height};
+}
+cv.addEventListener('click',e=>{if(state!=='playing')return;const p=canvasPos(e);pickAt(p.x,p.y);});
+cv.addEventListener('touchstart',e=>{e.preventDefault();if(state!=='playing')return;const p=canvasPos(e);pickAt(p.x,p.y);},{passive:false});
+document.addEventListener('keydown',e=>{
+  if(state==='playing'){
+    if(e.key>='1'&&e.key<='4'){selFerry=parseInt(e.key)-1;updateHUD();beep(660,0.08,'triangle');}
+    else if(e.key==='ArrowRight'||e.key==='ArrowDown'){selDock=(selDock+1)%4;updateHUD();e.preventDefault();}
+    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){selDock=(selDock+3)%4;updateHUD();e.preventDefault();}
+    else if(e.key===' '){dispatch(selFerry,selDock);e.preventDefault();}
+  } else if(e.key==='Enter'){
+    if(state==='title')$('startBtn').click(); else $('restartBtn').click();
+  }
+});
+$('startBtn').addEventListener('click',()=>{initAudio();reset();state='playing';$('title').classList.add('hidden');beep(880,0.15,'sine');});
+$('restartBtn').addEventListener('click',()=>{initAudio();reset();state='playing';$('end').classList.add('hidden');beep(880,0.15,'sine');});
+reset();state='title';updateHUD();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -64,3 +64,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0758 | Bakery Supply Chain | Strategy / Bakery Logistics | Mouse/touch buy and bake, Arrow Keys select, Space confirm | [Play](./../games/game-0758.html) |
 | 0759 | Ukulele Island Strum | Rhythm / Ukulele Strum Timing | Keys play chords, Space strum, mouse/touch tap | [Play](./../games/game-0759.html) |
 | 0760 | Archery Wind Shot | Precision / Wind Archery | Arrow Keys aim, Space shoot, mouse aim, touch tap | [Play](./../games/game-0760.html) |
+| 0761 | Moonlight Firefly Catcher | Arcade / Firefly Catching | Arrow Keys/WASD move, mouse move, touch drag | [Play](./../games/game-0761.html) |
+| 0762 | Gearworks Cog Puzzle | Puzzle / Gear Rotation Logic | Mouse/touch tap cog rotate, Arrow Keys select, Space rotate | [Play](./../games/game-0762.html) |
+| 0763 | Harbor Ferry Scheduler | Strategy / Ferry Route Planning | Mouse/touch tap ferry then dock, Keys 1-4 select ferry, Arrow Keys select dock, Space dispatch | [Play](./../games/game-0763.html) |
+| 0764 | Rainforest Rain Drummer | Rhythm / Rain Drum Timing | Keys A/S/D/F tap drums, mouse click pads, touch tap pads | [Play](./../games/game-0764.html) |
+| 0765 | Glacier Crystal Skater | Precision / Crystal Gate Slalom | Arrow Keys steer, mouse move/drag, touch drag | [Play](./../games/game-0765.html) |
+| 0766 | Canyon Condor Soarer | Arcade / Thermal Soaring Collector | Arrow Keys/WASD steer, Space soar, mouse/touch drag | [Play](./../games/game-0766.html) |
+| 0767 | Crystal Prism Sorter | Puzzle / Color Sorting Logic | Mouse/touch tap tubes, Arrow Keys select, Space pick/drop | [Play](./../games/game-0767.html) |
+| 0768 | Mountain Ski Resort Manager | Strategy / Resort Management | Mouse/touch select buildings, Arrow Keys select, Keys 1-3 actions, Space confirm | [Play](./../games/game-0768.html) |
+| 0769 | Alpine Yodel Echo | Rhythm / Melody Echo Timing | Keys A/S/D/F play notes, mouse click, touch tap | [Play](./../games/game-0769.html) |
+| 0770 | Comet Tail Navigator | Precision / Asteroid Gate Navigation | Arrow Keys/WASD thrust, Space brake, mouse/touch drag steer | [Play](./../games/game-0770.html) |

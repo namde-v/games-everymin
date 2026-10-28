@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glacier Crystal Skater</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06121f; color: #eaf7ff; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+  #wrap { width: min(96vw, 760px); text-align: center; }
+  h1 { font-size: 28px; letter-spacing: 1px; color: #aef3ff; text-shadow: 0 0 12px #35c7ff; margin: 8px 0 4px; }
+  p.sub { color: #b8d7e8; font-size: 14px; margin-bottom: 8px; }
+  #hud { display: flex; justify-content: space-between; background: #0b2a42; border: 2px solid #37c8ff; border-radius: 10px; padding: 8px 12px; font-weight: bold; margin-bottom: 8px; }
+  #hud span { color: #ffe27a; }
+  canvas { width: 100%; height: 520px; background: linear-gradient(#bfeaff, #e8fbff); border: 3px solid #59d6ff; border-radius: 12px; display: block; touch-action: none; }
+  .screen { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; }
+  #stage { position: relative; }
+  .panel { background: rgba(3, 22, 38, 0.92); border: 2px solid #67e1ff; border-radius: 16px; padding: 22px; max-width: 520px; margin: 0 auto; }
+  .panel h2 { color: #aef3ff; font-size: 30px; margin-bottom: 10px; }
+  .panel p { line-height: 1.55; color: #d8eefb; margin: 8px 0; }
+  button { background: #ffcf3d; border: none; color: #17233a; font-size: 19px; font-weight: bold; padding: 12px 26px; border-radius: 999px; cursor: pointer; margin-top: 14px; }
+  button:hover { background: #ffe27a; }
+  .keys { font-size: 13px; color: #9fd8ef; }
+  #touchHint { font-size: 13px; color: #cdeeff; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>❄ GLACIER CRYSTAL SKATER ❄</h1>
+  <p class="sub">Glide with momentum. Thread the crystal gates. Dodge rocks and cracks.</p>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Gates: <span id="gates">0</span> / 12</div>
+    <div>Lives: <span id="lives">❤❤❤</span></div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="760" height="520"></canvas>
+    <div class="screen" id="titleScreen" style="display:flex;">
+      <div class="panel">
+        <h2>Glacier Crystal Skater</h2>
+        <p><strong>How to Play:</strong> Your skater slides downhill with real momentum — steering is smooth, not instant. Pass through the glowing crystal gates to score. Avoid rocks and icy cracks.</p>
+        <p>Missing a gate or hitting an obstacle costs one life. Clear <strong>12 gates</strong> to win!</p>
+        <p class="keys">Controls: ← → Arrow Keys to steer &nbsp;|&nbsp; Mouse move / drag &nbsp;|&nbsp; Touch drag</p>
+        <button id="startBtn">▶ START SKATING</button>
+      </div>
+    </div>
+    <div class="screen" id="endScreen">
+      <div class="panel">
+        <h2 id="endTitle">You Win!</h2>
+        <p id="endText"></p>
+        <p class="keys">Steer with arrows, mouse, or touch. Press Restart to glide again.</p>
+        <button id="restartBtn">↻ RESTART</button>
+      </div>
+    </div>
+  </div>
+  <p id="touchHint">Tip: Hold a gentle turn — sharp, constant steering will send you sliding wide!</p>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var gatesEl = document.getElementById('gates');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var W = canvas.width, H = canvas.height;
+  var state = 'title';
+  var player, gates, obstacles, particles, flakes, keys;
+  var score, gateCount, lives, distance, invuln, audioCtx;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function reset() {
+    player = { x: W / 2, y: H - 90, vx: 0, w: 34, h: 42, tilt: 0 };
+    gates = []; obstacles = []; particles = []; flakes = [];
+    for (var i = 0; i < 70; i++) flakes.push({ x: Math.random() * W, y: Math.random() * H, s: 1 + Math.random() * 2.5, v: 0.5 + Math.random() });
+    score = 0; gateCount = 0; lives = 3; distance = 0; invuln = 0; keys = {};
+    spawnRow(-80); spawnRow(-320);
+    updateHUD('Sliding!');
+  }
+  function updateHUD(s) {
+    scoreEl.textContent = score;
+    gatesEl.textContent = gateCount;
+    livesEl.textContent = '❤'.repeat(Math.max(0, lives)) || '—';
+    if (s) statusEl.textContent = s;
+  }
+  function spawnRow(y) {
+    // One gate per row, placed away from the previous gate so steering matters.
+    var gx = 90 + Math.random() * (W - 180);
+    gates.push({ x: gx, y: y, w: 120, passed: false, missed: false });
+    // 1-2 obstacles, never inside the gate opening.
+    var n = 1 + (Math.random() < 0.5 ? 1 : 0);
+    for (var i = 0; i < n; i++) {
+      var ox = 40 + Math.random() * (W - 80);
+      if (Math.abs(ox - gx) < 105) ox = (ox < gx) ? Math.max(35, gx - 160) : Math.min(W - 35, gx + 160);
+      obstacles.push({ x: ox, y: y + (Math.random() * 60 - 30), r: 16 + Math.random() * 8, crack: Math.random() < 0.45, rot: Math.random() * 3 });
+    }
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 30, color: color });
+  }
+  function loseLife(reason) {
+    if (invuln > 0) return;
+    lives--; invuln = 90; beep(140, 0.35, 'sawtooth', 0.15);
+    burst(player.x, player.y, '#ff5a5a', 22);
+    updateHUD(reason);
+    if (lives <= 0) endGame(false);
+  }
+  function endGame(won) {
+    state = 'over';
+    endTitle.textContent = won ? '🏆 YOU WIN! 🏆' : '💥 GAME OVER 💥';
+    endText.textContent = won
+      ? 'You cleared all 12 crystal gates with a final score of ' + score + '! Brilliant glacier run!'
+      : 'The glacier got the better of you. You cleared ' + gateCount + ' gates and scored ' + score + '. Try again!';
+    endScreen.style.display = 'flex';
+    if (won) { beep(523, 0.2, 'sine', 0.15); setTimeout(function(){ beep(659, 0.2, 'sine', 0.15); }, 180); setTimeout(function(){ beep(784, 0.35, 'sine', 0.15); }, 360); }
+    updateHUD(won ? 'Winner!' : 'Game Over');
+  }
+  function startGame() {
+    initAudio(); reset();
+    titleScreen.style.display = 'none';
+    endScreen.style.display = 'none';
+    state = 'playing';
+    beep(440, 0.15, 'sine', 0.12);
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if ((e.key === 'Enter' || e.key === ' ') && state !== 'playing') startGame();
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+  var pointerX = null;
+  function setPointer(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    pointerX = (cx - r.left) * (W / r.width);
+  }
+  canvas.addEventListener('mousemove', setPointer);
+  canvas.addEventListener('mousedown', function(e) { initAudio(); setPointer(e); });
+  canvas.addEventListener('touchstart', function(e) { initAudio(); setPointer(e); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { setPointer(e); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchend', function() { pointerX = null; });
+
+  function drawBackground() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#c9efff'); g.addColorStop(1, '#ffffff');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#8fb9d8';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(130, 0); ctx.lineTo(70, H); ctx.lineTo(0, H); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W, 0); ctx.lineTo(W - 130, 0); ctx.lineTo(W - 70, H); ctx.lineTo(W, H); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
+    for (var i = 0; i < 8; i++) {
+      var yy = ((i * 90 + distance * 0.35) % (H + 90)) - 45;
+      ctx.beginPath(); ctx.moveTo(150, yy); ctx.lineTo(190, yy + 18); ctx.moveTo(W - 150, yy + 30); ctx.lineTo(W - 190, yy + 48); ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    flakes.forEach(function(f) { ctx.beginPath(); ctx.arc(f.x, f.y, f.s, 0, Math.PI * 2); ctx.fill(); });
+  }
+  function drawSkater() {
+    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.tilt);
+    if (invuln > 0 && Math.floor(invuln / 6) % 2 === 0) ctx.globalAlpha = 0.45;
+    ctx.fillStyle = '#1d4ed8'; ctx.beginPath(); ctx.ellipse(0, 0, 15, 20, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff5a8a'; ctx.beginPath(); ctx.arc(0, -16, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#17233a'; ctx.fillRect(-14, 20, 28, 4);
+    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(-14, 24, 28, 2);
+    ctx.restore();
+  }
+  function loop() {
+    requestAnimationFrame(loop);
+    drawBackground();
+    if (state !== 'playing') {
+      if (state === 'title') { drawSkater(); }
+      flakes.forEach(function(f) { f.y += f.v; if (f.y > H) { f.y = -5; f.x = Math.random() * W; } });
+      return;
+    }
+    var scroll = 4.2 + gateCount * 0.15;
+    distance += scroll;
+    if (keys['ArrowLeft']) player.vx -= 0.55;
+    if (keys['ArrowRight']) player.vx += 0.55;
+    if (pointerX !== null) player.vx += (pointerX - player.x) * 0.012;
+    player.vx *= 0.94; // inertia / glide friction
+    player.x += player.vx;
+    player.tilt = Math.max(-0.35, Math.min(0.35, player.vx * 0.045));
+    if (player.x < 28) { player.x = 28; player.vx = Math.abs(player.vx) * 0.4; }
+    if (player.x > W - 28) { player.x = W - 28; player.vx = -Math.abs(player.vx) * 0.4; }
+    if (invuln > 0) invuln--;
+    if (gates.length === 0 || gates[gates.length - 1].y > -240) spawnRow(gates.length ? gates[gates.length - 1].y - 260 : -260);
+    gates.forEach(function(gt) {
+      gt.y += scroll;
+      ctx.save(); ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 16;
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillRect(gt.x - gt.w / 2, gt.y - 22, 10, 44);
+      ctx.fillRect(gt.x + gt.w / 2 - 10, gt.y - 22, 10, 44);
+      ctx.fillStyle = '#a5f3fc'; ctx.fillRect(gt.x - gt.w / 2, gt.y - 24, gt.w, 6);
+      ctx.restore();
+      ctx.fillStyle = '#0e7490'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('◆ GATE ◆', gt.x, gt.y + 42);
+      if (!gt.passed && !gt.missed && gt.y > player.y - 10 && gt.y < player.y + 30) {
+        if (Math.abs(player.x - gt.x) < gt.w / 2) {
+          gt.passed = true; gateCount++; score += 100 + Math.max(0, 50 - Math.abs(player.vx) * 5 | 0);
+          burst(gt.x, gt.y, '#22d3ee', 18); beep(880, 0.18, 'sine', 0.14); updateHUD('Gate cleared!');
+          if (gateCount >= 12) { endGame(true); return; }
+        }
+      }
+      if (!gt.passed && !gt.missed && gt.y > H + 30) { gt.missed = true; loseLife('Gate missed!'); }
+    });
+    obstacles.forEach(function(o) {
+      o.y += scroll;
+      ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.rot);
+      if (o.crack) {
+        ctx.strokeStyle = '#164e63'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(-20, -8); ctx.lineTo(-4, 2); ctx.lineTo(8, -6); ctx.lineTo(22, 10); ctx.stroke();
+        ctx.fillStyle = 'rgba(14,116,144,0.25)'; ctx.beginPath(); ctx.ellipse(0, 0, 24, 12, 0, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = '#64748b'; ctx.beginPath(); ctx.moveTo(0, -o.r); ctx.lineTo(o.r, o.r * 0.7); ctx.lineTo(-o.r, o.r * 0.7); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.moveTo(0, -o.r); ctx.lineTo(o.r * 0.4, 0); ctx.lineTo(-o.r * 0.4, 0); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+      if (state === 'playing' && invuln === 0) {
+        var dx = player.x - o.x, dy = player.y - o.y;
+        if (Math.sqrt(dx * dx + dy * dy) < o.r + 16) loseLife('Obstacle hit!');
+      }
+    });
+    gates = gates.filter(function(gt) { return gt.y < H + 60; });
+    obstacles = obstacles.filter(function(o) { return o.y < H + 60; });
+    particles.forEach(function(p) { p.x += p.vx; p.y += p.vy; p.life--; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 4, 4); });
+    particles = particles.filter(function(p) { return p.life > 0; });
+    flakes.forEach(function(f) { f.y += f.v + 1; if (f.y > H) { f.y = -5; f.x = Math.random() * W; } });
+    drawSkater();
+  }
+  reset(); loop();
+})();
+</script>
+</body>
+</html>
