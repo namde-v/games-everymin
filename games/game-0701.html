@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bamboo Panda Bounce</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a2f1a; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: Arial, Helvetica, sans-serif; color: #fff; padding: 12px; }
+  h1 { font-size: 26px; margin: 8px 0 4px; text-align: center; color: #b8e986; text-shadow: 2px 2px 0 #0a1a0a; }
+  p.tag { color: #d8f3c8; font-size: 13px; margin-bottom: 8px; text-align: center; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#87ceeb, #c8f0a8); border: 4px solid #4a7c2a; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 6px; font-weight: bold; font-size: 15px; }
+  #hud span { background: #2f5a1e; padding: 6px 10px; border-radius: 20px; border: 2px solid #7ab648; white-space: nowrap; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,30,10,0.82); border-radius: 14px; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffe066; }
+  .overlay h3 { font-size: 22px; color: #b8e986; }
+  .overlay p { font-size: 15px; line-height: 1.55; max-width: 360px; color: #eaf7dd; }
+  .overlay .big { font-size: 52px; line-height: 1; }
+  button { cursor: pointer; font-size: 19px; font-weight: bold; padding: 13px 28px; border-radius: 30px; border: 3px solid #fff; background: #ffb703; color: #3a2200; box-shadow: 0 5px 0 #b87a00; }
+  button:active { transform: translateY(3px); box-shadow: 0 2px 0 #b87a00; }
+  button.secondary { background: #7ab648; color: #fff; box-shadow: 0 5px 0 #3d6b1e; }
+  .keys { font-size: 13px; color: #ffe9a8; background: rgba(255,255,255,0.12); padding: 10px; border-radius: 10px; }
+  #msg { min-height: 20px; font-size: 14px; color: #ffe066; text-align: center; margin-top: 6px; font-weight: bold; }
+  @media (max-width: 520px) { h1 { font-size: 22px; } #hud { font-size: 13px; } }
+</style>
+</head>
+<body>
+<h1>&#127183; Bamboo Panda Bounce</h1>
+<p class="tag">Bounce ever higher through the bamboo forest! Game #0701</p>
+<div id="wrap">
+  <div id="hud">
+    <span id="hudScore">Score: 0</span>
+    <span id="hudHeight">Height: 0m</span>
+    <span id="hudBamboo">Bamboo: 0</span>
+    <span id="hudLives">Lives: &#10084;&#10084;&#10084;</span>
+  </div>
+  <canvas id="game" width="480" height="640"></canvas>
+  <div id="titleScreen" class="overlay">
+    <div class="big">&#128060;</div>
+    <h2>Bamboo Panda Bounce</h2>
+    <p><strong>How to Play:</strong> Your panda bounces automatically! Steer left and right to land on bamboo trampolines, grab bamboo shoots for bonus points, and climb as high as you can. Miss a platform and fall off the bottom and you lose a life. Reach <strong>2500m</strong> to win!</p>
+    <div class="keys">Move: &larr; &rarr; or A / D &nbsp;|&nbsp; Mouse: move to steer &nbsp;|&nbsp; Touch: drag to steer<br>Green platforms = safe &nbsp;|&nbsp; Gold platforms = super bounce &nbsp;|&nbsp; Red platforms = break after one bounce</div>
+    <button id="startBtn" type="button">▶ Start Game</button>
+    <p>Tip: Gold trampolines launch you much higher. Chain bamboo pickups for combo points!</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <div class="big" id="endEmoji">&#127881;</div>
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText">Amazing climbing!</p>
+    <p id="endStats"></p>
+    <button id="restartBtn" type="button">↻ Play Again</button>
+    <button id="menuBtn" class="secondary" type="button">Back to Title</button>
+  </div>
+</div>
+<div id="msg">Press Start, then steer with arrows, mouse, or touch.</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+  var menuBtn = document.getElementById('menuBtn');
+  var msg = document.getElementById('msg');
+  var hudScore = document.getElementById('hudScore');
+  var hudHeight = document.getElementById('hudHeight');
+  var hudBamboo = document.getElementById('hudBamboo');
+  var hudLives = document.getElementById('hudLives');
+
+  var state = 'title'; // title, playing, won, over
+  var score = 0, bambooCount = 0, lives = 3, maxHeight = 0, combo = 0, comboTimer = 0;
+  var cameraY = 0;
+  var keys = {};
+  var pointerX = null;
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    var ac = audio();
+    if (!ac) return;
+    try {
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+      o.connect(g); g.connect(ac.destination);
+      o.start(); o.stop(ac.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundBounce() { beep(320 + Math.random() * 80, 0.12, 'triangle', 0.14); }
+  function soundSuper() { beep(520, 0.1, 'square', 0.1); setTimeout(function(){ beep(780, 0.16, 'square', 0.1); }, 70); }
+  function soundBamboo() { beep(880, 0.09, 'sine', 0.14); setTimeout(function(){ beep(1170, 0.14, 'sine', 0.12); }, 70); }
+  function soundLose() { beep(220, 0.3, 'sawtooth', 0.12); }
+  function soundWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'triangle', 0.14); }, i * 130); }); }
+
+  var panda = { x: W / 2, y: H - 120, w: 52, h: 54, vx: 0, vy: 0 };
+  var platforms = [];
+  var pickups = [];
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function makePlatform(y, forced) {
+    var type = forced || 'normal';
+    if (!forced) {
+      var r = Math.random();
+      if (r < 0.14) type = 'super';
+      else if (r < 0.30) type = 'break';
+      else if (r < 0.45) type = 'move';
+      else type = 'normal';
+    }
+    return { x: rand(10, W - 110), y: y, w: type === 'super' ? 110 : 96, h: 16, type: type, dir: Math.random() < 0.5 ? -1 : 1, speed: rand(0.6, 1.4), broken: false, bob: rand(0, 6.28) };
+  }
+  function resetWorld() {
+    score = 0; bambooCount = 0; lives = 3; maxHeight = 0; combo = 0; comboTimer = 0; cameraY = 0;
+    panda.x = W / 2; panda.y = H - 120; panda.vx = 0; panda.vy = -2;
+    platforms = [];
+    pickups = [];
+    var y = H - 60;
+    platforms.push({ x: W / 2 - 48, y: y, w: 110, h: 16, type: 'normal', dir: 1, speed: 0, broken: false, bob: 0 });
+    y -= 78;
+    while (y > -4000) {
+      platforms.push(makePlatform(y));
+      if (Math.random() < 0.55) pickups.push({ x: rand(30, W - 40), y: y - 42, taken: false, bob: rand(0, 6.28) });
+      y -= rand(62, 92);
+    }
+    updateHUD();
+  }
+  function updateHUD() {
+    hudScore.textContent = 'Score: ' + score;
+    hudHeight.textContent = 'Height: ' + Math.floor(maxHeight) + 'm / 2500m';
+    hudBamboo.textContent = 'Bamboo: ' + bambooCount;
+    var hearts = '';
+    for (var i = 0; i < 3; i++) hearts += (i < lives) ? '\u2764' : '\u2661';
+    hudLives.textContent = 'Lives: ' + hearts;
+  }
+  function loseLife() {
+    lives--; soundLose(); updateHUD();
+    if (lives <= 0) { endGame(false); return; }
+    msg.textContent = 'Oops! You fell. ' + lives + ' lives left — keep bouncing!';
+    panda.y = cameraY + H - 140; panda.vy = -13; panda.x = W / 2;
+    // ensure a platform below the respawn point
+    platforms.push({ x: W / 2 - 48, y: panda.y + 70, w: 110, h: 16, type: 'normal', dir: 1, speed: 0, broken: false, bob: 0 });
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    if (won) soundWin(); else soundLose();
+    document.getElementById('endEmoji').textContent = won ? '\u{1F389}' : '\u{1F43C}';
+    document.getElementById('endTitle').textContent = won ? 'You Win!' : 'Game Over';
+    document.getElementById('endText').textContent = won ? 'The panda reached the top of the bamboo forest!' : 'The panda tumbled out of the forest. Try again!';
+    document.getElementById('endStats').textContent = 'Final Score: ' + score + '  |  Height: ' + Math.floor(maxHeight) + 'm  |  Bamboo: ' + bambooCount;
+    endScreen.classList.remove('hidden');
+    msg.textContent = won ? 'Victory! Press Play Again for another climb.' : 'Game over. Press Play Again to bounce back!';
+  }
+  function startGame() {
+    audio(); // created only after user interaction
+    resetWorld();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    msg.textContent = 'Bounce! Steer with arrows, mouse, or touch. Reach 2500m!';
+    beep(440, 0.12, 'triangle', 0.12);
+  }
+  function showTitle() {
+    state = 'title';
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    resetWorld();
+    msg.textContent = 'Press Start, then steer with arrows, mouse, or touch.';
+  }
+
+  function drawPanda(x, y) {
+    var px = x - panda.w / 2, py = y - panda.h / 2;
+    ctx.save();
+    // ears
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(px + 10, py + 8, 11, 0, Math.PI * 2); ctx.arc(px + 42, py + 8, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px + 10, py + 8, 5, 0, Math.PI * 2); ctx.arc(px + 42, py + 8, 5, 0, Math.PI * 2); ctx.fill();
+    // head/body
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.ellipse(px + 26, py + 22, 26, 22, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.ellipse(px + 26, py + 42, 24, 14, 0, 0, Math.PI * 2); ctx.fill();
+    // eye patches
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.ellipse(px + 16, py + 20, 8, 10, -0.3, 0, Math.PI * 2); ctx.ellipse(px + 36, py + 20, 8, 10, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px + 17, py + 18, 3, 0, Math.PI * 2); ctx.arc(px + 37, py + 18, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(px + 26, py + 28, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(px + 26, py + 32, 6, 0.2, Math.PI - 0.2); ctx.stroke();
+    // bamboo snack in paw
+    ctx.fillStyle = '#3d9b2a'; ctx.fillRect(px + 42, py + 34, 6, 20);
+    ctx.fillStyle = '#7ab648'; ctx.fillRect(px + 40, py + 30, 10, 6);
+    ctx.restore();
+  }
+  function drawPlatform(p) {
+    var sy = p.y - cameraY;
+    if (sy < -40 || sy > H + 40 || p.broken) return;
+    var color = '#5da32e', dark = '#3d7a1a';
+    if (p.type === 'super') { color = '#e6a800'; dark = '#a87a00'; }
+    if (p.type === 'break') { color = '#c0392b'; dark = '#7d241a'; }
+    if (p.type === 'move') { color = '#2e86c1'; dark = '#1a5276'; }
+    ctx.fillStyle = dark; ctx.fillRect(p.x, sy + 4, p.w, p.h);
+    ctx.fillStyle = color; ctx.fillRect(p.x, sy, p.w, p.h);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (var i = 0; i < 3; i++) ctx.fillRect(p.x + 10 + i * 30, sy + 3, 3, p.h - 6);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+    if (p.type === 'super') ctx.fillText('SUPER', p.x + p.w / 2, sy + 12);
+    if (p.type === 'move') ctx.fillText('MOVING', p.x + p.w / 2, sy + 12);
+    if (p.type === 'break') ctx.fillText('FRAGILE', p.x + p.w / 2, sy + 12);
+  }
+  function drawPickup(pk, t) {
+    if (pk.taken) return;
+    var sy = pk.y - cameraY;
+    if (sy < -30 || sy > H + 30) return;
+    var bobY = sy + Math.sin(t / 300 + pk.bob) * 4;
+    ctx.fillStyle = '#2f8f1e'; ctx.fillRect(pk.x, bobY, 7, 30);
+    ctx.fillStyle = '#7ed957'; ctx.fillRect(pk.x - 3, bobY, 13, 7);
+    ctx.fillStyle = '#a8e063';
+    ctx.beginPath(); ctx.ellipse(pk.x + 10, bobY - 4, 10, 5, 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(pk.x - 3, bobY + 6, 9, 4, -0.5, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawBackground() {
+    ctx.fillStyle = '#87ceeb'; ctx.fillRect(0, 0, W, H);
+    // distant bamboo stalks
+    ctx.fillStyle = 'rgba(80,160,60,0.35)';
+    for (var i = 0; i < 9; i++) {
+      var bx = (i * 58 + 12) % W;
+      ctx.fillRect(bx, 0, 12, H);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath(); ctx.arc(70, 70, 26, 0, Math.PI * 2); ctx.arc(100, 62, 30, 0, Math.PI * 2); ctx.arc(130, 72, 24, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2f5a1e'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Goal: 2500m', 12, 22);
+    if (state === 'playing' && combo > 1) {
+      ctx.fillStyle = '#ff6b00'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('COMBO x' + combo, W / 2, 44);
+    }
+  }
+  function update() {
+    if (state !== 'playing') return;
+    // steering
+    var accel = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) accel -= 0.7;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) accel += 0.7;
+    if (pointerX !== null) {
+      var target = pointerX;
+      var diff = target - panda.x;
+      if (Math.abs(diff) > 4) accel += Math.max(-0.9, Math.min(0.9, diff * 0.02));
+    }
+    panda.vx += accel;
+    panda.vx *= 0.92;
+    if (panda.vx > 7) panda.vx = 7; if (panda.vx < -7) panda.vx = -7;
+    panda.x += panda.vx;
+    if (panda.x < panda.w / 2) { panda.x = panda.w / 2; panda.vx = 0; }
+    if (panda.x > W - panda.w / 2) { panda.x = W - panda.w / 2; panda.vx = 0; }
+    panda.vy += 0.45;
+    if (panda.vy > 18) panda.vy = 18;
+    var prevY = panda.y;
+    panda.y += panda.vy;
+    // moving platforms
+    for (var i = 0; i < platforms.length; i++) {
+      var mp = platforms[i];
+      if (mp.type === 'move') { mp.x += mp.dir * mp.speed; if (mp.x < 4) { mp.x = 4; mp.dir = 1; } if (mp.x > W - mp.w - 4) { mp.x = W - mp.w - 4; mp.dir = -1; } }
+    }
+    // bounce on platforms when falling
+    if (panda.vy > 0) {
+      for (var j = 0; j < platforms.length; j++) {
+        var p = platforms[j];
+        if (p.broken) continue;
+        var feet = panda.y + panda.h / 2;
+        var prevFeet = prevY + panda.h / 2;
+        if (feet >= p.y && prevFeet <= p.y + 10 && panda.x + 18 > p.x && panda.x - 18 < p.x + p.w) {
+          if (p.type === 'super') { panda.vy = -21; soundSuper(); score += 25; }
+          else if (p.type === 'break') { panda.vy = -13.5; p.broken = true; soundBounce(); }
+          else { panda.vy = -13.5; soundBounce(); }
+          panda.y = p.y - panda.h / 2;
+          break;
+        }
+      }
+    }
+    // camera follows upward movement only
+    var screenY = panda.y - cameraY;
+    if (screenY < H * 0.38) cameraY = panda.y - H * 0.38;
+    var height = Math.max(0, Math.floor((H - 120 - panda.y) / 10) + Math.floor(-cameraY / 10));
+    if (panda.y < H - 120) height = Math.floor((H - 120 - panda.y) / 10);
+    // simpler: height from distance climbed above start, plus camera offset
+    var climbed = Math.floor(Math.max(0, (H - 120 - panda.y)) / 4) + Math.floor(Math.max(0, -cameraY) / 4);
+    // track best height using camera: top reached
+    var currentHeight = Math.floor(Math.max(maxHeight, climbed));
+    if (climbed > maxHeight) { score += (climbed - maxHeight); maxHeight = climbed; }
+    // pickups
+    for (var k = 0; k < pickups.length; k++) {
+      var pk = pickups[k];
+      if (!pk.taken && Math.abs(panda.x - pk.x) < 34 && Math.abs(panda.y - pk.y) < 40) {
+        pk.taken = true; bambooCount++; combo++; comboTimer = 180;
+        var bonus = 50 + (combo - 1) * 25;
+        score += bonus; soundBamboo();
+        msg.textContent = 'Bamboo! +' + bonus + ' points' + (combo > 1 ? ' (combo x' + combo + ')' : '');
+      }
+    }
+    if (comboTimer > 0) { comboTimer--; if (comboTimer === 0) combo = 0; }
+    // recycle platforms above camera and generate new ones higher up
+    var topY = Infinity;
+    for (var m = 0; m < platforms.length; m++) if (platforms[m].y < topY) topY = platforms[m].y;
+    while (topY > cameraY - 800) {
+      topY -= rand(62, 92);
+      platforms.push(makePlatform(topY));
+      if (Math.random() < 0.55) pickups.push({ x: rand(30, W - 40), y: topY - 42, taken: false, bob: rand(0, 6.28) });
+    }
+    platforms = platforms.filter(function(p){ return p.y - cameraY < H + 120; });
+    pickups = pickups.filter(function(pk){ return pk.y - cameraY < H + 120 && pk.y > cameraY - 600; });
+    // fell off bottom?
+    if (panda.y - cameraY > H + 80) { loseLife(); return; }
+    if (maxHeight >= 2500) { score += 1000; updateHUD(); endGame(true); return; }
+    updateHUD();
+  }
+  function draw(t) {
+    drawBackground();
+    for (var i = 0; i < platforms.length; i++) drawPlatform(platforms[i]);
+    for (var j = 0; j < pickups.length; j++) drawPickup(pickups[j], t);
+    drawPanda(panda.x, panda.y - cameraY);
+  }
+  function loop(t) {
+    update();
+    draw(t || 0);
+    requestAnimationFrame(loop);
+  }
+  // Controls: keyboard, mouse, touch
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].indexOf(e.key) !== -1) e.preventDefault();
+    if ((e.key === 'Enter' || e.key === ' ') && state === 'title') startGame();
+    if ((e.key === 'Enter' || e.key === ' ') && (state === 'won' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function (e) {
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+  });
+  canvas.addEventListener('mouseleave', function () { pointerX = null; });
+  canvas.addEventListener('mousedown', function (e) {
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+    if (state === 'title') startGame();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    pointerX = (t.clientX - r.left) * (W / r.width);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    pointerX = (t.clientX - r.left) * (W / r.width);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointerX = null; });
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+  menuBtn.addEventListener('click', showTitle);
+  resetWorld();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

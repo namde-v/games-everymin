@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Paper Plane Wind Tunnel</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e33; font-family: Arial, Helvetica, sans-serif; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 12px; }
+  #wrap { width: 100%; max-width: 920px; }
+  h1 { text-align: center; font-size: 26px; margin-bottom: 8px; letter-spacing: 1px; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: #132f52; border: 2px solid #3b6ea5; border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; font-weight: bold; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  #stage { position: relative; width: 100%; background: linear-gradient(#7ec8f7, #cfeeff 55%, #a8e6a1); border: 3px solid #3b6ea5; border-radius: 12px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(6, 20, 40, 0.82); padding: 20px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; }
+  .overlay ul { text-align: left; max-width: 560px; line-height: 1.6; font-size: 14px; margin-left: 18px; }
+  button { background: #ffcc33; color: #12233a; border: none; border-radius: 10px; padding: 13px 28px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #e8f1ff; }
+  #windNote { text-align: center; margin-top: 8px; font-size: 14px; color: #cfe6ff; }
+  #msg { text-align: center; min-height: 20px; margin-top: 6px; font-weight: bold; color: #ffdd55; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9992; Paper Plane Wind Tunnel</h1>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Planes: <span id="lives">&#9992;&#9992;&#9992;</span></span>
+    <span>Rings: <span id="rings">0 / 20</span></span>
+    <span>Wind: <span id="wind">Calm</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="900" height="540"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Paper Plane Wind Tunnel</h2>
+      <p><strong>How to Play:</strong> Launch your paper plane and fly it through 20 floating rings. Wind gusts will push you up and down — steer gently and stay off the ground and ceiling.</p>
+      <ul>
+        <li><strong>Keyboard:</strong> Arrow Up / W / Space = climb, Arrow Down / S = dive. Hold to steer smoothly.</li>
+        <li><strong>Mouse:</strong> Hold and drag up or down — the plane follows your pointer.</li>
+        <li><strong>Touch:</strong> Drag your finger up or down on the screen to steer.</li>
+        <li>Fly through a ring centre for +100 points. Hitting a storm cloud, the ground, or the ceiling costs one plane.</li>
+        <li>Collect all 20 rings to win. You have 3 planes — good luck, pilot!</li>
+      </ul>
+      <button id="startBtn" type="button">Start Flight</button>
+      <p>Tip: small corrections beat big swoops. Watch the wind arrow.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <p id="endScore"></p>
+      <button id="restartBtn" type="button">Restart</button>
+      <button id="menuBtn" type="button" class="secondary">How to Play</button>
+    </div>
+  </div>
+  <div id="windNote">Wind gusts change every few seconds. A strong gust can help you reach a high ring — or push you into trouble.</div>
+  <div id="msg"></div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var ringsEl = document.getElementById('rings');
+  var windEl = document.getElementById('wind');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var W = 900, H = 540;
+  var state = 'title'; // title, playing, win, over
+  var plane = { x: 210, y: 270, vy: 0, angle: 0 };
+  var score = 0, lives = 3, collected = 0, spawned = 0, missed = 0;
+  var rings = [], clouds = [], trail = [], bgClouds = [];
+  var keys = {};
+  var pointerActive = false, pointerY = 270;
+  var wind = 0, windTimer = 0, windLabel = 'Calm';
+  var ringTimer = 0, cloudTimer = 0, invuln = 0, elapsed = 0, lastTime = 0;
+  var audioCtx = null;
+
+  function initAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function chime() { beep(660, 0.12, 'sine', 0.14); setTimeout(function () { beep(990, 0.16, 'sine', 0.12); }, 70); }
+  function thud() { beep(140, 0.25, 'sawtooth', 0.14); }
+
+  function resetGame() {
+    score = 0; lives = 3; collected = 0; spawned = 0; missed = 0;
+    plane.y = 270; plane.vy = 0; plane.angle = 0;
+    rings = []; clouds = []; trail = []; invuln = 0; elapsed = 0;
+    wind = 0; windTimer = 0; windLabel = 'Calm';
+    ringTimer = 0.6; cloudTimer = 3.5;
+    bgClouds = [];
+    for (var i = 0; i < 6; i++) bgClouds.push({ x: Math.random() * W, y: 30 + Math.random() * 180, s: 0.6 + Math.random() * 0.9 });
+    updateHud('Flying');
+    msgEl.textContent = '';
+  }
+  function updateHud(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives > 0 ? '\u2708'.repeat(lives) : 'None';
+    ringsEl.textContent = collected + ' / 20';
+    windEl.textContent = windLabel;
+    if (status) statusEl.textContent = status;
+  }
+  function spawnRing() {
+    var y = 90 + Math.random() * (H - 180);
+    rings.push({ x: W + 60, y: y, r: 56, done: false, passed: false });
+    spawned++;
+  }
+  function spawnCloud() {
+    var y = 80 + Math.random() * (H - 160);
+    clouds.push({ x: W + 70, y: y, w: 86, h: 52 });
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHud('Flying');
+    beep(440, 0.15, 'sine', 0.14);
+  }
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? 'You Win! \u2708' : 'Game Over';
+    endText.textContent = won ? 'You flew through all 20 rings and mastered the wind tunnel!' : 'Out of planes. The wind tunnel wins this time — try again!';
+    endScore.textContent = 'Final score: ' + score + '  |  Rings: ' + collected + ' / 20  |  Missed: ' + missed;
+    endScreen.classList.remove('hidden');
+    updateHud(won ? 'You Win!' : 'Game Over');
+    if (won) { chime(); setTimeout(chime, 250); } else { thud(); }
+  }
+  function losePlane(reason) {
+    if (invuln > 0 || state !== 'playing') return;
+    lives--; thud(); invuln = 1.8;
+    msgEl.textContent = reason + ' — planes left: ' + lives;
+    plane.y = 270; plane.vy = 0;
+    updateHud('Ouch! ' + reason);
+    if (lives <= 0) { endGame(false); return; }
+    setTimeout(function () { if (state === 'playing') { msgEl.textContent = ''; updateHud('Flying'); } }, 1600);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    state = 'title'; updateHud('Ready');
+  });
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (state === 'playing' && (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) e.preventDefault();
+    if ((e.key === 'Enter' || e.key === ' ') && (state === 'title' || state === 'win' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  function pointerFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return (clientY - rect.top) / rect.height * H;
+  }
+  canvas.addEventListener('mousedown', function (e) { initAudio(); pointerActive = true; pointerY = pointerFromEvent(e); });
+  canvas.addEventListener('mousemove', function (e) { if (pointerActive) pointerY = pointerFromEvent(e); });
+  canvas.addEventListener('mouseup', function () { pointerActive = false; });
+  canvas.addEventListener('mouseleave', function () { pointerActive = false; });
+  canvas.addEventListener('touchstart', function (e) { initAudio(); pointerActive = true; pointerY = pointerFromEvent(e); if (e.cancelable) e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { if (pointerActive) pointerY = pointerFromEvent(e); if (e.cancelable) e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointerActive = false; });
+  canvas.addEventListener('touchcancel', function () { pointerActive = false; });
+
+  function update(dt) {
+    elapsed += dt;
+    if (invuln > 0) invuln -= dt;
+
+    // Wind gusts: change every 2.5-4 seconds.
+    windTimer -= dt;
+    if (windTimer <= 0) {
+      windTimer = 2.5 + Math.random() * 1.5;
+      var roll = Math.random();
+      if (roll < 0.3) { wind = 0; windLabel = 'Calm'; }
+      else if (roll < 0.65) { wind = (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 50); windLabel = wind < 0 ? 'Updraft' : 'Downdraft'; }
+      else { wind = (Math.random() < 0.5 ? -1 : 1) * (90 + Math.random() * 60); windLabel = wind < 0 ? 'Strong Updraft!' : 'Strong Downdraft!'; }
+    }
+
+    // Steering: keyboard thrust + pointer follow.
+    var thrust = 0;
+    if (keys['ArrowUp'] || keys['w'] || keys['W'] || keys[' ']) thrust -= 620;
+    if (keys['ArrowDown'] || keys['s'] || keys['S']) thrust += 620;
+    plane.vy += thrust * dt;
+    if (pointerActive) {
+      var diff = pointerY - plane.y;
+      plane.vy += diff * 6 * dt;
+    }
+    plane.vy += wind * dt;          // wind push
+    plane.vy += 55 * dt;            // gentle gravity
+    plane.vy *= Math.pow(0.35, dt); // damping for smooth gliding
+    if (plane.vy > 420) plane.vy = 420;
+    if (plane.vy < -420) plane.vy = -420;
+    plane.y += plane.vy * dt;
+    plane.angle = Math.max(-0.5, Math.min(0.5, plane.vy / 700));
+
+    // Trail
+    trail.push({ x: plane.x - 20, y: plane.y, life: 0.45 });
+    for (var i = trail.length - 1; i >= 0; i--) { trail[i].life -= dt; trail[i].x -= 60 * dt; if (trail[i].life <= 0) trail.splice(i, 1); }
+
+    // Background clouds drift
+    for (var b = 0; b < bgClouds.length; b++) { bgClouds[b].x -= 18 * dt; if (bgClouds[b].x < -120) { bgClouds[b].x = W + 40; bgClouds[b].y = 30 + Math.random() * 180; } }
+
+    // Rings
+    var speed = 185 + Math.min(70, collected * 3);
+    ringTimer -= dt;
+    if (ringTimer <= 0 && spawned < 60) { spawnRing(); ringTimer = 1.9 + Math.random() * 0.7; }
+    for (var r = rings.length - 1; r >= 0; r--) {
+      var ring = rings[r];
+      ring.x -= speed * dt;
+      if (!ring.done && ring.x < plane.x) {
+        ring.done = true;
+        var dist = Math.abs(plane.y - ring.y);
+        if (dist < ring.r - 6) { collected++; score += 100; chime(); msgEl.textContent = 'Ring! +100'; updateHud('Flying'); if (collected >= 20) { endGame(true); return; } }
+        else { missed++; }
+      }
+      if (ring.x < -90) rings.splice(r, 1);
+    }
+
+    // Storm clouds (obstacles)
+    cloudTimer -= dt;
+    if (cloudTimer <= 0) { spawnCloud(); cloudTimer = 3.8 + Math.random() * 1.6; }
+    for (var c = clouds.length - 1; c >= 0; c--) {
+      var cl = clouds[c];
+      cl.x -= speed * dt;
+      if (invuln <= 0 && Math.abs(cl.x - plane.x) < 52 && Math.abs(cl.y - plane.y) < 42) { clouds.splice(c, 1); losePlane('Storm cloud hit'); continue; }
+      if (cl.x < -110) clouds.splice(c, 1);
+    }
+
+    // Ceiling / ground crash
+    if (plane.y < 16) { plane.y = 16; losePlane('Ceiling crash'); }
+    if (plane.y > H - 16) { plane.y = H - 16; losePlane('Ground crash'); }
+    updateHud();
+  }
+
+  function drawCloud(x, y, s, dark) {
+    ctx.fillStyle = dark ? '#5a6b82' : 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.arc(x, y, 26 * s, 0, Math.PI * 2);
+    ctx.arc(x + 26 * s, y - 10 * s, 30 * s, 0, Math.PI * 2);
+    ctx.arc(x + 54 * s, y, 26 * s, 0, Math.PI * 2);
+    ctx.fill();
+    if (dark) { ctx.fillStyle = '#ffd94d'; ctx.font = 'bold 22px Arial'; ctx.fillText('\u26A1', x + 18 * s, y + 24 * s); }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#7ec8f7'); grad.addColorStop(0.55, '#cfeeff'); grad.addColorStop(1, '#a8e6a1');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    for (var b = 0; b < bgClouds.length; b++) drawCloud(bgClouds[b].x, bgClouds[b].y, bgClouds[b].s, false);
+    // Wind streaks
+    ctx.strokeStyle = wind !== 0 ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 2;
+    for (var s = 0; s < 8; s++) {
+      var wy = 40 + s * 62, wx = (elapsed * (60 + Math.abs(wind)) + s * 130) % (W + 100) - 50;
+      ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(wx + 42, wy + (wind > 0 ? 10 : wind < 0 ? -10 : 0)); ctx.stroke();
+    }
+    // Ground and ceiling guides
+    ctx.fillStyle = '#6b9e4f'; ctx.fillRect(0, H - 10, W, 10);
+    ctx.fillStyle = '#3b6ea5'; ctx.fillRect(0, 0, W, 6);
+    // Trail
+    for (var t = 0; t < trail.length; t++) { ctx.globalAlpha = Math.max(0, trail[t].life); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(trail[t].x, trail[t].y, 5, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    // Rings
+    for (var r = 0; r < rings.length; r++) {
+      var ring = rings[r];
+      ctx.strokeStyle = ring.done ? '#9be36b' : '#ffcc33';
+      ctx.lineWidth = 10; ctx.beginPath(); ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(ring.x, ring.y, ring.r - 7, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#12233a'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(ring.done ? 'OK' : '', ring.x, ring.y + 5);
+    }
+    // Storm clouds
+    for (var c = 0; c < clouds.length; c++) drawCloud(clouds[c].x, clouds[c].y, 1.1, true);
+    // Paper plane (blinking while invulnerable)
+    if (!(invuln > 0 && Math.floor(elapsed * 10) % 2 === 0)) {
+      ctx.save(); ctx.translate(plane.x, plane.y); ctx.rotate(plane.angle);
+      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#3b6ea5'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(28, 0); ctx.lineTo(-20, -14); ctx.lineTo(-8, 0); ctx.lineTo(-20, 14); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ff5a5a'; ctx.beginPath(); ctx.moveTo(28, 0); ctx.lineTo(-8, 0); ctx.lineTo(-20, 14); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    // Wind arrow indicator
+    ctx.fillStyle = '#12233a'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'left';
+    var arrow = wind < 0 ? '\u2191 ' : wind > 0 ? '\u2193 ' : '\u2194 ';
+    ctx.fillText(arrow + windLabel, 14, 34);
+    if (state === 'title') { ctx.fillStyle = 'rgba(6,20,40,0.15)'; ctx.fillRect(0, 0, W, H); }
+  }
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.033, (ts - lastTime) / 1000);
+    lastTime = ts;
+    if (state === 'playing') update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
