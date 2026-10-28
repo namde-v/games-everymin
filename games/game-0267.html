@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glyph Quest</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d0b1a;
+    color: #e8ddc0;
+    font-family: Georgia, 'Times New Roman', serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px;
+    -webkit-user-select: none; user-select: none;
+    touch-action: manipulation;
+  }
+  h1 { color: #f5c542; letter-spacing: 4px; margin: 6px 0 2px; font-size: 30px; text-shadow: 0 0 14px #7a5a00; }
+  .sub { color: #a89f7d; font-size: 13px; margin-bottom: 10px; }
+  #hud {
+    display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+    background: #1c1836; border: 1px solid #4a3f7a; border-radius: 10px;
+    padding: 8px 14px; margin-bottom: 10px; font-size: 15px; width: 100%; max-width: 640px;
+  }
+  #hud b { color: #f5c542; }
+  #status { color: #9fe8ff; font-style: italic; }
+  #wrap { position: relative; width: 100%; max-width: 640px; }
+  canvas {
+    display: block; width: 100%; height: auto; background: #14102a;
+    border: 2px solid #4a3f7a; border-radius: 12px;
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(10, 8, 24, 0.88); border-radius: 12px; padding: 20px; gap: 10px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #f5c542; font-size: 26px; letter-spacing: 2px; }
+  .overlay p { max-width: 440px; font-size: 15px; line-height: 1.55; color: #d8cfae; }
+  .overlay .rune-row { font-size: 34px; letter-spacing: 10px; color: #9fe8ff; }
+  button {
+    background: #f5c542; color: #1a1400; border: none; border-radius: 8px;
+    font-size: 18px; font-weight: bold; padding: 12px 30px; cursor: pointer; margin-top: 6px;
+  }
+  button:hover { background: #ffd95e; }
+  button.secondary { background: #3a3260; color: #e8ddc0; font-size: 14px; padding: 8px 16px; }
+  #controls { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  .hint { font-size: 12px; color: #8f86a8; margin-top: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>&#9670; GLYPH QUEST &#9670;</h1>
+<p class="sub">Decode the ancient runes before the sands run out</p>
+
+<div id="hud">
+  <span>Level: <b id="hudLevel">1</b>/5</span>
+  <span>Score: <b id="hudScore">0</b></span>
+  <span>Lives: <b id="hudLives">&#10084;&#10084;&#10084;</b></span>
+  <span>Time: <b id="hudTime">--</b></span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="640" height="420"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>GLYPH QUEST</h2>
+    <div class="rune-row">&#5792;&#5794;&#5798;&#5800;&#5802;&#5806;</div>
+    <p><b>How to Play:</b> An ancient stone tablet flashes a secret sequence of
+    runes. Memorize it! Then rebuild the exact sequence by tapping runes from
+    the palette below the tablet, before the timer runs out.</p>
+    <p>Each level the sequence grows longer. Finish Level 5 to break the seal
+    and win. A wrong sequence or an empty timer costs a life. You have 3 lives.
+    Use a <b>Clue</b> to reveal the next rune (2 per level, costs 25 points).</p>
+    <p>Keyboard: press <b>1-8</b> to pick a palette rune, <b>Backspace</b> to undo,
+    <b>C</b> for a clue. Mouse and touch work too.</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="clueBtn" class="secondary">Clue (2 left)</button>
+  <button id="undoBtn" class="secondary">Undo</button>
+  <button id="clearBtn" class="secondary">Clear</button>
+</div>
+<p class="hint">Tip: watch the tablet closely &mdash; the runes vanish fast on higher levels. Sound starts only after you press Start.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var RUNES = ['\u16A0', '\u16A2', '\u16A6', '\u16A8', '\u16B1', '\u16B2', '\u16B7', '\u16B9'];
+  var RUNE_NAMES = ['Fehu', 'Uruz', 'Thurisaz', 'Ansuz', 'Raido', 'Kaunan', 'Gebo', 'Hagalaz'];
+  var LEVEL_LENGTH = [0, 3, 4, 5, 6, 7];
+  var LEVEL_TIME = [0, 30, 28, 26, 24, 22];
+
+  var state = 'title'; // title | show | input | levelDone | win | over
+  var level = 1, score = 0, lives = 3, cluesLeft = 2;
+  var sequence = [], answer = [];
+  var showIndex = 0, showTimer = 0, inputTime = 0, lastTime = 0, flash = 0, flashText = '';
+  var message = 'Press Start to begin your quest.';
+  var audioCtx = null, muted = false;
+
+  var hudLevel = document.getElementById('hudLevel');
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudTime = document.getElementById('hudTime');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var clueBtn = document.getElementById('clueBtn');
+
+  function beep(freq, dur, type) {
+    if (!audioCtx || muted) return;
+    try {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function playRuneSound(i) { beep(220 + i * 55, 0.18, 'triangle'); }
+  function playGood() { beep(660, 0.12, 'sine'); setTimeout(function () { beep(880, 0.2, 'sine'); }, 110); }
+  function playBad() { beep(140, 0.3, 'sawtooth'); }
+  function playWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.3, 'triangle'); }, i * 150); }); }
+
+  function randomSequence(len) {
+    var seq = [];
+    for (var i = 0; i < len; i++) seq.push(Math.floor(Math.random() * RUNES.length));
+    return seq;
+  }
+
+  function startLevel() {
+    sequence = randomSequence(LEVEL_LENGTH[level]);
+    answer = [];
+    cluesLeft = 2;
+    inputTime = LEVEL_TIME[level];
+    showIndex = 0; showTimer = 0;
+    state = 'show';
+    message = 'Memorize the runes...';
+    statusEl.textContent = 'Memorizing';
+    updateClueBtn();
+    beep(440, 0.15, 'sine');
+  }
+
+  function startGame() {
+    initAudio();
+    level = 1; score = 0; lives = 3;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'show';
+    startLevel();
+    playGood();
+  }
+
+  function loseLife(reason) {
+    lives--;
+    playBad();
+    message = reason;
+    if (lives <= 0) { endGame(false); return; }
+    statusEl.textContent = 'Life lost!';
+    setTimeout(function () { if (state === 'input' || state === 'show') startLevel(); }, 1400);
+  }
+
+  function checkAnswer() {
+    var correct = true;
+    for (var i = 0; i < sequence.length; i++) {
+      if (answer[i] !== sequence[i]) { correct = false; break; }
+    }
+    if (correct) {
+      var bonus = Math.round(inputTime) * 10;
+      score += 100 + bonus;
+      playGood();
+      if (level >= 5) { endGame(true); return; }
+      message = 'Seal cracked! +' + (100 + bonus) + ' points. Next level...';
+      statusEl.textContent = 'Level cleared!';
+      state = 'levelDone';
+      setTimeout(function () { level++; startLevel(); }, 1600);
+    } else {
+      loseLife('Wrong sequence! The runes fade... a life is lost.');
+    }
+  }
+
+  function pickRune(i) {
+    if (state !== 'input') return;
+    if (answer.length >= sequence.length) return;
+    answer.push(i);
+    playRuneSound(i);
+    if (answer.length === sequence.length) {
+      setTimeout(checkAnswer, 350);
+    }
+  }
+
+  function useClue() {
+    if (state !== 'input' || cluesLeft <= 0) return;
+    if (answer.length >= sequence.length) return;
+    cluesLeft--;
+    score = Math.max(0, score - 25);
+    answer.push(sequence[answer.length]);
+    playRuneSound(answer[answer.length - 1]);
+    message = 'The spirits whisper a rune... (-25 pts)';
+    updateClueBtn();
+    if (answer.length === sequence.length) setTimeout(checkAnswer, 350);
+  }
+
+  function updateClueBtn() { clueBtn.textContent = 'Clue (' + cluesLeft + ' left)'; }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? 'THE SEAL IS BROKEN!' : 'THE RUNES CLAIM YOU...';
+    endText.textContent = won
+      ? 'You decoded all five seals and unlocked the ancient vault! Final score: ' + score + '.'
+      : 'Out of lives on level ' + level + '. Final score: ' + score + '. Try again, rune-reader!';
+    endScreen.classList.remove('hidden');
+    statusEl.textContent = won ? 'Victory!' : 'Game Over';
+    if (won) playWin(); else playBad();
+  }
+
+  function updateHud() {
+    hudLevel.textContent = level;
+    hudScore.textContent = score;
+    hudLives.textContent = '\u2764'.repeat(Math.max(0, lives));
+    hudTime.textContent = (state === 'input') ? Math.ceil(inputTime) + 's' : '--';
+  }
+
+  // ---------- Rendering ----------
+  function drawStone(x, y, w, h, label) {
+    ctx.fillStyle = '#241f3d';
+    ctx.strokeStyle = '#6a5aa8';
+    ctx.lineWidth = 3;
+    roundRect(x, y, w, h, 14);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#a89f7d';
+    ctx.font = '13px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, x + w / 2, y + 20);
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function drawRune(cx, cy, rune, size, color) {
+    ctx.fillStyle = color;
+    ctx.font = size + 'px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(rune, cx, cy);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Tablet (sequence display)
+    drawStone(40, 20, 560, 150, 'ANCIENT TABLET');
+    if (state === 'show') {
+      var shown = Math.min(showIndex + 1, sequence.length);
+      for (var i = 0; i < shown; i++) {
+        drawRune(110 + i * 72, 105, RUNES[sequence[i]], 52, i === showIndex ? '#f5c542' : '#9fe8ff');
+      }
+    } else if (state === 'input' || state === 'levelDone') {
+      ctx.fillStyle = '#6a5aa8';
+      ctx.font = '16px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('Rebuild the sequence from the palette below', 320, 105);
+      for (var j = 0; j < answer.length; j++) {
+        drawRune(110 + j * 72, 140, RUNES[answer[j]], 30, '#f5c542');
+      }
+      for (var k = answer.length; k < sequence.length; k++) {
+        ctx.strokeStyle = '#4a3f7a'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(110 + k * 72, 140, 18, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#4a3f7a'; ctx.font = '16px Georgia';
+        ctx.fillText('?', 110 + k * 72, 140);
+      }
+    } else {
+      ctx.fillStyle = '#6a5aa8'; ctx.font = '20px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('The tablet sleeps...', 320, 105);
+    }
+    // Palette
+    drawStone(40, 190, 560, 110, 'RUNE PALETTE  (tap, click, or press 1-8)');
+    for (var p = 0; p < RUNES.length; p++) {
+      var px = 75 + p * 70, py = 255;
+      ctx.fillStyle = '#2c2650';
+      ctx.beginPath(); ctx.arc(px, py, 28, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#f5c542'; ctx.lineWidth = 1.5; ctx.stroke();
+      drawRune(px, py, RUNES[p], 30, '#e8ddc0');
+      ctx.fillStyle = '#8f86a8'; ctx.font = '11px Georgia';
+      ctx.fillText((p + 1) + '', px, py + 44);
+    }
+    // Message bar
+    ctx.fillStyle = '#1c1836';
+    roundRect(40, 315, 560, 80, 10); ctx.fill();
+    ctx.strokeStyle = '#4a3f7a'; ctx.stroke();
+    ctx.fillStyle = '#e8ddc0'; ctx.font = '17px Georgia'; ctx.textAlign = 'center';
+    wrapText(message, 320, 345, 520, 22);
+    if (state === 'input') {
+      ctx.fillStyle = inputTime < 8 ? '#ff6b6b' : '#f5c542';
+      var w = Math.max(0, (inputTime / LEVEL_TIME[level]) * 520);
+      ctx.fillRect(60, 382, w, 8);
+    }
+    updateHud();
+  }
+
+  function wrapText(text, cx, y, maxW, lh) {
+    var words = text.split(' ');
+    var line = '', lines = [];
+    for (var i = 0; i < words.length; i++) {
+      var test = line ? line + ' ' + words[i] : words[i];
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = words[i]; }
+      else line = test;
+    }
+    lines.push(line);
+    for (var j = 0; j < lines.length; j++) ctx.fillText(lines[j], cx, y + j * lh);
+  }
+
+  function loop(now) {
+    var dt = lastTime ? (now - lastTime) / 1000 : 0;
+    lastTime = now;
+    if (dt > 0.1) dt = 0.1;
+    if (state === 'show') {
+      showTimer += dt;
+      var perRune = Math.max(0.55, 1.05 - level * 0.07);
+      if (showTimer >= perRune) {
+        showTimer = 0;
+        showIndex++;
+        if (showIndex >= sequence.length) {
+          state = 'input';
+          message = 'Now rebuild the sequence!';
+          statusEl.textContent = 'Your turn';
+          beep(520, 0.15, 'sine');
+        } else {
+          playRuneSound(sequence[showIndex]);
+        }
+      }
+    } else if (state === 'input') {
+      inputTime -= dt;
+      if (inputTime <= 0) {
+        inputTime = 0;
+        loseLife('Time ran out! The runes crumble to dust...');
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Input ----------
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (evt.clientX - rect.left) * (canvas.width / rect.width);
+    var y = (evt.clientY - rect.top) * (canvas.height / rect.height);
+    return { x: x, y: y };
+  }
+  function handleCanvasPoint(evt) {
+    if (state !== 'input') return;
+    var pos = canvasPos(evt);
+    for (var p = 0; p < RUNES.length; p++) {
+      var px = 75 + p * 70, py = 255;
+      var dx = pos.x - px, dy = pos.y - py;
+      if (dx * dx + dy * dy <= 28 * 28) { pickRune(p); return; }
+    }
+  }
+
+  canvas.addEventListener('mousedown', function (e) { handleCanvasPoint(e); });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (e.touches && e.touches[0]) handleCanvasPoint(e.touches[0]);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (state === 'input') {
+      if (e.key >= '1' && e.key <= '8') pickRune(parseInt(e.key, 10) - 1);
+      else if (e.key === 'Backspace') { answer.pop(); }
+      else if (e.key === 'c' || e.key === 'C') useClue();
+    }
+    if ((state === 'win' || state === 'over') && e.key === 'Enter') startGame();
+    if (state === 'title' && e.key === 'Enter') startGame();
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  clueBtn.addEventListener('click', useClue);
+  document.getElementById('undoBtn').addEventListener('click', function () {
+    if (state === 'input') answer.pop();
+  });
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (state === 'input') answer = [];
+  });
+  // Touch support on all buttons
+  var btns = document.querySelectorAll('button');
+  for (var b = 0; b < btns.length; b++) {
+    btns[b].addEventListener('touchstart', function () { /* tap handled by click */ }, { passive: true });
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

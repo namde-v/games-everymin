@@ -68,6 +68,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0259 | Beat Boxer | Rhythm / Beat Boxing | A/Left punch left, D/Right punch right, mouse click pads, touch tap pads | [Play](./../games/game-0259.html) |
 | 0260 | Archery Ace | Precision / Archery | Mouse/touch drag aim and release, Arrow Keys aim/power, Space shoot | [Play](./../games/game-0260.html) |
 
+| 0261 | Tempest Rider | Arcade / Wave Surfing | Arrow Keys / A-D steer, mouse move steer, touch drag | [Play](./../games/game-0261.html) |
+| 0262 | Prism Path | Puzzle / Light Prism Logic | Mouse/touch click tiles to rotate, Arrow Keys move selection, Space rotate, R reset | [Play](./../games/game-0262.html) |
+| 0263 | Pastry Palace | Strategy / Bakery Management | Mouse/touch click customers and buttons, 1/2/3 bake, F/S/E/B buy, R restart | [Play](./../games/game-0263.html) |
+| 0264 | Drum Dash | Rhythm / Drum Timing | D/F/J/K drum lanes, mouse click pads, touch tap pads | [Play](./../games/game-0264.html) |
+| 0265 | Tightrope Tango | Precision / Balance Timing | Arrow Keys / A-D lean, Space step, mouse click buttons, touch tap sides/centre | [Play](./../games/game-0265.html) |
+| 0266 | Glowbug Garden | Arcade / Firefly Catching | Arrow Keys / WASD move jar, mouse move steer, touch drag | [Play](./../games/game-0266.html) |
+| 0267 | Glyph Quest | Puzzle / Rune Decoding | Mouse/touch tap runes, 1-8 select, Backspace undo, C clue | [Play](./../games/game-0267.html) |
+| 0268 | Port Captain | Strategy / Port Logistics | Mouse/touch click ships and docks, Arrow Keys select, Enter/Space assign | [Play](./../games/game-0268.html) |
+| 0269 | Songbird Serenade | Rhythm / Melody Timing | A/S/D/F/G pitches, mouse click pads, touch tap pads | [Play](./../games/game-0269.html) |
+| 0270 | Curling Clash | Precision / Curling Slide | Mouse/touch drag aim and release, Arrow Keys aim/power, Space sweep | [Play](./../games/game-0270.html) |
+
 ## Batch notes
 
 - Batch 021: 10 games, produced in one cycle. Volume 003 opened at game 0201.
@@ -76,4 +87,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 024: 10 games, produced in one cycle.
 - Batch 025: 10 games, produced in one cycle.
 - Batch 026: 10 games, produced in one cycle.
+- Batch 027: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

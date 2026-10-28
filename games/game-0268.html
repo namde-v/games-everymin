@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Port Captain</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b1d2e; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; text-align: center; }
+  h1 { margin: 12px 0 4px; font-size: 28px; letter-spacing: 1px; }
+  p.sub { margin: 0 0 10px; color: #9fd8ff; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 940px; margin: 0 auto 8px; }
+  #hud div { background: #12344d; border: 2px solid #2a6a96; border-radius: 10px; padding: 8px 12px; min-width: 140px; font-weight: bold; }
+  #hud span { color: #ffd166; }
+  #wrap { position: relative; max-width: 940px; margin: 0 auto; }
+  canvas { width: 100%; max-width: 920px; height: auto; background: #1a6fa8; border: 3px solid #ffd166; border-radius: 12px; display: block; margin: 0 auto; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(4, 20, 34, 0.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 36px; margin: 0 0 10px; color: #ffd166; }
+  .overlay p, .overlay li { line-height: 1.55; }
+  .overlay ul { text-align: left; max-width: 620px; }
+  button { background: #ffd166; color: #102a43; border: none; border-radius: 10px; padding: 14px 26px; font-size: 19px; font-weight: bold; cursor: pointer; margin-top: 12px; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #2a9d8f; color: white; }
+  #msg { min-height: 22px; color: #ffd166; font-weight: bold; }
+  .legend { max-width: 920px; margin: 8px auto; color: #cdeeff; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>⚓ Port Captain</h1>
+<p class="sub">Strategy / Port Logistics — Run the harbor, beat the clock, hit the daily revenue goal.</p>
+<div id="hud">
+  <div>Revenue: $<span id="rev">0</span> / $2500</div>
+  <div>Ships Served: <span id="served">0</span></div>
+  <div>Missed: <span id="missed">0</span> / 4</div>
+  <div>Time Left: <span id="time">150</span>s</div>
+  <div>Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="920" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>⚓ PORT CAPTAIN</h2>
+    <p>Ships are arriving with cargo. Dock them, unload them, and send trucks to the right warehouse before deadlines expire.</p>
+    <ul>
+      <li><b>How to Play:</b> Click / tap a waiting ship to select it, then click an empty dock to berth it.</li>
+      <li>Watch the crane unload it. When the bar is full, click the docked ship again to dispatch its truck and earn its fee.</li>
+      <li>Match cargo to its warehouse color: Containers = blue, Oil = red, Grain = yellow, Autos = green.</li>
+      <li>Ships waiting too long leave angry: you lose $150 and gain a Miss. Four misses ends the day.</li>
+      <li>If more than 3 ships are waiting, congestion costs $5 every second. Keep the harbor moving.</li>
+      <li><b>Win:</b> Reach $2500 revenue before the 150-second day ends.</li>
+      <li><b>Keyboard:</b> 1–4 select a waiting ship, A / S / D berth it at Dock 1 / 2 / 3, Space dispatches a finished ship, R restarts, Enter starts.</li>
+      <li><b>Mouse / Touch:</b> Tap ships and docks on the harbor map. Everything is clickable.</li>
+    </ul>
+    <button id="startBtn">▶ Start Shift</button>
+    <p>Sound starts only after you press Start.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Day Complete</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">↻ Restart</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+<p id="msg">Select a ship, then an empty dock.</p>
+<p class="legend">Tip: High-fee ships have shorter deadlines. Prioritize red flashing ships — they are about to leave. Trucks earn the fee only when cargo goes to the matching warehouse, which the game does automatically on dispatch.</p>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+  var revEl = document.getElementById('rev');
+  var servedEl = document.getElementById('served');
+  var missedEl = document.getElementById('missed');
+  var timeEl = document.getElementById('time');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+
+  var GOAL = 2500, DAY = 150, MAX_MISSED = 4;
+  var state = 'title'; // title, playing, win, over
+  var revenue = 0, served = 0, missed = 0, timeLeft = DAY;
+  var ships = [], nextShipId = 1, selectedId = null;
+  var docks = [{id:0, ship:null}, {id:1, ship:null}, {id:2, ship:null}];
+  var trucks = [], particles = [], spawnTimer = 0, elapsed = 0, lastTime = 0, congestionTimer = 0;
+  var audioCtx = null;
+
+  var TYPES = [
+    { name: 'Containers', color: '#3aa7ff', fee: 420, unload: 7 },
+    { name: 'Oil', color: '#e63946', fee: 550, unload: 9 },
+    { name: 'Grain', color: '#ffd166', fee: 320, unload: 6 },
+    { name: 'Autos', color: '#2a9d8f', fee: 480, unload: 8 }
+  ];
+  var WAREHOUSES = [
+    { name: 'Containers', color: '#3aa7ff', x: 60 },
+    { name: 'Oil', color: '#e63946', x: 280 },
+    { name: 'Grain', color: '#ffd166', x: 500 },
+    { name: 'Autos', color: '#2a9d8f', x: 720 }
+  ];
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || state === 'title') return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function setStatus(t) { statusEl.textContent = t; }
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function randomShip() {
+    var t = TYPES[Math.floor(Math.random() * TYPES.length)];
+    var urgent = Math.random() < 0.30;
+    return {
+      id: nextShipId++, type: t.name, color: t.color, fee: urgent ? t.fee + 120 : t.fee,
+      unload: t.unload, progress: 0, wait: urgent ? 22 : 36, maxWait: urgent ? 22 : 36,
+      docked: false, ready: false, urgent: urgent, x: 0, y: 0, w: 0, h: 0
+    };
+  }
+  function reset() {
+    revenue = 0; served = 0; missed = 0; timeLeft = DAY; elapsed = 0;
+    ships = []; docks = [{id:0, ship:null}, {id:1, ship:null}, {id:2, ship:null}];
+    trucks = []; particles = []; selectedId = null; spawnTimer = 1.2; congestionTimer = 0;
+    for (var i = 0; i < 3; i++) ships.push(randomShip());
+    updateHUD(); setStatus('Playing'); setMsg('Select a ship, then an empty dock.');
+  }
+  function startGame() {
+    ensureAudio(); reset(); state = 'playing';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    beep(660, 0.15, 'triangle', 0.15); setTimeout(function(){ beep(880, 0.2, 'triangle', 0.15); }, 120);
+    lastTime = performance.now();
+  }
+  function showEnd(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? '🏆 DAILY GOAL REACHED!' : '⏰ SHIFT OVER — GOAL MISSED';
+    endText.textContent = win
+      ? 'Excellent harbor management! You earned the daily revenue goal with time to spare.'
+      : (missed >= MAX_MISSED ? 'Too many ships left unhappy. The port authority has closed the harbor for today.' : 'The day ended before you reached the revenue goal. Try prioritizing urgent ships next time.');
+    endStats.textContent = 'Revenue: $' + revenue + ' / $' + GOAL + '  •  Ships served: ' + served + '  •  Missed: ' + missed;
+    endScreen.classList.remove('hidden');
+    if (win) { beep(523, 0.2, 'square', 0.12); setTimeout(function(){ beep(659, 0.2, 'square', 0.12); }, 150); setTimeout(function(){ beep(784, 0.3, 'square', 0.12); }, 300); }
+    else { beep(220, 0.4, 'sawtooth', 0.1); }
+  }
+  function updateHUD() {
+    revEl.textContent = revenue; servedEl.textContent = served; missedEl.textContent = missed;
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+  }
+  function findShip(id) { for (var i = 0; i < ships.length; i++) if (ships[i].id === id) return ships[i]; return null; }
+  function selectedShip() { return selectedId ? findShip(selectedId) : null; }
+
+  function berth(ship, dockIndex) {
+    var dock = docks[dockIndex];
+    if (!dock || dock.ship || ship.docked) return false;
+    dock.ship = ship; ship.docked = true; ship.dockIndex = dockIndex;
+    ships = ships.filter(function(s){ return s.id !== ship.id; });
+    selectedId = null; beep(440, 0.12, 'triangle', 0.14); setMsg(ship.type + ' berthed at Dock ' + (dockIndex + 1) + '. Crane unloading…');
+    setStatus('Unloading at Dock ' + (dockIndex + 1)); return true;
+  }
+  function dispatch(dock) {
+    var ship = dock.ship; if (!ship || !ship.ready) return;
+    revenue += ship.fee; served++;
+    var wh = null;
+    for (var i = 0; i < WAREHOUSES.length; i++) if (WAREHOUSES[i].name === ship.type) wh = WAREHOUSES[i];
+    trucks.push({ x: 120 + dock.id * 260, y: 330, tx: (wh ? wh.x + 70 : 200), ty: 470, color: ship.color, label: ship.type });
+    for (var p = 0; p < 12; p++) particles.push({ x: 120 + dock.id * 260, y: 280, vx: (Math.random()-0.5)*120, vy: -Math.random()*80, life: 0.7 });
+    dock.ship = null; beep(880, 0.15, 'sine', 0.15); setTimeout(function(){ beep(1100, 0.15, 'sine', 0.12); }, 100);
+    setMsg('Truck dispatched! +$' + ship.fee + ' for ' + ship.type + '.');
+    setStatus('Truck en route to ' + ship.type);
+    if (revenue >= GOAL) { updateHUD(); showEnd(true); return; }
+    updateHUD();
+  }
+
+  function handlePoint(x, y) {
+    if (state !== 'playing') return;
+    // Waiting ships row
+    for (var i = 0; i < ships.length; i++) {
+      var s = ships[i];
+      if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) {
+        selectedId = s.id; beep(520, 0.08, 'sine', 0.1);
+        setMsg('Selected Ship #' + s.id + ' (' + s.type + ', $' + s.fee + '). Now click an empty dock.');
+        return;
+      }
+    }
+    // Docks
+    for (var d = 0; d < docks.length; d++) {
+      var dx = 90 + d * 280, dy = 225;
+      if (x >= dx && x <= dx + 220 && y >= dy && y <= dy + 110) {
+        var dock = docks[d];
+        if (dock.ship && dock.ship.ready) { dispatch(dock); return; }
+        if (dock.ship && !dock.ship.ready) { setMsg('Still unloading at Dock ' + (d + 1) + ' — wait for the crane.'); return; }
+        var sel = selectedShip();
+        if (sel) { if (!berth(sel, d)) setMsg('That dock is busy.'); }
+        else { setMsg('Select a waiting ship first, then click an empty dock.'); }
+        return;
+      }
+    }
+  }
+  function canvasPoint(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0].clientX)) - r.left;
+    var cy = (e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0].clientY)) - r.top;
+    return { x: cx * (canvas.width / r.width), y: cy * (canvas.height / r.height) };
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function() {
+    state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); setStatus('Ready');
+  });
+  canvas.addEventListener('mousedown', function(e) { var p = canvasPoint(e); handlePoint(p.x, p.y); });
+  canvas.addEventListener('click', function(e) { /* click also supported for accessibility; mousedown handles the action */ });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); var p = canvasPoint(e); handlePoint(p.x, p.y); }, { passive: false });
+  document.addEventListener('keydown', function(e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    if (e.key === 'r' || e.key === 'R') { if (state === 'win' || state === 'over' || state === 'playing') startGame(); return; }
+    if (state !== 'playing') return;
+    if (e.key >= '1' && e.key <= '4') {
+      var idx = parseInt(e.key, 10) - 1;
+      if (ships[idx]) { selectedId = ships[idx].id; setMsg('Selected Ship #' + ships[idx].id + ' (' + ships[idx].type + '). Press A, S or D to berth.'); beep(520, 0.08, 'sine', 0.1); }
+    } else if (e.key === 'a' || e.key === 'A') { var s1 = selectedShip(); if (s1) berth(s1, 0); }
+    else if (e.key === 's' || e.key === 'S') { var s2 = selectedShip(); if (s2) berth(s2, 1); }
+    else if (e.key === 'd' || e.key === 'D') { var s3 = selectedShip(); if (s3) berth(s3, 2); }
+    else if (e.key === ' ') {
+      e.preventDefault();
+      for (var i = 0; i < docks.length; i++) if (docks[i].ship && docks[i].ship.ready) { dispatch(docks[i]); break; }
+    }
+  });
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    timeLeft -= dt; elapsed += dt;
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { ships.push(randomShip()); spawnTimer = 7 + Math.random() * 4; if (ships.length > 6) spawnTimer = 11; }
+    // Waiting ships deadlines
+    for (var i = ships.length - 1; i >= 0; i--) {
+      ships[i].wait -= dt;
+      if (ships[i].wait <= 0) {
+        var lost = ships[i];
+        ships.splice(i, 1); missed++; revenue = Math.max(0, revenue - 150);
+        if (selectedId === lost.id) selectedId = null;
+        beep(180, 0.3, 'sawtooth', 0.1); setMsg('Ship #' + lost.id + ' left unhappy! -$150 and a Miss.');
+        if (missed >= MAX_MISSED) { updateHUD(); showEnd(false); return; }
+      }
+    }
+    // Congestion penalty
+    if (ships.length > 3) {
+      congestionTimer += dt;
+      if (congestionTimer >= 1) { congestionTimer = 0; revenue = Math.max(0, revenue - 5); setStatus('CONGESTED: -$5/sec'); }
+    } else { congestionTimer = 0; }
+    // Dock unloading
+    for (var d = 0; d < docks.length; d++) {
+      var sh = docks[d].ship;
+      if (sh && !sh.ready) {
+        sh.progress += dt / sh.unload;
+        if (sh.progress >= 1) { sh.ready = true; beep(760, 0.12, 'sine', 0.12); setMsg('Dock ' + (d + 1) + ' ready! Click it to dispatch the truck (+$' + sh.fee + ').'); }
+      }
+    }
+    // Trucks and particles
+    for (var t = trucks.length - 1; t >= 0; t--) {
+      var tr = trucks[t];
+      tr.x += (tr.tx - tr.x) * dt * 3; tr.y += (tr.ty - tr.y) * dt * 3;
+      if (Math.abs(tr.x - tr.tx) < 6 && Math.abs(tr.y - tr.ty) < 6) trucks.splice(t, 1);
+    }
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx * dt; particles[p].y += particles[p].vy * dt; particles[p].life -= dt;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    updateHUD();
+    if (timeLeft <= 0) { showEnd(revenue >= GOAL); }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Sea and quay
+    ctx.fillStyle = '#1a6fa8'; ctx.fillRect(0, 0, 920, 560);
+    ctx.fillStyle = '#0f4a73'; ctx.fillRect(0, 150, 920, 60);
+    ctx.fillStyle = '#c9a86a'; ctx.fillRect(0, 210, 920, 150);
+    ctx.fillStyle = '#2f3b45'; ctx.fillRect(0, 360, 920, 200);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('ARRIVING SHIPS — click one, then an empty dock', 20, 30);
+    ctx.fillStyle = '#ffd166'; ctx.fillText('DOCKS & CRANES', 20, 200);
+    ctx.fillStyle = '#ffffff'; ctx.fillText('WAREHOUSES & TRUCK ROAD', 20, 380);
+    // Waiting ships
+    for (var i = 0; i < ships.length; i++) {
+      var s = ships[i]; s.x = 30 + i * 150; s.y = 55; s.w = 135; s.h = 80;
+      var flash = s.wait < 9 && Math.floor(elapsed * 2) % 2 === 0;
+      ctx.fillStyle = flash ? '#ffdddd' : '#12344d';
+      ctx.strokeStyle = (selectedId === s.id) ? '#ffd166' : '#ffffff';
+      ctx.lineWidth = selectedId === s.id ? 4 : 2;
+      ctx.beginPath(); ctx.roundRect(s.x, s.y, s.w, s.h, 10); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = s.color; ctx.fillRect(s.x + 10, s.y + 12, 115, 22);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Ship #' + s.id, s.x + 10, s.y + 52);
+      ctx.fillText(s.type + ' $' + s.fee, s.x + 10, s.y + 70);
+      ctx.fillStyle = '#555'; ctx.fillRect(s.x + 10, s.y + 74, 115, 0); // spacer kept for layout
+      ctx.fillStyle = '#ff6b6b'; ctx.fillRect(s.x + 10, s.y + 58, 0, 0);
+      // Deadline bar
+      ctx.fillStyle = '#222'; ctx.fillRect(s.x + 10, s.y + 60, 115, 0);
+      ctx.fillStyle = '#222'; ctx.fillRect(s.x, s.y + s.h - 8, s.w, 6);
+      ctx.fillStyle = s.wait < 9 ? '#ff4444' : '#2a9d8f';
+      ctx.fillRect(s.x, s.y + s.h - 8, s.w * Math.max(0, s.wait / s.maxWait), 6);
+      if (s.urgent) { ctx.fillStyle = '#ffd166'; ctx.font = 'bold 11px Arial'; ctx.fillText('URGENT', s.x + 82, s.y + 52); }
+    }
+    if (ships.length === 0) { ctx.fillStyle = '#eaf6ff'; ctx.font = '16px Arial'; ctx.fillText('No ships waiting — new arrivals are on the way…', 30, 100); }
+    // Docks
+    for (var d = 0; d < docks.length; d++) {
+      var dx = 90 + d * 280, dy = 225, dock = docks[d];
+      ctx.fillStyle = '#8a6d3b'; ctx.fillRect(dx - 10, dy - 10, 240, 130);
+      ctx.fillStyle = dock.ship ? '#eaf6ff' : '#5b7a8a';
+      ctx.beginPath(); ctx.roundRect(dx, dy, 220, 110, 10); ctx.fill();
+      ctx.fillStyle = '#102a43'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('DOCK ' + (d + 1) + (dock.ship ? '' : ' — EMPTY'), dx + 12, dy + 24);
+      if (dock.ship) {
+        var sh = dock.ship;
+        ctx.fillStyle = sh.color; ctx.fillRect(dx + 12, dy + 34, 196, 26);
+        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Arial';
+        ctx.fillText('Ship #' + sh.id + ' · ' + sh.type, dx + 18, dy + 52);
+        ctx.fillStyle = '#12344d'; ctx.fillRect(dx + 12, dy + 68, 196, 16);
+        ctx.fillStyle = sh.ready ? '#2a9d8f' : '#ffd166';
+        ctx.fillRect(dx + 12, dy + 68, 196 * Math.min(1, sh.progress), 16);
+        ctx.fillStyle = '#102a43'; ctx.font = 'bold 12px Arial';
+        ctx.fillText(sh.ready ? 'READY — CLICK TO DISPATCH +$' + sh.fee : 'Unloading… ' + Math.floor(sh.progress * 100) + '%', dx + 12, dy + 100);
+        // Crane
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(dx + 30, dy - 8); ctx.lineTo(dx + 30, dy + 34); ctx.lineTo(dx + 180, dy + 34); ctx.stroke();
+        ctx.fillStyle = '#ffd166'; ctx.fillRect(dx + 160 + Math.sin(elapsed * 2 + d) * 10, dy + 34, 18, 12);
+      } else {
+        ctx.fillStyle = '#102a43'; ctx.font = '14px Arial'; ctx.fillText('Click here after', dx + 12, dy + 55); ctx.fillText('selecting a ship', dx + 12, dy + 75);
+      }
+    }
+    // Warehouses
+    for (var w = 0; w < WAREHOUSES.length; w++) {
+      var wh = WAREHOUSES[w];
+      ctx.fillStyle = wh.color; ctx.beginPath(); ctx.roundRect(wh.x, 400, 140, 90, 8); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(wh.name, wh.x + 70, 430); ctx.fillText('WAREHOUSE', wh.x + 70, 452);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(wh.x + 20, 465, 100, 14);
+    }
+    // Trucks
+    for (var ti = 0; ti < trucks.length; ti++) {
+      var tr = trucks[ti];
+      ctx.fillStyle = tr.color; ctx.fillRect(tr.x, tr.y, 52, 26);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('TRUCK', tr.x + 26, tr.y + 17);
+    }
+    // Particles
+    for (var pi = 0; pi < particles.length; pi++) {
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(particles[pi].x, particles[pi].y, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    // Goal banner
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 520, 920, 40);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('GOAL: $2500  •  Revenue: $' + revenue + '  •  Served: ' + served + '  •  ' + (state === 'playing' ? Math.ceil(timeLeft) + 's left' : state.toUpperCase()), 460, 545);
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(4,20,34,0.55)'; ctx.fillRect(0, 0, 920, 560);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to begin your shift', 460, 280);
+    }
+  }
+
+  function loop(now) {
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
+    lastTime = now;
+    if (state === 'playing') update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  reset();
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

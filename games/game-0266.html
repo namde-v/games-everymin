@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glowbug Garden</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050914; color: #f5f2c8; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 12px; overflow: hidden; }
+  #wrap { width: min(720px, 96vw); text-align: center; }
+  h1 { color: #ffe66d; font-size: 34px; letter-spacing: 1px; text-shadow: 0 0 18px #ffd700; margin-bottom: 4px; }
+  p.sub { color: #a8d8ff; margin-bottom: 10px; }
+  #hud { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; background: #0b1e3a; border: 2px solid #2c5a8a; border-radius: 10px; padding: 9px 12px; font-weight: bold; margin-bottom: 10px; }
+  #hud span { white-space: nowrap; }
+  #status { color: #ffe66d; }
+  #gameBox { position: relative; width: 100%; aspect-ratio: 4 / 3; background: radial-gradient(circle at 50% 20%, #132a4d 0%, #081426 55%, #030712 100%); border: 3px solid #355f2e; border-radius: 14px; overflow: hidden; touch-action: none; }
+  canvas { width: 100%; height: 100%; display: block; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; padding: 20px; background: rgba(3, 8, 20, 0.82); }
+  .screen.hidden { display: none; }
+  .screen h2 { font-size: 30px; color: #ffe66d; }
+  .screen p { line-height: 1.55; max-width: 520px; }
+  .rules { text-align: left; background: rgba(255,255,255,0.08); border-radius: 10px; padding: 14px 18px; }
+  .rules li { margin: 4px 0; }
+  button { background: #ffd700; color: #1a1200; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #a67c00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #7fd4ff; box-shadow: 0 4px 0 #2a6f96; }
+  .big { font-size: 22px; }
+  .gold { color: #ffe66d; } .red { color: #ff7a7a; } .green { color: #8dff9a; }
+  #hint { margin-top: 8px; color: #c9d6ff; font-size: 13px; }
+  @media (max-width: 500px) { h1 { font-size: 27px; } .screen h2 { font-size: 25px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>✦ Glowbug Garden ✦</h1>
+  <p class="sub">A glowing night-garden catching game</p>
+  <div id="hud">
+    <span>Score: <span id="score">0</span> / 250</span>
+    <span>Time: <span id="time">90</span>s</span>
+    <span>Lives: <span id="lives">♥♥♥</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="gameBox">
+    <canvas id="game" width="720" height="540"></canvas>
+    <div id="titleScreen" class="screen">
+      <h2>Glowbug Garden</h2>
+      <p>Catch the blinking fireflies before the night ends. Dodge the wasps and chase the rare golden ones!</p>
+      <ul class="rules">
+        <li><strong>How to Play:</strong> Move your glowing jar with arrow keys / WASD, mouse, or touch.</li>
+        <li><span class="gold">● Firefly = 10 points</span> &nbsp; <span class="gold">★ Golden firefly = 50 points</span></li>
+        <li><span class="red">● Wasp = lose 1 life</span> &nbsp; Catch 3 wasps and the game ends.</li>
+        <li>Reach <strong>250 points in 90 seconds</strong> to win. Fireflies blink in patterns — catch them while they glow bright!</li>
+      </ul>
+      <button id="startBtn">▶ Start Game</button>
+      <p>Tip: Golden fireflies blink fast and dart away. Corner them near the garden edges!</p>
+    </div>
+    <div id="endScreen" class="screen hidden">
+      <h2 id="endTitle">Game Over</h2>
+      <p id="endText" class="big"></p>
+      <p id="endDetail"></p>
+      <button id="restartBtn">↻ Restart Instantly</button>
+      <button id="menuBtn" class="secondary">Back to Title</button>
+    </div>
+  </div>
+  <p id="hint">Move: Arrow keys / WASD • Mouse • Touch &amp; drag &nbsp;|&nbsp; Press Space to pause</p>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var timeEl = document.getElementById('time');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endDetail = document.getElementById('endDetail');
+
+  var TARGET = 250, TIME_LIMIT = 90, MAX_LIVES = 3;
+  var state = 'title'; // title | playing | paused | won | over
+  var score = 0, lives = MAX_LIVES, timeLeft = TIME_LIMIT, lastTime = 0, elapsed = 0;
+  var jar = { x: W/2, y: H-90, r: 34, vx: 0, vy: 0 };
+  var keys = {};
+  var pointer = { active: false, x: W/2, y: H-90 };
+  var insects = [], particles = [], stars = [], flowers = [];
+  var audioCtx = null, muted = false;
+
+  for (var i = 0; i < 70; i++) stars.push({ x: Math.random()*W, y: Math.random()*H*0.7, r: Math.random()*1.8+0.5, p: Math.random()*6.28 });
+  for (var j = 0; j < 24; j++) flowers.push({ x: Math.random()*W, y: H-70+Math.random()*60, c: ['#ff7ad9','#ff9a7a','#b78cff','#7ad9ff'][j%4] });
+
+  function initAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function sCatch(golden) { beep(golden ? 1320 : 880, 0.18, 'sine', 0.15); setTimeout(function(){ beep(golden ? 1760 : 1174, 0.15, 'sine', 0.12); }, 60); }
+  function sWasp() { beep(180, 0.35, 'sawtooth', 0.12); }
+  function sWin() { [523,659,784,1046].forEach(function(f, k){ setTimeout(function(){ beep(f, 0.28, 'triangle', 0.15); }, k*150); }); }
+  function sLose() { [392,330,262,196].forEach(function(f, k){ setTimeout(function(){ beep(f, 0.3, 'triangle', 0.13); }, k*160); }); }
+
+  function rand(min, max) { return min + Math.random() * (max - min); }
+  function spawnInsect(force) {
+    var roll = Math.random();
+    var kind = roll < 0.13 ? 'golden' : (roll < 0.35 ? 'wasp' : 'firefly');
+    if (force) kind = force;
+    var blink = kind === 'golden' ? 0.28 : (kind === 'wasp' ? 0.5 : rand(0.35, 0.9));
+    insects.push({
+      kind: kind, x: rand(30, W-30), y: rand(40, H-150),
+      vx: rand(-1.1, 1.1) * (kind === 'golden' ? 1.9 : 1),
+      vy: rand(-0.8, 0.8), r: kind === 'golden' ? 13 : 11,
+      phase: Math.random() * 6.28, blink: blink, wobble: Math.random()*6.28, age: 0
+    });
+  }
+  function resetGame() {
+    score = 0; lives = MAX_LIVES; timeLeft = TIME_LIMIT; elapsed = 0;
+    jar.x = W/2; jar.y = H-90; jar.vx = 0; jar.vy = 0;
+    insects = []; particles = [];
+    for (var k = 0; k < 9; k++) spawnInsect();
+    updateHUD('Playing — catch fireflies!');
+  }
+  function updateHUD(msg) {
+    scoreEl.textContent = score;
+    timeEl.textContent = Math.ceil(timeLeft);
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, MAX_LIVES - lives));
+    if (msg) statusEl.textContent = msg;
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: rand(-2.5,2.5), vy: rand(-2.5,2.5), life: 28, color: color });
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing'; lastTime = performance.now();
+    updateHUD('Playing — catch fireflies!');
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '★ You Win! ★' : 'Game Over';
+    endText.textContent = won ? 'The garden glows for you!' : 'The night has ended.';
+    endDetail.textContent = 'Final score: ' + score + ' points • Lives left: ' + lives + ' • Time left: ' + Math.max(0, Math.ceil(timeLeft)) + 's';
+    updateHUD(won ? 'You Win!' : 'Game Over');
+    if (won) sWin(); else sLose();
+    endScreen.classList.remove('hidden');
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function() {
+    state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+    updateHUD('Ready');
+  });
+
+  document.addEventListener('keydown', function(e) {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === ' ') { e.preventDefault(); if (state === 'playing') { state = 'paused'; updateHUD('Paused'); } else if (state === 'paused') { state = 'playing'; updateHUD('Playing'); } }
+    if ((e.key === 'Enter') && (state === 'title' || state === 'won' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key.toLowerCase()] = false; });
+
+  function setPointer(e) {
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+  }
+  canvas.addEventListener('mousemove', function(e) { setPointer(e); pointer.active = true; });
+  canvas.addEventListener('mousedown', function(e) { setPointer(e); pointer.active = true; initAudio(); });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); initAudio(); var t = e.touches[0]; setPointer(t); pointer.active = true; }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); var t = e.touches[0]; setPointer(t); pointer.active = true; }, { passive: false });
+  canvas.addEventListener('touchend', function(e) { pointer.active = false; });
+
+  function update(dt) {
+    elapsed += dt;
+    // Jar movement: keyboard has priority, then pointer follow.
+    var speed = 5.2;
+    if (keys['arrowleft'] || keys['a']) jar.x -= speed;
+    if (keys['arrowright'] || keys['d']) jar.x += speed;
+    if (keys['arrowup'] || keys['w']) jar.y -= speed;
+    if (keys['arrowdown'] || keys['s']) jar.y += speed;
+    if (pointer.active && !keys['arrowleft'] && !keys['arrowright'] && !keys['arrowup'] && !keys['arrowdown'] && !keys['a'] && !keys['d'] && !keys['w'] && !keys['s']) {
+      jar.x += (pointer.x - jar.x) * 0.22;
+      jar.y += (pointer.y - jar.y) * 0.22;
+    }
+    jar.x = Math.max(jar.r, Math.min(W - jar.r, jar.x));
+    jar.y = Math.max(jar.r, Math.min(H - jar.r, jar.y));
+
+    timeLeft -= dt;
+    if (timeLeft <= 0) { timeLeft = 0; updateHUD(); endGame(score >= TARGET); return; }
+
+    // Spawn pressure: keep garden busy, more wasps late.
+    if (insects.length < 10 && Math.random() < 0.03) spawnInsect();
+    if (Math.random() < 0.004) spawnInsect('golden');
+
+    for (var i = insects.length - 1; i >= 0; i--) {
+      var b = insects[i]; b.age += dt; b.wobble += 0.08;
+      b.x += b.vx + Math.sin(b.wobble) * 0.7;
+      b.y += b.vy + Math.cos(b.wobble * 0.8) * 0.5;
+      if (b.x < 15 || b.x > W-15) b.vx *= -1;
+      if (b.y < 15 || b.y > H-40) b.vy *= -1;
+      // Blink pattern: glow pulses; brightness gates nothing, but bright catches feel best.
+      var glow = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(b.age * 4 / b.blink + b.phase));
+      b.glow = glow;
+      var dx = b.x - jar.x, dy = b.y - jar.y;
+      if (Math.sqrt(dx*dx + dy*dy) < jar.r + b.r) {
+        if (b.kind === 'wasp') {
+          lives--; burst(b.x, b.y, '#ff4444', 16); sWasp();
+          updateHUD('Ouch! A wasp stung you!');
+          insects.splice(i, 1);
+          if (lives <= 0) { updateHUD(); endGame(false); return; }
+        } else {
+          var pts = b.kind === 'golden' ? 50 : 10;
+          score += pts; burst(b.x, b.y, b.kind === 'golden' ? '#ffe66d' : '#aaff66', b.kind === 'golden' ? 24 : 12); sCatch(b.kind === 'golden');
+          updateHUD(b.kind === 'golden' ? 'Golden! +50' : 'Caught! +10');
+          insects.splice(i, 1); spawnInsect();
+          if (score >= TARGET) { updateHUD(); endGame(true); return; }
+        }
+      }
+      if (b.age > 22) { insects.splice(i, 1); spawnInsect(); }
+    }
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p]; pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Stars twinkling
+    stars.forEach(function(s) {
+      var a = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(elapsed * 2 + s.p));
+      ctx.globalAlpha = a; ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.29); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Moon
+    ctx.fillStyle = '#fff7c0'; ctx.beginPath(); ctx.arc(620, 70, 34, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#0b1e3a'; ctx.beginPath(); ctx.arc(608, 60, 28, 0, 6.29); ctx.fill();
+    // Grass and flowers
+    ctx.fillStyle = '#0d2b17'; ctx.fillRect(0, H-70, W, 70);
+    flowers.forEach(function(f) {
+      ctx.fillStyle = '#2e7d32'; ctx.fillRect(f.x, f.y, 3, 14);
+      ctx.fillStyle = f.c; ctx.beginPath(); ctx.arc(f.x, f.y, 6, 0, 6.29); ctx.fill();
+    });
+    // Insects
+    insects.forEach(function(b) {
+      var glow = b.glow || 0.8;
+      ctx.save();
+      ctx.globalAlpha = 0.35 + glow * 0.65;
+      ctx.shadowBlur = 22; ctx.shadowColor = b.kind === 'wasp' ? '#ff6644' : (b.kind === 'golden' ? '#ffe66d' : '#aaff66');
+      ctx.fillStyle = b.kind === 'wasp' ? '#ffb347' : (b.kind === 'golden' ? '#ffe66d' : '#ccff66');
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 6.29); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#102010';
+      ctx.beginPath(); ctx.arc(b.x - 3, b.y - 2, 2.5, 0, 6.29); ctx.arc(b.x + 4, b.y - 2, 2.5, 0, 6.29); ctx.fill();
+      if (b.kind === 'wasp') {
+        ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(b.x - 7, b.y - 7); ctx.lineTo(b.x - 13, b.y - 14); ctx.moveTo(b.x + 7, b.y - 7); ctx.lineTo(b.x + 13, b.y - 14); ctx.stroke();
+      }
+      ctx.restore();
+    });
+    // Particles
+    particles.forEach(function(pt) {
+      ctx.globalAlpha = Math.max(0, pt.life / 28); ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, 6.29); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Jar
+    ctx.save();
+    ctx.shadowBlur = 26; ctx.shadowColor = '#ffe66d';
+    ctx.fillStyle = 'rgba(180, 230, 255, 0.32)';
+    ctx.strokeStyle = '#d8f4ff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(jar.x, jar.y, jar.r, 0, 6.29); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#8a5a2b'; ctx.fillRect(jar.x - 16, jar.y - jar.r - 8, 32, 10);
+    ctx.fillStyle = '#ffe66d'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('JAR', jar.x, jar.y + 5);
+    ctx.restore();
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 32px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Paused — press Space', W/2, H/2);
+    }
+  }
+
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = 0;
+    if (lastTime) dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    if (state === 'playing') update(dt);
+    draw();
+  }
+  requestAnimationFrame(loop);
+  updateHUD('Ready');
+})();
+</script>
+</body>
+</html>

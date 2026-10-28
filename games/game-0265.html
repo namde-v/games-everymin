@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tightrope Tango</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { background: #0d1021; font-family: 'Segoe UI', system-ui, sans-serif; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; overflow: hidden; touch-action: none; user-select: none; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #ffd166; text-shadow: 0 0 18px rgba(255,209,102,.5); margin: 10px 0 4px; }
+  #wrap { position: relative; width: min(96vw, 720px); }
+  canvas { display: block; width: 100%; background: linear-gradient(#1b2350, #0d1021);
+    border: 3px solid #ffd166; border-radius: 14px; }
+  #hud { display: flex; justify-content: space-between; gap: 6px; width: min(96vw, 720px);
+    padding: 8px 4px; font-size: 16px; font-weight: bold; }
+  #hud span { background: #1e2547; border-radius: 8px; padding: 5px 10px; white-space: nowrap; }
+  #hud .warn { color: #ff5d5d; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; background: rgba(5,8,20,.86); border-radius: 14px;
+    text-align: center; padding: 20px; }
+  .overlay h2 { font-size: 34px; color: #ffd166; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #dfe3ff; }
+  .overlay .keys { background: #1e2547; border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+  button { font-size: 20px; font-weight: bold; padding: 13px 34px; border: none; border-radius: 12px;
+    background: #ffd166; color: #201503; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  #controls { display: flex; gap: 10px; margin-top: 10px; }
+  #controls button { flex: 1; font-size: 17px; padding: 12px 6px; background: #2a3369; color: #fff;
+    box-shadow: 0 4px 0 #151a38; }
+  #controls button:active { transform: translateY(3px); box-shadow: 0 1px 0 #151a38; }
+  .hidden { display: none !important; }
+  #beatbar { width: min(96vw, 720px); height: 12px; background: #1e2547; border-radius: 8px; margin-top: 6px; overflow: hidden; }
+  #beatfill { height: 100%; width: 0%; background: #ffd166; }
+  #msg { height: 22px; font-weight: bold; color: #ffd166; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>&#127932; TIGHTROPE TANGO &#127932;</h1>
+<div id="hud">
+  <span id="hudDist">Distance: 0 / 60 m</span>
+  <span id="hudLives">&#10084;&#65039; x 3</span>
+  <span id="hudBal">Balance: OK</span>
+  <span id="hudStatus">Ready</span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="720" height="420"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Tightrope Tango</h2>
+    <p>Step onto the high wire and dance your way across a 60-metre canyon! The wind gusts and your balance sways &mdash; correct it in time, step forward on the beat, and reach the far platform without falling.</p>
+    <div class="keys">
+      <b>How to Play:</b><br>
+      &#8592; / &#8594; arrow keys or the LEAN buttons (or tap left / right side) to lean against the sway.<br>
+      Press SPACE, STEP button, or tap the centre to step forward &mdash; best on the beat!<br>
+      Keep the balance meter in the green zone. Falling off costs a life. 3 falls = game over.<br>
+      Reach 60 m to win. Gusts get stronger as you cross!
+    </div>
+    <button id="startBtn">Start</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<div id="beatbar"><div id="beatfill"></div></div>
+<div id="msg"></div>
+<div id="controls">
+  <button id="leftBtn">&#8592; LEAN LEFT</button>
+  <button id="stepBtn">&#11014; STEP</button>
+  <button id="rightBtn">LEAN RIGHT &#8594;</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var hudDist = document.getElementById('hudDist');
+  var hudLives = document.getElementById('hudLives');
+  var hudBal = document.getElementById('hudBal');
+  var hudStatus = document.getElementById('hudStatus');
+  var beatfill = document.getElementById('beatfill');
+  var msgEl = document.getElementById('msg');
+
+  var W = canvas.width, H = canvas.height;
+  var GOAL = 60, STEP_M = 2;
+  var state = 'title'; // title | playing | won | over
+  var dist = 0, lives = 3, balance = 0, swayVel = 0, wind = 0, windTarget = 0;
+  var beatT = 0, beatPeriod = 0.62, stepCooldown = 0, fallTimer = 0, shake = 0;
+  var bestCombo = 0, combo = 0, stepsTaken = 0, score = 0;
+  var clouds = [], birds = [], particles = [];
+  var audioCtx = null, masterGain = null;
+
+  for (var i = 0; i < 6; i++) clouds.push({ x: Math.random() * W, y: 20 + Math.random() * 90, s: 0.5 + Math.random() * 0.9, v: 4 + Math.random() * 8 });
+  for (var j = 0; j < 3; j++) birds.push({ x: Math.random() * W, y: 60 + Math.random() * 80, p: Math.random() * 6.28 });
+
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.22;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(masterGain);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (!audioCtx) return;
+    if (kind === 'step') { tone(220, 0.12, 'triangle', 0.7, 60); tone(440, 0.08, 'sine', 0.3); }
+    else if (kind === 'good') { tone(523, 0.1, 'sine', 0.5); tone(784, 0.15, 'sine', 0.5); }
+    else if (kind === 'bad') { tone(180, 0.25, 'sawtooth', 0.4, -100); }
+    else if (kind === 'fall') { tone(600, 0.7, 'sine', 0.6, -500); }
+    else if (kind === 'win') { [523, 659, 784, 1047].forEach(function (f, k) { setTimeout(function () { tone(f, 0.25, 'triangle', 0.6); }, k * 140); }); }
+    else if (kind === 'beat') { tone(880, 0.05, 'sine', 0.25); }
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function reset() {
+    dist = 0; lives = 3; balance = 0; swayVel = 0; wind = 0; windTarget = 0;
+    beatT = 0; stepCooldown = 0; fallTimer = 0; combo = 0; stepsTaken = 0; score = 0; bestCombo = 0;
+    particles = []; setMsg('Step on the beat!');
+  }
+  function startGame() {
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    sfx('good');
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? 'You Made It Across!' : 'Game Over';
+    endText.textContent = won
+      ? 'You danced all ' + GOAL + ' metres across the canyon in ' + stepsTaken + ' steps! Best combo: ' + bestCombo + '. Final score: ' + score + '.'
+      : 'The canyon claimed you after ' + stepsTaken + ' steps (' + dist + ' m). Best combo: ' + bestCombo + '. Try again, dancer!';
+    endScreen.classList.remove('hidden');
+    sfx(won ? 'win' : 'bad');
+  }
+  function fall() {
+    lives--; combo = 0; fallTimer = 1.4; shake = 14; sfx('fall');
+    for (var i = 0; i < 26; i++) particles.push({ x: W / 2, y: 200, vx: (Math.random() - 0.5) * 240, vy: -Math.random() * 120, life: 1 });
+    if (lives <= 0) { setTimeout(function () { endGame(false); }, 1300); setMsg('You fell!'); }
+    else { balance = 0; swayVel = 0; setMsg('Fell! ' + lives + ' lives left.'); }
+  }
+  function lean(dir) {
+    if (state !== 'playing' || fallTimer > 0) return;
+    swayVel += dir * 38; balance += dir * 3.2;
+    tone(300 + (dir > 0 ? 60 : 0), 0.07, 'triangle', 0.3);
+    for (var i = 0; i < 4; i++) particles.push({ x: W / 2, y: 190, vx: dir * (30 + Math.random() * 60), vy: -20 - Math.random() * 40, life: 0.6 });
+  }
+  function step() {
+    if (state !== 'playing' || fallTimer > 0 || stepCooldown > 0) return;
+    stepCooldown = 0.28;
+    var beatPhase = beatT / beatPeriod; // 0..1 through the beat cycle
+    var onBeat = Math.min(beatPhase, 1 - beatPhase) < 0.22;
+    stepsTaken++;
+    if (onBeat) {
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      score += 10 + combo * 2; dist += STEP_M; sfx('good');
+      setMsg(combo >= 3 ? 'On the beat! Combo x' + combo : 'Nice step, on the beat!');
+    } else {
+      combo = 0; dist += STEP_M; score += 5; sfx('step');
+      setMsg('Step taken — try stepping on the beat!');
+    }
+    // stepping slightly disturbs balance, more so off-beat
+    swayVel += (Math.random() - 0.5) * (onBeat ? 6 : 16);
+    if (dist >= GOAL) { dist = GOAL; score += 200 + lives * 100; endGame(true); }
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('leftBtn').addEventListener('click', function () { lean(-1); });
+  document.getElementById('rightBtn').addEventListener('click', function () { lean(1); });
+  document.getElementById('stepBtn').addEventListener('click', step);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { lean(-1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { lean(1); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { step(); e.preventDefault(); }
+    else if (e.key === 'Enter' && (state === 'title' || state === 'won' || state === 'over')) startGame();
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (state !== 'playing') return;
+    if (e.target && (e.target.tagName === 'BUTTON')) return;
+    var r = canvas.getBoundingClientRect();
+    if (e.clientX < r.left + r.width * 0.3) lean(-1);
+    else if (e.clientX > r.left + r.width * 0.7) lean(1);
+    else step();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state !== 'playing') return;
+    var t = e.touches[0];
+    var r = canvas.getBoundingClientRect();
+    if (t.clientX < r.left + r.width * 0.3) lean(-1);
+    else if (t.clientX > r.left + r.width * 0.7) lean(1);
+    else step();
+  }, { passive: false });
+  document.addEventListener('touchstart', function (e) {
+    if (e.target && e.target.tagName === 'BUTTON') return;
+    if (state !== 'playing') return;
+    var t = e.touches[0];
+    var r = canvas.getBoundingClientRect();
+    if (t.clientY > r.bottom) {
+      if (t.clientX < r.left + r.width * 0.33) lean(-1);
+      else if (t.clientX > r.left + r.width * 0.66) lean(1);
+    }
+  }, { passive: true });
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  function update(dt) {
+    // clouds & birds drift
+    clouds.forEach(function (c) { c.x += c.v * dt; if (c.x > W + 80) c.x = -80; });
+    birds.forEach(function (b) { b.x += 30 * dt; b.p += dt * 6; if (b.x > W + 20) b.x = -20; });
+    particles.forEach(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 160 * dt; p.life -= dt; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    if (shake > 0) shake -= dt * 30;
+
+    if (state !== 'playing') return;
+    if (fallTimer > 0) { fallTimer -= dt; return; }
+
+    beatT += dt;
+    if (beatT >= beatPeriod) { beatT -= beatPeriod; sfx('beat'); }
+    beatfill.style.width = (beatT / beatPeriod * 100).toFixed(1) + '%';
+    if (stepCooldown > 0) stepCooldown -= dt;
+
+    // wind gusts grow stronger further across
+    var difficulty = 1 + (dist / GOAL) * 1.8;
+    if (Math.random() < dt * 0.5) windTarget = (Math.random() - 0.5) * 26 * difficulty;
+    wind += (windTarget - wind) * dt * 1.4;
+    swayVel += (wind + Math.sin(now * 0.002) * 4 * difficulty) * dt;
+    swayVel *= (1 - dt * 0.6);
+    balance += swayVel * dt;
+    if (Math.abs(balance) > 100) { fall(); return; }
+
+    var balTxt = Math.abs(balance) < 35 ? 'Balance: OK' : (Math.abs(balance) < 70 ? 'Balance: Wobbly!' : 'Balance: DANGER!');
+    hudBal.textContent = balTxt;
+    hudBal.className = Math.abs(balance) >= 70 ? 'warn' : '';
+    hudDist.textContent = 'Distance: ' + dist + ' / ' + GOAL + ' m';
+    hudLives.textContent = '\u2764\uFE0F x ' + lives;
+    hudStatus.textContent = 'Score: ' + score + (combo >= 2 ? ' | Combo x' + combo : '');
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    // sky
+    var sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#1b2350'); sky.addColorStop(1, '#3a2a5e');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    // stars
+    ctx.fillStyle = '#ffffff';
+    for (var s = 0; s < 40; s++) {
+      var sx = (s * 173) % W, sy = (s * 89) % 150;
+      ctx.globalAlpha = 0.3 + 0.4 * Math.abs(Math.sin(s + performance.now() * 0.001));
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    // clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    clouds.forEach(function (c) {
+      ctx.beginPath(); ctx.ellipse(c.x, c.y, 46 * c.s, 16 * c.s, 0, 0, 6.283); ctx.fill();
+    });
+    // birds
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
+    birds.forEach(function (b) {
+      var w = Math.sin(b.p) * 6;
+      ctx.beginPath(); ctx.moveTo(b.x - 8, b.y + w); ctx.quadraticCurveTo(b.x, b.y - 4, b.x + 8, b.y + w); ctx.stroke();
+    });
+    // canyon
+    ctx.fillStyle = '#2c1a3e';
+    ctx.beginPath(); ctx.moveTo(0, 330); ctx.lineTo(90, 330); ctx.lineTo(60, H); ctx.lineTo(0, H); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W, 330); ctx.lineTo(W - 90, 330); ctx.lineTo(W - 60, H); ctx.lineTo(W, H); ctx.fill();
+    ctx.fillStyle = 'rgba(255,209,102,0.12)';
+    ctx.beginPath(); ctx.ellipse(W / 2, 400, 200, 18, 0, 0, 6.283); ctx.fill();
+    // platforms
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(0, 318, 90, 16);
+    ctx.fillStyle = '#a9743c'; ctx.fillRect(0, 318, 90, 6);
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(W - 90, 318, 90, 16);
+    ctx.fillStyle = '#a9743c'; ctx.fillRect(W - 90, 318, 90, 6);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('START', 45, 310); ctx.fillText('FINISH', W - 45, 310);
+    // rope
+    var ropeY = 330;
+    ctx.strokeStyle = '#e8c07a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, ropeY); ctx.lineTo(W, ropeY); ctx.stroke();
+    // wind arrows
+    if (state === 'playing' && Math.abs(wind) > 3) {
+      ctx.fillStyle = wind > 0 ? 'rgba(135,206,250,0.8)' : 'rgba(255,150,150,0.8)';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillText(wind > 0 ? 'WIND >>>' : '<<< WIND', W / 2, 60);
+    }
+    // walker position & lean
+    var px = 90 + (dist / GOAL) * (W - 180);
+    var lean = balance * 0.9;
+    var py = ropeY;
+    var falling = fallTimer > 0;
+    var wy = falling ? py + (1.4 - fallTimer) * 120 : py;
+    // pole
+    ctx.strokeStyle = '#d94f70'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    var poleAngle = -lean * 0.012;
+    ctx.beginPath();
+    ctx.moveTo(px + Math.cos(poleAngle + Math.PI) * 42, wy - 42 + Math.sin(poleAngle + Math.PI) * 8);
+    ctx.lineTo(px + Math.cos(poleAngle) * 42, wy - 42 + Math.sin(poleAngle) * 8);
+    ctx.stroke();
+    // body
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(px, wy - 42); ctx.lineTo(px + lean * 0.18, wy - 8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px + lean * 0.18, wy - 8);
+    ctx.lineTo(px - 8 + lean * 0.3, wy); ctx.moveTo(px + lean * 0.18, wy - 8);
+    ctx.lineTo(px + 8 + lean * 0.3, wy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px, wy - 34); ctx.lineTo(px - 12 + lean * 0.2, wy - 24);
+    ctx.moveTo(px, wy - 34); ctx.lineTo(px + 12 + lean * 0.2, wy - 24); ctx.stroke();
+    // head
+    ctx.fillStyle = '#ffcf9e'; ctx.beginPath(); ctx.arc(px + lean * 0.15, wy - 50, 9, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#d94f70'; ctx.beginPath(); ctx.arc(px + lean * 0.15, wy - 58, 9, Math.PI, 0); ctx.fill();
+    // balance meter
+    var mx = W / 2 - 150, mw = 300;
+    ctx.fillStyle = '#1e2547'; ctx.fillRect(mx - 4, H - 46, mw + 8, 26);
+    ctx.fillStyle = '#2ecc71'; ctx.fillRect(mx + 75, H - 46, 150, 26);
+    ctx.fillStyle = '#f1c40f'; ctx.fillRect(mx + 30, H - 46, 45, 26); ctx.fillRect(mx + 225, H - 46, 45, 26);
+    ctx.fillStyle = '#e74c3c'; ctx.fillRect(mx, H - 46, 30, 26); ctx.fillRect(mx + 270, H - 46, 30, 26);
+    var bx = mx + mw / 2 + balance * 1.5;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(bx - 3, H - 52, 6, 38);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('BALANCE', W / 2, H - 56);
+    // particles
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(p.x, p.y, 4, 4);
+    });
+    ctx.globalAlpha = 1;
+    // distance progress dots
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    for (var d = 0; d <= 10; d++) ctx.fillRect(90 + d * (W - 180) / 10, 350, 3, 8);
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(90, 350, (dist / GOAL) * (W - 180), 8);
+    ctx.restore();
+  }
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
