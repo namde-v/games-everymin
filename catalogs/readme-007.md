@@ -74,3 +74,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0668 | Tea House Service Strategy | Strategy / Tea House Customer Management | Mouse/touch serve guests, Keys select | [Play](./../games/game-0668.html) |
 | 0669 | River Reed Flute Melody | Rhythm / Melody Matching | Keys play notes, mouse/touch tap notes | [Play](./../games/game-0669.html) |
 | 0670 | Blacksmith Hammer Strike | Precision / Hammer Timing | Space/click/tap strike, Arrow Keys select | [Play](./../games/game-0670.html) |
+| 0671 | Desert Dune Buggy Jump | Arcade / Dune Buggy Jumping | Space/click/tap jump, Arrow Keys/WASD drive | [Play](./../games/game-0671.html) |
+| 0672 | Mosaic Tile Weaver | Puzzle / Pattern Weaving Logic | Mouse/touch rotate tiles, Arrow Keys select, Enter confirm | [Play](./../games/game-0672.html) |
+| 0673 | Observatory Night Scheduler | Strategy / Telescope Scheduling | Mouse/touch assign telescopes, Keys select request | [Play](./../games/game-0673.html) |
+| 0674 | Synthwave Beat Runner | Rhythm / Synth Tap Timing | Keys tap lanes on beat, mouse/touch tap lanes | [Play](./../games/game-0674.html) |
+| 0675 | Sky Kite Collector | Arcade / Kite Wind Collection | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0675.html) |
+| 0676 | Herb Garden Potion Sort | Puzzle / Potion Sorting Logic | Mouse/touch pour vials, Arrow Keys select, Enter confirm | [Play](./../games/game-0676.html) |
+| 0677 | Lighthouse Keeper Roster | Strategy / Lighthouse Shift Management | Mouse/touch assign keepers, Keys select shift | [Play](./../games/game-0677.html) |
+| 0678 | Archery Wind Shot | Precision / Archery Wind Aim | Mouse/touch drag aim, Space/click/tap release, Arrow Keys aim | [Play](./../games/game-0678.html) |
+| 0679 | Deep Sea Pearl Diver | Arcade / Underwater Treasure Diving | Arrow Keys/WASD swim, mouse/touch steer | [Play](./../games/game-0679.html) |
+| 0680 | Mirror Labyrinth Reflector | Puzzle / Laser Mirror Logic | Mouse/touch place and rotate mirrors, Arrow Keys select, Enter confirm | [Play](./../games/game-0680.html) |

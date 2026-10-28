@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Desert Dune Buggy Jump</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#1a1207; font-family:Arial, Helvetica, sans-serif; color:#fff; display:flex; flex-direction:column; align-items:center; min-height:100vh; padding:12px; overflow-x:hidden; }
+  h1 { color:#ffb347; font-size:28px; text-align:center; margin:6px 0 4px; text-shadow:2px 2px 0 #000; }
+  p.tag { color:#ffd98a; text-align:center; margin-bottom:10px; font-size:14px; }
+  #wrap { position:relative; width:100%; max-width:900px; }
+  canvas { display:block; width:100%; height:480px; background:linear-gradient(#87ceeb,#ffe6a3); border:4px solid #8b5a2b; border-radius:12px; touch-action:none; }
+  #hud { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; background:#3b2410; border:2px solid #ffb347; border-radius:10px; padding:10px 14px; margin-bottom:10px; font-weight:bold; font-size:16px; }
+  #hud span { color:#ffe08a; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:rgba(20,10,0,0.82); border-radius:12px; text-align:center; padding:20px; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { color:#ffb347; font-size:34px; }
+  .overlay p { max-width:560px; line-height:1.55; font-size:16px; color:#fff3d6; }
+  .overlay .keys { background:#fff3d6; color:#222; padding:12px 16px; border-radius:10px; font-size:15px; line-height:1.6; }
+  button { background:#ff8c00; color:#fff; border:3px solid #fff; border-radius:12px; padding:14px 28px; font-size:20px; font-weight:bold; cursor:pointer; }
+  button:hover, button:active { background:#ffb347; transform:scale(1.03); }
+  button.secondary { background:#555; font-size:16px; padding:10px 20px; }
+  #hint { text-align:center; color:#ffd98a; margin-top:10px; font-size:14px; }
+  @media (max-width:600px){ h1{font-size:22px;} canvas{height:360px;} #hud{font-size:14px;} }
+</style>
+</head>
+<body>
+<h1>🏜️ Desert Dune Buggy Jump 🏎️</h1>
+<p class="tag">Race across the dunes, leap the rocks, grab the fuel — and reach the oasis!</p>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>❤️ Lives: <span id="lives">3</span></div>
+    <div>⛽ Fuel: <span id="fuel">5</span></div>
+    <div>Level: <span id="level">1</span></div>
+    <div>Distance: <span id="dist">0</span> / 3000 m</div>
+  </div>
+  <canvas id="game" width="900" height="480"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Desert Dune Buggy Jump</h2>
+    <p>Drive your buggy across endless desert dunes! Jump over rocks and gaps, collect fuel cans to keep going, and reach the oasis 3000 m away to win.</p>
+    <div class="keys">
+      <strong>How to Play</strong><br>
+      🕹️ <b>Space / ↑ / Click / Tap</b> — Jump (hold for a higher jump, double-tap for a double jump!)<br>
+      ⛽ Collect <b>fuel cans</b> for +50 points and +1 fuel<br>
+      🪨 Avoid rocks and gaps — each crash costs 1 life<br>
+      ❤️ You have <b>3 lives</b>. Reach 3000 m to win! Speed and hazards increase as you go.
+    </div>
+    <button id="startBtn">▶ Start Engine</button>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>🏆 YOU WIN! 🏆</h2>
+    <p id="winText">You reached the oasis!</p>
+    <button id="winRestartBtn">🔄 Play Again</button>
+  </div>
+
+  <div id="gameOverScreen" class="overlay hidden">
+    <h2>💥 GAME OVER 💥</h2>
+    <p id="overText">Your buggy ran out of lives.</p>
+    <button id="overRestartBtn">🔄 Restart</button>
+  </div>
+</div>
+<p id="hint">Press Space, click, or tap anywhere to jump. Double jump in mid-air!</p>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var fuelEl = document.getElementById('fuel');
+  var levelEl = document.getElementById('level');
+  var distEl = document.getElementById('dist');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var gameOverScreen = document.getElementById('gameOverScreen');
+
+  var W = 900, H = 480, GROUND_Y = 390;
+  var state = 'title'; // title, playing, win, over
+  var score, lives, fuel, distance, speed, level, frame;
+  var buggy, obstacles, pickups, particles, clouds, cacti;
+  var audioCtx = null, muted = false;
+  var keys = {};
+
+  function initAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e){}
+  }
+  function jumpSound(){ beep(300, 0.18, 'sine', 0.18); beep(520, 0.15, 'sine', 0.12); }
+  function coinSound(){ beep(880, 0.1, 'square', 0.12); setTimeout(function(){ beep(1320, 0.15, 'square', 0.12); }, 70); }
+  function crashSound(){ beep(120, 0.4, 'sawtooth', 0.2); }
+  function winSound(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.16); }, i*140); }); }
+
+  function reset(){
+    score = 0; lives = 3; fuel = 5; distance = 0; level = 1; frame = 0;
+    speed = 5;
+    buggy = { x: 130, y: GROUND_Y - 46, vy: 0, jumping: false, jumps: 0, w: 84, h: 46, tilt: 0, inv: 0 };
+    obstacles = []; pickups = []; particles = [];
+    clouds = []; cacti = [];
+    for (var i=0;i<6;i++) clouds.push({x: Math.random()*W, y: 30+Math.random()*100, s: 0.5+Math.random()*0.8});
+    for (var j=0;j<8;j++) cacti.push({x: Math.random()*W, y: GROUND_Y+18, h: 26+Math.random()*30});
+    updateHUD();
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    fuelEl.textContent = fuel;
+    levelEl.textContent = level;
+    distEl.textContent = Math.floor(distance);
+  }
+
+  function spawnObstacle(){
+    var r = Math.random();
+    if (r < 0.55) obstacles.push({ type:'rock', x: W+20, w: 34+Math.random()*22, h: 30+Math.random()*22, y: GROUND_Y - 30 });
+    else if (r < 0.8) obstacles.push({ type:'rockBig', x: W+20, w: 50, h: 52, y: GROUND_Y - 52 });
+    else obstacles.push({ type:'gap', x: W+20, w: 70+Math.random()*50, h: 10, y: GROUND_Y });
+    // sometimes a fuel can above / near the obstacle
+    if (Math.random() < 0.6) pickups.push({ x: W+80+Math.random()*120, y: GROUND_Y - 120 - Math.random()*60, taken:false });
+  }
+
+  function doJump(){
+    if (state !== 'playing') return;
+    if (!buggy.jumping) {
+      buggy.vy = -15.5; buggy.jumping = true; buggy.jumps = 1; jumpSound();
+    } else if (buggy.jumps < 2) {
+      buggy.vy = -13.5; buggy.jumps = 2; jumpSound();
+    }
+  }
+
+  function crash(){
+    if (buggy.inv > 0) return;
+    lives--; fuel = Math.max(0, fuel - 1);
+    buggy.inv = 90; crashSound();
+    for (var i=0;i<22;i++) particles.push({x: buggy.x+40, y: buggy.y+20, vx: (Math.random()-0.5)*8, vy: -Math.random()*7, life: 30+Math.random()*20, color: '#ff5722'});
+    // clear nearby obstacles so the player is not instantly hit again
+    obstacles = obstacles.filter(function(o){ return o.x > buggy.x + 160; });
+    updateHUD();
+    if (lives <= 0) endGame(false);
+  }
+
+  function endGame(won){
+    state = won ? 'win' : 'over';
+    if (won) {
+      document.getElementById('winText').textContent = 'You reached the oasis! Final score: ' + score + ' — distance ' + Math.floor(distance) + ' m, level ' + level + '.';
+      winScreen.classList.remove('hidden'); winSound();
+    } else {
+      document.getElementById('overText').textContent = 'Your buggy ran out of lives at ' + Math.floor(distance) + ' m. Final score: ' + score + '. Try again!';
+      gameOverScreen.classList.remove('hidden');
+    }
+  }
+
+  function startGame(){
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    gameOverScreen.classList.add('hidden');
+    beep(440, 0.2, 'triangle', 0.15);
+  }
+  function restart(){ startGame(); }
+
+  function groundHeightAt(x){
+    // rolling dune silhouette: sum of sines, offset by distance scrolled
+    var t = (x + distance * 2) * 0.004;
+    return Math.sin(t) * 14 + Math.sin(t * 2.3 + 1.7) * 8;
+  }
+
+  function update(){
+    if (state !== 'playing') return;
+    frame++;
+    // difficulty ramp
+    level = 1 + Math.floor(distance / 600);
+    speed = 5 + Math.min(6, level * 0.9);
+    distance += speed * 0.55;
+    score += 1;
+    if (frame % 90 === 0) fuel = Math.max(0, fuel - 1);
+    if (fuel <= 0) { lives = 0; updateHUD(); endGame(false); return; }
+
+    // spawn pacing gets tighter with level
+    var interval = Math.max(55, 110 - level * 10);
+    if (frame % interval === 0) spawnObstacle();
+    if (frame % 210 === 0) pickups.push({ x: W+20, y: GROUND_Y - 110 - Math.random()*80, taken:false });
+
+    // buggy physics
+    if (buggy.jumping) {
+      buggy.vy += 0.85;
+      buggy.y += buggy.vy;
+      buggy.tilt = Math.max(-0.25, Math.min(0.3, buggy.vy * 0.02));
+      if (buggy.y >= GROUND_Y - buggy.h) { buggy.y = GROUND_Y - buggy.h; buggy.vy = 0; buggy.jumping = false; buggy.jumps = 0; buggy.tilt = 0; }
+    } else {
+      buggy.y = GROUND_Y - buggy.h + groundHeightAt(buggy.x) * 0.3;
+      buggy.tilt = Math.sin((buggy.x + distance*2) * 0.004) * 0.06;
+    }
+    if (buggy.inv > 0) buggy.inv--;
+
+    // obstacles
+    for (var i = obstacles.length - 1; i >= 0; i--) {
+      var o = obstacles[i];
+      o.x -= speed;
+      if (o.x + o.w < -20) { obstacles.splice(i, 1); continue; }
+      var bx = buggy.x, by = buggy.y, bw = buggy.w, bh = buggy.h;
+      if (o.type === 'gap') {
+        // falling in a gap: buggy on ground and overlapping gap = crash
+        if (!buggy.jumping && bx + bw > o.x + 8 && bx < o.x + o.w - 8) crash();
+      } else {
+        var oy = (o.type === 'rockBig') ? GROUND_Y - 52 : GROUND_Y - o.h;
+        if (bx + bw - 10 > o.x + 4 && bx + 10 < o.x + o.w - 4 && by + bh - 6 > oy && by < oy + o.h) crash();
+      }
+    }
+    // pickups
+    for (var j = pickups.length - 1; j >= 0; j--) {
+      var p = pickups[j];
+      p.x -= speed;
+      if (p.x < -30) { pickups.splice(j, 1); continue; }
+      if (!p.taken && Math.abs(p.x - (buggy.x + 42)) < 48 && Math.abs(p.y - (buggy.y + 20)) < 48) {
+        p.taken = true; score += 50; fuel += 1; coinSound();
+        for (var k=0;k<10;k++) particles.push({x: p.x, y: p.y, vx: (Math.random()-0.5)*5, vy: -Math.random()*4, life: 22, color: '#ffeb3b'});
+        pickups.splice(j, 1);
+      }
+    }
+    // clouds / cacti drift
+    clouds.forEach(function(c){ c.x -= speed * 0.2; if (c.x < -90) { c.x = W + 20; c.y = 30 + Math.random()*100; } });
+    cacti.forEach(function(c){ c.x -= speed; if (c.x < -20) { c.x = W + Math.random()*200; c.h = 26 + Math.random()*30; } });
+    // particles
+    for (var m = particles.length - 1; m >= 0; m--) {
+      var pt = particles[m];
+      pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.3; pt.life--;
+      if (pt.life <= 0) particles.splice(m, 1);
+    }
+    // dust behind wheels
+    if (frame % 6 === 0 && !buggy.jumping) particles.push({x: buggy.x + 8, y: GROUND_Y + 6, vx: -2 - Math.random()*2, vy: -Math.random()*2, life: 18, color: '#e8c98a'});
+
+    if (distance >= 3000) { score += 500; updateHUD(); endGame(true); return; }
+    updateHUD();
+  }
+
+  function drawBuggy(){
+    ctx.save();
+    ctx.translate(buggy.x + 42, buggy.y + 23);
+    ctx.rotate(buggy.tilt);
+    if (buggy.inv > 0 && Math.floor(frame / 6) % 2 === 0) ctx.globalAlpha = 0.45;
+    // body
+    ctx.fillStyle = '#ff5722';
+    ctx.beginPath();
+    ctx.moveTo(-42, 12); ctx.lineTo(-38, -8); ctx.lineTo(-18, -20); ctx.lineTo(12, -20); ctx.lineTo(28, -8); ctx.lineTo(42, 8); ctx.lineTo(42, 16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-22, -16, 26, 14); // window
+    ctx.fillStyle = '#b3e5fc';
+    ctx.fillRect(-19, -14, 20, 10);
+    // driver helmet
+    ctx.fillStyle = '#ffeb3b'; ctx.beginPath(); ctx.arc(-4, -14, 8, 0, Math.PI * 2); ctx.fill();
+    // wheels
+    ctx.fillStyle = '#111';
+    ctx.beginPath(); ctx.arc(-24, 16, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(24, 16, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ccc';
+    ctx.beginPath(); ctx.arc(-24, 16, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(24, 16, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw(){
+    // sky
+    var sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#87ceeb'); sky.addColorStop(0.6, '#ffe6a3'); sky.addColorStop(1, '#ffcc80');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    // sun
+    ctx.fillStyle = '#ffeb3b'; ctx.beginPath(); ctx.arc(800, 70, 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,235,59,0.3)'; ctx.beginPath(); ctx.arc(800, 70, 60, 0, Math.PI * 2); ctx.fill();
+    // clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    clouds.forEach(function(c){
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 22 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 24 * c.s, c.y - 8, 18 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 48 * c.s, c.y, 20 * c.s, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // distant dunes
+    ctx.fillStyle = '#e8b06a';
+    ctx.beginPath(); ctx.moveTo(0, 300);
+    for (var x = 0; x <= W; x += 20) ctx.lineTo(x, 300 + Math.sin((x + distance) * 0.008) * 22);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    // ground with rolling dunes
+    ctx.fillStyle = '#d9903f';
+    ctx.beginPath(); ctx.moveTo(0, GROUND_Y);
+    for (var gx = 0; gx <= W; gx += 10) ctx.lineTo(gx, GROUND_Y + groundHeightAt(gx));
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#c47f2e'; ctx.fillRect(0, GROUND_Y + 26, W, H - GROUND_Y - 26);
+    // cacti
+    ctx.fillStyle = '#2e7d32';
+    cacti.forEach(function(c){ ctx.fillRect(c.x, GROUND_Y + 18 - c.h, 10, c.h); ctx.fillRect(c.x - 10, GROUND_Y + 18 - c.h + 10, 10, 12); ctx.fillRect(c.x + 10, GROUND_Y + 18 - c.h + 16, 10, 12); });
+    // gaps: dark pits on the ground
+    obstacles.forEach(function(o){
+      if (o.type === 'gap') {
+        ctx.fillStyle = '#1a1207'; ctx.fillRect(o.x, GROUND_Y - 2, o.w, 40);
+        ctx.fillStyle = '#ff5722'; ctx.font = 'bold 20px Arial'; ctx.fillText('⚠', o.x + o.w/2 - 10, GROUND_Y - 12);
+      } else {
+        ctx.fillStyle = '#6d4c41';
+        ctx.beginPath();
+        ctx.moveTo(o.x, GROUND_Y + 4); ctx.lineTo(o.x + o.w * 0.2, GROUND_Y - o.h); ctx.lineTo(o.x + o.w * 0.8, GROUND_Y - o.h); ctx.lineTo(o.x + o.w, GROUND_Y + 4); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#8d6e63'; ctx.beginPath(); ctx.arc(o.x + o.w/2, GROUND_Y - o.h * 0.5, o.w * 0.18, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    // fuel cans
+    pickups.forEach(function(p){
+      ctx.fillStyle = '#e53935'; ctx.fillRect(p.x - 12, p.y - 14, 26, 28);
+      ctx.fillStyle = '#ffeb3b'; ctx.font = 'bold 16px Arial'; ctx.fillText('⛽', p.x - 10, p.y + 8);
+      ctx.fillStyle = 'rgba(255,235,59,0.25)'; ctx.beginPath(); ctx.arc(p.x, p.y, 26 + Math.sin(frame * 0.15) * 4, 0, Math.PI * 2); ctx.fill();
+    });
+    // particles
+    particles.forEach(function(pt){ ctx.fillStyle = pt.color; ctx.fillRect(pt.x, pt.y, 6, 6); });
+    // progress flag / oasis at the end
+    var goalX = W - 60 - (3000 - distance) * 0.12;
+    if (distance > 2400) {
+      ctx.fillStyle = '#2e7d32'; ctx.fillRect(goalX, GROUND_Y - 90, 8, 90);
+      ctx.fillStyle = '#00bcd4'; ctx.beginPath(); ctx.moveTo(goalX + 8, GROUND_Y - 90); ctx.lineTo(goalX + 60, GROUND_Y - 78); ctx.lineTo(goalX + 8, GROUND_Y - 66); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#4fc3f7'; ctx.beginPath(); ctx.ellipse(goalX + 40, GROUND_Y + 8, 46, 10, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    if (state === 'playing' || state === 'win' || state === 'over') drawBuggy();
+    // distance progress bar
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(20, 20, 300, 16);
+    ctx.fillStyle = '#4caf50'; ctx.fillRect(20, 20, 300 * Math.min(1, distance / 3000), 16);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('OASIS →', 330, 33);
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, touch
+  document.addEventListener('keydown', function(e){
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      if (state === 'title') startGame();
+      else doJump();
+    }
+    if (e.code === 'Enter' && (state === 'win' || state === 'over')) restart();
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', restart);
+  document.getElementById('overRestartBtn').addEventListener('click', restart);
+  canvas.addEventListener('mousedown', function(e){ e.preventDefault(); if (state === 'playing') doJump(); });
+  canvas.addEventListener('click', function(e){ if (state === 'playing') doJump(); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); if (state === 'playing') doJump(); }, { passive:false });
+  document.addEventListener('touchstart', function(e){
+    if (state === 'playing' && e.target === canvas) doJump();
+  }, { passive:true });
+
+  reset();
+  state = 'title';
+  // idle title backdrop: draw dunes and buggy parked
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

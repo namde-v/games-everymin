@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Deep Sea Pearl Diver</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #02182e; color: #eafcff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 26px; text-align: center; margin: 6px 0 4px; text-shadow: 0 2px 8px #00bcd4; }
+  p.sub { text-align: center; color: #9fdcec; font-size: 14px; margin-bottom: 8px; }
+  #hud { width: min(820px, 96vw); display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; background: #06324d; border: 2px solid #1aa8c9; border-radius: 10px; padding: 8px 12px; font-weight: bold; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  #airWrap { width: min(820px, 96vw); height: 14px; background: #123; border-radius: 8px; overflow: hidden; border: 1px solid #1aa8c9; margin: 6px 0; }
+  #airBar { height: 100%; width: 100%; background: linear-gradient(90deg, #00e5ff, #4dd0e1); transition: width 0.2s; }
+  #wrap { position: relative; width: min(820px, 96vw); }
+  canvas { width: 100%; height: auto; display: block; background: linear-gradient(#0a5a8a, #04263f 55%, #01101f); border: 3px solid #1aa8c9; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(1, 25, 45, 0.86); border-radius: 12px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #d7f6ff; margin: 4px 0; }
+  .overlay .big { font-size: 18px; font-weight: bold; color: #ffe082; }
+  button { margin-top: 14px; padding: 13px 26px; font-size: 18px; font-weight: bold; border: none; border-radius: 10px; background: #ffca28; color: #102027; cursor: pointer; box-shadow: 0 4px 0 #b58900; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b58900; }
+  button.secondary { background: #4dd0e1; box-shadow: 0 4px 0 #00838f; }
+  #controls { width: min(820px, 96vw); text-align: center; color: #9fdcec; font-size: 13px; margin-top: 8px; line-height: 1.5; }
+  .pearl { color: #fff9c4; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>🌊 Deep Sea Pearl Diver 🦪</h1>
+<p class="sub">Dive deep, gather treasure, and make it back to the surface alive!</p>
+
+<div id="hud">
+  <span>⭐ Score: <span id="score">0</span></span>
+  <span>🦪 Pearls: <span id="pearls">0</span> / 12</span>
+  <span>❤️ Lives: <span id="lives">3</span></span>
+  <span>🌊 Depth: <span id="depth">0</span>m</span>
+  <span>🎯 Status: <span id="status">Ready</span></span>
+</div>
+<div id="airWrap"><div id="airBar"></div></div>
+
+<div id="wrap">
+  <canvas id="game" width="820" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🦪 Deep Sea Pearl Diver</h2>
+    <p class="big">Collect 12 pearls, then return to the surface to WIN!</p>
+    <p><strong>How to Play:</strong> Swim with Arrow Keys / WASD, or steer with your mouse / finger by pressing and dragging on the water. Grab glowing pearls and air bubbles. Avoid sharks and jellyfish — each hit costs a life.</p>
+    <p>⚠️ Air drains faster the deeper you go. Air bubbles refill your tank. If your air runs out or you lose all lives, the dive is over.</p>
+    <p>🏆 Win: collect all 12 pearls AND swim back up to the surface (top of the screen).</p>
+    <button id="startBtn">▶ Start Dive</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">🔄 Dive Again</button>
+  </div>
+</div>
+
+<p id="controls">Controls: Arrow Keys / WASD to swim &nbsp;|&nbsp; Mouse: hold + move to steer &nbsp;|&nbsp; Touch: drag on the water &nbsp;|&nbsp; P = Pause</p>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var pearlsEl = document.getElementById('pearls');
+  var livesEl = document.getElementById('lives');
+  var depthEl = document.getElementById('depth');
+  var statusEl = document.getElementById('status');
+  var airBar = document.getElementById('airBar');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var state = 'title'; // title | playing | win | over
+  var paused = false;
+  var player, keys, pearls, bubbles, sharks, jellies, particles, seaweed;
+  var score, pearlCount, lives, air, frame, audioCtx, muted;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx*dx + dy*dy); }
+
+  function initAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (name === 'pearl') { beep(880, 0.25, 'sine', 0.15); setTimeout(function(){ beep(1320, 0.2, 'sine', 0.12); }, 70); }
+    else if (name === 'air') { beep(520, 0.3, 'triangle', 0.15); }
+    else if (name === 'hit') { beep(160, 0.4, 'sawtooth', 0.18); }
+    else if (name === 'win') { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,0.35,'triangle',0.15); }, i*130); }); }
+    else if (name === 'lose') { [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ beep(f,0.3,'sawtooth',0.12); }, i*140); }); }
+  }
+
+  function reset() {
+    player = { x: W/2, y: 45, vx: 0, vy: 0, r: 18, inv: 0, targetX: null, targetY: null };
+    keys = {};
+    pearls = []; bubbles = []; sharks = []; jellies = []; particles = []; seaweed = [];
+    score = 0; pearlCount = 0; lives = 3; air = 100; frame = 0; paused = false;
+    for (var i = 0; i < 14; i++) seaweed.push({ x: rand(10, W-10), h: rand(30, 90), sway: rand(0, 6.28) });
+    spawnPearls(6);
+    spawnHazards();
+    updateHUD('Diving! Find pearls.');
+  }
+
+  function spawnPearls(n) {
+    for (var i = 0; i < n; i++) {
+      pearls.push({ x: rand(40, W-40), y: rand(130, H-60), r: 11, pulse: rand(0, 6.28), bob: rand(0.4, 1.0) });
+    }
+  }
+  function spawnHazards() {
+    for (var i = 0; i < 3; i++) sharks.push({ x: rand(0, W), y: rand(140, H-80), vx: rand(1.0, 1.8) * (Math.random() < 0.5 ? -1 : 1), r: 30 });
+    for (var i = 0; i < 5; i++) jellies.push({ x: rand(30, W-30), y: rand(120, H-80), vy: rand(0.4, 0.9), dir: 1, r: 16, ph: rand(0, 6.28) });
+  }
+  function spawnBubble() {
+    bubbles.push({ x: rand(40, W-40), y: H - 20, r: 13, vy: -0.9 });
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: rand(-2, 2), vy: rand(-2, 1), life: 28, color: color });
+  }
+
+  function updateHUD(status) {
+    if (status) statusEl.textContent = status;
+    scoreEl.textContent = score;
+    pearlsEl.textContent = pearlCount;
+    livesEl.textContent = lives;
+    var d = Math.max(0, Math.round((player ? player.y : 0) / 10));
+    depthEl.textContent = d;
+    airBar.style.width = Math.max(0, air) + '%';
+    airBar.style.background = air < 30 ? '#ff5252' : 'linear-gradient(90deg,#00e5ff,#4dd0e1)';
+  }
+
+  function endGame(win, reason) {
+    state = win ? 'win' : 'over';
+    endScreen.classList.remove('hidden');
+    if (win) {
+      endTitle.textContent = '🏆 YOU WIN! Treasure Recovered!';
+      endText.textContent = 'You collected all 12 pearls and surfaced safely. Legendary diver!';
+      sfx('win');
+    } else {
+      endTitle.textContent = '💀 Game Over';
+      endText.textContent = reason;
+      sfx('lose');
+    }
+    endScore.textContent = 'Final Score: ' + score + '  |  Pearls: ' + pearlCount + ' / 12  |  Lives left: ' + Math.max(0, lives);
+    updateHUD(win ? 'Victory!' : 'Dive failed');
+  }
+
+  function hitHazard() {
+    if (player.inv > 0) return;
+    lives--; player.inv = 90; sfx('hit');
+    burst(player.x, player.y, '#ff5252', 18);
+    player.y = Math.max(50, player.y - 50);
+    if (lives <= 0) { updateHUD('Out of lives'); endGame(false, 'A shark or jellyfish ended your dive. Watch out next time!'); }
+    else updateHUD('Ouch! Lives left: ' + lives);
+  }
+
+  function update() {
+    if (state !== 'playing' || paused) return;
+    frame++;
+    var speed = 3.4;
+    var ax = 0, ay = 0;
+    if (keys['arrowleft'] || keys['a']) ax -= 1;
+    if (keys['arrowright'] || keys['d']) ax += 1;
+    if (keys['arrowup'] || keys['w']) ay -= 1;
+    if (keys['arrowdown'] || keys['s']) ay += 1;
+    if (ax !== 0 || ay !== 0) {
+      var len = Math.sqrt(ax*ax + ay*ay);
+      player.vx += (ax/len) * 0.55; player.vy += (ay/len) * 0.55;
+      player.targetX = null;
+    } else if (player.targetX !== null) {
+      var dx = player.targetX - player.x, dy = player.targetY - player.y;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if (d > 6) { player.vx += (dx/d) * 0.45; player.vy += (dy/d) * 0.45; }
+      else { player.vx *= 0.7; player.vy *= 0.7; }
+    } else { player.vx *= 0.88; player.vy *= 0.88; }
+    player.vx = Math.max(-speed, Math.min(speed, player.vx));
+    player.vy = Math.max(-speed, Math.min(speed, player.vy));
+    player.x += player.vx; player.y += player.vy;
+    player.x = Math.max(20, Math.min(W-20, player.x));
+    player.y = Math.max(20, Math.min(H-20, player.y));
+    if (player.inv > 0) player.inv--;
+
+    // Air drains faster with depth
+    var depthFactor = 0.045 + (player.y / H) * 0.10;
+    air -= depthFactor;
+    if (frame % 240 === 0) spawnBubble();
+    if (frame % 420 === 0 && pearls.length < 8) spawnPearls(2);
+    if (frame % 600 === 0) sharks.push({ x: Math.random() < 0.5 ? -40 : W+40, y: rand(140, H-80), vx: rand(1.1, 1.9) * (Math.random() < 0.5 ? -1 : 1), r: 30 });
+
+    // Pearls
+    for (var i = pearls.length - 1; i >= 0; i--) {
+      var p = pearls[i]; p.pulse += 0.08; p.y += Math.sin(p.pulse) * 0.25;
+      if (dist(player, p) < player.r + p.r) {
+        pearls.splice(i, 1); pearlCount++; score += 100;
+        burst(p.x, p.y, '#fff9c4', 14); sfx('pearl');
+        updateHUD(pearlCount >= 12 ? 'All pearls! Return to surface!' : 'Pearl found! ' + (12 - pearlCount) + ' to go');
+        if (pearlCount < 12 && pearls.length < 4) spawnPearls(3);
+      }
+    }
+    // Bubbles
+    for (var j = bubbles.length - 1; j >= 0; j--) {
+      var b = bubbles[j]; b.y += b.vy;
+      if (b.y < 10) { bubbles.splice(j, 1); continue; }
+      if (dist(player, b) < player.r + b.r) {
+        bubbles.splice(j, 1); air = Math.min(100, air + 35); score += 25;
+        burst(b.x, b.y, '#b3e5fc', 10); sfx('air'); updateHUD('Fresh air! +35');
+      }
+    }
+    // Sharks
+    sharks.forEach(function(s) {
+      s.x += s.vx;
+      if (s.x < -50) { s.x = W + 40; s.vx = Math.abs(s.vx); }
+      if (s.x > W + 50) { s.x = -40; s.vx = -Math.abs(s.vx); }
+      if (player.inv === 0 && dist(player, s) < player.r + s.r - 6) hitHazard();
+    });
+    // Jellyfish
+    jellies.forEach(function(jl) {
+      jl.ph += 0.05; jl.y += jl.vy * jl.dir; jl.x += Math.sin(jl.ph) * 0.5;
+      if (jl.y > H - 40) jl.dir = -1;
+      if (jl.y < 110) jl.dir = 1;
+      if (player.inv === 0 && dist(player, jl) < player.r + jl.r - 2) hitHazard();
+    });
+    // Particles
+    for (var k = particles.length - 1; k >= 0; k--) {
+      var pt = particles[k]; pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+      if (pt.life <= 0) particles.splice(k, 1);
+    }
+    if (pearlCount >= 12 && player.y <= 32) { score += 500; updateHUD('Surfaced with treasure!'); endGame(true); return; }
+    if (air <= 0) { air = 0; updateHUD('Out of air!'); endGame(false, 'Your air ran out deep below. Grab bubbles to refill next time!'); return; }
+    updateHUD();
+  }
+
+  function drawBackground() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#7ec8e3'); g.addColorStop(0.25, '#0a5a8a'); g.addColorStop(1, '#01101f');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // Sun rays
+    ctx.fillStyle = 'rgba(255,255,200,0.10)';
+    for (var i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(80 + i*180, 0); ctx.lineTo(180 + i*180, 0); ctx.lineTo(120 + i*180, 180); ctx.closePath(); ctx.fill(); }
+    // Surface waves
+    ctx.fillStyle = '#b3e5fc'; ctx.fillRect(0, 0, W, 6);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    for (var x = 0; x < W; x += 46) { ctx.beginPath(); ctx.arc(x + ((frame % 46)), 8, 6, 0, Math.PI); ctx.fill(); }
+    // Seaweed
+    seaweed.forEach(function(sw) {
+      ctx.strokeStyle = '#2e7d32'; ctx.lineWidth = 6; ctx.beginPath();
+      ctx.moveTo(sw.x, H);
+      ctx.quadraticCurveTo(sw.x + Math.sin(frame/40 + sw.sway)*12, H - sw.h/2, sw.x + Math.sin(frame/30 + sw.sway)*18, H - sw.h);
+      ctx.stroke();
+    });
+    // Sand
+    ctx.fillStyle = '#d7b56d'; ctx.fillRect(0, H-14, W, 14);
+  }
+
+  function draw() {
+    drawBackground();
+    // Pearls (clams glow)
+    pearls.forEach(function(p) {
+      var glow = 0.7 + Math.sin(p.pulse) * 0.3;
+      ctx.fillStyle = 'rgba(255,249,196,' + (0.25*glow) + ')';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 24, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fffde7'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#f48fb1'; ctx.beginPath(); ctx.arc(p.x-3, p.y-3, 4, 0, Math.PI*2); ctx.fill();
+    });
+    // Bubbles
+    bubbles.forEach(function(b) {
+      ctx.strokeStyle = '#b3e5fc'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.arc(b.x-4, b.y-4, 3, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#e1f5fe'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('AIR', b.x, b.y+4);
+    });
+    // Jellyfish
+    jellies.forEach(function(jl) {
+      ctx.fillStyle = 'rgba(225,190,231,0.9)';
+      ctx.beginPath(); ctx.arc(jl.x, jl.y, jl.r, Math.PI, 0); ctx.fill();
+      ctx.strokeStyle = '#ce93d8'; ctx.lineWidth = 2;
+      for (var t = -1; t <= 1; t++) { ctx.beginPath(); ctx.moveTo(jl.x + t*8, jl.y); ctx.quadraticCurveTo(jl.x + t*10 + Math.sin(jl.ph+t)*5, jl.y+18, jl.x + t*8, jl.y+28); ctx.stroke(); }
+    });
+    // Sharks
+    sharks.forEach(function(s) {
+      ctx.save(); ctx.translate(s.x, s.y); if (s.vx < 0) ctx.scale(-1, 1);
+      ctx.fillStyle = '#78909c'; ctx.beginPath(); ctx.ellipse(0, 0, 32, 13, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(26, 0); ctx.lineTo(44, -10); ctx.lineTo(44, 10); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-2, -12); ctx.lineTo(8, -26); ctx.lineTo(16, -10); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(20, -4, 4, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(21, -4, 2, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
+    // Player diver
+    if (player) {
+      var blink = player.inv > 0 && Math.floor(frame/6) % 2 === 0;
+      if (!blink) {
+        ctx.fillStyle = '#ff7043'; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ffe0b2'; ctx.beginPath(); ctx.arc(player.x + 5, player.y - 3, 9, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#37474f'; ctx.beginPath(); ctx.arc(player.x + 5, player.y - 3, 10, -0.6, 0.6); ctx.fill();
+        ctx.fillStyle = '#4dd0e1'; ctx.fillRect(player.x - 16, player.y + 4, 32, 7);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('DIVER', player.x, player.y + 26);
+        // Trail bubbles
+        if (frame % 18 === 0) particles.push({ x: player.x, y: player.y - 18, vx: 0.3, vy: -1.2, life: 26, color: '#b3e5fc' });
+      }
+    }
+    // Particles
+    particles.forEach(function(pt) {
+      ctx.fillStyle = pt.color; ctx.globalAlpha = Math.max(0, pt.life/28);
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+    // Depth markers
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '12px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('SURFACE — return here with 12 pearls', 12, 24);
+    ctx.fillText('DEEP ZONE — air drains faster', 12, H - 24);
+    if (state === 'title') { ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText('Press Start Dive to begin your treasure hunt', W/2, H/2 + 90); }
+    if (paused) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = '#fff'; ctx.font = 'bold 28px Arial'; ctx.textAlign = 'center'; ctx.fillText('PAUSED — press P to resume', W/2, H/2); }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Diving! Find pearls.');
+    sfx('air');
+  }
+
+  // Controls: keyboard
+  document.addEventListener('keydown', function(e) {
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === 'p' && state === 'playing') { paused = !paused; updateHUD(paused ? 'Paused' : 'Diving!'); }
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key.toLowerCase()] = false; });
+
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  // Controls: mouse
+  canvas.addEventListener('mousedown', function(e) {
+    if (state !== 'playing') return;
+    var p = canvasPos(e); player.targetX = p.x; player.targetY = p.y;
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    if (state !== 'playing') return;
+    if (e.buttons === 1) { var p = canvasPos(e); player.targetX = p.x; player.targetY = p.y; }
+  });
+  canvas.addEventListener('click', function(e) {
+    if (state !== 'playing') return;
+    var p = canvasPos(e); player.targetX = p.x; player.targetY = p.y;
+  });
+  // Controls: touch
+  canvas.addEventListener('touchstart', function(e) {
+    if (state !== 'playing') return;
+    e.preventDefault();
+    var p = canvasPos(e); player.targetX = p.x; player.targetY = p.y;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    if (state !== 'playing') return;
+    e.preventDefault();
+    var p = canvasPos(e); player.targetX = p.x; player.targetY = p.y;
+  }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  reset();
+  state = 'title';
+  updateHUD('Ready');
+  loop();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Archery Wind Shot</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a2f1a; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 28px; margin: 8px 0 4px; color: #ffd94d; text-shadow: 2px 2px 0 #000; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 8px 0; width: 100%; max-width: 900px; }
+  .stat { background: #2c4a2c; border: 2px solid #6a9a4a; border-radius: 8px; padding: 6px 12px; font-size: 15px; font-weight: bold; }
+  .stat b { color: #ffd94d; }
+  #wrap { position: relative; width: 100%; max-width: 900px; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#87ceeb, #c8e8a0); border: 4px solid #5a3d1e; border-radius: 10px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.82); border-radius: 10px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd94d; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; font-size: 16px; }
+  .overlay .big { font-size: 22px; font-weight: bold; }
+  button { margin-top: 16px; padding: 14px 34px; font-size: 20px; font-weight: bold; border: none; border-radius: 10px; background: #ffb400; color: #222; cursor: pointer; }
+  button:hover { background: #ffd94d; }
+  button:active { transform: scale(0.97); }
+  #hint { margin-top: 8px; font-size: 14px; color: #cfe8b0; text-align: center; }
+  #windBar { width: 100%; max-width: 900px; height: 10px; background: #333; border-radius: 5px; margin-top: 6px; overflow: hidden; }
+  #windFill { height: 100%; background: #4ecdc4; width: 50%; transition: width 0.3s; }
+</style>
+</head>
+<body>
+<h1>🏹 Archery Wind Shot</h1>
+<div id="hud">
+  <div class="stat">Score: <b id="score">0</b> / 100</div>
+  <div class="stat">Arrows: <b id="arrows">12</b></div>
+  <div class="stat">Target: <b id="targetNo">1</b> / 12</div>
+  <div class="stat">Wind: <b id="windText">Calm</b></div>
+  <div class="stat">Best Hit: <b id="best">—</b></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="900" height="540"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🏹 Archery Wind Shot</h2>
+    <p class="big">Hit moving targets. Beat 100 points with 12 arrows!</p>
+    <p><b>How to Play:</b> Aim with your mouse, touch drag, or Arrow Keys (Up/Down to raise or lower aim, Left/Right to fine-tune). The wind pushes your arrow sideways — aim into the wind when it is strong. Press <b>Space</b>, click, or tap <b>SHOOT</b> to release. Closer to the bullseye = more points: Bullseye 25, Inner 15, Middle 10, Outer 5.</p>
+    <p>Targets drift left and right and change speed. Wind changes every round. Reach 100 points to win!</p>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endMsg" class="big"></p>
+    <p id="endDetail"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<div id="windBar"><div id="windFill"></div></div>
+<p id="hint">Aim: Mouse / Touch drag / Arrow Keys &nbsp;|&nbsp; Shoot: Space / Click / Tap SHOOT &nbsp;|&nbsp; R = Restart &nbsp;|&nbsp; Wind blows arrows sideways — compensate!</p>
+<button id="shootBtn" style="display:none; margin-top:10px;">🏹 SHOOT ARROW</button>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var arrowsEl = document.getElementById('arrows');
+  var targetEl = document.getElementById('targetNo');
+  var windEl = document.getElementById('windText');
+  var bestEl = document.getElementById('best');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endMsg = document.getElementById('endMsg');
+  var endDetail = document.getElementById('endDetail');
+  var shootBtn = document.getElementById('shootBtn');
+  var windFill = document.getElementById('windFill');
+
+  var W = 900, H = 540;
+  var running = false, gameOver = false;
+  var score = 0, arrowsLeft = 12, shotIndex = 0;
+  var bestHit = '—';
+  var angle = -0.55; // radians, upward
+  var power = 62;
+  var wind = 0; // px/s^2 drift, negative = left, positive = right
+  var target = { x: 700, y: 300, vx: 40, r: 52, dir: 1 };
+  var arrow = null; // flying arrow {x,y,vx,vy}
+  var trail = [];
+  var message = '';
+  var messageUntil = 0;
+  var audioCtx = null;
+  var aiming = false, aimX = 0, aimY = 0;
+
+  function rand(a, b){ return a + Math.random() * (b - a); }
+  function newWind(){
+    wind = rand(-14, 14);
+    if (Math.abs(wind) < 2) wind = wind < 0 ? -2 : 2;
+    var dir = wind > 0 ? '→ Right' : '← Left';
+    var strength = Math.abs(wind) < 5 ? 'Light' : (Math.abs(wind) < 10 ? 'Moderate' : 'Strong');
+    windEl.textContent = strength + ' ' + dir + ' (' + Math.abs(wind).toFixed(1) + ')';
+    windFill.style.width = (50 + wind * 3.2) + '%';
+    windFill.style.background = Math.abs(wind) > 10 ? '#ff6b6b' : '#4ecdc4';
+  }
+  function newTarget(){
+    target.r = 52;
+    target.y = rand(150, 420);
+    target.x = rand(560, 830);
+    target.vx = rand(30, 85) * (Math.random() < 0.5 ? -1 : 1);
+  }
+  function initAudio(){
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e){}
+  }
+  function shootSound(){ beep(300, 0.25, 'triangle', 0.2); beep(600, 0.15, 'sine', 0.1); }
+  function hitSound(pts){ if (pts >= 25) { beep(880, 0.3, 'sine', 0.2); beep(1320, 0.3, 'sine', 0.15); } else if (pts >= 10) { beep(660, 0.25, 'sine', 0.18); } else { beep(440, 0.2, 'sine', 0.15); } }
+  function missSound(){ beep(180, 0.4, 'sawtooth', 0.12); }
+
+  function updateHUD(){
+    scoreEl.textContent = score;
+    arrowsEl.textContent = arrowsLeft;
+    targetEl.textContent = Math.min(shotIndex + 1, 12);
+    bestEl.textContent = bestHit;
+  }
+  function showMessage(txt, ms){
+    message = txt; messageUntil = Date.now() + (ms || 2200);
+  }
+  function shoot(){
+    if (!running || gameOver || arrow) return;
+    initAudio();
+    arrow = { x: 70, y: 460, vx: Math.cos(angle) * power * 10, vy: Math.sin(angle) * power * 10 };
+    trail = [];
+    arrowsLeft--;
+    shotIndex++;
+    shootSound();
+    updateHUD();
+  }
+  function endGame(win){
+    gameOver = true; running = false;
+    shootBtn.style.display = 'none';
+    endTitle.textContent = win ? '🏆 YOU WIN!' : '💔 Game Over';
+    endMsg.textContent = win ? 'You reached ' + score + ' points!' : 'Out of arrows with ' + score + ' points.';
+    endDetail.textContent = win ? 'Brilliant archery! You beat the 100-point target.' : 'You needed 100 points to win. Try reading the wind more carefully!';
+    endScreen.classList.remove('hidden');
+    if (win) { beep(523, 0.3, 'sine', 0.2); setTimeout(function(){ beep(659, 0.3, 'sine', 0.2); }, 200); setTimeout(function(){ beep(784, 0.5, 'sine', 0.2); }, 400); }
+    else { beep(220, 0.5, 'sawtooth', 0.15); }
+  }
+  function resetGame(){
+    score = 0; arrowsLeft = 12; shotIndex = 0; bestHit = '—';
+    angle = -0.55; power = 62; arrow = null; trail = [];
+    gameOver = false;
+    newWind(); newTarget();
+    updateHUD();
+    endScreen.classList.add('hidden');
+    titleScreen.classList.add('hidden');
+    shootBtn.style.display = 'inline-block';
+    running = true;
+  }
+
+  function drawBackground(){
+    ctx.fillStyle = '#87ceeb'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#7ec850'; ctx.fillRect(0, 430, W, 110);
+    ctx.fillStyle = '#5a3d1e'; ctx.fillRect(0, 480, W, 60);
+    // sun and clouds
+    ctx.fillStyle = '#ffdf4d'; ctx.beginPath(); ctx.arc(820, 70, 34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath(); ctx.ellipse(180, 80, 60, 22, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(420, 55, 50, 18, 0, 0, Math.PI * 2); ctx.fill();
+    // distance markers
+    ctx.fillStyle = '#333'; ctx.font = '13px Arial';
+    ctx.fillText('50m', 560, 505); ctx.fillText('70m', 700, 505); ctx.fillText('90m', 830, 505);
+    // wind arrows indicator
+    ctx.fillStyle = '#222'; ctx.font = 'bold 16px Arial';
+    ctx.fillText('Wind: ' + (wind > 0 ? 'blowing right' : 'blowing left'), 20, 30);
+    var wx = 20;
+    for (var i = 0; i < 3; i++){
+      ctx.beginPath();
+      ctx.moveTo(wx + i * 30, 50);
+      ctx.lineTo(wx + i * 30 + (wind > 0 ? 18 : -18), 50);
+      ctx.strokeStyle = '#222'; ctx.lineWidth = 3; ctx.stroke();
+    }
+  }
+  function drawArcher(){
+    var bx = 70, by = 460;
+    ctx.strokeStyle = '#5a3d1e'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, by - 70); ctx.stroke();
+    ctx.fillStyle = '#8b5a2b'; ctx.beginPath(); ctx.arc(bx, by - 85, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#3b2a12'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(bx, by - 60); ctx.lineTo(bx - 14, by - 30); ctx.moveTo(bx, by - 60); ctx.lineTo(bx + 14, by - 30); ctx.stroke();
+    // bow
+    ctx.strokeStyle = '#7a4a1a'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(bx + 18, by - 48, 26, -1.1, 1.1); ctx.stroke();
+    ctx.strokeStyle = '#eee'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(bx + 18 + Math.cos(-1.1) * 26, by - 48 + Math.sin(-1.1) * 26);
+    ctx.lineTo(bx + 18 + Math.cos(1.1) * 26, by - 48 + Math.sin(1.1) * 26); ctx.stroke();
+    // aim line
+    if (!arrow) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.setLineDash([8, 8]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(bx + 30, by - 48);
+      ctx.lineTo(bx + 30 + Math.cos(angle) * 180, by - 48 + Math.sin(angle) * 180);
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    // quiver count
+    ctx.fillStyle = '#222'; ctx.font = 'bold 14px Arial';
+    ctx.fillText('🏹 x ' + arrowsLeft, bx - 18, by + 26);
+  }
+  function drawTarget(){
+    var cols = ['#fff', '#e33', '#fff', '#e33', '#ffd94d'];
+    for (var i = 0; i < 5; i++){
+      ctx.fillStyle = cols[i];
+      ctx.beginPath(); ctx.arc(target.x, target.y, target.r - i * 10, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(target.x, target.y, target.r, 0, Math.PI * 2); ctx.stroke();
+    // stand
+    ctx.strokeStyle = '#5a3d1e'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(target.x - 30, target.y + target.r); ctx.lineTo(target.x - 44, 480);
+    ctx.moveTo(target.x + 30, target.y + target.r); ctx.lineTo(target.x + 44, 480); ctx.stroke();
+    ctx.fillStyle = '#222'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('TARGET', target.x, target.y + target.r + 20);
+    ctx.textAlign = 'left';
+  }
+  function drawArrow(a){
+    var ang = Math.atan2(a.vy, a.vx);
+    ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(ang);
+    ctx.strokeStyle = '#5a3d1e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-22, 0); ctx.lineTo(14, 0); ctx.stroke();
+    ctx.fillStyle = '#ccc'; ctx.beginPath(); ctx.moveTo(22, 0); ctx.lineTo(12, -6); ctx.lineTo(12, 6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e33'; ctx.beginPath(); ctx.moveTo(-22, 0); ctx.lineTo(-30, -6); ctx.lineTo(-30, 6); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function draw(){
+    drawBackground();
+    drawTarget();
+    drawArcher();
+    if (arrow) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (var i = 0; i < trail.length; i++){
+        if (i === 0) ctx.moveTo(trail[i].x, trail[i].y); else ctx.lineTo(trail[i].x, trail[i].y);
+      }
+      ctx.stroke();
+      drawArrow(arrow);
+    }
+    ctx.fillStyle = '#222'; ctx.font = 'bold 18px Arial';
+    ctx.fillText('Aim: ' + Math.round(-angle * 57.3) + '°  Power: ' + Math.round(power), 20, 470);
+    if (message && Date.now() < messageUntil){
+      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(250, 90, 400, 52);
+      ctx.fillStyle = '#ffd94d'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(message, 450, 125); ctx.textAlign = 'left';
+    }
+    if (!running && !gameOver && titleScreen.classList.contains('hidden') === false) { /* title overlay covers */ }
+  }
+  function update(dt){
+    // moving target bounces between 540 and 870
+    target.x += target.vx * dt;
+    if (target.x < 540) { target.x = 540; target.vx = Math.abs(target.vx); }
+    if (target.x > 870) { target.x = 870; target.vx = -Math.abs(target.vx); }
+    if (arrow){
+      trail.push({ x: arrow.x, y: arrow.y });
+      if (trail.length > 40) trail.shift();
+      arrow.vy += 500 * dt; // gravity
+      arrow.vx += wind * 6 * dt; // wind drift
+      arrow.x += arrow.vx * dt;
+      arrow.y += arrow.vy * dt;
+      var dx = arrow.x - target.x, dy = arrow.y - target.y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= target.r){
+        var pts = 5;
+        var label = 'Outer +5';
+        if (dist <= 10) { pts = 25; label = 'BULLSEYE +25!'; }
+        else if (dist <= 22) { pts = 15; label = 'Inner +15'; }
+        else if (dist <= 36) { pts = 10; label = 'Middle +10'; }
+        score += pts;
+        if (pts === 25) bestHit = 'Bullseye';
+        else if (pts === 15 && bestHit !== 'Bullseye') bestHit = 'Inner';
+        else if (pts === 10 && bestHit === '—') bestHit = 'Middle';
+        hitSound(pts);
+        showMessage(label, 2200);
+        arrow = null; trail = [];
+        updateHUD();
+        if (score >= 100) { endGame(true); return; }
+        if (arrowsLeft <= 0) { endGame(false); return; }
+        newWind(); newTarget();
+        updateHUD();
+      } else if (arrow.x > W + 30 || arrow.x < -30 || arrow.y > H + 10){
+        missSound();
+        showMessage('Miss! Wind was ' + Math.abs(wind).toFixed(1) + (wind > 0 ? ' →' : ' ←'), 2200);
+        arrow = null; trail = [];
+        if (arrowsLeft <= 0) { endGame(false); return; }
+        newWind(); newTarget();
+        updateHUD();
+      }
+    }
+  }
+  var last = 0;
+  function loop(ts){
+    if (!last) last = ts;
+    var dt = Math.min(0.033, (ts - last) / 1000);
+    last = ts;
+    if (running && !gameOver) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function canvasPos(evt){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function aimFromPos(p){
+    var bx = 100, by = 412;
+    var dx = p.x - bx, dy = p.y - by;
+    if (dx < 10) dx = 10;
+    angle = Math.max(-1.35, Math.min(-0.08, Math.atan2(dy, dx)));
+    power = Math.max(30, Math.min(95, Math.sqrt(dx * dx + dy * dy) / 6));
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function(){ initAudio(); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function(){ initAudio(); resetGame(); });
+  shootBtn.addEventListener('click', function(){ shoot(); });
+  canvas.addEventListener('click', function(e){ if (running && !gameOver) { aimFromPos(canvasPos(e)); shoot(); } });
+  canvas.addEventListener('mousedown', function(e){ aiming = true; if (running) aimFromPos(canvasPos(e)); });
+  canvas.addEventListener('mousemove', function(e){ if (aiming && running) aimFromPos(canvasPos(e)); });
+  canvas.addEventListener('mouseup', function(){ aiming = false; });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); aiming = true; if (running) aimFromPos(canvasPos(e)); }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); if (aiming && running) aimFromPos(canvasPos(e)); }, { passive: false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); aiming = false; if (running && !gameOver) shoot(); }, { passive: false });
+  document.addEventListener('keydown', function(e){
+    if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); if (running && !gameOver) shoot(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); angle = Math.max(-1.35, angle - 0.04); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); angle = Math.min(-0.08, angle + 0.04); }
+    else if (e.key === 'ArrowLeft') { power = Math.max(30, power - 3); }
+    else if (e.key === 'ArrowRight') { power = Math.min(95, power + 3); }
+    else if (e.key === 'r' || e.key === 'R') { if (gameOver || !running) { initAudio(); resetGame(); } }
+    else if (e.key === 'Enter') { if (!running && !gameOver) { initAudio(); resetGame(); } }
+  });
+  updateHUD();
+})();
+</script>
+</body>
+</html>
