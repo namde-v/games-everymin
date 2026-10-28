@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Obsidian Outrider</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#1a0f0a; font-family:"Segoe UI", Arial, sans-serif; color:#f5e6c8; overflow:hidden; touch-action:none; }
+  #wrap { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:8px; }
+  h1 { font-size:clamp(20px,4vw,34px); letter-spacing:2px; color:#ffb347; text-shadow:0 0 14px #ff7b00; margin-bottom:4px; text-align:center; }
+  #sub { font-size:13px; color:#d8b98a; margin-bottom:8px; text-align:center; }
+  #hud { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; font-weight:bold; font-size:15px; margin-bottom:6px; }
+  #hud span { background:#2b1a10; border:1px solid #6b4226; border-radius:8px; padding:4px 10px; }
+  #lives { color:#ff6b6b; }
+  canvas { background:#2a1608; border:3px solid #6b4226; border-radius:12px; max-width:96vw; max-height:62vh; display:block; box-shadow:0 0 30px rgba(255,123,0,.25); }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:rgba(10,4,1,.82); border-radius:12px; text-align:center; padding:20px; }
+  #stage { position:relative; }
+  .overlay h2 { font-size:28px; color:#ffb347; }
+  .overlay p { max-width:420px; line-height:1.55; font-size:15px; color:#f0dcb4; }
+  button { font-size:18px; font-weight:bold; padding:12px 26px; border:none; border-radius:10px; background:#ff7b00; color:#fff; cursor:pointer; box-shadow:0 4px 0 #b35000; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b35000; }
+  button.secondary { background:#4a3220; box-shadow:0 4px 0 #241709; }
+  #lanes { display:flex; gap:10px; margin-top:10px; }
+  #lanes button { padding:12px 20px; font-size:16px; }
+  #msg { min-height:20px; font-size:14px; color:#ffd98a; margin-top:6px; }
+  kbd { background:#3a2415; border:1px solid #6b4226; border-radius:4px; padding:1px 6px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9670; OBSIDIAN OUTRIDER &#9670;</h1>
+  <div id="sub">Ride the burning dunes. Dodge the pillars. Reach the oasis at 1500m.</div>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Lives: <b id="lives">&#10084;&#10084;&#10084;</b></span>
+    <span>Distance: <b id="dist">0</b>m / 1500m</span>
+    <span>Speed: <b id="speed">1.0x</b></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="480" height="620"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>OBSIDIAN OUTRIDER</h2>
+      <p><b>How to Play:</b> You ride a desert bike down three sandy lanes.
+      <br>Move with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> arrow keys, swipe left/right, or tap the lane buttons below.
+      Press <kbd>&uarr;</kbd> / <kbd>Space</kbd> or tap the rider to <b>jump</b> over ground gaps.
+      Dodge black obsidian pillars, grab glowing crystals for +50 points, and survive to <b>1500m</b> to win.
+      You have 3 lives &mdash; each crash costs one.</p>
+      <p>Controls: Keyboard &bull; Mouse &bull; Touch</p>
+      <button id="startBtn">START RIDE</button>
+    </div>
+    <div class="overlay" id="endScreen" style="display:none">
+      <h2 id="endTitle">GAME OVER</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">RESTART</button>
+    </div>
+  </div>
+  <div id="lanes">
+    <button id="leftBtn">&#8592; LEFT</button>
+    <button id="jumpBtn">&#9650; JUMP</button>
+    <button id="rightBtn">RIGHT &#8594;</button>
+  </div>
+  <div id="msg">Tip: jump gaps, steer around pillars, crystals are worth 50 points.</div>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var speedEl = document.getElementById('speed');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var msgEl = document.getElementById('msg');
+
+  var LANES = [90, 240, 390];
+  var GOAL = 1500;
+  var state = 'title';
+  var lane = 1, targetX = LANES[1], riderX = LANES[1];
+  var jumping = false, jumpY = 0, jumpV = 0;
+  var score = 0, lives = 3, distance = 0, speed = 1;
+  var obstacles = [], crystals = [], particles = [], dunes = [];
+  var spawnTimer = 0, frame = 0, lastTime = 0, invuln = 0;
+  var audioCtx = null;
+
+  for (var i = 0; i < 14; i++) dunes.push({ x: Math.random()*W, y: Math.random()*H, r: 8 + Math.random()*26 });
+
+  function initAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'square'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function crashSound() { beep(90, 0.35, 'sawtooth', 0.2); setTimeout(function(){ beep(55, 0.3, 'sawtooth', 0.15); }, 80); }
+  function coinSound() { beep(880, 0.12, 'sine', 0.15); setTimeout(function(){ beep(1320, 0.18, 'sine', 0.12); }, 90); }
+  function jumpSound() { beep(300, 0.18, 'triangle', 0.14); }
+
+  function reset() {
+    lane = 1; riderX = LANES[1]; targetX = LANES[1];
+    jumping = false; jumpY = 0; score = 0; lives = 3; distance = 0; speed = 1;
+    obstacles = []; crystals = []; particles = []; spawnTimer = 0; invuln = 0; frame = 0;
+    updateHUD();
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = '\u2764'.repeat(lives) + '\u2661'.repeat(3 - lives);
+    distEl.textContent = Math.floor(distance);
+    speedEl.textContent = speed.toFixed(1) + 'x';
+  }
+  function moveLeft() { if (state !== 'playing') return; if (lane > 0) { lane--; targetX = LANES[lane]; beep(440, 0.08, 'triangle', 0.08); } }
+  function moveRight() { if (state !== 'playing') return; if (lane < 2) { lane++; targetX = LANES[lane]; beep(440, 0.08, 'triangle', 0.08); } }
+  function doJump() {
+    if (state !== 'playing' || jumping) return;
+    jumping = true; jumpV = -13; jumpSound();
+  }
+  function spawnRow() {
+    var kind = Math.random();
+    var gapLane = Math.floor(Math.random() * 3);
+    if (kind < 0.45) {
+      // pillars in one or two lanes, never all three
+      var blocked = [0, 1, 2].filter(function(l){ return l !== gapLane; });
+      if (Math.random() < 0.5) blocked = blocked.slice(0, 1);
+      blocked.forEach(function(l){ obstacles.push({ lane: l, y: -60, w: 64, h: 64, hit: false }); });
+    } else if (kind < 0.65) {
+      obstacles.push({ lane: gapLane, y: -60, w: 64, h: 64, hit: false, gap: true });
+    } else {
+      crystals.push({ lane: Math.floor(Math.random() * 3), y: -30, taken: false });
+    }
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) particles.push({ x: x, y: y, vx: (Math.random()-0.5)*6, vy: (Math.random()-0.5)*6, life: 30, color: color });
+  }
+  function endGame(win) {
+    state = 'over';
+    endTitle.textContent = win ? 'YOU WIN!' : 'GAME OVER';
+    endText.textContent = win
+      ? 'You reached the oasis! Final score: ' + score + ' points over ' + Math.floor(distance) + 'm. The dunes salute you, Outrider.'
+      : 'The obsidian claimed your bike at ' + Math.floor(distance) + 'm. Final score: ' + score + '. Ride again!';
+    if (win) { beep(523, 0.2, 'sine', 0.15); setTimeout(function(){ beep(659, 0.2, 'sine', 0.15); }, 180); setTimeout(function(){ beep(784, 0.35, 'sine', 0.15); }, 360); }
+    endScreen.style.display = 'flex';
+  }
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.style.display = 'none';
+    endScreen.style.display = 'none';
+    msgEl.textContent = 'Ride! Dodge pillars, jump gaps, grab crystals.';
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    frame++;
+    speed = 1 + Math.min(2.2, distance / 500);
+    var scroll = (4 + speed * 2.2) * dt;
+    distance += scroll * 0.55;
+    riderX += (targetX - riderX) * 0.25;
+    if (jumping) {
+      jumpY += jumpV; jumpV += 0.7;
+      if (jumpY >= 0) { jumpY = 0; jumping = false; }
+    }
+    if (invuln > 0) invuln -= dt;
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnRow(); spawnTimer = 55 - Math.min(28, speed * 8); }
+
+    var riderY = H - 110 + jumpY;
+    obstacles.forEach(function(o){
+      o.y += scroll;
+      var ox = LANES[o.lane], oy = o.y;
+      var overlap = Math.abs(ox - riderX) < 55 && Math.abs(oy - riderY) < 55;
+      if (overlap && !o.hit) {
+        o.hit = true;
+        if (o.gap) {
+          if (!jumping) { hitRider(ox, oy); }
+        } else if (!jumping && invuln <= 0) {
+          hitRider(ox, oy);
+        } else if (jumping && !o.gap) {
+          // jumping over a pillar still clips it: tall obsidian
+          if (invuln <= 0) hitRider(ox, oy);
+        }
+      }
+    });
+    function hitRider(x, y) {
+      lives--; burst(x, y, '#ff4444'); crashSound(); invuln = 90;
+      msgEl.textContent = lives > 0 ? 'Crash! ' + lives + (lives === 1 ? ' life' : ' lives') + ' left.' : 'No lives left!';
+      if (lives <= 0) { updateHUD(); endGame(false); return; }
+    }
+    crystals.forEach(function(c){
+      c.y += scroll;
+      if (!c.taken && Math.abs(LANES[c.lane] - riderX) < 50 && Math.abs(c.y - riderY) < 50) {
+        c.taken = true; score += 50; burst(LANES[c.lane], c.y, '#00e5ff'); coinSound();
+        msgEl.textContent = 'Crystal! +50 points.';
+      }
+    });
+    obstacles = obstacles.filter(function(o){ return o.y < H + 80; });
+    crystals = crystals.filter(function(c){ return c.y < H + 40 && !c.taken; });
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    dunes.forEach(function(d){ d.y += scroll * 0.35; if (d.y > H + 30) { d.y = -30; d.x = Math.random() * W; } });
+    score += Math.floor(scroll * 0.02);
+    updateHUD();
+    if (distance >= GOAL) { endGame(true); }
+  }
+
+  function draw() {
+    ctx.fillStyle = '#c98a3d'; ctx.fillRect(0, 0, W, H);
+    // sky gradient band
+    var grad = ctx.createLinearGradient(0, 0, 0, 150);
+    grad.addColorStop(0, '#ff9a3c'); grad.addColorStop(1, '#c98a3d');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, 130);
+    ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.arc(400, 55, 34, 0, Math.PI * 2); ctx.fill();
+    // dunes
+    dunes.forEach(function(d){
+      ctx.fillStyle = 'rgba(160,100,40,0.5)';
+      ctx.beginPath(); ctx.ellipse(d.x, d.y, d.r, d.r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    // road lanes
+    ctx.fillStyle = '#8a5a28'; ctx.fillRect(30, 130, W - 60, H - 130);
+    ctx.strokeStyle = '#e8c88a'; ctx.lineWidth = 3; ctx.setLineDash([24, 18]);
+    [165, 315].forEach(function(x){
+      ctx.beginPath(); ctx.moveTo(x, 130); ctx.lineTo(x, H); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    // distance marker
+    ctx.fillStyle = '#f5e6c8'; ctx.font = 'bold 13px Arial';
+    ctx.fillText('OASIS ' + Math.max(0, Math.ceil(GOAL - distance)) + 'm ahead', 12, 150);
+    // crystals
+    crystals.forEach(function(c){
+      ctx.save(); ctx.translate(LANES[c.lane], c.y); ctx.rotate(frame * 0.05);
+      ctx.fillStyle = '#00e5ff'; ctx.shadowColor = '#00e5ff'; ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(11, 0); ctx.lineTo(0, 16); ctx.lineTo(-11, 0); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+    // obstacles
+    obstacles.forEach(function(o){
+      var x = LANES[o.lane], y = o.y;
+      if (o.gap) {
+        ctx.fillStyle = '#3a1c08'; ctx.fillRect(x - 40, y - 30, 80, 60);
+        ctx.strokeStyle = '#ff7b00'; ctx.lineWidth = 3; ctx.strokeRect(x - 40, y - 30, 80, 60);
+        ctx.fillStyle = '#ffb347'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('GAP! JUMP', x, y + 4); ctx.textAlign = 'left';
+      } else {
+        ctx.fillStyle = '#1b1b26'; ctx.fillRect(x - 32, y - 32, 64, 64);
+        ctx.fillStyle = '#3d3d5c'; ctx.beginPath(); ctx.moveTo(x - 32, y - 32); ctx.lineTo(x, y - 44); ctx.lineTo(x + 32, y - 32); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#7b2d8b'; ctx.fillRect(x - 20, y - 10, 40, 8);
+        ctx.fillStyle = '#a855f7'; ctx.fillRect(x - 12, y + 6, 24, 6);
+      }
+    });
+    // rider
+    var rx = riderX, ry = H - 110 + jumpY;
+    ctx.save();
+    if (invuln > 0 && Math.floor(frame / 4) % 2 === 0) ctx.globalAlpha = 0.4;
+    ctx.shadowColor = '#ff7b00'; ctx.shadowBlur = 16;
+    ctx.fillStyle = '#ff7b00'; ctx.beginPath(); ctx.ellipse(rx, ry + 18, 30, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(rx - 18, ry + 22, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(rx + 18, ry + 22, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(rx - 8, ry - 22, 16, 26);
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(rx, ry - 26, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff7b00'; ctx.fillRect(rx - 13, ry - 30, 26, 6);
+    ctx.restore();
+    // particles
+    particles.forEach(function(p){
+      ctx.globalAlpha = Math.max(0, p.life / 30);
+      ctx.fillStyle = p.color; ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+    });
+    ctx.globalAlpha = 1;
+    // progress bar
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(10, H - 18, W - 20, 10);
+    ctx.fillStyle = '#00e5ff'; ctx.fillRect(10, H - 18, (W - 20) * Math.min(1, distance / GOAL), 10);
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(2, (now - lastTime) / 16.7 || 1);
+    lastTime = now;
+    update(dt);
+    if (state === 'playing') { draw(); requestAnimationFrame(loop); }
+    else draw();
+  }
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowLeft') { moveLeft(); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { moveRight(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp' || e.key === ' ') { doJump(); e.preventDefault(); }
+    else if (e.key === 'Enter' && state !== 'playing') { startGame(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('leftBtn').addEventListener('click', moveLeft);
+  document.getElementById('rightBtn').addEventListener('click', moveRight);
+  document.getElementById('jumpBtn').addEventListener('click', doJump);
+  canvas.addEventListener('mousedown', function(e){
+    if (state !== 'playing') return;
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (W / rect.width);
+    if (x < W / 3) moveLeft(); else if (x > 2 * W / 3) moveRight(); else doJump();
+  });
+  var touchX = null;
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    if (state !== 'playing') return;
+    touchX = e.touches[0].clientX;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e){
+    if (state !== 'playing' || touchX === null) return;
+    var dx = e.changedTouches[0].clientX - touchX;
+    if (dx < -24) moveLeft(); else if (dx > 24) moveRight(); else doJump();
+    touchX = null;
+  });
+  document.getElementById('leftBtn').addEventListener('touchstart', function(e){ e.preventDefault(); moveLeft(); }, { passive: false });
+  document.getElementById('rightBtn').addEventListener('touchstart', function(e){ e.preventDefault(); moveRight(); }, { passive: false });
+  document.getElementById('jumpBtn').addEventListener('touchstart', function(e){ e.preventDefault(); doJump(); }, { passive: false });
+
+  draw();
+})();
+</script>
+</body>
+</html>

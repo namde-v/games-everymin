@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Velvet Voyager</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0b0714;
+    color: #f5eefc;
+    font-family: "Trebuchet MS", Verdana, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px;
+    overflow-x: hidden;
+  }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #d8a7ff; text-shadow: 0 0 14px #7b2ff7; margin: 6px 0 2px; }
+  .tagline { color: #b9a8cc; font-size: 13px; margin-bottom: 10px; }
+  #hud {
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    width: 100%; max-width: 860px; margin-bottom: 8px;
+  }
+  .pill {
+    background: #241238; border: 1px solid #6b3fa0; border-radius: 20px;
+    padding: 6px 12px; font-size: 14px; min-width: 110px; text-align: center;
+  }
+  .pill b { color: #ffd166; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas {
+    display: block; width: 100%; height: 520px;
+    background: radial-gradient(circle at 50% 40%, #1b1030, #07030f 75%);
+    border: 2px solid #6b3fa0; border-radius: 14px; touch-action: none; cursor: crosshair;
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(7, 3, 15, 0.82); border-radius: 14px; padding: 24px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #e9c6ff; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #ddd2ea; margin: 6px 0; font-size: 15px; }
+  .overlay .keys { font-size: 13px; color: #c9b8dd; }
+  button {
+    margin-top: 16px; padding: 12px 26px; font-size: 18px; font-weight: bold;
+    color: #160a24; background: #d8a7ff; border: none; border-radius: 999px; cursor: pointer;
+  }
+  button:hover { background: #ffd166; }
+  button.secondary { background: #3a2454; color: #f5eefc; font-size: 15px; padding: 9px 20px; }
+  #msg { margin-top: 8px; color: #ffd166; font-size: 14px; min-height: 20px; }
+  .levels { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  .levels button { margin-top: 0; font-size: 13px; padding: 8px 14px; }
+  .levels button.active { background: #ffd166; }
+  footer { color: #8f7fa6; font-size: 12px; margin-top: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>VELVET VOYAGER</h1>
+<div class="tagline">A gravity-slingshot voyage across a velvet void</div>
+
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Level: <b id="level">1 / 5</b></div>
+  <div class="pill">Attempts: <b id="attempts">3</b></div>
+  <div class="pill">Fuel: <b id="fuel">100%</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Velvet Voyager</h2>
+    <p><b>How to Play:</b> Drag anywhere on the starfield to aim your launch arrow, then release to fire the velvet spacecraft. Gravity from each planet bends your path — swing around them to slingshot toward the glowing goal star. Do not touch a planet or drift off the edge of space.</p>
+    <p>You have <b>3 attempts</b> per level and limited fuel. Each launch costs fuel; slingshot flybys and near-misses earn bonus score. Reach the goal star on all 5 levels to win.</p>
+    <p class="keys">Controls: Mouse / touch drag to aim, release to launch &nbsp;|&nbsp; R = restart level &nbsp;|&nbsp; Space = launch with last aim &nbsp;|&nbsp; Arrow keys = nudge aim &nbsp;|&nbsp; M = sound on/off</p>
+    <button id="startBtn">Start Voyage</button>
+    <button id="howBtn" class="secondary">How to Play Again</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Mission Complete</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+
+<div id="msg">Drag on the starfield to aim, release to launch.</div>
+<div class="levels" id="levelBtns"></div>
+<footer>Velvet Voyager — fully offline. No downloads, no network play. Gravity does the steering; you do the aiming.</footer>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById("score");
+  var levelEl = document.getElementById("level");
+  var attemptsEl = document.getElementById("attempts");
+  var fuelEl = document.getElementById("fuel");
+  var statusEl = document.getElementById("status");
+  var msgEl = document.getElementById("msg");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+  var endScore = document.getElementById("endScore");
+
+  // ---------- Audio (procedural, created only after user interaction) ----------
+  var audioCtx = null, soundOn = true;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx || !soundOn) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfxLaunch() { tone(180, 0.35, "sawtooth", 0.10, 420); }
+  function sfxSlingshot() { tone(520, 0.25, "sine", 0.12, 980); }
+  function sfxCrash() { tone(140, 0.5, "square", 0.14, 40); }
+  function sfxWin() { tone(523, 0.18, "sine", 0.12); setTimeout(function(){ tone(659, 0.18, "sine", 0.12); }, 160); setTimeout(function(){ tone(784, 0.35, "sine", 0.12); }, 320); }
+  function sfxGoal() { tone(880, 0.3, "triangle", 0.14, 1320); }
+
+  // ---------- Levels ----------
+  var LEVELS = [
+    { start: {x: 90, y: 430}, goal: {x: 780, y: 90}, planets: [
+      {x: 420, y: 260, r: 42, g: 2600, color: "#b565d8"},
+      {x: 620, y: 340, r: 30, g: 1700, color: "#4cc9f0"}
+    ]},
+    { start: {x: 80, y: 100}, goal: {x: 790, y: 430}, planets: [
+      {x: 300, y: 220, r: 46, g: 3000, color: "#f72585"},
+      {x: 540, y: 180, r: 34, g: 2000, color: "#ffd166"},
+      {x: 500, y: 400, r: 38, g: 2400, color: "#43aa8b"}
+    ]},
+    { start: {x: 90, y: 430}, goal: {x: 780, y: 100}, planets: [
+      {x: 250, y: 260, r: 40, g: 2800, color: "#7209b7"},
+      {x: 470, y: 130, r: 30, g: 1800, color: "#4cc9f0"},
+      {x: 470, y: 400, r: 36, g: 2300, color: "#f98404"},
+      {x: 660, y: 260, r: 30, g: 1900, color: "#90be6d"}
+    ]},
+    { start: {x: 430, y: 470}, goal: {x: 430, y: 60}, planets: [
+      {x: 220, y: 260, r: 44, g: 3000, color: "#ef476f"},
+      {x: 640, y: 260, r: 44, g: 3000, color: "#06d6a0"},
+      {x: 430, y: 260, r: 26, g: 1600, color: "#ffd166"}
+    ]},
+    { start: {x: 80, y: 260}, goal: {x: 790, y: 260}, planets: [
+      {x: 280, y: 150, r: 38, g: 2600, color: "#9b5de5"},
+      {x: 280, y: 380, r: 38, g: 2600, color: "#f15bb5"},
+      {x: 520, y: 260, r: 50, g: 3400, color: "#00bbf9"},
+      {x: 700, y: 130, r: 28, g: 1700, color: "#fee440"}
+    ]}
+  ];
+
+  var state = "title"; // title | aiming | flying | over
+  var levelIndex = 0, score = 0, attempts = 3, fuel = 100;
+  var ship = null, trail = [], aim = {x: 0, y: 0}, dragging = false, lastAim = {x: 120, y: -120};
+  var stars = [], slingshotCounted = {};
+  var lastTime = 0, elapsed = 0;
+
+  for (var i = 0; i < 130; i++) {
+    stars.push({x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.6 + 0.4, tw: Math.random() * Math.PI * 2});
+  }
+
+  function currentLevel() { return LEVELS[levelIndex]; }
+
+  function resetShip() {
+    var L = currentLevel();
+    ship = { x: L.start.x, y: L.start.y, vx: 0, vy: 0, angle: 0, alive: true };
+    trail = []; slingshotCounted = {};
+    aim = { x: L.start.x + 100, y: L.start.y - 80 };
+    lastAim = { x: 120, y: -120 };
+  }
+
+  function startLevel(idx) {
+    levelIndex = idx;
+    attempts = 3; fuel = 100;
+    resetShip();
+    state = "aiming";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    setStatus("Aim your launch");
+    msgEl.textContent = "Level " + (levelIndex + 1) + ": drag to aim, release to launch. Swing around planets to reach the star.";
+    updateHUD(); buildLevelButtons();
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; levelIndex = 0;
+    startLevel(0);
+    tone(440, 0.2, "sine", 0.10, 660);
+  }
+
+  function setStatus(s) { statusEl.textContent = s; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    levelEl.textContent = (levelIndex + 1) + " / " + LEVELS.length;
+    attemptsEl.textContent = attempts;
+    fuelEl.textContent = Math.max(0, Math.round(fuel)) + "%";
+  }
+
+  function buildLevelButtons() {
+    var box = document.getElementById("levelBtns");
+    box.innerHTML = "";
+    LEVELS.forEach(function (L, idx) {
+      var b = document.createElement("button");
+      b.textContent = "Level " + (idx + 1);
+      if (idx === levelIndex) b.className = "active";
+      b.addEventListener("click", function () { ensureAudio(); score = Math.max(0, score); startLevel(idx); });
+      box.appendChild(b);
+    });
+  }
+
+  function showEnd(win, text) {
+    state = "over";
+    endTitle.textContent = win ? "Mission Complete!" : "Game Over";
+    endText.textContent = text;
+    endScore.textContent = "Final score: " + score + "  |  Reached level " + (levelIndex + 1) + " of " + LEVELS.length;
+    endScreen.classList.remove("hidden");
+    if (win) sfxWin(); else sfxCrash();
+  }
+
+  function loseAttempt(reason) {
+    attempts -= 1;
+    fuel = Math.max(0, fuel - 10);
+    updateHUD();
+    if (attempts <= 0) {
+      showEnd(false, reason + " No attempts remain. The velvet void claims another voyager — try again!");
+    } else {
+      resetShip();
+      state = "aiming";
+      setStatus("Attempt lost");
+      msgEl.textContent = reason + " Attempts left: " + attempts + ". Drag to aim again.";
+      tone(220, 0.3, "square", 0.08, 110);
+    }
+  }
+
+  function winLevel() {
+    var bonus = 500 + attempts * 150 + Math.round(fuel);
+    score += bonus;
+    sfxGoal();
+    if (levelIndex >= LEVELS.length - 1) {
+      updateHUD();
+      showEnd(true, "You reached the final star! Every gravity well bent to your will. Bonus +" + bonus + ".");
+    } else {
+      msgEl.textContent = "Star reached! Level bonus +" + bonus + ". Next system loading...";
+      setStatus("Star reached!");
+      updateHUD();
+      setTimeout(function () { if (state !== "over") startLevel(levelIndex + 1); }, 1400);
+      state = "flying";
+    }
+  }
+
+  // ---------- Input ----------
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = evt.clientX !== undefined ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0);
+    var cy = evt.clientY !== undefined ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  function onDown(evt) {
+    if (state !== "aiming") return;
+    ensureAudio();
+    dragging = true;
+    aim = canvasPos(evt);
+    if (evt.preventDefault) evt.preventDefault();
+  }
+  function onMove(evt) {
+    if (!dragging || state !== "aiming") return;
+    aim = canvasPos(evt);
+    if (evt.preventDefault) evt.preventDefault();
+  }
+  function onUp(evt) {
+    if (!dragging || state !== "aiming") return;
+    dragging = false;
+    var L = currentLevel();
+    var dx = L.start.x - aim.x, dy = L.start.y - aim.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 12) { msgEl.textContent = "Drag farther for a stronger launch."; return; }
+    if (fuel < 15) { msgEl.textContent = "Not enough fuel to launch. Restart the level."; return; }
+    var power = Math.min(dist * 1.6, 420);
+    var len = Math.max(dist, 1);
+    ship.vx = (dx / len) * power;
+    ship.vy = (dy / len) * power;
+    lastAim = { x: dx, y: dy };
+    fuel = Math.max(0, fuel - 15);
+    state = "flying";
+    setStatus("In flight");
+    msgEl.textContent = "Flying! Gravity is steering you now.";
+    sfxLaunch();
+    updateHUD();
+  }
+
+  canvas.addEventListener("mousedown", onDown);
+  canvas.addEventListener("mousemove", onMove);
+  canvas.addEventListener("mouseup", onUp);
+  canvas.addEventListener("mouseleave", function () { dragging = false; });
+  canvas.addEventListener("touchstart", onDown, { passive: false });
+  canvas.addEventListener("touchmove", onMove, { passive: false });
+  canvas.addEventListener("touchend", onUp, { passive: false });
+  canvas.addEventListener("click", function () { ensureAudio(); });
+
+  document.addEventListener("keydown", function (evt) {
+    if (evt.key === "m" || evt.key === "M") { soundOn = !soundOn; msgEl.textContent = soundOn ? "Sound on." : "Sound off."; }
+    if (evt.key === "r" || evt.key === "R") { if (state !== "title") { ensureAudio(); startLevel(levelIndex); } }
+    if (evt.key === " " && state === "aiming") {
+      evt.preventDefault();
+      var L = currentLevel();
+      var len = Math.sqrt(lastAim.x * lastAim.x + lastAim.y * lastAim.y) || 1;
+      ship.vx = (lastAim.x / len) * 260; ship.vy = (lastAim.y / len) * 260;
+      fuel = Math.max(0, fuel - 15); state = "flying"; setStatus("In flight"); sfxLaunch(); updateHUD();
+    }
+    if (state === "aiming") {
+      var step = 10;
+      if (evt.key === "ArrowLeft") aim.x -= step;
+      if (evt.key === "ArrowRight") aim.x += step;
+      if (evt.key === "ArrowUp") aim.y -= step;
+      if (evt.key === "ArrowDown") aim.y += step;
+    }
+  });
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("howBtn").addEventListener("click", function () {
+    ensureAudio();
+    msgEl.textContent = "How to Play: drag to aim, release to launch, slingshot around planets, reach the glowing star. Avoid planets and the edge of space. R restarts, M toggles sound.";
+  });
+  document.getElementById("restartBtn").addEventListener("click", function () { ensureAudio(); score = 0; startLevel(0); });
+
+  // ---------- Physics + render ----------
+  function step(dt) {
+    if (state !== "flying" || !ship) return;
+    var L = currentLevel();
+    // Gravity from each planet
+    L.planets.forEach(function (p, pi) {
+      var dx = p.x - ship.x, dy = p.y - ship.y;
+      var d2 = dx * dx + dy * dy;
+      var d = Math.sqrt(d2) || 1;
+      var accel = p.g / Math.max(d2, 900);
+      ship.vx += (dx / d) * accel * dt * 60;
+      ship.vy += (dy / d) * accel * dt * 60;
+      // Slingshot bonus: fast close pass without crashing
+      if (d < p.r + 55 && d > p.r + 2 && !slingshotCounted[pi]) {
+        var speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+        if (speed > 260) {
+          slingshotCounted[pi] = true;
+          score += 100;
+          msgEl.textContent = "Slingshot! +100";
+          sfxSlingshot();
+          updateHUD();
+        }
+      }
+    });
+    ship.x += ship.vx * dt;
+    ship.y += ship.vy * dt;
+    ship.angle = Math.atan2(ship.vy, ship.vx);
+    trail.push({ x: ship.x, y: ship.y });
+    if (trail.length > 60) trail.shift();
+
+    // Crash into a planet
+    for (var i = 0; i < L.planets.length; i++) {
+      var p = L.planets[i];
+      var ddx = ship.x - p.x, ddy = ship.y - p.y;
+      if (Math.sqrt(ddx * ddx + ddy * ddy) < p.r + 8) {
+        sfxCrash();
+        loseAttempt("Crashed into a planet!");
+        return;
+      }
+    }
+    // Drifted off the edge
+    if (ship.x < -30 || ship.x > W + 30 || ship.y < -30 || ship.y > H + 30) {
+      loseAttempt("Drifted off the edge of space!");
+      return;
+    }
+    // Reached the goal star
+    var gx = ship.x - L.goal.x, gy = ship.y - L.goal.y;
+    if (Math.sqrt(gx * gx + gy * gy) < 34) {
+      winLevel();
+      return;
+    }
+    // Ran out of steam: slow drift for too long
+    elapsed += dt;
+    var spd = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+    if (spd < 12 && elapsed > 2) {
+      elapsed = 0;
+      loseAttempt("Your ship stalled in the void!");
+    }
+  }
+
+  function drawStarfield(t) {
+    ctx.fillStyle = "#07030f";
+    ctx.fillRect(0, 0, W, H);
+    stars.forEach(function (s) {
+      var a = 0.4 + 0.6 * Math.abs(Math.sin(t / 900 + s.tw));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = "#e8dcff";
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawPlanet(p, t) {
+    // Gravity well halo
+    var grad = ctx.createRadialGradient(p.x, p.y, p.r * 0.4, p.x, p.y, p.r * 3.2);
+    grad.addColorStop(0, p.color + "55");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 3.2, 0, Math.PI * 2); ctx.fill();
+    // Body
+    var body = ctx.createRadialGradient(p.x - p.r * 0.3, p.y - p.r * 0.3, 2, p.x, p.y, p.r);
+    body.addColorStop(0, "#ffffff");
+    body.addColorStop(0.35, p.color);
+    body.addColorStop(1, "#160a24");
+    ctx.fillStyle = body;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
+    // Ring
+    ctx.save();
+    ctx.translate(p.x, p.y); ctx.rotate(-0.4 + Math.sin(t / 2000) * 0.05);
+    ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(0, 0, p.r + 14, (p.r + 14) * 0.35, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore(); ctx.lineWidth = 1;
+  }
+
+  function drawGoal(g, t) {
+    var pulse = 26 + Math.sin(t / 300) * 5;
+    ctx.save();
+    ctx.translate(g.x, g.y);
+    ctx.fillStyle = "#ffd166";
+    ctx.shadowColor = "#ffd166"; ctx.shadowBlur = 30;
+    for (var i = 0; i < 4; i++) {
+      ctx.rotate(Math.PI / 2);
+      ctx.beginPath();
+      ctx.moveTo(0, -pulse - 10); ctx.lineTo(7, -7); ctx.lineTo(0, 0); ctx.lineTo(-7, -7);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fillStyle = "#fff3c4"; ctx.fill();
+    ctx.restore();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawShip() {
+    if (!ship) return;
+    // Trail
+    ctx.strokeStyle = "rgba(216,167,255,0.7)"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    trail.forEach(function (pt, idx) { if (idx === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y); });
+    ctx.stroke(); ctx.lineWidth = 1;
+    // Ship body
+    ctx.save();
+    ctx.translate(ship.x, ship.y); ctx.rotate(ship.angle);
+    ctx.fillStyle = "#d8a7ff";
+    ctx.beginPath();
+    ctx.moveTo(16, 0); ctx.lineTo(-10, -10); ctx.lineTo(-5, 0); ctx.lineTo(-10, 10);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ffd166";
+    ctx.beginPath(); ctx.arc(2, 0, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // Launch pad marker
+    var L = currentLevel();
+    ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath(); ctx.arc(L.start.x, L.start.y, 20, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function drawAim() {
+    if (state !== "aiming" || !ship) return;
+    var L = currentLevel();
+    var dx = L.start.x - aim.x, dy = L.start.y - aim.y;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ex = L.start.x + (dx / len) * Math.min(len * 0.9, 150);
+    var ey = L.start.y + (dy / len) * Math.min(len * 0.9, 150);
+    ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(L.start.x, L.start.y); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.fillStyle = "#ffd166";
+    ctx.beginPath(); ctx.arc(ex, ey, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "#f5eefc"; ctx.font = "14px Verdana";
+    ctx.fillText("Drag to aim — release to launch", 20, 30);
+    // Predicted dotted arc (simple gravity preview, 40 steps)
+    var px = L.start.x, py = L.start.y;
+    var pvx = (dx / len) * Math.min(len * 1.6, 420);
+    var pvy = (dy / len) * Math.min(len * 1.6, 420);
+    ctx.fillStyle = "rgba(255,209,102,0.55)";
+    for (var s = 0; s < 40; s++) {
+      L.planets.forEach(function (p) {
+        var ddx = p.x - px, ddy = p.y - py;
+        var d2 = ddx * ddx + ddy * ddy, d = Math.sqrt(d2) || 1;
+        var a = p.g / Math.max(d2, 900);
+        pvx += (ddx / d) * a * 0.28; pvy += (ddy / d) * a * 0.28;
+      });
+      px += pvx * 0.016; py += pvy * 0.016;
+      if (s % 3 === 0) { ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI * 2); ctx.fill(); }
+    }
+  }
+
+  function render(t) {
+    drawStarfield(t);
+    var L = currentLevel();
+    L.planets.forEach(function (p) { drawPlanet(p, t); });
+    drawGoal(L.goal, t);
+    drawShip();
+    drawAim();
+  }
+
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min((ts - lastTime) / 1000, 0.05);
+    lastTime = ts;
+    if (state === "flying") step(dt);
+    render(ts);
+    requestAnimationFrame(loop);
+  }
+
+  // Init
+  resetShip();
+  updateHUD();
+  buildLevelButtons();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

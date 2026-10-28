@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lunar Luthier — Moon-Note Plucking</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#0a0e27; font-family:Georgia, 'Times New Roman', serif; }
+  #wrap { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; padding:10px; }
+  h1 { color:#f5d76e; font-size:clamp(22px,5vw,38px); letter-spacing:2px; text-shadow:0 0 18px rgba(245,215,110,.6); margin-bottom:4px; }
+  .sub { color:#a8b6e8; font-size:13px; margin-bottom:10px; letter-spacing:1px; }
+  #hud { display:flex; gap:14px; color:#e8ecff; font-size:15px; margin-bottom:8px; flex-wrap:wrap; justify-content:center; }
+  #hud b { color:#f5d76e; }
+  #hud .lives b { color:#ff7a9e; }
+  #stage { position:relative; width:min(92vw, 460px); height:min(62vh, 560px); }
+  canvas { width:100%; height:100%; display:block; border:2px solid #3a4470; border-radius:14px; background:linear-gradient(180deg,#141b3f 0%,#0a0e27 70%,#1a1430 100%); box-shadow:0 0 30px rgba(90,110,220,.35); touch-action:none; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:22px; background:rgba(6,8,22,.86); border-radius:14px; color:#e8ecff; z-index:5; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { color:#f5d76e; font-size:26px; margin-bottom:10px; }
+  .overlay p { font-size:14px; line-height:1.55; margin:6px 0; max-width:340px; }
+  .overlay .keys { background:#1c2447; border:1px solid #3a4470; border-radius:10px; padding:10px 14px; margin:10px 0; font-size:13px; line-height:1.7; }
+  .overlay .keys span { display:inline-block; background:#f5d76e; color:#141021; font-weight:bold; border-radius:5px; padding:1px 8px; margin:0 2px; font-family:monospace; }
+  button { margin-top:14px; padding:13px 30px; font-size:18px; font-weight:bold; color:#141021; background:#f5d76e; border:none; border-radius:30px; cursor:pointer; box-shadow:0 4px 0 #b89a2e, 0 0 20px rgba(245,215,110,.5); }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b89a2e; }
+  button.secondary { background:#8ea2ff; box-shadow:0 4px 0 #5a6fc4; }
+  #result { font-size:20px; color:#f5d76e; margin:8px 0; }
+  #finalStats { font-size:15px; line-height:1.7; color:#cdd6ff; }
+  .judge { color:#7dffb0; font-weight:bold; }
+  footer { color:#6d7ab0; font-size:11px; margin-top:8px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#127769; LUNAR LUTHIER</h1>
+  <div class="sub">Pluck the falling moon-notes on your celestial lute</div>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Combo: <b id="combo">0</b></span>
+    <span class="lives">Lives: <b id="lives">&#10084;&#10084;&#10084;</b></span>
+    <span>Notes: <b id="progress">0 / 60</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="460" height="560"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>&#127769; Lunar Luthier</h2>
+      <p>You are the keeper of a moonlit lute. Moon-notes drift down four glowing strings. Pluck each one exactly as it crosses the golden hit line!</p>
+      <div class="keys">
+        Press <span>D</span> <span>F</span> <span>J</span> <span>K</span> for lanes 1&ndash;4<br>
+        Or <b>tap / click</b> a lane directly<br>
+        Perfect = 100 &nbsp; Good = 50 &nbsp; Miss = lose a life
+      </div>
+      <p>Survive all 60 notes with at least one life left to tune the moon and win. Lose all 3 lives and the night goes silent.</p>
+      <button id="startBtn">▶ Start Plucking</button>
+      <p style="font-size:12px;color:#8a96c8;">Sound starts only after you press Start. No downloads, fully offline.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">Game Over</h2>
+      <div id="result"></div>
+      <div id="finalStats"></div>
+      <p id="endMsg"></p>
+      <button id="restartBtn">↻ Play Again</button>
+    </div>
+  </div>
+  <footer>Keyboard: D F J K &nbsp;·&nbsp; Mouse &amp; touch: tap a lane &nbsp;·&nbsp; P pauses</footer>
+</div>
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var livesEl = document.getElementById('lives');
+  var progEl = document.getElementById('progress');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+
+  var LANES = 4;
+  var laneW = W / LANES;
+  var hitY = H - 90;
+  var NOTE_SPEED = 190; // px per second
+  var TOTAL_NOTES = 60;
+  var PERFECT_WIN = 26, GOOD_WIN = 55;
+
+  var state = 'title'; // title | playing | paused | over
+  var score = 0, combo = 0, bestCombo = 0, lives = 3;
+  var perfects = 0, goods = 0, misses = 0;
+  var notes = [], particles = [], laneFlash = [0,0,0,0], judgeText = '', judgeTimer = 0, judgeColor = '#7dffb0';
+  var spawnTimer = 0, spawnIndex = 0, elapsed = 0, lastTime = 0, rafId = 0;
+  var moonPhase = 0;
+
+  // Procedural audio — created only after user presses Start.
+  var actx = null;
+  function ensureAudio(){
+    if (!actx) {
+      try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ actx = null; }
+    }
+    if (actx && actx.state === 'suspended') { actx.resume(); }
+  }
+  var LANE_FREQ = [220.00, 261.63, 329.63, 440.00]; // A3 C4 E4 A4 — lute-like open strings
+  function pluck(lane, quality){
+    if (!actx) return;
+    var t = actx.currentTime;
+    var osc = actx.createOscillator();
+    var gain = actx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(LANE_FREQ[lane], t);
+    osc.frequency.exponentialRampToValueAtTime(LANE_FREQ[lane] * (quality === 'perfect' ? 1.02 : 0.98), t + 0.25);
+    gain.gain.setValueAtTime(quality === 'perfect' ? 0.35 : 0.22, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    osc.connect(gain); gain.connect(actx.destination);
+    osc.start(t); osc.stop(t + 0.55);
+  }
+  function thud(){
+    if (!actx) return;
+    var t = actx.currentTime;
+    var osc = actx.createOscillator();
+    var gain = actx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(110, t);
+    osc.frequency.exponentialRampToValueAtTime(55, t + 0.25);
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    osc.connect(gain); gain.connect(actx.destination);
+    osc.start(t); osc.stop(t + 0.32);
+  }
+  function fanfare(win){
+    if (!actx) return;
+    var seq = win ? [523.25, 659.25, 783.99, 1046.50] : [392.00, 329.63, 261.63, 196.00];
+    seq.forEach(function(f, i){
+      var t = actx.currentTime + i * 0.18;
+      var osc = actx.createOscillator();
+      var gain = actx.createGain();
+      osc.type = 'sine'; osc.frequency.value = f;
+      gain.gain.setValueAtTime(0.28, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      osc.connect(gain); gain.connect(actx.destination);
+      osc.start(t); osc.stop(t + 0.42);
+    });
+  }
+
+  function buildChart(){
+    // Deterministic-ish pattern: phrases of single notes, pairs and runs, no randomness needed for fairness.
+    var chart = [];
+    var pattern = [0,1,2,3, 3,2,1,0, 0,2,1,3, 1,1,2,2, 3,0,2,1, 0,3,3,0, 2,1,3,2, 1,0,3,1, 2,2,0,3, 1,3,0,2, 3,1,2,0, 0,1,3,2, 2,0,1,3, 1,2,3,0, 0,2,1,3];
+    for (var i = 0; i < TOTAL_NOTES; i++) chart.push(pattern[i % pattern.length]);
+    return chart;
+  }
+  var chart = buildChart();
+
+  function updateHUD(){
+    scoreEl.textContent = score;
+    comboEl.textContent = combo;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, lives)) + '\u00B7'.repeat(Math.max(0, 3 - lives));
+    progEl.textContent = Math.min(spawnIndex, TOTAL_NOTES) + ' / ' + TOTAL_NOTES;
+    statusEl.textContent = state === 'playing' ? 'Playing' : state === 'paused' ? 'Paused' : state === 'over' ? 'Finished' : 'Ready';
+  }
+
+  function startGame(){
+    ensureAudio();
+    score = 0; combo = 0; bestCombo = 0; lives = 3;
+    perfects = 0; goods = 0; misses = 0;
+    notes = []; particles = []; laneFlash = [0,0,0,0];
+    judgeText = ''; judgeTimer = 0;
+    spawnTimer = 0.4; spawnIndex = 0; elapsed = 0;
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD();
+    lastTime = performance.now();
+    cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function endGame(win){
+    state = 'over';
+    cancelAnimationFrame(rafId);
+    fanfare(win);
+    document.getElementById('endTitle').textContent = win ? '\u2728 The Moon Is Tuned! You Win!' : '\u263E The Night Goes Silent';
+    document.getElementById('result').innerHTML = win ? '<span class="judge">WIN</span>' : '<span style="color:#ff7a9e">GAME OVER</span>';
+    document.getElementById('finalStats').innerHTML =
+      'Score: <b>' + score + '</b><br>Perfect: ' + perfects + ' &nbsp; Good: ' + goods + ' &nbsp; Miss: ' + misses +
+      '<br>Best Combo: ' + bestCombo + ' &nbsp; Lives Left: ' + lives;
+    document.getElementById('endMsg').textContent = win
+      ? 'The lute sings and the moon glows brighter. Beautiful playing!'
+      : 'The strings fall quiet. Press Play Again and try a cleaner run.';
+    endScreen.classList.remove('hidden');
+    updateHUD();
+  }
+
+  function spawnNote(){
+    if (spawnIndex >= TOTAL_NOTES) return;
+    notes.push({ lane: chart[spawnIndex], y: -30, hit: false });
+    spawnIndex++;
+  }
+
+  function burst(x, y, color){
+    for (var i = 0; i < 14; i++){
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 220, vy: (Math.random() - 0.5) * 220 - 40, life: 0.6, color: color });
+    }
+  }
+
+  function hitLane(lane){
+    if (state !== 'playing') return;
+    laneFlash[lane] = 0.22;
+    // Find nearest unhit note in this lane near the hit line.
+    var best = -1, bestDist = 1e9;
+    for (var i = 0; i < notes.length; i++){
+      if (notes[i].lane !== lane || notes[i].hit) continue;
+      var d = Math.abs(notes[i].y - hitY);
+      if (d < bestDist){ bestDist = d; best = i; }
+    }
+    if (best === -1 || bestDist > GOOD_WIN){
+      // Whiff: small combo break, no life lost (only true misses cost lives).
+      combo = 0; judgeText = 'Too early / late'; judgeColor = '#8a96c8'; judgeTimer = 0.8;
+      updateHUD(); return;
+    }
+    var n = notes[best]; n.hit = true;
+    var cx = lane * laneW + laneW / 2;
+    if (bestDist <= PERFECT_WIN){
+      score += 100; combo++; perfects++;
+      judgeText = 'PERFECT!'; judgeColor = '#7dffb0'; pluck(lane, 'perfect'); burst(cx, hitY, '#f5d76e');
+    } else {
+      score += 50; combo++; goods++;
+      judgeText = 'Good'; judgeColor = '#8ea2ff'; pluck(lane, 'good'); burst(cx, hitY, '#8ea2ff');
+    }
+    if (combo > bestCombo) bestCombo = combo;
+    judgeTimer = 0.9;
+    notes.splice(best, 1);
+    updateHUD();
+  }
+
+  function loop(now){
+    if (state !== 'playing'){ draw(); return; }
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    elapsed += dt;
+    moonPhase += dt * 0.15;
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0 && spawnIndex < TOTAL_NOTES){
+      spawnNote();
+      spawnTimer = 0.62; // steady tempo
+    }
+    for (var i = notes.length - 1; i >= 0; i--){
+      notes[i].y += NOTE_SPEED * dt;
+      if (notes[i].y > hitY + GOOD_WIN && !notes[i].hit){
+        notes.splice(i, 1);
+        misses++; combo = 0; lives--;
+        judgeText = 'MISS'; judgeColor = '#ff7a9e'; judgeTimer = 0.9;
+        thud(); updateHUD();
+        if (lives <= 0){ draw(); endGame(false); return; }
+      }
+    }
+    for (var j = 0; j < 4; j++) if (laneFlash[j] > 0) laneFlash[j] -= dt;
+    if (judgeTimer > 0) judgeTimer -= dt;
+    for (var p = particles.length - 1; p >= 0; p--){
+      var pt = particles[p];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 180 * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    if (spawnIndex >= TOTAL_NOTES && notes.length === 0){
+      draw(); endGame(true); return;
+    }
+    updateHUD();
+    draw();
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    // Starfield
+    ctx.fillStyle = '#ffffff';
+    for (var s = 0; s < 60; s++){
+      var sx = (s * 97) % W, sy = (s * 53 + 17) % (H - 120);
+      ctx.globalAlpha = 0.25 + 0.35 * Math.abs(Math.sin(moonPhase + s));
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    // Moon
+    var mx = W - 62, my = 58;
+    ctx.beginPath(); ctx.arc(mx, my, 30, 0, Math.PI * 2);
+    ctx.fillStyle = '#f5d76e'; ctx.fill();
+    ctx.beginPath(); ctx.arc(mx - 10, my - 6, 6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(200,170,70,.55)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + 8, my + 10, 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(200,170,70,.55)'; ctx.fill();
+    // Lanes
+    var laneColors = ['#ff7a9e', '#f5d76e', '#7dffb0', '#8ea2ff'];
+    for (var l = 0; l < LANES; l++){
+      var x = l * laneW;
+      ctx.fillStyle = laneFlash[l] > 0 ? 'rgba(255,255,255,.14)' : 'rgba(255,255,255,.04)';
+      ctx.fillRect(x, 0, laneW, H);
+      ctx.strokeStyle = 'rgba(160,175,230,.35)';
+      ctx.beginPath(); ctx.moveTo(x + laneW / 2, 0); ctx.lineTo(x + laneW / 2, H); ctx.stroke();
+      // String line
+      ctx.strokeStyle = laneColors[l];
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x + laneW / 2, 0); ctx.lineTo(x + laneW / 2, H); ctx.stroke();
+      ctx.lineWidth = 1;
+      // Lane key label at bottom
+      ctx.fillStyle = '#a8b6e8';
+      ctx.font = 'bold 15px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(['D','F','J','K'][l], x + laneW / 2, H - 18);
+    }
+    // Hit zone
+    ctx.fillStyle = 'rgba(245,215,110,.18)';
+    ctx.fillRect(0, hitY - 34, W, 68);
+    ctx.strokeStyle = '#f5d76e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, hitY); ctx.lineTo(W, hitY); ctx.stroke();
+    ctx.lineWidth = 1;
+    // Notes: crescent moon-notes
+    for (var i = 0; i < notes.length; i++){
+      var n = notes[i];
+      var cx = n.lane * laneW + laneW / 2;
+      var col = laneColors[n.lane];
+      ctx.beginPath(); ctx.arc(cx, n.y, 20, 0, Math.PI * 2);
+      ctx.fillStyle = col; ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + 7, n.y - 4, 15, 0, Math.PI * 2);
+      ctx.fillStyle = '#141b3f'; ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(['D','F','J','K'][n.lane], cx - 2, n.y + 5);
+    }
+    // Particles
+    particles.forEach(function(pt){
+      ctx.globalAlpha = Math.max(0, pt.life / 0.6);
+      ctx.fillStyle = pt.color;
+      ctx.fillRect(pt.x, pt.y, 4, 4);
+    });
+    ctx.globalAlpha = 1;
+    // Judge text
+    if (judgeTimer > 0){
+      ctx.fillStyle = judgeColor;
+      ctx.font = 'bold 26px Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(judgeText, W / 2, hitY - 70);
+    }
+    if (state === 'title'){
+      ctx.fillStyle = 'rgba(232,236,255,.75)';
+      ctx.font = '16px Georgia, serif'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and pluck the moon-notes', W / 2, H / 2);
+    }
+    if (state === 'paused'){
+      ctx.fillStyle = 'rgba(232,236,255,.9)';
+      ctx.font = 'bold 28px Georgia, serif'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED — press P to resume', W / 2, H / 2);
+    }
+  }
+
+  var KEYMAP = { KeyD: 0, KeyF: 1, KeyJ: 2, KeyK: 3 };
+  document.addEventListener('keydown', function(e){
+    if (e.code === 'KeyP' && state === 'playing'){ state = 'paused'; cancelAnimationFrame(rafId); updateHUD(); draw(); return; }
+    if (e.code === 'KeyP' && state === 'paused'){ state = 'playing'; lastTime = performance.now(); rafId = requestAnimationFrame(loop); updateHUD(); return; }
+    if (KEYMAP[e.code] !== undefined){ hitLane(KEYMAP[e.code]); }
+  });
+
+  function laneFromEvent(e){
+    var rect = canvas.getBoundingClientRect();
+    var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var x = (clientX - rect.left) * (W / rect.width);
+    return Math.max(0, Math.min(LANES - 1, Math.floor(x / laneW)));
+  }
+  canvas.addEventListener('mousedown', function(e){ hitLane(laneFromEvent(e)); });
+  canvas.addEventListener('click', function(e){ /* click also supported; mousedown already plucks */ });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); hitLane(laneFromEvent(e)); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  updateHUD();
+  draw();
+})();
+</script>
+</body>
+</html>

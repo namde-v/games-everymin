@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 400
-- **Latest game:** 0400 — Jubilee Jester
+- **Total games:** 410
+- **Latest game:** 0410 — Velvet Voyager
 - **Current volume:** 005 (Games 0401 to 0500)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -17,7 +17,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 | 004 | 0301–0400 (100, complete) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
-| 005 | 0401–0500 (0 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
+| 005 | 0401–0500 (10 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -31,22 +31,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 040
+## Latest batch — Batch 041
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0391 | Polaris Bowmaster | Arcade / Archery Timing | [Play](./games/game-0391.html) |
-| 0392 | Brine Brigadier | Strategy / Naval Blockade Tactics | [Play](./games/game-0392.html) |
-| 0393 | Cobalt Courier | Puzzle / Delivery Route Optimization | [Play](./games/game-0393.html) |
-| 0394 | Dune Diplomat | Strategy / Negotiation Choices | [Play](./games/game-0394.html) |
-| 0395 | Ember Acrobat | Rhythm / Beat Leap Timing | [Play](./games/game-0395.html) |
-| 0396 | Fjord Forager | Arcade / Foraging Identification | [Play](./games/game-0396.html) |
-| 0397 | Granite Gardener | Puzzle / Stone Pushing | [Play](./games/game-0397.html) |
-| 0398 | Harbor Harpist | Rhythm / Melody Matching | [Play](./games/game-0398.html) |
-| 0399 | Ivory Inventor | Puzzle / Contraption Wiring | [Play](./games/game-0399.html) |
-| 0400 | Jubilee Jester | Arcade / Balloon Pop Precision | [Play](./games/game-0400.html) |
-
-
+| 0401 | Lunar Luthier | Rhythm / Moon-Note Plucking | [Play](./games/game-0401.html) |
+| 0402 | Mossy Mechanic | Puzzle / Gear Connection | [Play](./games/game-0402.html) |
+| 0403 | Obsidian Outrider | Arcade / Desert Lane Rider | [Play](./games/game-0403.html) |
+| 0404 | Parchment Paladin | Strategy / Turn-Based Card Duel | [Play](./games/game-0404.html) |
+| 0405 | Quiver Quartermaster | Puzzle / Arrow Sorting Stacks | [Play](./games/game-0405.html) |
+| 0406 | Rustic Ranger | Arcade / Slingshot Target Precision | [Play](./games/game-0406.html) |
+| 0407 | Sapphire Sommelier | Puzzle / Blend Deduction | [Play](./games/game-0407.html) |
+| 0408 | Tidal Tinkerer | Strategy / Tide Defense Building | [Play](./games/game-0408.html) |
+| 0409 | Umbral Undertaker | Arcade / Shadow Stealth Maze | [Play](./games/game-0409.html) |
+| 0410 | Velvet Voyager | Arcade / Gravity Slingshot Navigation | [Play](./games/game-0410.html) |
 
 ## Quality standard
 

@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Tidal Tinkerer</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #0b2530; color: #f2ead8; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { margin: 12px 0 4px; font-size: 30px; letter-spacing: 1px; color: #ffd166; text-shadow: 2px 2px 0 #123; }
+  .sub { color: #9fd8e8; margin-bottom: 10px; font-size: 14px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 8px; }
+  .stat { background: #14394a; border: 2px solid #2a6b80; border-radius: 8px; padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .stat span { color: #ffd166; }
+  #tools { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 8px; }
+  button { cursor: pointer; font-family: inherit; font-weight: bold; border: 2px solid #ffd166; background: #1d5566; color: #fff; border-radius: 8px; padding: 8px 14px; font-size: 14px; }
+  button:hover { background: #2a7a8c; }
+  button.sel { background: #ffd166; color: #123; }
+  button.big { font-size: 20px; padding: 12px 26px; }
+  button.danger { border-color: #ff6b6b; background: #7a2e2e; }
+  #wrap { position: relative; }
+  canvas { display: block; background: #e8d9a8; border: 4px solid #2a6b80; border-radius: 10px; touch-action: none; max-width: 96vw; height: auto; }
+  .overlay { position: absolute; inset: 0; background: rgba(6, 28, 38, 0.93); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 18px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffd166; font-size: 34px; margin: 6px 0; }
+  .overlay p, .overlay li { font-size: 14px; line-height: 1.55; }
+  .overlay ul { text-align: left; max-width: 480px; margin: 8px auto; }
+  #msg { min-height: 22px; font-size: 14px; color: #9fd8e8; margin: 4px 0 10px; text-align: center; }
+  .legend { font-size: 12px; color: #cfe8ef; margin-bottom: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>&#127754; Tidal Tinkerer</h1>
+<div class="sub">Strategy / Tide Defense Building &mdash; hold the shoreline, save the village!</div>
+
+<div id="hud">
+  <div class="stat">Resources: <span id="res">20</span></div>
+  <div class="stat">Wave: <span id="wave">0 / 8</span></div>
+  <div class="stat">Village HP: <span id="hp">20</span></div>
+  <div class="stat">Score: <span id="score">0</span></div>
+  <div class="stat">Status: <span id="status">Title</span></div>
+</div>
+
+<div id="tools">
+  <button id="tool-barrier" onclick="selectTool('barrier')">&#129716; Sand Barrier (2) [1]</button>
+  <button id="tool-gate" onclick="selectTool('gate')">&#128682; Tide Gate (5) [2]</button>
+  <button id="tool-pump" onclick="selectTool('pump')">&#128167; Pump (6) [3]</button>
+  <button id="waveBtn" onclick="releaseWave()">&#127754; Release Wave [Space]</button>
+  <button onclick="restartGame()">Restart [R]</button>
+</div>
+
+<div id="wrap">
+  <canvas id="cv" width="648" height="432"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>&#127754; Tidal Tinkerer</h2>
+    <p><b>How to Play</b></p>
+    <ul>
+      <li>The sea is at the top, your village at the bottom. Between them lies open shoreline where you build defenses.</li>
+      <li><b>Build phase:</b> pick a tool, then click or tap a shoreline tile to place it. Click a placed structure to sell it back for half price.</li>
+      <li><b>Sand Barrier (2):</b> absorbs 2 surging water units before washing away.</li>
+      <li><b>Tide Gate (5):</b> a sturdy gate that absorbs 5 water units.</li>
+      <li><b>Pump (6):</b> sucks up to 3 water units that pass beside it during each wave.</li>
+      <li><b>Release the wave</b> when ready. Water rushes down each column; anything reaching the bottom row damages the village.</li>
+      <li>Earn resources after every survived wave. Survive all <b>8 waves</b> to win. If village HP hits 0, the village is lost.</li>
+      <li>Keys: 1/2/3 select tools, arrows move the cursor, Enter places, Space releases a wave, R restarts.</li>
+    </ul>
+    <button class="big" id="startBtn" onclick="startGame()">&#9654; Start Game</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Victory!</h2>
+    <p id="endText"></p>
+    <p>Final Score: <b id="endScore">0</b></p>
+    <button class="big" onclick="restartGame()">&#8635; Play Again</button>
+  </div>
+</div>
+
+<div id="msg">Press Start to begin building your defenses.</div>
+<div class="legend">Click / tap a shoreline tile to build &bull; click a structure to sell it &bull; keyboard fully supported</div>
+
+<script>
+(function () {
+  'use strict';
+  var COLS = 12, ROWS = 8, CELL = 54, TOTAL_WAVES = 8;
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var COST = { barrier: 2, gate: 5, pump: 6 };
+  var MAXHP = { barrier: 2, gate: 5, pump: 99 };
+
+  var phase = 'title'; // title | build | wave | end
+  var resources = 20, score = 0, villageHP = 20, wave = 0;
+  var tool = 'barrier';
+  var grid = [], houses = [], units = [], spawnQueue = [];
+  var cursor = { c: 5, r: 3 };
+  var lastTick = 0, spawnTimer = 0, time = 0, splash = [];
+
+  function makeGrid() {
+    grid = [];
+    houses = [];
+    for (var r = 0; r < ROWS; r++) {
+      var row = [];
+      for (var c = 0; c < COLS; c++) {
+        var type = r < 2 ? 'sea' : (r < 6 ? 'shore' : 'village');
+        var cell = { type: type, struct: null, house: false, alive: true };
+        if (type === 'village' && Math.random() < 0.62) { cell.house = true; houses.push(cell); }
+        row.push(cell);
+      }
+      grid.push(row);
+    }
+  }
+
+  function resetGame() {
+    resources = 20; score = 0; villageHP = 20; wave = 0;
+    units = []; spawnQueue = []; splash = [];
+    tool = 'barrier'; phase = 'build';
+    makeGrid();
+    updateHUD('Build defenses, then release Wave 1.');
+    selectTool('barrier');
+  }
+
+  function startGame() {
+    initAudio();
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    resetGame();
+    playTone(523, 0.12); setTimeout(function () { playTone(659, 0.12); }, 120);
+    setTimeout(function () { playTone(784, 0.18); }, 240);
+  }
+
+  function restartGame() {
+    initAudio();
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    resetGame();
+    playTone(440, 0.1);
+  }
+
+  function endGame(won) {
+    phase = 'end';
+    var t = document.getElementById('endTitle');
+    var x = document.getElementById('endText');
+    if (won) {
+      score += villageHP * 25 + resources * 5;
+      t.textContent = '\u2600 Victory! The village stands!';
+      x.textContent = 'You held back all ' + TOTAL_WAVES + ' waves. The tide retreats and the village celebrates its tinkerer.';
+      playWin();
+    } else {
+      t.textContent = '\ud83c\udf0a Defeat... The village floods.';
+      x.textContent = 'The final wave swept through the last homes. Rebuild stronger and try again.';
+      playLose();
+    }
+    document.getElementById('endScore').textContent = score;
+    document.getElementById('endScreen').classList.remove('hidden');
+    updateHUD(won ? 'Victory!' : 'Game Over');
+  }
+
+  function selectTool(t) {
+    tool = t;
+    ['barrier', 'gate', 'pump'].forEach(function (k) {
+      document.getElementById('tool-' + k).classList.toggle('sel', k === t);
+    });
+  }
+
+  function cellAt(px, py) {
+    var rect = cv.getBoundingClientRect();
+    var x = (px - rect.left) * (cv.width / rect.width);
+    var y = (py - rect.top) * (cv.height / rect.height);
+    return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) };
+  }
+
+  function placeAt(c, r) {
+    if (phase !== 'build') return;
+    if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return;
+    var cell = grid[r][c];
+    if (cell.type !== 'shore') { setMsg('Only shoreline tiles (the sandy middle rows) can hold structures.'); return; }
+    if (cell.struct) {
+      var refund = Math.floor(COST[cell.struct.kind] / 2);
+      resources += refund;
+      cell.struct = null;
+      setMsg('Sold structure for +' + refund + ' resources.');
+      playTone(330, 0.08);
+    } else {
+      var cost = COST[tool];
+      if (resources < cost) { setMsg('Not enough resources for that! Survive a wave to earn more.'); playTone(140, 0.15); return; }
+      resources -= cost;
+      cell.struct = { kind: tool, hp: MAXHP[tool], cap: 3 };
+      setMsg('Placed ' + tool + ' (' + cost + ' resources).');
+      playTone(600, 0.09);
+    }
+    updateHUD('Build phase');
+  }
+
+  function releaseWave() {
+    if (phase !== 'build') return;
+    wave++;
+    phase = 'wave';
+    var count = 8 + wave * 3;
+    spawnQueue = [];
+    for (var i = 0; i < count; i++) {
+      var col = Math.floor(Math.random() * COLS);
+      if (i > 0 && Math.random() < 0.45) col = spawnQueue[i - 1].c; // clusters surge together
+      spawnQueue.push({ c: col, r: 1 });
+    }
+    spawnTimer = 0;
+    lastTick = time;
+    setMsg('Wave ' + wave + ' is coming in! ' + count + ' surges on the way.');
+    updateHUD('Wave ' + wave + ' incoming!');
+    playTone(196, 0.35, 'sawtooth');
+  }
+
+  function pumpNear(c, r) {
+    for (var dr = -1; dr <= 1; dr++) {
+      for (var dc = -1; dc <= 1; dc++) {
+        var rr = r + dr, cc = c + dc;
+        if (rr < 0 || rr >= ROWS || cc < 0 || cc >= COLS) continue;
+        var s = grid[rr][cc].struct;
+        if (s && s.kind === 'pump' && s.cap > 0) { s.cap--; return true; }
+      }
+    }
+    return false;
+  }
+
+  function waveStep() {
+    // spawn a few units per step so the surge staggers in
+    var n = Math.min(3, spawnQueue.length);
+    for (var i = 0; i < n; i++) {
+      var u = spawnQueue.shift();
+      units.push({ c: u.c, r: u.r, y: u.r });
+    }
+    var next = [];
+    for (var j = 0; j < units.length; j++) {
+      var unit = units[j];
+      var nr = unit.r + 1;
+      if (nr >= ROWS) {
+        damageVillage(unit.c);
+        continue;
+      }
+      var cell = grid[nr][unit.c];
+      if (cell.struct) {
+        var st = cell.struct;
+        if (st.kind === 'pump') {
+          if (st.cap > 0) { st.cap--; splash.push({ c: unit.c, r: nr, t: time }); }
+          else { unit.r = nr; next.push(unit); }
+        } else {
+          st.hp--;
+          splash.push({ c: unit.c, r: nr, t: time });
+          if (st.hp <= 0) cell.struct = null;
+          // unit is absorbed by the structure
+        }
+      } else if (pumpNear(unit.c, nr)) {
+        splash.push({ c: unit.c, r: nr, t: time });
+      } else {
+        unit.r = nr;
+        next.push(unit);
+      }
+    }
+    units = next;
+    if (units.length === 0 && spawnQueue.length === 0 && phase === 'wave') {
+      if (villageHP <= 0) { endGame(false); return; }
+      if (wave >= TOTAL_WAVES) { endGame(true); return; }
+      var earn = 12 + wave * 2;
+      resources += earn;
+      score += 150 + wave * 25;
+      phase = 'build';
+      setMsg('Wave ' + wave + ' held! +' + earn + ' resources, +' + (150 + wave * 25) + ' score. Build for wave ' + (wave + 1) + '.');
+      updateHUD('Build phase');
+      playTone(784, 0.12); setTimeout(function () { playTone(1046, 0.16); }, 130);
+    }
+  }
+
+  function damageVillage(c) {
+    villageHP--;
+    splash.push({ c: c, r: ROWS - 1, t: time });
+    var alive = houses.filter(function (h) { return h.alive; });
+    if (alive.length) alive[Math.floor(Math.random() * alive.length)].alive = false;
+    playTone(130, 0.25, 'sawtooth');
+    updateHUD('Village damaged!');
+    if (villageHP <= 0) { endGame(false); }
+  }
+
+  function setMsg(m) { document.getElementById('msg').textContent = m; }
+
+  function updateHUD(status) {
+    document.getElementById('res').textContent = resources;
+    document.getElementById('wave').textContent = wave + ' / ' + TOTAL_WAVES;
+    document.getElementById('hp').textContent = villageHP;
+    document.getElementById('score').textContent = score;
+    if (status) document.getElementById('status').textContent = status;
+  }
+
+  // ---------- procedural audio (created only after a click) ----------
+  var AC = null;
+  function initAudio() {
+    if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; } }
+    if (AC && AC.state === 'suspended') AC.resume();
+  }
+  function playTone(freq, dur, type) {
+    if (!AC) return;
+    var o = AC.createOscillator(), g = AC.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.12, AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(); o.stop(AC.currentTime + dur);
+  }
+  function playWin() {
+    [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { playTone(f, 0.25); }, i * 150); });
+  }
+  function playLose() {
+    [392, 330, 262, 196].forEach(function (f, i) { setTimeout(function () { playTone(f, 0.3, 'triangle'); }, i * 170); });
+  }
+
+  // ---------- input ----------
+  cv.addEventListener('mousedown', function (e) { initAudio(); var p = cellAt(e.clientX, e.clientY); cursor = p; placeAt(p.c, p.r); });
+  cv.addEventListener('click', function (e) { initAudio(); });
+  cv.addEventListener('touchstart', function (e) {
+    e.preventDefault(); initAudio();
+    var t = e.changedTouches[0];
+    var p = cellAt(t.clientX, t.clientY); cursor = p; placeAt(p.c, p.r);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (phase === 'title' && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    if (phase === 'end' && (e.key === 'Enter' || e.key === 'r' || e.key === 'R')) { restartGame(); return; }
+    if (e.key === '1') selectTool('barrier');
+    else if (e.key === '2') selectTool('gate');
+    else if (e.key === '3') selectTool('pump');
+    else if (e.key === 'r' || e.key === 'R') restartGame();
+    else if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); releaseWave(); }
+    else if (e.key === 'ArrowLeft') cursor.c = Math.max(0, cursor.c - 1);
+    else if (e.key === 'ArrowRight') cursor.c = Math.min(COLS - 1, cursor.c + 1);
+    else if (e.key === 'ArrowUp') cursor.r = Math.max(0, cursor.r - 1);
+    else if (e.key === 'ArrowDown') cursor.r = Math.min(ROWS - 1, cursor.r + 1);
+    else if (e.key === 'Enter') placeAt(cursor.c, cursor.r);
+  });
+
+  // ---------- drawing ----------
+  function draw() {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    for (var r = 0; r < ROWS; r++) {
+      for (var c = 0; c < COLS; c++) {
+        var cell = grid[r][c];
+        var x = c * CELL, y = r * CELL;
+        if (cell.type === 'sea') ctx.fillStyle = (r === 0) ? '#2a7da6' : '#4aa8c8';
+        else if (cell.type === 'shore') ctx.fillStyle = '#e8d9a8';
+        else ctx.fillStyle = '#7fb069';
+        ctx.fillRect(x, y, CELL, CELL);
+        ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+        if (cell.type === 'sea' && r === 1) {
+          ctx.fillStyle = 'rgba(255,255,255,0.35)';
+          var wob = Math.sin(time / 400 + c) * 3;
+          ctx.beginPath(); ctx.arc(x + CELL / 2, y + CELL / 2 + wob, 4, 0, Math.PI * 2); ctx.fill();
+        }
+        if (cell.house && cell.alive) {
+          ctx.fillStyle = '#b5654a'; ctx.fillRect(x + 14, y + 20, 26, 20);
+          ctx.fillStyle = '#7a2e2e';
+          ctx.beginPath(); ctx.moveTo(x + 10, y + 21); ctx.lineTo(x + 27, y + 6); ctx.lineTo(x + 44, y + 21); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = '#ffe9a8'; ctx.fillRect(x + 23, y + 28, 8, 12);
+        } else if (cell.house && !cell.alive) {
+          ctx.fillStyle = 'rgba(60,50,40,0.55)'; ctx.fillRect(x + 14, y + 26, 26, 14);
+        }
+        if (cell.struct) {
+          if (cell.struct.kind === 'barrier') {
+            ctx.fillStyle = '#c19a5b';
+            ctx.beginPath(); ctx.moveTo(x + 6, y + 46); ctx.lineTo(x + 27, y + 14); ctx.lineTo(x + 48, y + 46); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#8a6a35'; ctx.fillRect(x + 6, y + 44, 42, 4);
+          } else if (cell.struct.kind === 'gate') {
+            ctx.fillStyle = '#5b7d8c'; ctx.fillRect(x + 8, y + 10, 10, 36);
+            ctx.fillRect(x + 36, y + 10, 10, 36);
+            ctx.fillStyle = '#2f6f8f'; ctx.fillRect(x + 8, y + 14, 38, 22);
+            ctx.fillStyle = '#9fd8e8'; ctx.fillRect(x + 12, y + 18, 30, 4);
+          } else {
+            ctx.fillStyle = '#3e7d4e'; ctx.fillRect(x + 12, y + 14, 30, 30);
+            ctx.fillStyle = '#d8f3dc'; ctx.beginPath(); ctx.arc(x + 27, y + 29, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#123'; ctx.font = 'bold 11px Verdana'; ctx.fillText(cell.struct.cap, x + 23, y + 33);
+          }
+          ctx.fillStyle = '#123'; ctx.font = 'bold 11px Verdana';
+          if (cell.struct.kind !== 'pump') ctx.fillText(cell.struct.hp, x + 23, y + 50);
+        }
+      }
+    }
+    // water units
+    units.forEach(function (u) {
+      var x = u.c * CELL + CELL / 2, y = u.r * CELL + CELL / 2;
+      ctx.fillStyle = 'rgba(30,120,200,0.85)';
+      ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath(); ctx.arc(x - 5, y - 5, 5, 0, Math.PI * 2); ctx.fill();
+    });
+    // splashes
+    splash = splash.filter(function (s) { return time - s.t < 400; });
+    splash.forEach(function (s) {
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.8 * (1 - (time - s.t) / 400)).toFixed(2) + ')';
+      ctx.beginPath(); ctx.arc(s.c * CELL + CELL / 2, s.r * CELL + CELL / 2, 20, 0, Math.PI * 2); ctx.fill();
+    });
+    // cursor in build phase
+    if (phase === 'build') {
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+      ctx.strokeRect(cursor.c * CELL + 2, cursor.r * CELL + 2, CELL - 4, CELL - 4);
+      ctx.lineWidth = 1;
+    }
+  }
+
+  function loop(ts) {
+    time = ts;
+    if (phase === 'wave' && ts - lastTick > 420) {
+      lastTick = ts;
+      waveStep();
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  makeGrid();
+  updateHUD('Title');
+  selectTool('barrier');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

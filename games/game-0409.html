@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Umbral Undertaker — Shadow Stealth Maze</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #07060d; color: #e8e2d4; font-family: Georgia, 'Times New Roman', serif; overflow: hidden; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 10px; gap: 10px; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #c9a86a; text-shadow: 0 0 18px rgba(201,168,106,.45); text-align: center; }
+  h1 span { display: block; font-size: 13px; letter-spacing: 4px; color: #9a8fb5; margin-top: 4px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 720px; }
+  .pill { background: #171326; border: 1px solid #3a3157; border-radius: 20px; padding: 7px 13px; font-size: 14px; min-width: 108px; text-align: center; }
+  .pill b { color: #ffd97a; }
+  .pill.danger { border-color: #a33; color: #ffb3b3; }
+  #stage { position: relative; width: min(94vw, 720px); aspect-ratio: 1.35; max-height: 62vh; }
+  canvas { width: 100%; height: 100%; display: block; background: #0b0918; border: 2px solid #4a3f6e; border-radius: 12px; box-shadow: 0 0 35px rgba(90,70,160,.35); touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 22px; background: rgba(5,4,12,.88); border-radius: 12px; backdrop-filter: blur(2px); }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #f2d492; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #d8d0c2; }
+  .overlay .keys { background: #1c1830; border: 1px solid #3d3460; border-radius: 10px; padding: 12px 14px; font-size: 13px; text-align: left; }
+  button { cursor: pointer; border: 0; border-radius: 999px; padding: 13px 28px; font-size: 17px; font-weight: 700; color: #17101f; background: linear-gradient(180deg, #ffe08a, #c9a86a); box-shadow: 0 4px 0 #7a5f2e; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #2c2545; color: #eee; box-shadow: 0 4px 0 #14102a; }
+  #alert { height: 22px; font-weight: 700; letter-spacing: 1px; color: #ff8a8a; }
+  #alert.safe { color: #9fe8a8; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #controls button { padding: 10px 16px; font-size: 14px; }
+  .hint { font-size: 12px; color: #9a93ad; text-align: center; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>UMBRAL UNDERTAKER<span>SHADOW STEALTH MAZE</span></h1>
+  <div id="hud">
+    <div class="pill">Score: <b id="score">0</b></div>
+    <div class="pill" id="livesPill">Lives: <b id="lives">♥♥♥</b></div>
+    <div class="pill">Relics: <b id="relics">0 / 6</b></div>
+    <div class="pill">Status: <b id="status">Hidden</b></div>
+    <div class="pill">Time: <b id="time">0:00</b></div>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="720" height="540"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>🕯️ Umbral Undertaker</h2>
+      <p>You are the undertaker of a forgotten crypt. Slip through the dark, gather six sealed relics, and reach the glowing exit — without ever stepping into a watcher's light.</p>
+      <div class="keys">
+        <b>How to Play</b><br>
+        • Move: WASD / Arrow keys, or drag / tap on the maze<br>
+        • Stay out of the yellow vision cones — walls block sight<br>
+        • Collect all 6 relics (✦), then enter the green exit gate<br>
+        • Spotted 3 times = Game Over. Crouch in shadow: slow down near walls to stay unseen.<br>
+        • Bonus: unseen relic pickups score more. Shadow pickups are worth 150, risky ones 50.
+      </div>
+      <button id="startBtn">▶ Start the Descent</button>
+      <div class="hint">Sound starts only after you press Start. Fully offline — no downloads needed.</div>
+    </div>
+    <div class="overlay hidden" id="endScreen">
+      <h2 id="endTitle">You Escaped</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">↻ Play Again</button>
+      <button class="secondary" id="menuBtn">Back to Title</button>
+    </div>
+  </div>
+  <div id="alert" class="safe">● SHADOWED — UNSEEN</div>
+  <div id="controls">
+    <button id="muteBtn">🔊 Sound: On</button>
+    <button id="pauseBtn">⏸ Pause</button>
+  </div>
+  <div class="hint">Keyboard: WASD / Arrows &nbsp;•&nbsp; Mouse: click or drag to steer &nbsp;•&nbsp; Touch: drag to steer</div>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var relicsEl = document.getElementById('relics');
+  var statusEl = document.getElementById('status');
+  var timeEl = document.getElementById('time');
+  var alertEl = document.getElementById('alert');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  // Maze: # wall, . floor, R relic, E exit, S start, W watcher patrol anchor
+  var MAP = [
+    "#####################",
+    "#S....#.....#...R...#",
+    "#.###.#.###.#.###.#.#",
+    "#...#...#...#...#.#.#",
+    "###.#.###.###.#.#.#.#",
+    "#...#.....#...#...#.#",
+    "#.#####.#.#.#####.#.#",
+    "#.....#.#...#.....#.#",
+    "#.###.#.#####.###.#R#",
+    "#.#...#.....#...#...#",
+    "#.#.###.###.#.#.###.#",
+    "#...#...#R..#.#.....#",
+    "###.#.###.#.###.###.#",
+    "#R..#.....#...#.#...#",
+    "#.###.#####.#.#.#.###",
+    "#...#.#.....#...#...#",
+    "###.#.#.###.#####.#.#",
+    "#...#...#...#R..#.#E#",
+    "#.#####.#.#.#.###.#.#",
+    "#.......#...#.....#.#",
+    "#####################"
+  ];
+  var COLS = MAP[0].length, ROWS = MAP.length;
+  var TILE = canvas.width / COLS;
+  var TILEH = canvas.height / ROWS;
+
+  var state = 'title'; // title, playing, paused, won, lost
+  var player, watchers, relics, keys, target, spottedFlash, startTime, elapsed, muted, audioCtx;
+
+  function cellAt(cx, cy){ if(cx<0||cy<0||cx>=COLS||cy>=ROWS) return '#'; return MAP[cy][cx]; }
+  function isWall(cx, cy){ return cellAt(cx, cy) === '#'; }
+  function findStart(){ for(var y=0;y<ROWS;y++) for(var x=0;x<COLS;x++) if(MAP[y][x]==='S') return {x:x,y:y}; return {x:1,y:1}; }
+  function findRelics(){ var out=[]; for(var y=0;y<ROWS;y++) for(var x=0;x<COLS;x++) if(MAP[y][x]==='R') out.push({cx:x,cy:y,taken:false, pulse: Math.random()*6}); return out; }
+
+  function reset(){
+    var s = findStart();
+    player = { x: (s.x+0.5)*TILE, y: (s.y+0.5)*TILEH, r: 10, speed: 2.3, vx: 0, vy: 0, dirX: 0, dirY: 0 };
+    relics = findRelics();
+    keys = {};
+    target = null;
+    spottedFlash = 0;
+    elapsed = 0;
+    startTime = Date.now();
+    // Watchers: patrol routes, facing angle, cone range and width
+    watchers = [
+      { path: [{x:5,y:1},{x:10,y:1},{x:10,y:3},{x:5,y:3}], idx: 0, t: 0, angle: 0, range: 115, fov: 0.75, speed: 0.55, x: 0, y: 0 },
+      { path: [{x:14,y:5},{x:18,y:5},{x:18,y:9},{x:14,y:9}], idx: 0, t: 0, angle: Math.PI, range: 105, fov: 0.7, speed: 0.5, x: 0, y: 0 },
+      { path: [{x:3,y:11},{x:7,y:11},{x:7,y:15},{x:3,y:15}], idx: 0, t: 0, angle: Math.PI/2, range: 110, fov: 0.8, speed: 0.6, x: 0, y: 0 },
+      { path: [{x:12,y:13},{x:16,y:13},{x:16,y:17},{x:12,y:17}], idx: 0, t: 0, angle: -Math.PI/2, range: 120, fov: 0.7, speed: 0.48, x: 0, y: 0 },
+      { path: [{x:8,y:7},{x:11,y:7},{x:11,y:9},{x:8,y:9}], idx: 0, t: 0, angle: 0, range: 95, fov: 0.85, speed: 0.7, x: 0, y: 0 }
+    ];
+    watchers.forEach(function(w){
+      var p = w.path[0];
+      w.x = (p.x+0.5)*TILE; w.y = (p.y+0.5)*TILEH;
+    });
+    updateHUD(0, 3, 'Hidden');
+  }
+
+  function updateHUD(score, lives, status){
+    scoreEl.textContent = score;
+    livesEl.textContent = '♥'.repeat(Math.max(0,lives)) + '♡'.repeat(Math.max(0,3-lives));
+    document.getElementById('livesPill').classList.toggle('danger', lives <= 1);
+    var got = relics ? relics.filter(function(r){return r.taken;}).length : 0;
+    relicsEl.textContent = got + ' / ' + (relics ? relics.length : 6);
+    statusEl.textContent = status;
+  }
+
+  // Audio: procedural only, created on Start
+  function ensureAudio(){
+    if(!audioCtx){
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+    }
+    if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol){
+    if(!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function playPickup(unseen){ tone(unseen ? 880 : 520, 0.22, 'triangle', 0.1); setTimeout(function(){ tone(unseen ? 1320 : 660, 0.18, 'sine', 0.08); }, 70); }
+  function playSpotted(){ tone(160, 0.35, 'sawtooth', 0.12); setTimeout(function(){ tone(110, 0.4, 'sawtooth', 0.1); }, 120); }
+  function playWin(){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.3, 'triangle', 0.1); }, i*130); }); }
+  function playLose(){ [330,262,196,131].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.35, 'sawtooth', 0.09); }, i*150); }); }
+
+  var score = 0, lives = 3;
+  function startGame(){
+    ensureAudio();
+    score = 0; lives = 3;
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    tone(440, 0.2, 'triangle', 0.1);
+    requestAnimationFrame(loop);
+  }
+  function endGame(won){
+    state = won ? 'won' : 'lost';
+    endTitle.textContent = won ? '🏆 You Escaped the Crypt!' : '💀 Caught in the Light';
+    endText.textContent = won
+      ? 'All relics recovered and the exit reached. Final score: ' + score + ' in ' + timeEl.textContent + '. The undertaker slips back into shadow, unremembered.'
+      : 'The watchers found you three times. Final score: ' + score + '. The crypt keeps its relics — for now.';
+    endScreen.classList.remove('hidden');
+    if(won) playWin(); else playLose();
+  }
+  function spotted(){
+    lives--; spottedFlash = 30; playSpotted();
+    alertEl.textContent = '⚠ SPOTTED! Lives left: ' + lives;
+    alertEl.classList.remove('safe');
+    var s = findStart();
+    player.x = (s.x+0.5)*TILE; player.y = (s.y+0.5)*TILEH; target = null;
+    updateHUD(score, lives, 'Spotted!');
+    if(lives <= 0){ setTimeout(function(){ endGame(false); }, 350); }
+  }
+
+  function losBlocked(x1, y1, x2, y2){
+    // Sample along the line; if a wall cell is crossed, sight is blocked.
+    var steps = 28, dx = (x2-x1)/steps, dy = (y2-y1)/steps;
+    for(var i=2;i<steps;i++){
+      var cx = Math.floor((x1+dx*i)/TILE), cy = Math.floor((y1+dy*i)/TILEH);
+      if(isWall(cx, cy)) return true;
+    }
+    return false;
+  }
+  function watcherSees(w){
+    var dx = player.x - w.x, dy = player.y - w.y;
+    var dist = Math.sqrt(dx*dx + dy*dy);
+    if(dist > w.range) return false;
+    var ang = Math.atan2(dy, dx);
+    var diff = Math.abs(((ang - w.angle + Math.PI*3) % (Math.PI*2)) - Math.PI);
+    if(diff > w.fov) return false;
+    if(losBlocked(w.x, w.y, player.x, player.y)) return false;
+    return true;
+  }
+
+  function movePlayer(){
+    var mx = 0, my = 0;
+    if(keys['arrowup'] || keys['w']) my -= 1;
+    if(keys['arrowdown'] || keys['s']) my += 1;
+    if(keys['arrowleft'] || keys['a']) mx -= 1;
+    if(keys['arrowright'] || keys['d']) mx += 1;
+    if(mx !== 0 || my !== 0){
+      var len = Math.sqrt(mx*mx + my*my); mx /= len; my /= len; target = null;
+    } else if(target){
+      var dx = target.x - player.x, dy = target.y - player.y;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if(d < 6){ target = null; } else { mx = dx/d; my = dy/d; }
+    }
+    // Slow slightly when hugging a wall — the "crouch in shadow" feel.
+    var nearWall = isWall(Math.floor(player.x/TILE)-1, Math.floor(player.y/TILEH)) || isWall(Math.floor(player.x/TILE)+1, Math.floor(player.y/TILEH));
+    var sp = player.speed * (nearWall ? 0.82 : 1);
+    var nx = player.x + mx*sp, ny = player.y + my*sp;
+    if(!isWall(Math.floor(nx/TILE), Math.floor(player.y/TILEH))) player.x = nx;
+    if(!isWall(Math.floor(player.x/TILE), Math.floor(ny/TILEH))) player.y = ny;
+    player.x = Math.max(player.r, Math.min(canvas.width-player.r, player.x));
+    player.y = Math.max(player.r, Math.min(canvas.height-player.r, player.y));
+  }
+
+  function update(){
+    if(state !== 'playing') return;
+    elapsed = Math.floor((Date.now()-startTime)/1000);
+    var mm = Math.floor(elapsed/60), ss = elapsed%60;
+    timeEl.textContent = mm + ':' + (ss<10 ? '0'+ss : ss);
+    movePlayer();
+    watchers.forEach(function(w){
+      var dest = w.path[(w.idx+1)%w.path.length];
+      var dx = (dest.x+0.5)*TILE - w.x, dy = (dest.y+0.5)*TILEH - w.y;
+      var d = Math.sqrt(dx*dx+dy*dy);
+      if(d < 4){ w.idx = (w.idx+1)%w.path.length; }
+      else { w.x += dx/d*w.speed; w.y += dy/d*w.speed; w.angle = Math.atan2(dy, dx); }
+      w.t += 0.016;
+    });
+    var seen = watchers.some(watcherSees);
+    if(seen && spottedFlash <= 0){
+      spotted();
+      if(state !== 'playing') return;
+    }
+    if(spottedFlash > 0) spottedFlash--;
+    if(!seen && spottedFlash <= 0){
+      alertEl.textContent = '● SHADOWED — UNSEEN'; alertEl.classList.add('safe');
+      statusEl.textContent = 'Hidden';
+    } else if(seen){
+      alertEl.textContent = '⚠ IN THE LIGHT — RUN!'; alertEl.classList.remove('safe');
+      statusEl.textContent = 'Exposed!';
+    }
+    // Relic pickup
+    var pcx = Math.floor(player.x/TILE), pcy = Math.floor(player.y/TILEH);
+    relics.forEach(function(r){
+      if(!r.taken && r.cx === pcx && r.cy === pcy){
+        r.taken = true;
+        var unseen = !seen;
+        score += unseen ? 150 : 50;
+        playPickup(unseen);
+        updateHUD(score, lives, unseen ? 'Hidden' : 'Exposed!');
+      }
+    });
+    // Exit check
+    var allTaken = relics.every(function(r){ return r.taken; });
+    if(allTaken && cellAt(pcx, pcy) === 'E'){
+      score += Math.max(0, 1000 - elapsed*5);
+      updateHUD(score, lives, 'Escaped!');
+      endGame(true);
+    } else {
+      updateHUD(score, lives, seen ? 'Exposed!' : 'Hidden');
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // Floor and walls
+    for(var y=0;y<ROWS;y++) for(var x=0;x<COLS;x++){
+      var px = x*TILE, py = y*TILEH;
+      if(MAP[y][x] === '#'){
+        ctx.fillStyle = '#241f3d'; ctx.fillRect(px,py,TILE+1,TILEH+1);
+        ctx.fillStyle = '#332b55'; ctx.fillRect(px+3,py+3,TILE-6,4);
+      } else {
+        ctx.fillStyle = (x+y)%2 ? '#100e20' : '#0e0c1c'; ctx.fillRect(px,py,TILE+1,TILEH+1);
+      }
+    }
+    // Exit gate
+    for(var y2=0;y2<ROWS;y2++) for(var x2=0;x2<COLS;x2++) if(MAP[y2][x2]==='E'){
+      var all = relics && relics.every(function(r){return r.taken;});
+      ctx.fillStyle = all ? '#2eff8a' : '#2a4a38';
+      ctx.fillRect(x2*TILE+2, y2*TILEH+2, TILE-4, TILEH-4);
+      ctx.fillStyle = '#06130b'; ctx.font = 'bold 15px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('EXIT', x2*TILE+TILE/2, y2*TILEH+TILEH/2);
+    }
+    // Relics
+    relics.forEach(function(r){
+      if(r.taken) return;
+      var cx = (r.cx+0.5)*TILE, cy = (r.cy+0.5)*TILEH;
+      var pulse = 1 + Math.sin(Date.now()/300 + r.pulse)*0.18;
+      ctx.save();
+      ctx.shadowColor = '#ffd97a'; ctx.shadowBlur = 16;
+      ctx.fillStyle = '#ffd97a'; ctx.font = (20*pulse) + 'px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('✦', cx, cy);
+      ctx.restore();
+    });
+    // Vision cones (drawn under watchers, over floor)
+    watchers.forEach(function(w){
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(w.x, w.y);
+      ctx.arc(w.x, w.y, w.range, w.angle - w.fov, w.angle + w.fov);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(255,210,80,0.13)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,210,80,0.35)'; ctx.stroke();
+      ctx.restore();
+      // Watcher body
+      ctx.fillStyle = '#e8b13a'; ctx.beginPath(); ctx.arc(w.x, w.y, 11, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#17101f'; ctx.beginPath(); ctx.arc(w.x + Math.cos(w.angle)*4, w.y + Math.sin(w.angle)*4, 4, 0, Math.PI*2); ctx.fill();
+    });
+    // Player: hooded undertaker
+    ctx.save();
+    if(spottedFlash > 0 && Math.floor(spottedFlash/4)%2===0) ctx.globalAlpha = 0.45;
+    ctx.shadowColor = '#9a8fb5'; ctx.shadowBlur = 12;
+    ctx.fillStyle = '#3b3358'; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#e8e2d4'; ctx.beginPath(); ctx.arc(player.x, player.y-2, 4, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+    // Darkness vignette: dim everything except near player
+    var grad = ctx.createRadialGradient(player.x, player.y, 40, player.x, player.y, 260);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = grad; ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(spottedFlash > 0){
+      ctx.fillStyle = 'rgba(255,60,60,' + (spottedFlash/120) + ')'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+  }
+
+  function loop(){
+    if(state === 'playing') update();
+    draw();
+    if(state === 'playing' || state === 'paused') requestAnimationFrame(loop);
+  }
+
+  function canvasPoint(e){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    var cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    return { x: cx / rect.width * canvas.width, y: cy / rect.height * canvas.height };
+  }
+
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
+    if(k === 'p' && state === 'playing'){ state = 'paused'; document.getElementById('pauseBtn').textContent = '▶ Resume'; }
+    else if(k === 'p' && state === 'paused'){ state = 'playing'; document.getElementById('pauseBtn').textContent = '⏸ Pause'; requestAnimationFrame(loop); }
+    if(k === 'enter' && state === 'title') startGame();
+    if(k === 'enter' && (state === 'won' || state === 'lost')) startGame();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+  document.addEventListener('click', function(e){
+    if(e.target && e.target.id === 'startBtn') startGame();
+    if(e.target && e.target.id === 'restartBtn') startGame();
+    if(e.target && e.target.id === 'menuBtn'){ state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); }
+    if(e.target && e.target.id === 'muteBtn'){ muted = !muted; e.target.textContent = muted ? '🔇 Sound: Off' : '🔊 Sound: On'; }
+    if(e.target && e.target.id === 'pauseBtn'){
+      if(state === 'playing'){ state = 'paused'; e.target.textContent = '▶ Resume'; }
+      else if(state === 'paused'){ state = 'playing'; e.target.textContent = '⏸ Pause'; requestAnimationFrame(loop); }
+    }
+  });
+  canvas.addEventListener('mousedown', function(e){
+    if(state !== 'playing') return;
+    target = canvasPoint(e);
+  });
+  canvas.addEventListener('mousemove', function(e){
+    if(state !== 'playing') return;
+    if(e.buttons === 1) target = canvasPoint(e);
+  });
+  canvas.addEventListener('touchstart', function(e){
+    if(state !== 'playing') return;
+    e.preventDefault();
+    target = canvasPoint(e);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){
+    if(state !== 'playing') return;
+    e.preventDefault();
+    target = canvasPoint(e);
+  }, { passive: false });
+  document.addEventListener('touchstart', function(){ /* touch support registered */ }, { passive: true });
+
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>

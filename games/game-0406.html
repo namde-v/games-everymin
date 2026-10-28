@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Rustic Ranger — Slingshot Target Precision</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #1a2b1a; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #fff; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; gap: 8px; }
+  h1 { font-size: 28px; letter-spacing: 1px; color: #ffe9a8; text-shadow: 2px 2px 0 #2b4a22; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; font-weight: 700; font-size: 15px; }
+  #hud span { background: rgba(0,0,0,.45); border: 1px solid #7fb069; border-radius: 999px; padding: 6px 12px; }
+  #hud .warn { color: #ffd166; }
+  #stage { position: relative; width: min(92vw, 860px); aspect-ratio: 16/9; max-height: 68vh; }
+  canvas { width: 100%; height: 100%; display: block; background: linear-gradient(#aee2ff, #d8f3c8); border: 4px solid #5b3a1e; border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.5); touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; background: rgba(20,35,18,.88); border-radius: 10px; padding: 18px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffe9a8; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #eaf5e0; font-size: 15px; }
+  .overlay .small { font-size: 13px; opacity: .85; }
+  button { cursor: pointer; border: 0; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: 800; background: #ffb703; color: #2b1d00; box-shadow: 0 4px 0 #b77900; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b77900; }
+  button.secondary { background: #eaf5e0; color: #1a2b1a; box-shadow: 0 4px 0 #9db89a; }
+  #aimHelp { font-size: 13px; opacity: .9; text-align: center; }
+  kbd { background: #fff; color: #222; border-radius: 4px; padding: 1px 6px; font-weight: 700; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  #powerBar { width: min(92vw, 860px); height: 12px; background: rgba(255,255,255,.15); border-radius: 999px; overflow: hidden; }
+  #powerFill { height: 100%; width: 0%; background: linear-gradient(90deg, #7fb069, #ffb703, #ef476f); transition: width .05s linear; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🌲 Rustic Ranger 🌲</h1>
+  <div id="hud">
+    <span>Score: <b id="score">0</b> / 120</span>
+    <span>Shots Left: <b id="shots">14</b></span>
+    <span>Wind: <b id="wind">Calm</b></span>
+    <span>Round: <b id="round">1</b> / 3</span>
+    <span id="status" class="warn">Aim and release!</span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="860" height="484"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Rustic Ranger</h2>
+      <p><b>How to Play:</b> You are the forest ranger with a trusty slingshot. Drag back from the slingshot (bottom-left) to set angle and power, then release to launch a pinecone. Moving forest targets drift across the hills — acorns, mushrooms and leaf badges are worth different points. Watch the wind: it pushes every shot sideways!</p>
+      <p>Mouse / Touch: drag from the slingshot and release. Keyboard: <kbd>←</kbd><kbd>→</kbd> angle, <kbd>↑</kbd><kbd>↓</kbd> power, <kbd>Space</kbd> to shoot, <kbd>R</kbd> to restart.</p>
+      <p>Score <b>120 points in 14 shots</b> across 3 rounds to Win. Run out of shots below 120 and the forest patrol ends.</p>
+      <button id="startBtn">▶ Start Patrol</button>
+      <p class="small">Sound starts only after you press Start. Fully offline — no downloads needed.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">Game Over</h2>
+      <p id="endText"></p>
+      <p id="endScore"></p>
+      <div class="row">
+        <button id="restartBtn">↻ Play Again</button>
+        <button id="menuBtn" class="secondary">Title Screen</button>
+      </div>
+    </div>
+  </div>
+  <div id="powerBar"><div id="powerFill"></div></div>
+  <div id="aimHelp">Tip: Strong wind? Aim upwind. Far targets need more power and a higher arc. Golden targets are worth 30!</div>
+</div>
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var shotsEl = document.getElementById('shots');
+  var windEl = document.getElementById('wind');
+  var roundEl = document.getElementById('round');
+  var statusEl = document.getElementById('status');
+  var powerFill = document.getElementById('powerFill');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var state = 'title'; // title, aiming, flying, over
+  var score = 0, shots = 14, round = 1, targetScore = 120;
+  var wind = 0; // px/s^2 lateral push
+  var angle = -0.7, power = 55; // angle radians, power 10..100
+  var sling = { x: 110, y: H - 105 };
+  var dragging = false;
+  var dragPos = null;
+  var proj = null;
+  var targets = [];
+  var particles = [];
+  var floaters = [];
+  var trail = [];
+  var audioCtx = null;
+  var muted = false;
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+
+  function initAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e){}
+  }
+  function sfx(kind){
+    if (kind==='launch') beep(220, 0.18, 'triangle', 0.18);
+    if (kind==='hit') { beep(660, 0.12, 'square', 0.14); setTimeout(function(){ beep(880, 0.15, 'square', 0.12); }, 70); }
+    if (kind==='gold') { beep(880, 0.12, 'sine', 0.15); setTimeout(function(){ beep(1174, 0.18, 'sine', 0.15); }, 80); }
+    if (kind==='miss') beep(160, 0.22, 'sawtooth', 0.08);
+    if (kind==='win') { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.16); }, i*140); }); }
+    if (kind==='lose') { [392,330,262,196].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.28, 'sawtooth', 0.09); }, i*160); }); }
+  }
+
+  function newWind(){
+    wind = Math.round(rand(-38, 38));
+    var label = wind === 0 ? 'Calm' : (wind > 0 ? '→ ' + Math.abs(wind) + ' East' : '← ' + Math.abs(wind) + ' West');
+    windEl.textContent = label;
+  }
+
+  function makeTarget(){
+    var kinds = [
+      { label: '🍄', pts: 10, r: 26, speed: 28, color: '#e76f51' },
+      { label: '🌰', pts: 20, r: 22, speed: 42, color: '#bc6c25' },
+      { label: '🍃', pts: 15, r: 20, speed: 55, color: '#7fb069' },
+      { label: '⭐', pts: 30, r: 18, speed: 68, color: '#ffb703' }
+    ];
+    var k = kinds[Math.floor(Math.random()*kinds.length)];
+    if (Math.random() < 0.18) k = kinds[3];
+    var dir = Math.random() < 0.5 ? 1 : -1;
+    return {
+      x: dir > 0 ? -40 : W + 40, y: rand(70, H - 210),
+      vx: dir * k.speed * rand(0.8, 1.25), vy: rand(-14, 14),
+      r: k.r, pts: k.pts, label: k.label, color: k.color,
+      bob: rand(0, 6.28), alive: true
+    };
+  }
+
+  function resetGame(){
+    score = 0; shots = 14; round = 1;
+    proj = null; targets = []; particles = []; floaters = []; trail = [];
+    angle = -0.7; power = 55;
+    for (var i=0;i<4;i++) targets.push(makeTarget());
+    newWind(); updateHUD();
+    statusEl.textContent = 'Round 1 — drag back and release!';
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = score;
+    shotsEl.textContent = shots;
+    roundEl.textContent = round;
+    powerFill.style.width = power + '%';
+  }
+
+  function burst(x,y,color,n){
+    for (var i=0;i<n;i++) particles.push({ x:x, y:y, vx: rand(-120,120), vy: rand(-160,40), life: rand(0.4,0.9), max: 0.9, color: color, size: rand(3,8) });
+  }
+
+  function launch(){
+    if (state !== 'aiming' || shots <= 0) return;
+    shots--;
+    var sp = 320 + power * 5.2;
+    proj = { x: sling.x, y: sling.y - 20, vx: Math.cos(angle)*sp, vy: Math.sin(angle)*sp, r: 11, active: true };
+    trail = [];
+    state = 'flying';
+    sfx('launch');
+    statusEl.textContent = 'Flying! Wind is pushing it...';
+    updateHUD();
+  }
+
+  function endGame(won){
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endTitle.textContent = '🏆 You Win, Ranger!';
+      endText.textContent = 'The forest is safe! You reached the target score with shots to spare.';
+      sfx('win');
+    } else {
+      endTitle.textContent = '🌲 Patrol Over';
+      endText.textContent = 'Out of shots below the target score. The forest needs you — try again!';
+      sfx('lose');
+    }
+    endScore.textContent = 'Final Score: ' + score + ' / ' + targetScore + '  •  Shots left: ' + Math.max(0, shots);
+  }
+
+  function checkRoundEnd(){
+    if (score >= targetScore) { endGame(true); return; }
+    if (shots <= 0) { endGame(false); return; }
+    // New round every 5 shots spent roughly: advance round display
+    var spent = 14 - shots;
+    round = Math.min(3, 1 + Math.floor(spent / 5));
+    if (Math.random() < 0.5) newWind();
+    updateHUD();
+  }
+
+  // --- Input: pointer drag from slingshot ---
+  function canvasPos(e){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function onDown(e){
+    if (state !== 'aiming') return;
+    var p = canvasPos(e);
+    var d = Math.hypot(p.x - sling.x, p.y - sling.y);
+    if (d < 160) { dragging = true; dragPos = p; if (e.preventDefault) e.preventDefault(); }
+  }
+  function onMove(e){
+    if (!dragging || state !== 'aiming') return;
+    var p = canvasPos(e);
+    dragPos = p;
+    // Drag opposite to launch: pull back-left/down, launch up-right
+    var dx = sling.x - p.x, dy = sling.y - p.y;
+    if (dx < 5) dx = 5;
+    angle = Math.atan2(-dy, dx); // dy inverted: pulling down gives upward launch
+    // Clamp angle to upward-right quadrant
+    if (angle > -0.05) angle = -0.05;
+    if (angle < -1.45) angle = -1.45;
+    var dist = Math.hypot(dx, dy);
+    power = clamp(Math.round(dist * 0.7), 10, 100);
+    updateHUD();
+    if (e.preventDefault) e.preventDefault();
+  }
+  function onUp(e){
+    if (!dragging) return;
+    dragging = false;
+    if (state === 'aiming' && power >= 15) launch();
+  }
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+  canvas.addEventListener('click', function(){ if (state === 'aiming') { /* click alone does not shoot; drag required */ } });
+
+  document.addEventListener('keydown', function(e){
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    if (state === 'over' && (e.key === 'r' || e.key === 'R' || e.key === 'Enter')) { startGame(); return; }
+    if (state !== 'aiming') return;
+    if (e.key === 'ArrowLeft') angle = clamp(angle - 0.06, -1.45, -0.05);
+    if (e.key === 'ArrowRight') angle = clamp(angle + 0.06, -1.45, -0.05);
+    if (e.key === 'ArrowUp') power = clamp(power + 5, 10, 100);
+    if (e.key === 'ArrowDown') power = clamp(power - 5, 10, 100);
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); launch(); }
+    if (e.key === 'r' || e.key === 'R') startGame();
+    updateHUD();
+  });
+
+  function startGame(){
+    initAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'aiming';
+    statusEl.textContent = 'Drag from the slingshot, then release!';
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function(){
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    state = 'title';
+  });
+
+  // --- Drawing ---
+  function drawBackground(){
+    // Sky handled by CSS gradient; draw hills, trees, ground
+    ctx.fillStyle = '#8ecf6e';
+    ctx.beginPath(); ctx.moveTo(0, H-70); ctx.quadraticCurveTo(200, H-150, 430, H-80); ctx.quadraticCurveTo(650, H-40, W, H-110); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#6aa84f';
+    ctx.beginPath(); ctx.moveTo(0, H-30); ctx.quadraticCurveTo(300, H-70, 600, H-25); ctx.quadraticCurveTo(750, H-5, W, H-35); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    // Decorative trees
+    var trees = [[700, H-95],[760, H-85],[60, H-60],[830, H-70]];
+    trees.forEach(function(t){
+      ctx.fillStyle = '#5b3a1e'; ctx.fillRect(t[0]-4, t[1], 8, 30);
+      ctx.fillStyle = '#2d6a2e';
+      ctx.beginPath(); ctx.arc(t[0], t[1]-8, 26, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(t[0]-14, t[1]+4, 16, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(t[0]+14, t[1]+4, 16, 0, Math.PI*2); ctx.fill();
+    });
+    // Wind arrow indicator
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.font = 'bold 15px system-ui, sans-serif'; ctx.textAlign = 'center';
+    var arrow = wind > 0 ? 'Wind →' : (wind < 0 ? '← Wind' : 'Wind: Calm');
+    ctx.fillText(arrow + '  (' + Math.abs(wind) + ')', W/2, 28);
+  }
+  function drawSlingshot(){
+    ctx.strokeStyle = '#5b3a1e'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(sling.x-14, sling.y+28); ctx.lineTo(sling.x, sling.y); ctx.lineTo(sling.x+16, sling.y-6); ctx.stroke();
+    // Rubber band when aiming/dragging
+    if (state === 'aiming' && (dragging || dragPos)) {
+      var px = dragging && dragPos ? dragPos.x : sling.x + Math.cos(angle)*30;
+      var py = dragging && dragPos ? dragPos.y : sling.y - 20;
+      ctx.strokeStyle = '#ef476f'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(sling.x+16, sling.y-6); ctx.lineTo(px, py); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sling.x, sling.y); ctx.lineTo(px, py); ctx.stroke();
+      // Aim guide dots
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      for (var i=1;i<=6;i++) {
+        var t = i*0.16, sp = 320 + power*5.2;
+        var gx = sling.x + Math.cos(angle)*sp*t;
+        var gy = (sling.y-20) + Math.sin(angle)*sp*t + 0.5*420*t*t;
+        ctx.beginPath(); ctx.arc(gx, gy, 4, 0, Math.PI*2); ctx.fill();
+      }
+      // Pinecone at pull point
+      ctx.fillStyle = '#8b5a2b'; ctx.beginPath(); ctx.arc(px, py, 10, 0, Math.PI*2); ctx.fill();
+    } else if (state === 'aiming') {
+      ctx.strokeStyle = '#ef476f'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(sling.x+16, sling.y-6); ctx.lineTo(sling.x+6, sling.y-18); ctx.stroke();
+    }
+  }
+  function drawTargets(){
+    targets.forEach(function(t){
+      if (!t.alive) return;
+      var bobY = Math.sin(t.bob) * 8;
+      ctx.fillStyle = t.color;
+      ctx.beginPath(); ctx.arc(t.x, t.y + bobY, t.r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.font = (t.r + 4) + 'px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(t.label, t.x, t.y + bobY + 1);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.fillText(t.pts, t.x, t.y + bobY - t.r - 10);
+    });
+  }
+
+  function update(dt){
+    targets.forEach(function(t){
+      t.x += t.vx * dt; t.y += t.vy * dt; t.bob += dt * 3;
+      if (t.y < 50 || t.y > H - 190) t.vy *= -1;
+      if ((t.vx > 0 && t.x > W + 50) || (t.vx < 0 && t.x < -50)) {
+        var nt = makeTarget(); t.x = nt.x; t.y = nt.y; t.vx = nt.vx; t.vy = nt.vy; t.r = nt.r; t.pts = nt.pts; t.label = nt.label; t.color = nt.color; t.alive = true;
+      }
+    });
+    if (targets.filter(function(t){ return t.alive; }).length < 4) targets.push(makeTarget());
+    particles.forEach(function(p){ p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 200*dt; p.life -= dt; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    floaters.forEach(function(f){ f.y -= 40*dt; f.life -= dt; });
+    floaters = floaters.filter(function(f){ return f.life > 0; });
+    if (proj && proj.active) {
+      proj.vy += 420 * dt;
+      proj.vx += wind * dt;
+      proj.x += proj.vx * dt; proj.y += proj.vy * dt;
+      trail.push({ x: proj.x, y: proj.y, life: 0.35 });
+      trail = trail.filter(function(tp){ return tp.life > 0; });
+      trail.forEach(function(tp){ tp.life -= dt; });
+      var hit = false;
+      targets.forEach(function(t){
+        if (!t.alive || hit) return;
+        var d = Math.hypot(proj.x - t.x, proj.y - t.y);
+        if (d < proj.r + t.r) {
+          hit = true; t.alive = false;
+          score += t.pts;
+          floaters.push({ x: t.x, y: t.y, text: '+' + t.pts, life: 1.1, color: t.pts >= 30 ? '#ffb703' : '#fff' });
+          burst(t.x, t.y, t.color, 18);
+          if (t.pts >= 30) sfx('gold'); else sfx('hit');
+          statusEl.textContent = 'Hit! +' + t.pts + ' points — ' + t.label + ' down!';
+        }
+      });
+      if (hit || proj.y > H - 8 || proj.x > W + 20 || proj.x < -20 || proj.y < -20) {
+        if (!hit) { sfx('miss'); statusEl.textContent = 'Missed — adjust for wind and try again!'; }
+        proj.active = false; proj = null; dragPos = null;
+        state = 'aiming';
+        checkRoundEnd();
+        if (state === 'aiming') { setTimeout(function(){ if (state==='aiming') targets.push(makeTarget()); }, 300); }
+      }
+    }
+    updateHUD();
+  }
+
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    drawTargets();
+    drawSlingshot();
+    if (proj && proj.active) {
+      trail.forEach(function(tp){ ctx.fillStyle = 'rgba(139,90,43,' + (tp.life*2) + ')'; ctx.beginPath(); ctx.arc(tp.x, tp.y, 5, 0, Math.PI*2); ctx.fill(); });
+      ctx.fillStyle = '#8b5a2b'; ctx.beginPath(); ctx.arc(proj.x, proj.y, proj.r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#5b3a1e'; ctx.beginPath(); ctx.arc(proj.x-3, proj.y-3, 4, 0, Math.PI*2); ctx.fill();
+    }
+    particles.forEach(function(p){ ctx.globalAlpha = Math.max(0, p.life/p.max); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1; });
+    floaters.forEach(function(f){ ctx.fillStyle = f.color; ctx.font = 'bold 22px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(f.text, f.x, f.y); });
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.font = 'bold 16px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to begin your patrol', W/2, H-12);
+    }
+  }
+
+  var last = 0;
+  function loop(ts){
+    if (!last) last = ts;
+    var dt = Math.min(0.033, (ts - last) / 1000);
+    last = ts;
+    if (state !== 'title' && state !== 'over') update(dt);
+    else if (state === 'title') { targets.forEach(function(t){ t.bob += dt*2; }); }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  resetGame();
+  state = 'title';
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

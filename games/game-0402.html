@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Mossy Mechanic</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #101a12; color: #eef5e9; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { margin: 10px 0 2px; font-size: 26px; letter-spacing: 1px; color: #b7e39a; text-shadow: 0 2px 0 #000; }
+  p.sub { margin: 0 0 8px; color: #9fb8a0; font-size: 13px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 6px 0; width: 96vw; max-width: 560px; }
+  .pill { background: #1e3322; border: 2px solid #3d6b3f; border-radius: 999px; padding: 6px 11px; font-size: 13px; font-weight: bold; }
+  .pill.warn { border-color: #c9a227; color: #ffe58a; }
+  .pill.bad { border-color: #c0392b; color: #ffb0a0; }
+  #wrap { position: relative; width: 96vw; max-width: 560px; }
+  canvas { width: 100%; height: auto; display: block; background: #16241a; border: 4px solid #2f4a30; border-radius: 14px; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; background: rgba(8, 16, 10, 0.92); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #b7e39a; margin: 6px 0; font-size: 30px; }
+  .overlay p { font-size: 14px; line-height: 1.55; max-width: 430px; color: #d7e6d0; }
+  .overlay .small { font-size: 12px; color: #9fb8a0; }
+  button { background: #6fbf5a; color: #0d1a0e; border: none; border-radius: 10px; padding: 13px 22px; font-size: 17px; font-weight: bold; cursor: pointer; margin-top: 12px; box-shadow: 0 4px 0 #3d6b3f; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #d9e8c8; }
+  #bar { display: flex; gap: 8px; margin: 8px 0 14px; flex-wrap: wrap; justify-content: center; }
+  #bar button { margin: 0; padding: 9px 14px; font-size: 13px; }
+  #msg { min-height: 20px; font-size: 14px; color: #ffe58a; }
+</style>
+</head>
+<body>
+<h1>🌿 Mossy Mechanic ⚙️</h1>
+<p class="sub">Wake the overgrown workshop — reconnect every mossy machine to the power spring.</p>
+
+<div id="hud">
+  <span class="pill" id="scorePill">Score: 0</span>
+  <span class="pill" id="movesPill">Moves: 0 / 70</span>
+  <span class="pill" id="powerPill">Powered: 0 / 0</span>
+  <span class="pill" id="statusPill">Status: Ready</span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="560" height="560"></canvas>
+
+  <div class="overlay" id="titleScreen">
+    <h2>🌿 Mossy Mechanic</h2>
+    <p><strong>How to Play:</strong> The workshop has gone wild. Gears and pipes grew moss and spun out of alignment, cutting power to the machines.</p>
+    <p>Tap or click any tile to rotate it 90°. Use <strong>Arrow Keys</strong> to move the glowing selector and <strong>Enter / Space</strong> to rotate the selected tile. Line up every pipe and gear so power flows from the glowing <strong>power spring</strong> (top-left) to <strong>every mossy machine</strong>.</p>
+    <p class="small">Win before you use 70 moves. Each rotation costs 1 move. Fewer moves = higher score. Sound starts only after you press Start.</p>
+    <button id="startBtn" type="button">▶ Start Game</button>
+  </div>
+
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn" type="button">↻ Play Again (Instant Restart)</button>
+  </div>
+</div>
+
+<div id="msg">Tip: a machine glows green when it is powered. Follow the pipes!</div>
+<div id="bar">
+  <button id="newBtn" type="button">New Puzzle</button>
+  <button id="hintBtn" type="button" class="secondary">Hint: highlight a wrong tile</button>
+  <button id="muteBtn" type="button" class="secondary">Sound: On</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var scorePill = document.getElementById('scorePill');
+  var movesPill = document.getElementById('movesPill');
+  var powerPill = document.getElementById('powerPill');
+  var statusPill = document.getElementById('statusPill');
+  var msgEl = document.getElementById('msg');
+
+  var COLS = 5, ROWS = 5, CELL = 112, MOVE_LIMIT = 70;
+  var DIRS = [ { dx: 0, dy: -1 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 } ]; // N E S W
+  var OPP = [2, 3, 0, 1];
+  var grid = [], solution = [], machines = [], poweredSet = {};
+  var moves = 0, score = 0, selX = 0, selY = 0, started = false, over = false;
+  var muted = false, audioCtx = null, hintCell = null, animT = 0, pulse = 0;
+
+  function key(x, y) { return x + ',' + y; }
+  function rand(n) { return Math.floor(Math.random() * n); }
+  function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = rand(i + 1); var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+
+  // Build a random spanning tree over the grid. The tree is the hidden
+  // solution: every tile's true ports are exactly its tree neighbours.
+  // Leaves (except the source) become mossy machines to power.
+  function buildPuzzle() {
+    var visited = {}, parent = {}, order = [];
+    var stack = [[0, 0]];
+    visited[key(0, 0)] = true;
+    while (stack.length) {
+      var cur = stack[stack.length - 1];
+      var nbrs = shuffle([[cur[0], cur[1] - 1], [cur[0] + 1, cur[1]], [cur[0], cur[1] + 1], [cur[0] - 1, cur[1]]]);
+      var moved = false;
+      for (var i = 0; i < nbrs.length; i++) {
+        var nx = nbrs[i][0], ny = nbrs[i][1];
+        if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS && !visited[key(nx, ny)]) {
+          visited[key(nx, ny)] = true; parent[key(nx, ny)] = cur; stack.push([nx, ny]); moved = true; break;
+        }
+      }
+      if (!moved) { order.push(stack.pop()); }
+    }
+    var links = {};
+    for (var k in parent) {
+      var p = parent[k], c = k.split(',').map(Number);
+      links[key(p[0], p[1])] = links[key(p[0], p[1])] || [];
+      links[key(c[0], c[1])] = links[key(c[0], c[1])] || [];
+      links[key(p[0], p[1])].push(c); links[key(c[0], c[1])].push(p);
+    }
+    grid = []; solution = []; machines = [];
+    for (var y = 0; y < ROWS; y++) {
+      grid[y] = []; solution[y] = [];
+      for (var x = 0; x < COLS; x++) {
+        var ns = links[key(x, y)] || [];
+        var ports = [false, false, false, false];
+        for (var d = 0; d < ns.length; d++) {
+          var dx = ns[d][0] - x, dy = ns[d][1] - y;
+          for (var q = 0; q < 4; q++) if (DIRS[q].dx === dx && DIRS[q].dy === dy) ports[q] = true;
+        }
+        var type = 'gear';
+        if (x === 0 && y === 0) type = 'source';
+        else if (ns.length === 1) { type = 'machine'; machines.push([x, y]); }
+        solution[y][x] = ports;
+        // Scramble: rotate the true ports by a random offset.
+        var off = rand(4);
+        var rot = [false, false, false, false];
+        for (var r = 0; r < 4; r++) rot[(r + off) % 4] = ports[r];
+        grid[y][x] = { type: type, ports: rot, spin: Math.random() * 6.28 };
+      }
+    }
+    moves = 0; score = 0; over = false; hintCell = null; selX = 0; selY = 0;
+    updatePower(); updateHud('Playing — rotate tiles to power all machines!');
+  }
+
+  function rotateTile(x, y) {
+    if (!started || over) return;
+    var t = grid[y][x];
+    var p = t.ports;
+    t.ports = [p[3], p[0], p[1], p[2]];
+    moves++; hintCell = null;
+    playTone(240 + rand(80), 0.06, 'square', 0.05);
+    if (isSolved()) { finish(true); }
+    else if (moves >= MOVE_LIMIT) { finish(false); }
+    else { updatePower(); updateHud('Playing — rotate tiles to power all machines!'); }
+  }
+
+  function isSolved() {
+    updatePower();
+    return machines.every(function (m) { return poweredSet[key(m[0], m[1])]; });
+  }
+
+  // Power flows from the source only through matching, facing ports.
+  function updatePower() {
+    poweredSet = {};
+    var seen = {}, queue = [[0, 0]];
+    seen[key(0, 0)] = true; poweredSet[key(0, 0)] = true;
+    while (queue.length) {
+      var cur = queue.shift();
+      for (var d = 0; d < 4; d++) {
+        if (!grid[cur[1]][cur[0]].ports[d]) continue;
+        var nx = cur[0] + DIRS[d].dx, ny = cur[1] + DIRS[d].dy;
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+        if (!grid[ny][nx].ports[OPP[d]]) continue;
+        if (!seen[key(nx, ny)]) { seen[key(nx, ny)] = true; poweredSet[key(nx, ny)] = true; queue.push([nx, ny]); }
+      }
+    }
+  }
+
+  function poweredCount() {
+    var n = 0;
+    machines.forEach(function (m) { if (poweredSet[key(m[0], m[1])]) n++; });
+    return n;
+  }
+
+  function updateHud(status) {
+    score = Math.max(0, 1000 + poweredCount() * 150 - moves * 10);
+    scorePill.textContent = 'Score: ' + score;
+    movesPill.textContent = 'Moves: ' + moves + ' / ' + MOVE_LIMIT;
+    movesPill.className = 'pill' + (moves >= 55 ? ' bad' : moves >= 40 ? ' warn' : '');
+    powerPill.textContent = 'Powered: ' + poweredCount() + ' / ' + machines.length;
+    if (status) statusPill.textContent = 'Status: ' + status;
+  }
+
+  function finish(won) {
+    over = true;
+    updatePower(); updateHud(won ? 'You win!' : 'Out of moves');
+    endTitle.textContent = won ? '🌿 Workshop Awake!' : '💤 Power Ran Out';
+    endText.textContent = won
+      ? 'All ' + machines.length + ' mossy machines are humming! Score: ' + score + ' in ' + moves + ' moves.'
+      : 'You used all ' + MOVE_LIMIT + ' moves with only ' + poweredCount() + ' of ' + machines.length + ' machines powered. Try a fresh puzzle!';
+    endScreen.classList.remove('hidden');
+    if (won) { playTone(523, 0.16, 'sine', 0.12); setTimeout(function () { playTone(659, 0.16, 'sine', 0.12); }, 140); setTimeout(function () { playTone(784, 0.3, 'sine', 0.12); }, 280); }
+    else { playTone(160, 0.4, 'sawtooth', 0.08); }
+  }
+
+  function startGame() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; } }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    started = true; over = false;
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    buildPuzzle();
+    msgEl.textContent = 'Power the workshop! Click a tile to rotate it.';
+  }
+
+  function restart() {
+    started = true; over = false;
+    endScreen.classList.add('hidden'); titleScreen.classList.add('hidden');
+    buildPuzzle();
+  }
+
+  function playTone(freq, dur, type, vol) {
+    if (muted || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is optional */ }
+  }
+
+  function drawGear(cx, cy, r, teeth, angle, lit) {
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(angle);
+    ctx.fillStyle = lit ? '#8fd14f' : '#7a8a6a';
+    ctx.beginPath();
+    for (var i = 0; i < teeth * 2; i++) {
+      var a = (Math.PI * i) / teeth, rr = (i % 2 === 0) ? r : r * 0.78;
+      var px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#22331f'; ctx.beginPath(); ctx.arc(0, 0, r * 0.32, 0, 6.283); ctx.fill();
+    ctx.fillStyle = lit ? '#eaffc8' : '#cfe0b8'; ctx.beginPath(); ctx.arc(0, 0, r * 0.14, 0, 6.283); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawTile(x, y) {
+    var px = x * CELL, py = y * CELL, t = grid[y][x];
+    var lit = !!poweredSet[key(x, y)];
+    var cx = px + CELL / 2, cy = py + CELL / 2;
+    ctx.fillStyle = (x + y) % 2 ? '#1a2c1e' : '#1e3322';
+    ctx.fillRect(px + 2, py + 2, CELL - 4, CELL - 4);
+    if (hintCell && hintCell[0] === x && hintCell[1] === y) { ctx.fillStyle = 'rgba(255,229,138,0.25)'; ctx.fillRect(px + 2, py + 2, CELL - 4, CELL - 4); }
+    // Pipes: draw a stub for every open port.
+    ctx.strokeStyle = lit ? '#a5e86a' : '#5b7a52'; ctx.lineWidth = 16; ctx.lineCap = 'round';
+    for (var d = 0; d < 4; d++) {
+      if (!t.ports[d]) continue;
+      ctx.beginPath(); ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + DIRS[d].dx * 54, cy + DIRS[d].dy * 54); ctx.stroke();
+    }
+    // Moss blobs.
+    ctx.fillStyle = 'rgba(120,190,80,0.55)';
+    ctx.beginPath(); ctx.arc(px + 16, py + 20, 9, 0, 6.283); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + CELL - 18, py + CELL - 16, 11, 0, 6.283); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 22, py + CELL - 14, 7, 0, 6.283); ctx.fill();
+    if (t.type === 'source') {
+      ctx.fillStyle = '#ffe58a'; ctx.beginPath(); ctx.arc(cx, cy, 30, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#7a4d00'; ctx.font = 'bold 30px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⚡', cx, cy + 1);
+      drawGear(cx, cy, 20, 8, animT * 0.6, true);
+    } else if (t.type === 'machine') {
+      ctx.fillStyle = lit ? '#2f6b2f' : '#4a4a3a'; ctx.fillRect(cx - 30, cy - 26, 60, 52);
+      ctx.fillStyle = lit ? '#d7ffb0' : '#9aa08a'; ctx.fillRect(cx - 22, cy - 18, 44, 14);
+      ctx.font = 'bold 24px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(lit ? '◉' : '○', cx, cy + 16);
+      ctx.fillStyle = lit ? '#a5e86a' : '#8a8a6a'; ctx.font = 'bold 11px Verdana'; ctx.fillText(lit ? 'ON' : 'OFF', cx, cy + 34);
+    } else {
+      drawGear(cx, cy, 30, 10, t.spin + animT * (lit ? 0.8 : 0.15), lit);
+    }
+    if (started && !over && selX === x && selY === y) {
+      ctx.strokeStyle = '#ffe58a'; ctx.lineWidth = 4; ctx.setLineDash([10, 6]);
+      ctx.strokeRect(px + 5, py + 5, CELL - 10, CELL - 10); ctx.setLineDash([]);
+    }
+  }
+
+  function loop(ts) {
+    animT = ts / 1000; pulse = Math.sin(animT * 3) * 0.5 + 0.5;
+    ctx.clearRect(0, 0, 560, 560);
+    ctx.fillStyle = '#16241a'; ctx.fillRect(0, 0, 560, 560);
+    if (grid.length) { for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) drawTile(x, y); }
+    requestAnimationFrame(loop);
+  }
+
+  function cellFromEvent(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0].clientX));
+    var cy = (e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0].clientY));
+    if (cx === undefined) return null;
+    var x = Math.floor((cx - r.left) / r.width * COLS), y = Math.floor((cy - r.top) / r.height * ROWS);
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return null;
+    return [x, y];
+  }
+
+  function onCanvasTap(e) {
+    if (!started || over) return;
+    var c = cellFromEvent(e);
+    if (c) { selX = c[0]; selY = c[1]; rotateTile(c[0], c[1]); }
+    if (e.type === 'touchstart') e.preventDefault();
+  }
+
+  canvas.addEventListener('click', onCanvasTap);
+  canvas.addEventListener('mousedown', function (e) { if (e.button === 0) onCanvasTap(e); });
+  canvas.addEventListener('touchstart', onCanvasTap, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (!started || over) {
+      if (e.key === 'Enter' && !started) startGame();
+      return;
+    }
+    if (e.key === 'ArrowLeft') { selX = Math.max(0, selX - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { selX = Math.min(COLS - 1, selX + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { selY = Math.max(0, selY - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { selY = Math.min(ROWS - 1, selY + 1); e.preventDefault(); }
+    else if (e.key === 'Enter' || e.key === ' ') { rotateTile(selX, selY); e.preventDefault(); }
+    else if (e.key === 'r' || e.key === 'R') { restart(); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', restart);
+  document.getElementById('newBtn').addEventListener('click', function () { if (!started) startGame(); else restart(); });
+  document.getElementById('muteBtn').addEventListener('click', function (e) { muted = !muted; e.target.textContent = muted ? 'Sound: Off' : 'Sound: On'; });
+  document.getElementById('hintBtn').addEventListener('click', function () {
+    if (!started || over) return;
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
+      var a = grid[y][x].ports, b = solution[y][x], bad = false;
+      for (var d = 0; d < 4; d++) if (a[d] !== b[d]) bad = true;
+      if (bad) { hintCell = [x, y]; msgEl.textContent = 'Hint: the highlighted tile is not yet in its solved rotation.'; return; }
+    }
+    msgEl.textContent = 'Every tile looks solved — power should be flowing!';
+  });
+
+  buildPuzzle();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
