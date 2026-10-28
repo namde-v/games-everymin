@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ashfall Ascent</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #140a08; color: #ffe8d6; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 10px; overflow: hidden; }
+  h1 { font-size: 28px; letter-spacing: 2px; color: #ff8c42; text-shadow: 0 2px 0 #7a1f00, 0 0 18px rgba(255,120,0,.6); margin-bottom: 6px; text-align: center; }
+  #wrap { position: relative; width: min(480px, 96vw); }
+  canvas { display: block; width: 100%; height: 640px; background: linear-gradient(#1a0f14, #3a1408); border: 3px solid #ff6b1a; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 6px; padding: 8px 4px; font-weight: bold; font-size: 14px; flex-wrap: wrap; }
+  #hud span { background: #2b1206; border: 1px solid #ff6b1a; border-radius: 8px; padding: 5px 8px; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,4,2,.86); border-radius: 12px; padding: 22px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffb347; font-size: 30px; }
+  .overlay p { line-height: 1.55; font-size: 15px; max-width: 380px; }
+  .howto { background: #2b1206; border: 1px solid #8a3b12; border-radius: 10px; padding: 12px; text-align: left; font-size: 14px; line-height: 1.6; }
+  .howto b { color: #ffb347; }
+  button { background: #ff6b1a; color: #fff; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #a33a00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #555; box-shadow: 0 4px 0 #222; }
+  #hint { font-size: 12px; color: #d8b9a3; text-align: center; margin-top: 6px; }
+  #touchbar { display: flex; gap: 8px; margin-top: 8px; }
+  #touchbar button { flex: 1; padding: 12px 4px; font-size: 15px; }
+</style>
+</head>
+<body>
+<h1>🌋 ASHFALL ASCENT 🌋</h1>
+<div id="wrap">
+  <canvas id="game" width="480" height="640"></canvas>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Lives: <b id="lives">❤️❤️❤️</b></span>
+    <span>Height: <b id="height">0%</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="titleScreen" class="overlay">
+    <h2>ASHFALL ASCENT</h2>
+    <p>Climb the volcano! Leap from ledge to ledge, dodge falling ash and rocks, grab glowing gems, and reach the crater rim before the mountain claims you.</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      ⬅️ ➡️ / A D — Move left and right<br>
+      ⬆️ / W / Space — Jump (hold to jump higher)<br>
+      🖱️ Mouse — Click left / right side to move, centre to jump<br>
+      👆 Touch — Tap left / right side to move, centre to jump<br>
+      💎 Gems = +50 points &nbsp;|&nbsp; 🪨 Rocks &amp; lava = lose a life<br>
+      🏆 Reach 100% height to win! You have 3 lives.
+    </div>
+    <button id="startBtn">▶ START CLIMB</button>
+    <p style="font-size:13px">P pauses &nbsp;•&nbsp; R restarts instantly</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <p>Final Score: <b id="finalScore">0</b> &nbsp;•&nbsp; Gems: <b id="finalGems">0</b></p>
+    <button id="restartBtn">↻ PLAY AGAIN</button>
+  </div>
+  <div id="pauseScreen" class="overlay hidden">
+    <h2>PAUSED</h2>
+    <p>The volcano waits for no one... except now.</p>
+    <button id="resumeBtn">▶ RESUME</button>
+  </div>
+</div>
+<div id="touchbar">
+  <button id="btnLeft">◀ LEFT</button>
+  <button id="btnJump">⬆ JUMP</button>
+  <button id="btnRight">RIGHT ▶</button>
+</div>
+<p id="hint">Tip: land on glowing ledges, time your jumps between rock showers, and grab gems on risky ledges for bonus points.</p>
+<script>
+(function(){
+"use strict";
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+var W = canvas.width, H = canvas.height;
+var scoreEl = document.getElementById('score');
+var livesEl = document.getElementById('lives');
+var heightEl = document.getElementById('height');
+var statusEl = document.getElementById('status');
+var titleScreen = document.getElementById('titleScreen');
+var endScreen = document.getElementById('endScreen');
+var pauseScreen = document.getElementById('pauseScreen');
+
+var state = 'title'; // title, playing, paused, won, over
+var score = 0, lives = 3, gems = 0, maxHeight = 0, cameraY = 0;
+var keys = {};
+var audioCtx = null, muted = false;
+
+function initAudio(){
+  if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+}
+function tone(freq, dur, type, vol, slide){
+  if (!audioCtx || muted) return;
+  try {
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'square'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+function sfxJump(){ tone(280, 0.18, 'square', 0.07, 560); }
+function sfxGem(){ tone(880, 0.12, 'sine', 0.09); setTimeout(function(){ tone(1320, 0.15, 'sine', 0.09); }, 70); }
+function sfxHit(){ tone(160, 0.3, 'sawtooth', 0.12, 60); }
+function sfxWin(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.3, 'triangle', 0.1); }, i*130); }); }
+
+// World: y increases downward; higher = smaller y. Start ground at y=0, rim at y=-3200.
+var GOAL_Y = -3200;
+var player, platforms, debris, gemList, particles, lavaBursts, spawnTimer;
+
+function makePlatform(y){
+  var w = 70 + Math.random()*70;
+  var x = 10 + Math.random()*(W - w - 20);
+  var kind = Math.random() < 0.16 ? 'crumble' : 'rock';
+  return { x: x, y: y, w: w, h: 16, kind: kind, hit: 0, visited: false };
+}
+function resetGame(){
+  score = 0; lives = 3; gems = 0; maxHeight = 0; cameraY = 0; spawnTimer = 0;
+  player = { x: W/2, y: -30, w: 30, h: 38, vx: 0, vy: 0, onGround: false, facing: 1 };
+  platforms = [{ x: 20, y: 0, w: W-40, h: 20, kind: 'base', hit: 0, visited: true }];
+  var y = -90;
+  while (y > GOAL_Y - 100){
+    platforms.push(makePlatform(y));
+    y -= 72 + Math.random()*45;
+  }
+  debris = []; gemList = []; particles = []; lavaBursts = [];
+  // gems on random platforms
+  for (var i = 5; i < platforms.length; i += 3){
+    if (Math.random() < 0.8) gemList.push({ x: platforms[i].x + platforms[i].w/2, y: platforms[i].y - 22, taken: false, bob: Math.random()*6 });
+  }
+  updateHUD('Climbing!');
+}
+function screenY(worldY){ return worldY - cameraY; }
+function progressPct(){
+  var p = Math.max(0, Math.min(100, Math.round((-player.y / -GOAL_Y) * 100)));
+  return p;
+}
+function updateHUD(status){
+  scoreEl.textContent = score;
+  livesEl.textContent = '❤️'.repeat(Math.max(0,lives)) + '🖤'.repeat(Math.max(0,3-lives));
+  heightEl.textContent = progressPct() + '%';
+  if (status) statusEl.textContent = status;
+}
+function loseLife(reason){
+  lives--; sfxHit(); updateHUD(reason);
+  burst(player.x + player.w/2, player.y + player.h/2, '#ff4422', 26);
+  if (lives <= 0){ endGame(false); return; }
+  // Respawn on nearest safe platform below current position
+  var best = null;
+  for (var i = 0; i < platforms.length; i++){
+    if (platforms[i].y >= player.y && platforms[i].kind !== 'crumble'){ best = platforms[i]; break; }
+  }
+  if (!best) best = platforms[0];
+  player.x = best.x + best.w/2 - player.w/2; player.y = best.y - player.h - 2; player.vx = 0; player.vy = 0;
+  // brief safety: clear debris near player
+  debris = debris.filter(function(d){ return Math.abs(d.y - player.y) > 180; });
+  statusEl.textContent = 'Ouch! ' + lives + ' lives left';
+}
+function burst(x, y, color, n){
+  for (var i = 0; i < n; i++){
+    particles.push({ x: x, y: y, vx: (Math.random()-0.5)*5, vy: (Math.random()-0.7)*5, life: 30+Math.random()*25, color: color });
+  }
+}
+function endGame(won){
+  state = won ? 'won' : 'over';
+  document.getElementById('endTitle').textContent = won ? '🏆 YOU REACHED THE CRATER RIM!' : '💀 GAME OVER';
+  document.getElementById('endText').textContent = won
+    ? 'You survived the ashfall and conquered the volcano! The crater glows below you.'
+    : 'The volcano wins this time. The ashfall got you — try a smarter route up!';
+  document.getElementById('finalScore').textContent = score + (won ? 500 : 0);
+  if (won) score += 500;
+  document.getElementById('finalGems').textContent = gems;
+  if (won) sfxWin();
+  endScreen.classList.remove('hidden');
+  updateHUD(won ? 'WINNER!' : 'Game Over');
+}
+function startGame(){
+  initAudio();
+  resetGame();
+  titleScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+  pauseScreen.classList.add('hidden');
+  state = 'playing';
+  updateHUD('Climbing!');
+}
+function togglePause(){
+  if (state === 'playing'){ state = 'paused'; pauseScreen.classList.remove('hidden'); updateHUD('Paused'); }
+  else if (state === 'paused'){ state = 'playing'; pauseScreen.classList.add('hidden'); updateHUD('Climbing!'); }
+}
+
+function update(dt){
+  if (state !== 'playing') return;
+  // Horizontal movement
+  var accel = 0.9, maxV = 5.2;
+  if (keys.left) { player.vx -= accel; player.facing = -1; }
+  if (keys.right) { player.vx += accel; player.facing = 1; }
+  if (!keys.left && !keys.right) player.vx *= 0.82;
+  if (player.vx > maxV) player.vx = maxV;
+  if (player.vx < -maxV) player.vx = -maxV;
+  player.x += player.vx;
+  if (player.x < 4) { player.x = 4; player.vx = 0; }
+  if (player.x + player.w > W-4) { player.x = W-4-player.w; player.vx = 0; }
+
+  // Gravity and jump
+  player.vy += 0.55;
+  if (player.vy > 14) player.vy = 14;
+  var prevBottom = player.y + player.h;
+  player.y += player.vy;
+  player.onGround = false;
+  for (var i = 0; i < platforms.length; i++){
+    var p = platforms[i];
+    if (player.vy >= 0 && prevBottom <= p.y + 8 && player.y + player.h >= p.y &&
+        player.x + player.w > p.x + 4 && player.x < p.x + p.w - 4){
+      player.y = p.y - player.h; player.vy = 0; player.onGround = true;
+      if (!p.visited){ p.visited = true; score += 10; }
+      if (p.kind === 'crumble'){ p.hit++; if (p.hit > 45){ platforms.splice(i,1); i--; } }
+      break;
+    }
+  }
+  if (keys.jump && player.onGround){ player.vy = -14.5; player.onGround = false; sfxJump(); burst(player.x+15, player.y+player.h, '#cccccc', 6); }
+
+  // Camera follows upward
+  var sy = screenY(player.y);
+  if (sy < H * 0.42) cameraY = player.y - H * 0.42;
+  if (player.y < maxHeight) maxHeight = player.y;
+  // Fell below screen?
+  if (screenY(player.y) > H + 60){ loseLife('Fell!'); if (state !== 'playing') return; }
+
+  // Win check
+  if (player.y <= GOAL_Y){ endGame(true); return; }
+
+  // Spawn falling debris more often higher up
+  spawnTimer -= dt;
+  var diff = 1 + progressPct()/60;
+  if (spawnTimer <= 0){
+    spawnTimer = 55 + Math.random()*55 / diff;
+    var kind = Math.random();
+    if (kind < 0.55) debris.push({ x: Math.random()*W, y: cameraY - 20, w: 22+Math.random()*18, vy: 3+Math.random()*2.5+diff, vx: (Math.random()-0.5)*1.2, rot: Math.random()*3, kind: 'rock' });
+    else if (kind < 0.8) debris.push({ x: Math.random()*W, y: cameraY - 20, w: 12, vy: 2+Math.random()*2, vx: (Math.random()-0.5)*2, rot: 0, kind: 'ash' });
+    else lavaBursts.push({ x: Math.random()*W, y: cameraY + H - 10, vy: -7 - Math.random()*3, life: 90, w: 26 });
+  }
+  for (var d = debris.length-1; d >= 0; d--){
+    var o = debris[d]; o.y += o.vy; o.x += o.vx; o.rot += 0.05;
+    if (screenY(o.y) > H + 40){ debris.splice(d,1); continue; }
+    if (o.x < player.x + player.w - 4 && o.x + o.w > player.x + 4 && o.y < player.y + player.h - 4 && o.y + o.w > player.y + 6){
+      debris.splice(d,1); loseLife('Hit by debris!'); if (state !== 'playing') return;
+    }
+  }
+  for (var l = lavaBursts.length-1; l >= 0; l--){
+    var lb = lavaBursts[l]; lb.y += lb.vy; lb.life--;
+    if (lb.life <= 0 || screenY(lb.y) < -40){ lavaBursts.splice(l,1); continue; }
+    if (lb.x < player.x + player.w && lb.x + lb.w > player.x && lb.y < player.y + player.h && lb.y + 30 > player.y){
+      lavaBursts.splice(l,1); loseLife('Lava burst!'); if (state !== 'playing') return;
+    }
+  }
+  for (var g = 0; g < gemList.length; g++){
+    var gm = gemList[g]; if (gm.taken) continue; gm.bob += 0.08;
+    if (Math.abs(gm.x - (player.x + player.w/2)) < 28 && Math.abs((gm.y + Math.sin(gm.bob)*4) - (player.y + player.h/2)) < 34){
+      gm.taken = true; gems++; score += 50; sfxGem(); burst(gm.x, gm.y, '#33eeff', 14);
+    }
+  }
+  for (var p2 = particles.length-1; p2 >= 0; p2--){
+    var pt = particles[p2]; pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.12; pt.life--;
+    if (pt.life <= 0) particles.splice(p2,1);
+  }
+  // Passive climb score tick
+  if (Math.floor(-player.y/100) > Math.floor(-maxHeight/100)) score += 0; // height tracked via platform bonuses
+  updateHUD();
+}
+
+function drawBackground(){
+  var grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, '#1a0f14'); grad.addColorStop(0.6, '#3a1408'); grad.addColorStop(1, '#5a1a00');
+  ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+  // volcano silhouette sides
+  ctx.fillStyle = '#2a0d05';
+  ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(0,H*0.35); ctx.lineTo(90,H); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(W,H); ctx.lineTo(W,H*0.35); ctx.lineTo(W-90,H); ctx.closePath(); ctx.fill();
+  // lava glow at bottom
+  ctx.fillStyle = 'rgba(255,80,0,0.25)'; ctx.fillRect(0,H-40,W,40);
+  ctx.fillStyle = '#ff4400';
+  for (var i = 0; i < 8; i++){ var lx = (i*61 + (Date.now()/40 % 20)) % W; ctx.beginPath(); ctx.arc(lx, H-12, 5+Math.sin(Date.now()/300+i)*2, 0, Math.PI*2); ctx.fill(); }
+}
+function draw(){
+  drawBackground();
+  // crater rim marker
+  var rimY = screenY(GOAL_Y);
+  if (rimY > -60 && rimY < H){
+    ctx.fillStyle = '#ffdd00'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('★ CRATER RIM ★', W/2, rimY + 50);
+    ctx.fillStyle = '#ff4400'; ctx.fillRect(0, rimY + 60, W, 10);
+  }
+  // platforms
+  platforms.forEach(function(p){
+    var y = screenY(p.y); if (y < -30 || y > H+30) return;
+    ctx.fillStyle = p.kind === 'base' ? '#5a2a12' : (p.kind === 'crumble' ? '#8a6a4a' : '#6b3a1e');
+    ctx.fillRect(p.x, y, p.w, p.h);
+    ctx.fillStyle = p.kind === 'crumble' ? '#ffdd88' : '#ff8c42';
+    ctx.fillRect(p.x, y, p.w, 4);
+    if (p.kind === 'crumble'){ ctx.fillStyle = '#2b1206'; ctx.font = '11px Arial'; ctx.textAlign = 'center'; ctx.fillText('CRUMBLY', p.x + p.w/2, y + 13); }
+  });
+  // gems
+  gemList.forEach(function(g){
+    if (g.taken) return; var y = screenY(g.y) + Math.sin(g.bob)*4; if (y < -20 || y > H+20) return;
+    ctx.save(); ctx.translate(g.x, y); ctx.rotate(Math.PI/4); ctx.fillStyle = '#33eeff'; ctx.fillRect(-8,-8,16,16); ctx.restore();
+    ctx.fillStyle = 'rgba(51,238,255,0.3)'; ctx.beginPath(); ctx.arc(g.x, y, 16, 0, Math.PI*2); ctx.fill();
+  });
+  // debris
+  debris.forEach(function(o){
+    var y = screenY(o.y);
+    ctx.save(); ctx.translate(o.x + o.w/2, y + o.w/2); ctx.rotate(o.rot);
+    ctx.fillStyle = o.kind === 'rock' ? '#7a7a7a' : '#999'; ctx.fillRect(-o.w/2,-o.w/2,o.w,o.w);
+    if (o.kind === 'rock'){ ctx.fillStyle = '#444'; ctx.fillRect(-4,-4,8,8); }
+    ctx.restore();
+  });
+  // lava bursts
+  lavaBursts.forEach(function(lb){
+    var y = screenY(lb.y);
+    ctx.fillStyle = '#ffdd00'; ctx.beginPath(); ctx.arc(lb.x + lb.w/2, y, lb.w/2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff4400'; ctx.beginPath(); ctx.arc(lb.x + lb.w/2, y, lb.w/3, 0, Math.PI*2); ctx.fill();
+  });
+  // particles
+  particles.forEach(function(pt){ ctx.fillStyle = pt.color; ctx.fillRect(pt.x, screenY(pt.y), 4, 4); });
+  // player: little climber
+  if (state !== 'title'){
+    var py = screenY(player.y);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(player.x, py, player.w, player.h);
+    ctx.fillStyle = '#e63946'; ctx.fillRect(player.x, py, player.w, 10); // helmet
+    ctx.fillStyle = '#222'; ctx.fillRect(player.x + (player.facing > 0 ? 18 : 6), py + 14, 6, 6); // eye
+    ctx.fillStyle = '#333'; ctx.fillRect(player.x + 4, py + player.h - 6, player.w - 8, 6); // boots
+    // rope
+    ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.moveTo(player.x + player.w/2, py); ctx.lineTo(player.x + player.w/2, py - 12); ctx.stroke();
+  }
+  // ash particles falling ambience
+  ctx.fillStyle = 'rgba(200,200,200,0.5)';
+  for (var i = 0; i < 25; i++){ var ax = (i*97 + Date.now()/60) % W; var ay = (i*53 + Date.now()/30) % H; ctx.fillRect(ax, ay, 2, 2); }
+  // progress arrow
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+  ctx.fillText('▲ ' + progressPct() + '% to rim', 10, 20);
+}
+
+var last = 0;
+function loop(ts){
+  var dt = Math.min(50, ts - last); last = ts;
+  if (state === 'playing') update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+resetGame();
+requestAnimationFrame(loop);
+
+// Input: keyboard
+document.addEventListener('keydown', function(e){
+  var k = e.key.toLowerCase();
+  if (k === 'arrowleft' || k === 'a') keys.left = true;
+  if (k === 'arrowright' || k === 'd') keys.right = true;
+  if (k === 'arrowup' || k === 'w' || k === ' ') { keys.jump = true; e.preventDefault(); }
+  if (k === 'p' && (state === 'playing' || state === 'paused')) togglePause();
+  if (k === 'r') startGame();
+});
+document.addEventListener('keyup', function(e){
+  var k = e.key.toLowerCase();
+  if (k === 'arrowleft' || k === 'a') keys.left = false;
+  if (k === 'arrowright' || k === 'd') keys.right = false;
+  if (k === 'arrowup' || k === 'w' || k === ' ') keys.jump = false;
+});
+// Mouse: click sides to move, centre to jump
+canvas.addEventListener('mousedown', function(e){
+  initAudio();
+  var rect = canvas.getBoundingClientRect();
+  var x = (e.clientX - rect.left) / rect.width * W;
+  if (x < W*0.33) { keys.left = true; setTimeout(function(){ keys.left = false; }, 220); }
+  else if (x > W*0.66) { keys.right = true; setTimeout(function(){ keys.right = false; }, 220); }
+  else { keys.jump = true; setTimeout(function(){ keys.jump = false; }, 220); }
+});
+canvas.addEventListener('mousemove', function(e){
+  // Holding mouse on a side steers continuously while pressed handled by mousedown; no-op for hover
+});
+// Touch: tap sides to move, centre to jump
+canvas.addEventListener('touchstart', function(e){
+  e.preventDefault(); initAudio();
+  var rect = canvas.getBoundingClientRect();
+  for (var i = 0; i < e.changedTouches.length; i++){
+    var t = e.changedTouches[i];
+    var x = (t.clientX - rect.left) / rect.width * W;
+    if (x < W*0.33) { keys.left = true; setTimeout(function(){ keys.left = false; }, 260); }
+    else if (x > W*0.66) { keys.right = true; setTimeout(function(){ keys.right = false; }, 260); }
+    else { keys.jump = true; setTimeout(function(){ keys.jump = false; }, 260); }
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', function(e){ e.preventDefault(); }, { passive: false });
+
+// Buttons
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+document.getElementById('resumeBtn').addEventListener('click', togglePause);
+document.getElementById('btnLeft').addEventListener('click', function(){ initAudio(); keys.left = true; setTimeout(function(){ keys.left = false; }, 260); });
+document.getElementById('btnRight').addEventListener('click', function(){ initAudio(); keys.right = true; setTimeout(function(){ keys.right = false; }, 260); });
+document.getElementById('btnJump').addEventListener('click', function(){ initAudio(); keys.jump = true; setTimeout(function(){ keys.jump = false; }, 260); });
+})();
+</script>
+</body>
+</html>

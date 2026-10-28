@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Comet Slingshot</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #050816; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin: 8px 0 2px; color: #ffd166; text-shadow: 0 0 14px rgba(255,209,102,.6); text-align: center; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: center; font-size: 14px; font-weight: bold; padding: 6px 10px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15); border-radius: 10px; margin: 4px 8px; width: min(960px, 96vw); }
+  #hud span { white-space: nowrap; }
+  #status { color: #7cf2ff; }
+  #wrap { position: relative; width: min(960px, 96vw); height: min(560px, 72vh); }
+  canvas { width: 100%; height: 100%; display: block; background: radial-gradient(circle at 30% 20%, #182a5e 0, #050816 55%); border: 2px solid #334; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(3,6,22,.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #dbe7ff; }
+  .howto { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  .howto b { color: #7cf2ff; }
+  button { background: #ffd166; color: #1a1200; border: none; border-radius: 10px; padding: 12px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  button.secondary { background: #7cf2ff; box-shadow: 0 4px 0 #1a7f8f; }
+  #hint { font-size: 13px; color: #aebadd; text-align: center; padding: 5px 10px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+</style>
+</head>
+<body>
+<h1>☄️ Comet Slingshot</h1>
+<div id="hud">
+  <span>Score: <span id="score">0</span></span>
+  <span>Level: <span id="level">1 / 5</span></span>
+  <span>Launches: <span id="launches">4</span></span>
+  <span>Targets: <span id="targets">0 / 2</span></span>
+  <span>Status: <span id="status">Ready</span></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="960" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>☄️ Comet Slingshot</h2>
+    <p>Bend your comet around planets and slingshot it into every star target!</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      • <b>Drag</b> from the comet with mouse or finger to aim — pull back like a slingshot, release to launch.<br>
+      • <b>Arrow Keys</b> adjust aim angle and power. <b>Space</b> launches. <b>R</b> restarts instantly.<br>
+      • Planets pull your comet with gravity — use the curve to reach targets hidden behind them.<br>
+      • Hit ALL targets in a level before you run out of launches. Clear all 5 levels to win!
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Tip: a dotted preview shows your first arc — but gravity bends it after launch!</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <div class="row">
+      <button id="restartBtn">↻ Restart Game</button>
+      <button id="retryBtn" class="secondary">↻ Retry Level</button>
+    </div>
+  </div>
+</div>
+<p id="hint">Drag to aim &amp; release to launch &nbsp;|&nbsp; ← → ↑ ↓ aim &nbsp;|&nbsp; Space launch &nbsp;|&nbsp; R restart &nbsp;|&nbsp; Avoid crashing into planets!</p>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var levelEl = document.getElementById('level');
+  var launchesEl = document.getElementById('launches');
+  var targetsEl = document.getElementById('targets');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  // Procedural Web Audio - created only after user interaction
+  var audioCtx = null;
+  function ensureAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+  }
+  function sfxLaunch(){ beep(220, 0.25, 'sawtooth', 0.12); beep(440, 0.2, 'sine', 0.1); }
+  function sfxHit(){ beep(880, 0.18, 'sine', 0.18); beep(1320, 0.22, 'sine', 0.14); }
+  function sfxCrash(){ beep(120, 0.3, 'square', 0.15); }
+  function sfxWin(){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,0.25,'triangle',0.16); }, i*140); }); }
+
+  // Levels: start, planets (x,y,radius,gravity), targets, launches
+  var LEVELS = [
+    { launches: 4, start: {x:120,y:280}, planets: [{x:520,y:280,r:34,g:9000}], targets: [{x:830,y:140},{x:830,y:420}] },
+    { launches: 4, start: {x:110,y:470}, planets: [{x:430,y:300,r:40,g:13000},{x:700,y:180,r:28,g:8000}], targets: [{x:850,y:90},{x:850,y:460},{x:600,y:500}] },
+    { launches: 5, start: {x:120,y:90}, planets: [{x:480,y:280,r:52,g:18000}], targets: [{x:860,y:280},{x:700,y:480}] },
+    { launches: 5, start: {x:130,y:280}, planets: [{x:380,y:140,r:32,g:11000},{x:580,y:420,r:32,g:11000},{x:760,y:200,r:26,g:9000}], targets: [{x:880,y:90},{x:880,y:480},{x:480,y:280}] },
+    { launches: 6, start: {x:110,y:280}, planets: [{x:350,y:280,r:44,g:15000},{x:650,y:140,r:36,g:12000},{x:650,y:420,r:36,g:12000}], targets: [{x:880,y:280},{x:880,y:90},{x:880,y:470},{x:500,y:90}] }
+  ];
+
+  var state = 'title'; // title, aiming, flying, levelClear, gameover, win
+  var levelIdx = 0, score = 0, launchesLeft = 0;
+  var comet = null, trail = [];
+  var aimAngle = -0.3, aimPower = 260, dragging = false, dragStart = null, dragCur = null;
+  var levelTargets = [], hitCount = 0, stars = [], levelTimer = 0;
+  for (var i = 0; i < 90; i++) stars.push({x: Math.random()*W, y: Math.random()*H, r: Math.random()*1.6+0.5, tw: Math.random()*6.28});
+
+  function curLevel(){ return LEVELS[levelIdx]; }
+  function loadLevel(idx){
+    levelIdx = idx;
+    var L = curLevel();
+    launchesLeft = L.launches; hitCount = 0; levelTimer = 0;
+    levelTargets = L.targets.map(function(t){ return {x:t.x, y:t.y, r:20, hit:false}; });
+    resetComet();
+    state = 'aiming';
+    updateHUD('Aim! Drag from the comet.');
+  }
+  function resetComet(){
+    var L = curLevel();
+    comet = { x: L.start.x, y: L.start.y, vx: 0, vy: 0, alive: true };
+    trail = []; dragging = false; dragStart = null; dragCur = null;
+    aimAngle = 0; aimPower = 260;
+  }
+  function updateHUD(msg){
+    scoreEl.textContent = score;
+    levelEl.textContent = (levelIdx+1) + ' / ' + LEVELS.length;
+    launchesEl.textContent = launchesLeft;
+    targetsEl.textContent = hitCount + ' / ' + levelTargets.length;
+    if (msg) statusEl.textContent = msg;
+  }
+  function showEnd(title, text, isWin){
+    state = isWin ? 'win' : 'gameover';
+    endTitle.textContent = title;
+    endText.textContent = text;
+    document.getElementById('retryBtn').style.display = isWin ? 'none' : 'inline-block';
+    endScreen.classList.remove('hidden');
+    updateHUD(title);
+  }
+  function hideEnd(){ endScreen.classList.add('hidden'); }
+  function startGame(){
+    ensureAudio();
+    score = 0; hideEnd(); titleScreen.classList.add('hidden');
+    loadLevel(0);
+  }
+  function restartAll(){ ensureAudio(); hideEnd(); titleScreen.classList.add('hidden'); score = 0; loadLevel(0); }
+  function retryLevel(){ ensureAudio(); hideEnd(); loadLevel(levelIdx); }
+
+  function aimVector(){
+    if (dragging && dragStart && dragCur) {
+      var dx = dragStart.x - dragCur.x, dy = dragStart.y - dragCur.y;
+      var p = Math.min(340, Math.sqrt(dx*dx + dy*dy) * 2.2);
+      return { angle: Math.atan2(dy, dx), power: Math.max(60, p) };
+    }
+    return { angle: aimAngle, power: aimPower };
+  }
+  function launch(){
+    if (state !== 'aiming') return;
+    var a = aimVector();
+    comet.vx = Math.cos(a.angle) * a.power;
+    comet.vy = Math.sin(a.angle) * a.power;
+    if (Math.abs(comet.vx) < 20 && Math.abs(comet.vy) < 20) return;
+    launchesLeft--; dragging = false; state = 'flying'; trail = [];
+    sfxLaunch(); updateHUD('Comet flying! Gravity is bending it...');
+  }
+  function failCheck(){
+    if (launchesLeft <= 0 && hitCount < levelTargets.length) {
+      sfxCrash();
+      showEnd('Out of Launches!', 'Level ' + (levelIdx+1) + ': you hit ' + hitCount + ' of ' + levelTargets.length + ' targets. Score: ' + score + '. Retry this level!', false);
+    }
+  }
+  function endFlight(reason){
+    if (state !== 'flying') return;
+    comet.alive = false;
+    if (hitCount >= levelTargets.length) {
+      score += 500 + launchesLeft * 200;
+      if (levelIdx + 1 >= LEVELS.length) {
+        sfxWin();
+        showEnd('🏆 You Win!', 'You cleared all ' + LEVELS.length + ' levels! Final score: ' + score + '. You are a master of orbital slingshots!', true);
+      } else {
+        state = 'levelClear'; sfxWin();
+        updateHUD('Level cleared! Next level...');
+        setTimeout(function(){ if (state === 'levelClear') loadLevel(levelIdx + 1); }, 1400);
+      }
+    } else if (launchesLeft > 0) {
+      updateHUD(reason + ' Launches left: ' + launchesLeft + '. Aim again!');
+      resetComet(); state = 'aiming';
+    } else {
+      failCheck();
+    }
+    updateHUD();
+  }
+
+  function physics(dt){
+    if (state !== 'flying' || !comet.alive) return;
+    var L = curLevel();
+    // Gravity from each planet
+    L.planets.forEach(function(p){
+      var dx = p.x - comet.x, dy = p.y - comet.y;
+      var d2 = dx*dx + dy*dy, d = Math.sqrt(d2) || 1;
+      var acc = p.g / Math.max(d2, 900);
+      if (acc > 900) acc = 900;
+      comet.vx += (dx / d) * acc * dt;
+      comet.vy += (dy / d) * acc * dt;
+    });
+    comet.x += comet.vx * dt; comet.y += comet.vy * dt;
+    trail.push({x: comet.x, y: comet.y});
+    if (trail.length > 90) trail.shift();
+    levelTimer += dt;
+    // Planet collision
+    for (var i = 0; i < L.planets.length; i++) {
+      var p = L.planets[i];
+      var dx = p.x - comet.x, dy = p.y - comet.y;
+      if (Math.sqrt(dx*dx + dy*dy) < p.r + 8) { sfxCrash(); endFlight('Crashed into a planet!'); return; }
+    }
+    // Target hits
+    levelTargets.forEach(function(t){
+      if (!t.hit) {
+        var dx = t.x - comet.x, dy = t.y - comet.y;
+        if (Math.sqrt(dx*dx + dy*dy) < t.r + 10) {
+          t.hit = true; hitCount++; score += 250; sfxHit();
+          updateHUD('Target hit! ' + hitCount + ' / ' + levelTargets.length);
+        }
+      }
+    });
+    if (hitCount >= levelTargets.length) { endFlight('All targets hit!'); return; }
+    // Out of bounds or stalled
+    var speed = Math.sqrt(comet.vx*comet.vx + comet.vy*comet.vy);
+    if (comet.x < -60 || comet.x > W+60 || comet.y < -60 || comet.y > H+60 || (levelTimer > 14) || (levelTimer > 3 && speed < 12)) {
+      endFlight('Comet drifted away.');
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    stars.forEach(function(s){
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(Date.now()/900 + s.tw));
+      ctx.fillStyle = '#cfe6ff'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.283); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (state === 'title') { drawScene(true); return; }
+    drawScene(false);
+  }
+  function drawScene(isTitle){
+    var L = LEVELS[Math.min(levelIdx, LEVELS.length-1)];
+    // Planets with gravity rings
+    L.planets.forEach(function(p){
+      ctx.strokeStyle = 'rgba(124,242,255,0.18)'; ctx.lineWidth = 1;
+      [1.8, 2.6, 3.4].forEach(function(m){ ctx.beginPath(); ctx.arc(p.x, p.y, p.r*m, 0, 6.283); ctx.stroke(); });
+      var g = ctx.createRadialGradient(p.x-8, p.y-10, 4, p.x, p.y, p.r);
+      g.addColorStop(0, '#ffb86b'); g.addColorStop(0.6, '#e76f51'); g.addColorStop(1, '#7a2e1d');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.arc(p.x-10, p.y-12, p.r*0.28, 0, 6.283); ctx.fill();
+    });
+    // Targets
+    (isTitle ? L.targets : levelTargets).forEach(function(t){
+      if (!isTitle && t.hit) return;
+      ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(Date.now()/700);
+      ctx.fillStyle = '#ffe066'; ctx.shadowColor = '#ffd166'; ctx.shadowBlur = 18;
+      ctx.beginPath();
+      for (var i = 0; i < 5; i++) {
+        var a = i * 1.2566 - 1.5708, a2 = a + 0.6283;
+        ctx.lineTo(Math.cos(a)*20, Math.sin(a)*20); ctx.lineTo(Math.cos(a2)*9, Math.sin(a2)*9);
+      }
+      ctx.closePath(); ctx.fill(); ctx.restore();
+      ctx.shadowBlur = 0;
+    });
+    // Trail
+    if (trail.length > 1) {
+      ctx.strokeStyle = 'rgba(255,180,80,0.9)'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath();
+      ctx.moveTo(trail[0].x, trail[0].y);
+      for (var i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
+      ctx.stroke();
+    }
+    // Comet + aim
+    if (comet && comet.alive) {
+      if (state === 'aiming') {
+        var a = aimVector();
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.setLineDash([6,8]); ctx.lineWidth = 2; ctx.beginPath();
+        ctx.moveTo(comet.x, comet.y);
+        for (var s = 1; s <= 14; s++) {
+          var px = comet.x + Math.cos(a.angle) * a.power * 0.18 * s;
+          var py = comet.y + Math.sin(a.angle) * a.power * 0.18 * s;
+          ctx.lineTo(px, py);
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+        if (dragging) { ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(comet.x, comet.y); ctx.lineTo(dragCur.x, dragCur.y); ctx.stroke(); }
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('Power: ' + Math.round(a.power), comet.x + 18, comet.y - 18);
+      }
+      ctx.fillStyle = '#ff9f43'; ctx.shadowColor = '#ff7b00'; ctx.shadowBlur = 22;
+      ctx.beginPath(); ctx.arc(comet.x, comet.y, 10, 0, 6.283); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(comet.x - 3, comet.y - 3, 3.5, 0, 6.283); ctx.fill();
+    }
+    if (state === 'aiming') {
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Drag from the comet to aim, release to launch', W/2, 26); ctx.textAlign = 'left';
+    }
+  }
+
+  function posFromEvent(e){
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches ? e.touches[0].clientX : e.clientX);
+    var cy = (e.touches ? e.touches[0].clientY : e.clientY);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  canvas.addEventListener('mousedown', function(e){
+    if (state !== 'aiming') return;
+    var p = posFromEvent(e);
+    if (Math.hypot(p.x - comet.x, p.y - comet.y) < 90) { dragging = true; dragStart = p; dragCur = p; }
+  });
+  canvas.addEventListener('mousemove', function(e){ if (dragging) dragCur = posFromEvent(e); });
+  canvas.addEventListener('mouseup', function(e){ if (dragging) { dragCur = posFromEvent(e); dragging = false; launch(); } });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); if (state !== 'aiming') return; var p = posFromEvent(e); if (Math.hypot(p.x - comet.x, p.y - comet.y) < 110) { dragging = true; dragStart = p; dragCur = p; } }, {passive:false});
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); if (dragging) dragCur = posFromEvent(e); }, {passive:false});
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); if (dragging) { dragging = false; launch(); } }, {passive:false});
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') restartAll(); return; }
+    if (state !== 'aiming') return;
+    if (e.key === 'ArrowLeft') aimAngle -= 0.08;
+    if (e.key === 'ArrowRight') aimAngle += 0.08;
+    if (e.key === 'ArrowUp') aimPower = Math.min(340, aimPower + 15);
+    if (e.key === 'ArrowDown') aimPower = Math.max(60, aimPower - 15);
+    if (e.key === ' ') { e.preventDefault(); launch(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', restartAll);
+  document.getElementById('retryBtn').addEventListener('click', retryLevel);
+
+  // Title preview scene
+  comet = { x: 120, y: 280, vx: 0, vy: 0, alive: true };
+  levelTargets = LEVELS[0].targets.map(function(t){ return {x:t.x, y:t.y, r:20, hit:false}; });
+  updateHUD('Press Start to play.');
+  var last = performance.now();
+  function loop(now){
+    var dt = Math.min(0.033, (now - last) / 1000); last = now;
+    physics(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

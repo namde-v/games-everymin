@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Trident Toss</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #062a3a; color: #eafcff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 30px; margin: 6px 0 2px; text-shadow: 2px 2px 0 #0a6a8a; letter-spacing: 1px; }
+  .sub { color: #9be7ff; font-size: 14px; margin-bottom: 8px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 8px; width: 100%; max-width: 860px; }
+  .pill { background: #0b4a63; border: 2px solid #2ec4e8; border-radius: 20px; padding: 6px 13px; font-weight: bold; font-size: 14px; }
+  .pill b { color: #ffe066; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { width: 100%; height: auto; display: block; background: linear-gradient(#39a8d4, #0b5f7d 58%, #073d52); border: 4px solid #2ec4e8; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(2, 30, 44, 0.88); border-radius: 10px; padding: 22px; }
+  .overlay h2 { font-size: 36px; color: #ffe066; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; }
+  .howto { background: rgba(255,255,255,0.10); border: 1px solid #2ec4e8; border-radius: 10px; padding: 12px 16px; margin: 12px 0; text-align: left; }
+  .howto li { margin: 4px 0 4px 18px; }
+  button { background: #ffbf1f; color: #122a00; border: none; border-radius: 10px; padding: 13px 26px; font-size: 19px; font-weight: bold; cursor: pointer; margin-top: 12px; box-shadow: 0 4px 0 #b87e00; }
+  button:hover, button:focus { background: #ffd84d; outline: 3px solid #fff; }
+  #msg { min-height: 24px; font-weight: bold; color: #ffe066; margin-top: 8px; text-align: center; }
+  #controls { color: #bfefff; font-size: 13px; margin-top: 4px; text-align: center; line-height: 1.5; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<h1>🔱 Trident Toss</h1>
+<div class="sub">A precision fishing challenge from the deck of a drifting boat</div>
+<div id="hud" role="status" aria-live="polite">
+  <div class="pill">Score: <b id="score">0</b> / 100</div>
+  <div class="pill">Throws left: <b id="throws">12</b></div>
+  <div class="pill">Wind: <b id="wind">0</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+  <div class="pill">Last hit: <b id="last">—</b></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="540" aria-label="Trident Toss game canvas"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🔱 Trident Toss</h2>
+    <p>Fish are gliding through the lagoon. Read the wind, drag to aim, and land your trident dead-center for the biggest points.</p>
+    <div class="howto">
+      <strong>How to Play</strong>
+      <ul>
+        <li><strong>Drag</strong> on the water (mouse or touch) to aim from the boat, then <strong>release</strong> to throw.</li>
+        <li><strong>Arrow Keys</strong> nudge your aim. <strong>Space</strong> throws. <strong>R</strong> restarts.</li>
+        <li>Wind pushes the trident sideways — aim into the wind to compensate.</li>
+        <li>Bullseye = 25 pts, inner ring = 15 pts, outer ring = 8 pts, graze = 3 pts.</li>
+        <li>Reach <strong>100 points in 12 throws</strong> to win. Bonus: hitting 3 fish in a row adds +10.</li>
+      </ul>
+    </div>
+    <button id="startBtn" type="button">▶ Start Game</button>
+    <p>Audio starts only after you press Start.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn" type="button">↻ Play Again</button>
+  </div>
+</div>
+<div id="msg">Drag from the boat to aim. Watch the wind!</div>
+<div id="controls">Mouse / touch drag + release to throw &nbsp;•&nbsp; ← ↑ ↓ → aim &nbsp;•&nbsp; Space throw &nbsp;•&nbsp; R restart</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var scoreEl = document.getElementById('score');
+  var throwsEl = document.getElementById('throws');
+  var windEl = document.getElementById('wind');
+  var statusEl = document.getElementById('status');
+  var lastEl = document.getElementById('last');
+  var msgEl = document.getElementById('msg');
+
+  var state = 'title'; // title | aiming | flying | over
+  var score = 0, throwsLeft = 12, streak = 0, bestHit = 0, hits = 0;
+  var wind = 0, aimAngle = -Math.PI / 4, aimPower = 0.62;
+  var dragging = false, dragX = 0, dragY = 0;
+  var trident = null, particles = [], splash = null, rippleT = 0;
+  var boatX = 90, boatY = 455;
+  var fishes = [];
+  var audioCtx = null;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function newWind() {
+    wind = Math.round(rand(-9, 9));
+    var arrow = wind === 0 ? 'calm' : (wind > 0 ? '→ +' + wind : '← ' + wind);
+    windEl.textContent = arrow;
+  }
+  function makeFish() {
+    var colors = ['#ff7a59', '#ffd84d', '#7bf1a8', '#ff9de2', '#9be7ff'];
+    return {
+      x: rand(320, 820), y: rand(150, 380), r: rand(26, 38),
+      vx: rand(0.5, 1.4) * (Math.random() < 0.5 ? -1 : 1),
+      vy: rand(-0.3, 0.3), color: pick(colors), wob: rand(0, 6.28), depth: rand(0.55, 1)
+    };
+  }
+  function reset() {
+    score = 0; throwsLeft = 12; streak = 0; bestHit = 0; hits = 0;
+    aimAngle = -Math.PI / 4; aimPower = 0.62;
+    trident = null; particles = []; splash = null; dragging = false;
+    fishes = []; for (var i = 0; i < 4; i++) fishes.push(makeFish());
+    newWind(); updateHUD('Aiming'); setMsg('Drag from the boat to aim. Watch the wind!');
+    endScreen.classList.add('hidden');
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    throwsEl.textContent = throwsLeft;
+    statusEl.textContent = status || statusEl.textContent;
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundThrow() { tone(220, 0.25, 'triangle', 0.14, 520); }
+  function soundHit(pts) { tone(520, 0.18, 'sine', 0.16, 880); setTimeout(function () { tone(760, 0.22, 'sine', 0.14, 1100); }, 70); if (pts >= 25) setTimeout(function () { tone(1040, 0.3, 'sine', 0.12); }, 150); }
+  function soundMiss() { tone(180, 0.3, 'sine', 0.12, 90); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.35, 'triangle', 0.14); }, i * 130); }); }
+
+  function aimPoint() {
+    var len = 90 + aimPower * 150;
+    return { x: boatX + 18 + Math.cos(aimAngle) * len, y: boatY - 28 + Math.sin(aimAngle) * len };
+  }
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0));
+    var cy = (evt.clientY !== undefined ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0));
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  function updateAimFromPoint(p) {
+    var dx = p.x - (boatX + 18), dy = p.y - (boatY - 28);
+    if (Math.sqrt(dx * dx + dy * dy) < 20) return;
+    aimAngle = Math.atan2(dy, dx);
+    if (aimAngle > -0.08) aimAngle = -0.08;
+    if (aimAngle < -1.5) aimAngle = -1.5;
+    aimPower = Math.min(1, Math.max(0.25, Math.sqrt(dx * dx + dy * dy) / 320));
+  }
+
+  function throwTrident() {
+    if (state !== 'aiming' || throwsLeft <= 0) return;
+    throwsLeft--;
+    var speed = 9 + aimPower * 8;
+    trident = { x: boatX + 18, y: boatY - 28, vx: Math.cos(aimAngle) * speed, vy: Math.sin(aimAngle) * speed, angle: aimAngle, trail: [] };
+    state = 'flying'; updateHUD('Flying!'); soundThrow();
+    setMsg('Trident away! Wind ' + (wind >= 0 ? '+' : '') + wind + ' is pushing it.');
+  }
+
+  function resolveThrow() {
+    var hitFish = null, hitDist = 1e9;
+    for (var i = 0; i < fishes.length; i++) {
+      var f = fishes[i];
+      var d = Math.sqrt((trident.x - f.x) * (trident.x - f.x) + (trident.y - f.y) * (trident.y - f.y));
+      if (d < hitDist) { hitDist = d; hitFish = f; }
+    }
+    var pts = 0, label = 'Miss';
+    if (hitFish && hitDist <= hitFish.r * 0.45) { pts = 25; label = 'BULLSEYE! +25'; }
+    else if (hitFish && hitDist <= hitFish.r * 0.9) { pts = 15; label = 'Great hit! +15'; }
+    else if (hitFish && hitDist <= hitFish.r * 1.35) { pts = 8; label = 'Hit! +8'; }
+    else if (hitFish && hitDist <= hitFish.r * 1.8) { pts = 3; label = 'Graze! +3'; }
+
+    if (pts > 0) {
+      hits++; streak++; bestHit = Math.max(bestHit, pts);
+      score += pts;
+      if (streak >= 3 && streak % 3 === 0) { score += 10; label += ' + streak bonus 10!'; tone(880, 0.25, 'triangle', 0.12); }
+      soundHit(pts);
+      // replace the hit fish with a fresh one, burst of particles
+      var idx = fishes.indexOf(hitFish);
+      if (idx >= 0) fishes[idx] = makeFish();
+      for (var p = 0; p < 22; p++) particles.push({ x: trident.x, y: trident.y, vx: rand(-3, 3), vy: rand(-4, 1), life: 1, color: hitFish.color });
+      setMsg(label + ' — ' + score + ' points total.');
+    } else {
+      streak = 0; soundMiss();
+      splash = { x: Math.min(Math.max(trident.x, 120), 840), y: Math.min(Math.max(trident.y, 90), 500), t: 0 };
+      setMsg('Splash! No fish this time. Aim into the wind and try again.');
+    }
+    lastEl.textContent = label;
+    trident = null;
+    if (score >= 100) { endGame(true); return; }
+    if (throwsLeft <= 0) { endGame(false); return; }
+    newWind(); state = 'aiming'; updateHUD('Aiming');
+  }
+
+  function endGame(won) {
+    state = 'over';
+    document.getElementById('endTitle').textContent = won ? '🏆 You Win!' : '🌊 Out of Throws';
+    document.getElementById('endText').textContent = won
+      ? 'You reached ' + score + ' points with ' + throwsLeft + ' throw(s) to spare. Master of the lagoon!'
+      : 'You finished with ' + score + ' points — just short of 100. The fish are still out there!';
+    document.getElementById('endStats').textContent = 'Fish hit: ' + hits + ' • Best single hit: ' + bestHit + ' • Final score: ' + score;
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'You Win!' : 'Game Over');
+    if (won) soundWin();
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    titleScreen.classList.add('hidden');
+    state = 'aiming';
+    setMsg('Throw 1: drag to aim, release to throw!');
+  }
+
+  // ---- input ----
+  canvas.addEventListener('mousedown', function (e) { if (state !== 'aiming') return; dragging = true; updateAimFromPoint(canvasPos(e)); });
+  canvas.addEventListener('mousemove', function (e) { if (dragging && state === 'aiming') updateAimFromPoint(canvasPos(e)); });
+  window.addEventListener('mouseup', function () { if (dragging) { dragging = false; if (state === 'aiming') throwTrident(); } });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (state !== 'aiming') return; dragging = true; updateAimFromPoint(canvasPos(e)); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); if (dragging && state === 'aiming') updateAimFromPoint(canvasPos(e)); }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); if (dragging) { dragging = false; if (state === 'aiming') throwTrident(); } }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startGame(); return; }
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') { startGame(); } return; }
+    if (state !== 'aiming') return;
+    if (e.key === 'ArrowLeft') { aimAngle = Math.max(-1.5, aimAngle - 0.06); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { aimAngle = Math.min(-0.08, aimAngle + 0.06); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { aimPower = Math.min(1, aimPower + 0.06); e.preventDefault(); }
+    if (e.key === 'ArrowDown') { aimPower = Math.max(0.25, aimPower - 0.06); e.preventDefault(); }
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); throwTrident(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // ---- update / draw ----
+  function update() {
+    rippleT += 0.02;
+    for (var i = 0; i < fishes.length; i++) {
+      var f = fishes[i]; f.wob += 0.08;
+      f.x += f.vx; f.y += f.vy + Math.sin(f.wob) * 0.15;
+      if (f.x < 280 || f.x > 830) f.vx *= -1;
+      if (f.y < 130) f.y = 130; if (f.y > 400) f.y = 400;
+    }
+    if (state === 'flying' && trident) {
+      trident.trail.push({ x: trident.x, y: trident.y });
+      if (trident.trail.length > 14) trident.trail.shift();
+      trident.vy += 0.22; // gravity
+      trident.vx += wind * 0.012; // wind drift
+      trident.x += trident.vx; trident.y += trident.vy;
+      trident.angle = Math.atan2(trident.vy, trident.vx);
+      if (trident.y >= 500 || trident.x > 860 || trident.x < 0 || trident.y < 0) { trident.y = Math.min(trident.y, 500); resolveThrow(); }
+    }
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var pt = particles[j]; pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.15; pt.life -= 0.04;
+      if (pt.life <= 0) particles.splice(j, 1);
+    }
+    if (splash) { splash.t += 0.05; if (splash.t > 1) splash = null; }
+  }
+
+  function drawFish(f) {
+    ctx.save(); ctx.translate(f.x, f.y); ctx.scale(f.vx >= 0 ? 1 : -1, 1); ctx.globalAlpha = f.depth;
+    ctx.fillStyle = f.color;
+    ctx.beginPath(); ctx.ellipse(0, 0, f.r, f.r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-f.r * 0.8, 0); ctx.lineTo(-f.r * 1.5, -f.r * 0.55); ctx.lineTo(-f.r * 1.5, f.r * 0.55); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#062a3a'; ctx.beginPath(); ctx.arc(f.r * 0.55, -f.r * 0.12, 3.5, 0, Math.PI * 2); ctx.fill();
+    // target ring so players can judge center distance
+    ctx.globalAlpha = 0.85; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, f.r * 0.45, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, f.r * 0.9, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawTrident(x, y, angle, scale) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(angle); ctx.scale(scale, scale);
+    ctx.strokeStyle = '#e8c268'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-52, 0); ctx.lineTo(34, 0); ctx.stroke();
+    ctx.strokeStyle = '#dfefff'; ctx.lineWidth = 3;
+    [-10, 0, 10].forEach(function (off, i) {
+      ctx.beginPath(); ctx.moveTo(34, off); ctx.lineTo(52, off); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(52, off); ctx.lineTo(44, off - 7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(52, off); ctx.lineTo(44, off + 7); ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // sky, sun, clouds
+    ctx.fillStyle = '#ffdf6b'; ctx.beginPath(); ctx.arc(760, 62, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    [[140, 60], [330, 42], [560, 66]].forEach(function (c) {
+      ctx.beginPath(); ctx.ellipse(c[0], c[1], 46, 14, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    // water surface + ripples
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    for (var i = 0; i < 26; i++) {
+      var rx = (i * 71 + Math.sin(rippleT + i) * 8) % 860;
+      var ry = 118 + (i % 5) * 74;
+      ctx.beginPath(); ctx.ellipse(rx, ry, 26, 4, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    fishes.forEach(drawFish);
+    // boat
+    ctx.fillStyle = '#8a4b1f'; ctx.beginPath();
+    ctx.moveTo(boatX - 55, boatY); ctx.lineTo(boatX + 70, boatY); ctx.lineTo(boatX + 48, boatY + 34); ctx.lineTo(boatX - 34, boatY + 34); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5d3012'; ctx.fillRect(boatX - 8, boatY - 52, 6, 52);
+    ctx.fillStyle = '#fff3c4'; ctx.beginPath(); ctx.moveTo(boatX - 2, boatY - 52); ctx.lineTo(boatX + 44, boatY - 20); ctx.lineTo(boatX - 2, boatY - 20); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#122a00'; ctx.font = 'bold 20px Arial'; ctx.fillText('⛵', boatX + 8, boatY + 26);
+    // aim guide
+    if (state === 'aiming') {
+      var ap = aimPoint();
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.setLineDash([8, 8]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(boatX + 18, boatY - 28); ctx.lineTo(ap.x, ap.y); ctx.stroke(); ctx.setLineDash([]);
+      // wind arrow
+      ctx.fillStyle = '#ffe066'; ctx.font = 'bold 17px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Wind ' + (wind > 0 ? '→' : wind < 0 ? '←' : '·') + ' ' + Math.abs(wind), 430, 32);
+      ctx.textAlign = 'left';
+      drawTrident(boatX + 18, boatY - 28, aimAngle, 0.9);
+      // predicted landing hint: simple dot at aim point
+      ctx.fillStyle = 'rgba(255,224,102,0.9)'; ctx.beginPath(); ctx.arc(ap.x, ap.y, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    if (state === 'flying' && trident) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
+      ctx.beginPath(); trident.trail.forEach(function (t, k) { if (k === 0) ctx.moveTo(t.x, t.y); else ctx.lineTo(t.x, t.y); }); ctx.stroke();
+      drawTrident(trident.x, trident.y, trident.angle, 1);
+    }
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+    if (splash) {
+      ctx.strokeStyle = 'rgba(255,255,255,' + (1 - splash.t) + ')'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(splash.x, splash.y, 10 + splash.t * 46, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Four fish are swimming — read the wind before every throw!', 430, 505);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+  reset(); updateHUD('Ready'); loop();
+})();
+</script>
+</body>
+</html>

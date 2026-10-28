@@ -44,3 +44,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0538 | Banjo Barnstorm | Rhythm / Banjo Strum Melody | 1-5 / A/S/D/F/G strum, mouse click, touch tap strings | [Play](./../games/game-0538.html) |
 | 0539 | Lantern Launcher | Precision / Lantern Trajectory Aim | Mouse/touch drag aim and release, Arrow Keys adjust, Space launch | [Play](./../games/game-0539.html) |
 | 0540 | Dune Dasher | Arcade / Sandboard Descent | Arrow Keys/WASD move and jump, mouse/touch steer and tap to jump | [Play](./../games/game-0540.html) |
+| 0541 | Polarity Pursuit | Arcade / Polarity Runner | Arrow Keys/WASD move lanes, Space/click/tap switch polarity | [Play](./../games/game-0541.html) |
+| 0542 | Tide Lock | Puzzle / Tide Gate Logic | Mouse/touch click gates to rotate, Arrow Keys select, Space/Enter rotate | [Play](./../games/game-0542.html) |
+| 0543 | Hive Horizon | Strategy / Beehive Management | Mouse/touch click assignments, 1-3 assign roles, N next day | [Play](./../games/game-0543.html) |
+| 0544 | Parade Percussion | Rhythm / Marching Beat Timing | D/F/J/K or 1-4 hit lanes, mouse click, touch tap lanes | [Play](./../games/game-0544.html) |
+| 0545 | Comet Slingshot | Precision / Orbital Slingshot | Mouse/touch drag aim and release, Arrow Keys aim, Space launch | [Play](./../games/game-0545.html) |
+| 0546 | Signal Switchboard | Puzzle / Wire Routing | Mouse/touch drag wires, Arrow Keys move cursor, Space/Enter connect, U undo | [Play](./../games/game-0546.html) |
+| 0547 | Glacier Expedition | Strategy / Turn-Based Expedition Planning | Mouse/touch click adjacent tiles, Arrow Keys/WASD move, Space camp/rest | [Play](./../games/game-0547.html) |
+| 0548 | Glass Harmonica | Rhythm / Melody Memory and Timing | 1-4 / A/S/D/F play bowls, mouse click, touch tap bowls | [Play](./../games/game-0548.html) |
+| 0549 | Trident Toss | Precision / Trident Throw Aim | Mouse/touch drag aim and release, Arrow Keys adjust, Space throw | [Play](./../games/game-0549.html) |
+| 0550 | Ashfall Ascent | Arcade / Volcano Climb Dodger | Arrow Keys/WASD move and jump, Space jump, mouse/touch tap move/jump | [Play](./../games/game-0550.html) |
