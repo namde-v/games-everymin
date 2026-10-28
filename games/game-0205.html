@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Boomerang Bandit</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { background: #0e1a12; color: #f5f0dc; font-family: Georgia, 'Times New Roman', serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+  h1 { font-size: clamp(26px, 5vw, 44px); letter-spacing: 2px; color: #ffcf4d; text-shadow: 2px 2px 0 #7a4a00; margin: 8px 0 4px; text-align: center; }
+  #wrap { position: relative; width: min(96vw, 860px); }
+  #hud { display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; background: #1d3320; border: 2px solid #4a7c43; border-bottom: none; border-radius: 10px 10px 0 0; padding: 8px 14px; font-size: 15px; font-weight: bold; }
+  #hud span { color: #ffcf4d; }
+  #status { color: #b8f0a8 !important; }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 860 / 540; background: linear-gradient(#274d2e, #16281a); border: 2px solid #4a7c43; border-radius: 0 0 10px 10px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(8, 20, 10, 0.88); text-align: center; padding: 20px; border-radius: 10px; }
+  .hidden { display: none !important; }
+  .overlay h2 { font-size: clamp(28px, 5vw, 42px); color: #ffcf4d; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 16px; }
+  .overlay .small { font-size: 14px; color: #cfe6b8; }
+  button { background: #ffcf4d; color: #3a2400; border: none; border-radius: 999px; padding: 13px 34px; font-size: 19px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #a67c00; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #a67c00; }
+  button.secondary { background: #e8e0c8; box-shadow: 0 4px 0 #8a8270; }
+  #powerRow { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 14px; }
+  #powerBar { width: 220px; height: 14px; background: #22351f; border: 1px solid #4a7c43; border-radius: 8px; overflow: hidden; }
+  #powerFill { height: 100%; width: 40%; background: linear-gradient(90deg, #7ed957, #ffcf4d, #ff5d3a); transition: width 0.05s; }
+  kbd { background: #33402c; border: 1px solid #6b8a5e; border-bottom-width: 3px; border-radius: 5px; padding: 1px 6px; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Boomerang Bandit</h1>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Targets: <span id="targets">0 / 8</span></div>
+    <div>Throws left: <span id="throws">6</span></div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="860" height="540"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Boomerang Bandit</h2>
+    <p><strong>How to Play:</strong> You are the Bandit at the bottom of the clearing. Aim your boomerang, then throw it — it flies out in a wide curve and comes right back to you. Hit every moving target before you run out of throws!</p>
+    <p class="small">Outbound hits score 100 points. Hits on the <b>return path</b> score 200 and build your combo. A wide, powerful arc can sweep several targets in one throw. Watch out: targets drift, bounce and speed up as you clear them.</p>
+    <p class="small">Aim with the mouse or your finger. Hold to charge power, release to throw. Keyboard: <kbd>&larr;</kbd><kbd>&rarr;</kbd> aim, <kbd>&uarr;</kbd><kbd>&darr;</kbd> power, <kbd>Space</kbd> throw, <kbd>R</kbd> restart.</p>
+    <button id="startBtn" type="button">Start Game</button>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>You Win!</h2>
+    <p id="winText">Every target down — a true Bandit legend!</p>
+    <p class="small">Press Restart to play again with a fresh clearing.</p>
+    <button id="winRestartBtn" type="button">Restart</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <h2>Game Over</h2>
+    <p id="overText">Out of throws — the targets got away this time.</p>
+    <p class="small">Try a wider arc and aim for return-path bonuses.</p>
+    <button id="overRestartBtn" type="button">Restart</button>
+  </div>
+</div>
+<div id="powerRow"><span>Power</span><div id="powerBar"><div id="powerFill"></div></div><span id="powerLabel">40%</span></div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var targetsEl = document.getElementById('targets');
+  var throwsEl = document.getElementById('throws');
+  var statusEl = document.getElementById('status');
+  var powerFill = document.getElementById('powerFill');
+  var powerLabel = document.getElementById('powerLabel');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  var state = 'title'; // title | aiming | flying | win | over
+  var score = 0, hits = 0, throwsLeft = 6, combo = 0;
+  var TOTAL_TARGETS = 8;
+  var player = { x: W / 2, y: H - 52, r: 20 };
+  var aimAngle = -Math.PI / 2; // straight up
+  var power = 0.4; // 0..1
+  var charging = false, chargeDir = 1;
+  var boom = null;
+  var targets = [];
+  var particles = [];
+  var trail = [];
+  var floaters = [];
+  var audioCtx = null, muted = false;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; } }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    var ac = audio(); if (!ac || muted) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, ac.currentTime);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, ac.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+  function sfxHit(returning) { tone(returning ? 880 : 660, 0.18, 'triangle', 0.2, returning ? 1320 : 990); }
+  function sfxThrow() { tone(300, 0.35, 'sawtooth', 0.08, 700); }
+  function sfxWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.25, 'triangle', 0.2); }, i * 130); }); }
+  function sfxLose() { tone(320, 0.5, 'sawtooth', 0.12, 110); }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  function spawnTargets() {
+    targets = [];
+    var colors = ['#ff5d3a', '#ffb13a', '#7ed957', '#4dc9ff', '#e87ed7', '#ffe14d', '#ff7a5c', '#9be15d'];
+    for (var i = 0; i < TOTAL_TARGETS; i++) {
+      var dir = Math.random() < 0.5 ? -1 : 1;
+      targets.push({
+        x: rand(60, W - 60), y: rand(50, 260), r: rand(17, 24),
+        vx: dir * rand(0.7, 1.5), vy: rand(0.3, 0.9) * (Math.random() < 0.5 ? -1 : 1),
+        color: colors[i % colors.length], alive: true, phase: rand(0, Math.PI * 2)
+      });
+    }
+  }
+
+  function resetGame() {
+    score = 0; hits = 0; throwsLeft = 6; combo = 0;
+    aimAngle = -Math.PI / 2; power = 0.4; boom = null; trail = []; particles = []; floaters = [];
+    spawnTargets();
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+    state = 'aiming';
+    setStatus('Aim and throw!');
+    updateHUD();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    targetsEl.textContent = hits + ' / ' + TOTAL_TARGETS;
+    throwsEl.textContent = throwsLeft;
+    powerFill.style.width = Math.round(power * 100) + '%';
+    powerLabel.textContent = Math.round(power * 100) + '%';
+  }
+  function setStatus(t) { statusEl.textContent = t; }
+
+  function throwBoomerang() {
+    if (state !== 'aiming' || throwsLeft <= 0) return;
+    throwsLeft--; combo = 0;
+    var speed = 5 + power * 6;
+    boom = {
+      x: player.x, y: player.y - 10, vx: Math.cos(aimAngle) * speed, vy: Math.sin(aimAngle) * speed,
+      age: 0, returning: false, angle: 0, hitSet: []
+    };
+    trail = [];
+    state = 'flying';
+    sfxThrow();
+    setStatus('Boomerang away!');
+    updateHUD();
+  }
+
+  function endThrow() {
+    boom = null; trail = [];
+    if (hits >= TOTAL_TARGETS) { winGame(); return; }
+    if (throwsLeft <= 0) { loseGame(); return; }
+    state = 'aiming';
+    setStatus('Aim your next throw!');
+    updateHUD();
+  }
+
+  function winGame() {
+    state = 'win';
+    score += throwsLeft * 150;
+    document.getElementById('winText').textContent = 'Every target down! Score: ' + score + ' (including +' + (throwsLeft * 150) + ' unused-throw bonus).';
+    winScreen.classList.remove('hidden');
+    setStatus('You win!');
+    sfxWin(); updateHUD();
+  }
+  function loseGame() {
+    state = 'over';
+    document.getElementById('overText').textContent = 'Out of throws — you hit ' + hits + ' of ' + TOTAL_TARGETS + ' targets. Final score: ' + score + '.';
+    overScreen.classList.remove('hidden');
+    setStatus('Game over');
+    sfxLose(); updateHUD();
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) {
+      particles.push({ x: x, y: y, vx: rand(-3, 3), vy: rand(-3, 3), life: 30, color: color });
+    }
+  }
+  function floater(x, y, text) { floaters.push({ x: x, y: y, text: text, life: 50 }); }
+
+  function update() {
+    // Targets drift and bounce, speeding up as the board clears.
+    var speedBoost = 1 + (hits / TOTAL_TARGETS) * 0.9;
+    targets.forEach(function (t) {
+      if (!t.alive) return;
+      t.phase += 0.03;
+      t.x += t.vx * speedBoost;
+      t.y += t.vy * speedBoost + Math.sin(t.phase) * 0.3;
+      if (t.x < t.r + 8 || t.x > W - t.r - 8) t.vx *= -1;
+      if (t.y < t.r + 8 || t.y > 300) t.vy *= -1;
+    });
+
+    if (state === 'aiming' && charging) {
+      power += 0.012 * chargeDir;
+      if (power >= 1) { power = 1; chargeDir = -1; }
+      if (power <= 0.15) { power = 0.15; chargeDir = 1; }
+      updateHUD();
+    }
+
+    if (boom) {
+      boom.age++; boom.angle += 0.35;
+      boom.x += boom.vx; boom.y += boom.vy;
+      trail.push({ x: boom.x, y: boom.y, life: 18 });
+      if (trail.length > 40) trail.shift();
+      trail.forEach(function (p) { p.life--; });
+
+      // Outbound leg: gentle curve so the arc sweeps wide.
+      if (!boom.returning) {
+        boom.vx += -Math.sin(boom.angle * 0.25) * 0.06;
+        boom.vy += 0.045; // gravity sag
+        if (boom.age > 55 || boom.y < 20 || boom.x < 15 || boom.x > W - 15) boom.returning = true;
+      } else {
+        // Return leg: steer home to the player.
+        var dx = player.x - boom.x, dy = (player.y - 10) - boom.y;
+        var d = Math.hypot(dx, dy) || 1;
+        boom.vx += (dx / d) * 0.55; boom.vy += (dy / d) * 0.55;
+        var sp = Math.hypot(boom.vx, boom.vy), maxSp = 11;
+        if (sp > maxSp) { boom.vx *= maxSp / sp; boom.vy *= maxSp / sp; }
+        if (d < 28) { setStatus('Caught it!'); endThrow(); return; }
+        if (boom.age > 400) { endThrow(); return; }
+      }
+
+      // Hits on either leg; return hits pay double and build combo.
+      targets.forEach(function (t, idx) {
+        if (!t.alive || boom.hitSet.indexOf(idx) !== -1) return;
+        if (dist(boom, t) < t.r + 12) {
+          t.alive = false; hits++; boom.hitSet.push(idx);
+          var pts = boom.returning ? 200 : 100;
+          if (boom.returning) { combo++; pts += combo * 50; }
+          score += pts;
+          burst(t.x, t.y, t.color);
+          floater(t.x, t.y - 10, '+' + pts + (boom.returning ? ' RETURN!' : ''));
+          sfxHit(boom.returning);
+          setStatus(boom.returning ? 'Return hit! Combo x' + combo : 'Target hit!');
+          updateHUD();
+          if (hits >= TOTAL_TARGETS) { boom = null; winGame(); return; }
+        }
+      });
+    }
+
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    floaters.forEach(function (f) { f.y -= 1; f.life--; });
+    floaters = floaters.filter(function (f) { return f.life > 0; });
+  }
+
+  function drawAimGuide() {
+    if (state !== 'aiming') return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 207, 77, 0.55)';
+    ctx.setLineDash([6, 8]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(player.x, player.y - 10);
+    var gx = player.x + Math.cos(aimAngle) * (60 + power * 130);
+    var gy = (player.y - 10) + Math.sin(aimAngle) * (60 + power * 130);
+    // Show the expected curve: out, then bending back.
+    ctx.quadraticCurveTo(gx, gy, player.x + Math.cos(aimAngle) * 40, player.y - 120);
+    ctx.stroke(); ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Clearing: grass bands, trees, and a throwing circle.
+    ctx.fillStyle = '#1d3320'; ctx.fillRect(0, H - 90, W, 90);
+    ctx.fillStyle = '#2c4a26';
+    [[60, 480], [150, 500], [730, 485], [800, 505]].forEach(function (pos) {
+      ctx.beginPath(); ctx.arc(pos[0], pos[1], 26, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3f7034'; ctx.beginPath(); ctx.arc(pos[0], pos[1] - 8, 20, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#2c4a26';
+    });
+    ctx.strokeStyle = 'rgba(255, 207, 77, 0.35)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(player.x, player.y, 44, 0, Math.PI * 2); ctx.stroke();
+
+    drawAimGuide();
+
+    // Targets: drifting bullseyes.
+    targets.forEach(function (t) {
+      if (!t.alive) return;
+      ctx.save();
+      ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff8dc'; ctx.beginPath(); ctx.arc(t.x, t.y, t.r * 0.62, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(t.x, t.y, t.r * 0.3, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    });
+
+    // Boomerang trail.
+    trail.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 18) * 0.5;
+      ctx.fillStyle = '#ffcf4d'; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Player: the Bandit.
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.fillStyle = '#5b3a1a'; ctx.beginPath(); ctx.arc(0, -6, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffcf4d'; ctx.beginPath(); ctx.arc(0, -6, 16, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#f5d9b0'; ctx.beginPath(); ctx.arc(0, 2, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.fillRect(-7, 0, 4, 3); ctx.fillRect(3, 0, 4, 3);
+    ctx.restore();
+
+    // Boomerang in flight (two spinning arms).
+    if (boom) {
+      ctx.save(); ctx.translate(boom.x, boom.y); ctx.rotate(boom.angle);
+      ctx.fillStyle = boom.returning ? '#ff8a3a' : '#ffcf4d';
+      ctx.beginPath(); ctx.ellipse(0, 0, 20, 7, 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, 0, 20, 7, -0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7a4a00'; ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 30);
+      ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 5, 5);
+    });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px Georgia, serif'; ctx.textAlign = 'center';
+    floaters.forEach(function (f) { ctx.fillText(f.text, f.x, f.y); });
+
+    if (state === 'aiming') {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'; ctx.font = '15px Georgia, serif';
+      ctx.fillText('Drag or use arrow keys to aim — hold to charge, release to throw', W / 2, 34);
+    }
+  }
+
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function aimAt(pos) {
+    var a = Math.atan2(pos.y - (player.y - 10), pos.x - player.x);
+    if (a > -0.15) a = -0.15; if (a < -Math.PI + 0.15) a = -Math.PI + 0.15;
+    aimAngle = a;
+  }
+
+  // Mouse controls.
+  canvas.addEventListener('mousemove', function (e) { if (state === 'aiming') aimAt(canvasPos(e)); });
+  canvas.addEventListener('mousedown', function (e) { audio(); if (state === 'aiming') { aimAt(canvasPos(e)); charging = true; chargeDir = 1; } });
+  window.addEventListener('mouseup', function () { if (charging) { charging = false; throwBoomerang(); } });
+
+  // Touch controls.
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); audio(); if (state === 'aiming') { aimAt(canvasPos(e)); charging = true; chargeDir = 1; } }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); if (state === 'aiming') aimAt(canvasPos(e)); }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); if (charging) { charging = false; throwBoomerang(); } }, { passive: false });
+
+  // Keyboard controls.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') { aimAngle = Math.max(-Math.PI + 0.15, aimAngle - 0.08); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { aimAngle = Math.min(-0.15, aimAngle + 0.08); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { power = Math.min(1, power + 0.08); updateHUD(); e.preventDefault(); }
+    if (e.key === 'ArrowDown') { power = Math.max(0.15, power - 0.08); updateHUD(); e.preventDefault(); }
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault(); audio();
+      if (state === 'title') resetGame();
+      else if (state === 'aiming') throwBoomerang();
+    }
+    if (e.key === 'r' || e.key === 'R') { if (state === 'win' || state === 'over') resetGame(); }
+    if (e.key === 'm' || e.key === 'M') { muted = !muted; setStatus(muted ? 'Sound off' : 'Sound on'); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', function () { audio(); resetGame(); });
+  document.getElementById('winRestartBtn').addEventListener('click', function () { audio(); resetGame(); });
+  document.getElementById('overRestartBtn').addEventListener('click', function () { audio(); resetGame(); });
+
+  spawnTargets();
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

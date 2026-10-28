@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Flute Flight</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1e2d; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: Georgia, 'Times New Roman', serif; overflow: hidden; }
+  #wrap { position: relative; width: 100%; max-width: 820px; aspect-ratio: 820 / 560; background: #87ceeb; overflow: hidden; border: 4px solid #f5d76e; border-radius: 12px; box-shadow: 0 0 40px rgba(245,215,110,.35); }
+  canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  #hud { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; padding: 10px 14px; font-weight: bold; color: #102a43; background: linear-gradient(rgba(255,255,255,.85), rgba(255,255,255,.55)); font-size: 15px; z-index: 5; }
+  #hud span { margin-right: 8px; }
+  #status { color: #8a5a00; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(11,30,45,.78); color: #fff; padding: 20px; z-index: 10; }
+  .overlay.hidden { display: none; }
+  h1 { font-size: 44px; color: #f5d76e; text-shadow: 2px 2px 0 #7a4a00; margin-bottom: 6px; letter-spacing: 1px; }
+  h2 { font-size: 36px; color: #f5d76e; margin-bottom: 10px; }
+  p { max-width: 560px; line-height: 1.55; font-size: 16px; margin: 6px 0; }
+  .howto { background: rgba(255,255,255,.12); border: 1px solid rgba(245,215,110,.6); border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 15px; }
+  .howto b { color: #f5d76e; }
+  button { cursor: pointer; border: none; border-radius: 999px; background: #f5d76e; color: #102a43; font-weight: bold; font-size: 18px; padding: 13px 30px; margin-top: 14px; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  #notes { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; gap: 8px; padding: 10px; z-index: 6; }
+  #notes button { margin: 0; padding: 12px 0; width: 15%; max-width: 110px; font-size: 16px; border-radius: 12px; background: rgba(255,255,255,.92); box-shadow: 0 3px 0 #7a6a2f; }
+  #notes button.flash { background: #f5d76e; }
+  #notes button.target { outline: 4px solid #ff5a5a; }
+  #seq { position: absolute; left: 50%; transform: translateX(-50%); top: 46px; display: flex; gap: 4px; z-index: 5; }
+  #seq span { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.85); font-size: 13px; font-weight: bold; color: #102a43; border: 2px solid transparent; }
+  #seq span.done { background: #7ed957; color: #fff; }
+  #seq span.now { border-color: #ff5a5a; transform: scale(1.2); }
+  #msg { position: absolute; left: 50%; top: 96px; transform: translateX(-50%); font-size: 22px; font-weight: bold; color: #ff5a5a; text-shadow: 1px 1px 0 #fff; z-index: 5; min-height: 28px; }
+  @media (max-width: 600px) { h1 { font-size: 32px; } p, .howto { font-size: 14px; } #hud { font-size: 12px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="820" height="560"></canvas>
+  <div id="hud">
+    <div><span>Score: <b id="score">0</b></span><span>Altitude: <b id="alt">55</b>%</span></div>
+    <div><span>Notes: <b id="hits">0</b>/24</span><span id="status">Ready</span></div>
+  </div>
+  <div id="seq"></div>
+  <div id="msg"></div>
+  <div id="notes"></div>
+
+  <div id="title" class="overlay">
+    <h1>&#127929; Flute Flight &#128038;</h1>
+    <p>A little bird can only fly as far as your melody carries it. Play the song note by note and guide it over hills, rivers and clouds to the sunrise.</p>
+    <div class="howto">
+      <b>How to Play:</b> Watch the glowing note in the melody strip. Play that exact note with the keys below, your keyboard, or by tapping.<br>
+      <b>Keys:</b> A = C &nbsp; S = D &nbsp; D = E &nbsp; F = G &nbsp; G = A<br>
+      Correct note: bird rises and you score. Wrong note: bird dips and loses altitude. Finish all 24 notes to Win. If altitude reaches 0, the bird lands &mdash; Game Over.
+    </div>
+    <button id="startBtn">Start Playing</button>
+  </div>
+
+  <div id="end" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var altEl = document.getElementById('alt');
+  var hitsEl = document.getElementById('hits');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var seqEl = document.getElementById('seq');
+  var notesEl = document.getElementById('notes');
+
+  // Five flute notes: name, frequency, colour, keyboard key.
+  var NOTES = [
+    { name: 'C', freq: 523.25, color: '#ff6b6b', key: 'a' },
+    { name: 'D', freq: 587.33, color: '#ffa94d', key: 's' },
+    { name: 'E', freq: 659.25, color: '#ffd43b', key: 'd' },
+    { name: 'G', freq: 783.99, color: '#51cf66', key: 'f' },
+    { name: 'A', freq: 880.00, color: '#4dabf7', key: 'g' }
+  ];
+  // A singable 24-note melody journey (indices into NOTES).
+  var MELODY = [0,1,2,3,2,1,0,2, 3,4,3,2,1,2,3,4, 3,2,1,0,1,2,3,4];
+
+  var state = 'title'; // title | playing | won | lost
+  var score = 0, hits = 0, idx = 0, altitude = 55;
+  var birdX = 90, birdY = 240, wing = 0, clouds = [], particles = [];
+  var audioCtx = null, msgTimer = null;
+
+  for (var i = 0; i < 7; i++) {
+    clouds.push({ x: Math.random() * 820, y: 30 + Math.random() * 140, s: 0.6 + Math.random() * 0.9, v: 0.2 + Math.random() * 0.4 });
+  }
+
+  // Build the on-screen flute buttons.
+  var buttons = [];
+  NOTES.forEach(function (n, i) {
+    var b = document.createElement('button');
+    b.textContent = n.name + ' (' + n.key.toUpperCase() + ')';
+    b.style.color = n.color;
+    b.addEventListener('click', function () { playNote(i); });
+    b.addEventListener('touchstart', function (e) { e.preventDefault(); playNote(i); }, { passive: false });
+    notesEl.appendChild(b);
+    buttons.push(b);
+  });
+
+  function renderSeq() {
+    seqEl.innerHTML = '';
+    MELODY.forEach(function (n, i) {
+      var s = document.createElement('span');
+      s.textContent = NOTES[n].name;
+      if (i < idx) s.className = 'done';
+      else if (i === idx && state === 'playing') s.className = 'now';
+      seqEl.appendChild(s);
+    });
+    buttons.forEach(function (b, i) {
+      b.classList.toggle('target', state === 'playing' && MELODY[idx] === i);
+    });
+  }
+
+  function showMsg(text, ms) {
+    msgEl.textContent = text;
+    if (msgTimer) clearTimeout(msgTimer);
+    msgTimer = setTimeout(function () { msgEl.textContent = ''; }, ms || 1400);
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function tone(freq, good) {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = good ? 'sine' : 'sawtooth';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, audioCtx.currentTime + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + (good ? 0.55 : 0.25));
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.6);
+  }
+
+  function fanfare() {
+    if (!audioCtx) return;
+    [0, 2, 3, 4].forEach(function (n, i) {
+      setTimeout(function () { tone(NOTES[n].freq, true); }, i * 160);
+    });
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    altEl.textContent = Math.round(altitude);
+    hitsEl.textContent = hits;
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'lost';
+    statusEl.textContent = won ? 'Melody complete!' : 'Landed';
+    document.getElementById('endTitle').textContent = won ? 'You Win! Sunrise Reached!' : 'Game Over - The Bird Landed';
+    document.getElementById('endText').textContent = won
+      ? 'You played all 24 notes beautifully. Final score: ' + score + '. The bird soars into the sunrise!'
+      : 'The melody broke and the bird ran out of lift at note ' + (idx + 1) + ' of 24. Final score: ' + score + '. Try the song again!';
+    if (won) fanfare();
+    document.getElementById('end').classList.remove('hidden');
+    renderSeq();
+  }
+
+  function playNote(i) {
+    if (state !== 'playing') return;
+    ensureAudio();
+    var target = MELODY[idx];
+    var b = buttons[i];
+    b.classList.add('flash');
+    setTimeout(function () { b.classList.remove('flash'); }, 220);
+    if (i === target) {
+      tone(NOTES[i].freq, true);
+      score += 100;
+      hits++;
+      idx++;
+      altitude = Math.min(100, altitude + 5);
+      for (var p = 0; p < 8; p++) particles.push({ x: birdX + 20, y: birdY, vx: 1 + Math.random() * 2, vy: -2 + Math.random() * 4, life: 30, c: NOTES[i].color });
+      if (idx >= MELODY.length) { updateHUD(); renderSeq(); endGame(true); return; }
+      showMsg('Lovely! Next: ' + NOTES[MELODY[idx]].name, 900);
+      statusEl.textContent = 'On course';
+    } else {
+      tone(NOTES[i].freq, false);
+      score = Math.max(0, score - 25);
+      altitude -= 14;
+      showMsg('Wrong note! That was ' + NOTES[i].name + ', try ' + NOTES[target].name, 1400);
+      statusEl.textContent = 'Dipping!';
+      if (altitude <= 0) { altitude = 0; updateHUD(); renderSeq(); endGame(false); return; }
+    }
+    updateHUD();
+    renderSeq();
+  }
+
+  function reset() {
+    score = 0; hits = 0; idx = 0; altitude = 55;
+    birdX = 90; birdY = 240; particles = [];
+    document.getElementById('end').classList.add('hidden');
+    statusEl.textContent = 'Flying...';
+    updateHUD();
+    renderSeq();
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = 'playing';
+    document.getElementById('title').classList.add('hidden');
+    showMsg('First note: ' + NOTES[MELODY[0]].name, 1600);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', function () { reset(); state = 'playing'; showMsg('First note: ' + NOTES[MELODY[0]].name, 1600); });
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    if (state === 'title' && (k === 'enter' || k === ' ')) { startGame(); return; }
+    if ((state === 'won' || state === 'lost') && k === 'enter') { reset(); state = 'playing'; return; }
+    for (var i = 0; i < NOTES.length; i++) {
+      if (NOTES[i].key === k) { playNote(i); break; }
+    }
+  });
+  canvas.addEventListener('click', function () {
+    if (state === 'title') startGame();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state === 'title') startGame();
+  }, { passive: false });
+  document.addEventListener('mousedown', function () { ensureAudio(); });
+
+  // ---- Drawing ----
+  function drawBackground() {
+    var g = ctx.createLinearGradient(0, 0, 0, 560);
+    g.addColorStop(0, '#7ec8f7');
+    g.addColorStop(0.6, '#aee3f5');
+    g.addColorStop(1, '#ffe9a8');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 820, 560);
+    // Sun
+    ctx.fillStyle = '#ffd43b';
+    ctx.beginPath(); ctx.arc(720, 80, 46, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,212,59,.25)';
+    ctx.beginPath(); ctx.arc(720, 80, 66, 0, Math.PI * 2); ctx.fill();
+    // Clouds
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    clouds.forEach(function (c) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 22 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 22 * c.s, c.y - 8, 18 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 44 * c.s, c.y, 20 * c.s, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // Hills and ground
+    ctx.fillStyle = '#5fae5a';
+    ctx.beginPath(); ctx.moveTo(0, 470);
+    ctx.quadraticCurveTo(200, 420, 420, 470);
+    ctx.quadraticCurveTo(620, 510, 820, 450);
+    ctx.lineTo(820, 560); ctx.lineTo(0, 560); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#7a5230';
+    ctx.fillRect(0, 520, 820, 40);
+    // River
+    ctx.fillStyle = '#4dabf7';
+    ctx.beginPath(); ctx.moveTo(300, 470); ctx.quadraticCurveTo(360, 500, 330, 560); ctx.lineTo(390, 560); ctx.quadraticCurveTo(420, 500, 360, 470); ctx.closePath(); ctx.fill();
+    // Melody path dots across the sky
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    for (var x = 90; x <= 770; x += 68) {
+      var y = 120 + Math.sin(x / 90) * 60;
+      ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    // Finish flag
+    ctx.fillStyle = '#8a5a00';
+    ctx.fillRect(768, 110, 4, 70);
+    ctx.fillStyle = '#ff5a5a';
+    ctx.beginPath(); ctx.moveTo(772, 110); ctx.lineTo(806, 122); ctx.lineTo(772, 134); ctx.closePath(); ctx.fill();
+  }
+
+  function drawBird() {
+    // Altitude maps to vertical position: high altitude = high in the sky.
+    var targetY = 470 - (altitude / 100) * 340;
+    birdY += (targetY - birdY) * 0.08;
+    wing += 0.35;
+    var flap = Math.sin(wing) * 10;
+    ctx.save();
+    ctx.translate(birdX, birdY);
+    // Wing
+    ctx.fillStyle = '#ffd43b';
+    ctx.beginPath(); ctx.ellipse(-4, -2 + flap * 0.4, 18, 8 - flap * 0.3, -0.3, 0, Math.PI * 2); ctx.fill();
+    // Body
+    ctx.fillStyle = '#4dabf7';
+    ctx.beginPath(); ctx.ellipse(0, 0, 26, 16, 0, 0, Math.PI * 2); ctx.fill();
+    // Tail
+    ctx.fillStyle = '#ff6b6b';
+    ctx.beginPath(); ctx.moveTo(-24, 0); ctx.lineTo(-40, -8); ctx.lineTo(-38, 8); ctx.closePath(); ctx.fill();
+    // Head, beak, eye
+    ctx.fillStyle = '#4dabf7';
+    ctx.beginPath(); ctx.arc(20, -8, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffa94d';
+    ctx.beginPath(); ctx.moveTo(30, -8); ctx.lineTo(44, -4); ctx.lineTo(30, -2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#102a43';
+    ctx.beginPath(); ctx.arc(23, -11, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // Particles
+    particles = particles.filter(function (p) { return p.life > 0; });
+    particles.forEach(function (p) {
+      p.x += p.vx; p.y += p.vy; p.life--;
+      ctx.fillStyle = p.c;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  function loop() {
+    clouds.forEach(function (c) {
+      c.x += c.v;
+      if (c.x > 860) c.x = -60;
+    });
+    drawBackground();
+    drawBird();
+    if (state === 'playing') {
+      // Gentle gravity: the song must keep lifting the bird.
+      altitude = Math.max(0, altitude - 0.012);
+      if (altitude <= 0) { updateHUD(); endGame(false); }
+      else if (Math.floor(performance.now() / 1000) % 2 === 0) { /* keep HUD fresh */ }
+      altEl.textContent = Math.round(altitude);
+    }
+    requestAnimationFrame(loop);
+  }
+
+  renderSeq();
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

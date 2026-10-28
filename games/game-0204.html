@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sitar Serenade</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#14101c;color:#f5e9d0;font-family:Georgia,'Times New Roman',serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+  h1{color:#ffb84d;font-size:28px;letter-spacing:1px;text-align:center}
+  .sub{color:#c9b8a0;font-size:14px;margin:4px 0 10px;text-align:center}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:680px;margin-bottom:8px}
+  .stat{background:#241d33;border:1px solid #5a4370;border-radius:10px;padding:7px 12px;min-width:105px;text-align:center}
+  .stat b{display:block;font-size:19px;color:#ffe08a}
+  .stat span{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:#bfae96}
+  #wrap{position:relative;width:100%;max-width:680px}
+  canvas{display:block;width:100%;height:auto;background:#1d1630;border:2px solid #7a5a2e;border-radius:14px;touch-action:none}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(12,8,22,.88);border-radius:14px;padding:22px;gap:12px}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:30px;color:#ffb84d}
+  .overlay p{max-width:520px;line-height:1.55;color:#e8dcc8;font-size:15px}
+  .keys{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .key{background:#3a2b52;border:1px solid #ffb84d;border-radius:8px;padding:8px 12px;font-weight:bold}
+  button{background:#ffb84d;color:#241100;border:0;border-radius:999px;padding:13px 26px;font-size:17px;font-weight:bold;cursor:pointer}
+  button:hover{background:#ffd27a}
+  button.secondary{background:#2e2347;color:#ffe08a;border:1px solid #ffb84d}
+  #judge{font-size:22px;font-weight:bold;min-height:28px;color:#ffe08a}
+  #songbar{width:100%;max-width:680px;height:10px;background:#2a2140;border-radius:99px;overflow:hidden;margin-top:8px}
+  #songfill{height:100%;width:0%;background:#ffb84d}
+  .foot{font-size:12px;color:#9d8dab;margin-top:8px;text-align:center}
+</style>
+</head>
+<body>
+<h1>&#127931; Sitar Serenade</h1>
+<p class="sub">A rhythm serenade &mdash; pluck each string at the perfect moment.</p>
+<div id="hud">
+  <div class="stat"><b id="score">0</b><span>Score</span></div>
+  <div class="stat"><b id="combo">0</b><span>Combo</span></div>
+  <div class="stat"><b id="acc">100%</b><span>Accuracy</span></div>
+  <div class="stat"><b id="status">Ready</b><span>Status</span></div>
+  <div class="stat"><b id="misses">0 / 20</b><span>Misses</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="680" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Sitar Serenade</h2>
+    <p><b>How to Play:</b> Notes glide down four sitar strings. Pluck a string the instant its note crosses the glowing golden target line. A perfect pluck scores 300, a good pluck 100. Chain plucks to build your combo. Finish the song with at least 65% accuracy to win &mdash; but 20 misses ends the serenade early.</p>
+    <div class="keys"><span class="key">D &mdash; String 1</span><span class="key">F &mdash; String 2</span><span class="key">J &mdash; String 3</span><span class="key">K &mdash; String 4</span></div>
+    <p>You can also click or tap a string lane on the canvas.</p>
+    <div id="judge"></div>
+    <button id="startBtn">Start Serenade</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <p id="howText" style="display:none">Tip: watch the note, not the falling speed. Perfect timing is a small window right on the line &mdash; early or late still counts as Good if you are close. Keep the combo alive for bonus points on every hit.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Serenade Complete</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">Play Again</button>
+  </div>
+</div>
+<div id="songbar"><div id="songfill"></div></div>
+<p class="foot">Controls: D / F / J / K &bull; Mouse click on a lane &bull; Touch / tap a lane &bull; Enter to start or restart</p>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var scoreEl=document.getElementById('score'), comboEl=document.getElementById('combo'),
+      accEl=document.getElementById('acc'), statusEl=document.getElementById('status'),
+      missEl=document.getElementById('misses'), judgeEl=document.getElementById('judge'),
+      fillEl=document.getElementById('songfill');
+  var titleScreen=document.getElementById('titleScreen'), endScreen=document.getElementById('endScreen');
+  var endTitle=document.getElementById('endTitle'), endText=document.getElementById('endText'), endStats=document.getElementById('endStats');
+  var W=680, H=560, TARGET_Y=470, LANES=4, LANE_W=W/LANES;
+  var strings=[
+    {name:'Sa', freq:146.83, color:'#ffb84d'},
+    {name:'Re', freq:164.81, color:'#ff7a9e'},
+    {name:'Ga', freq:196.00, color:'#7ad9ff'},
+    {name:'Ma', freq:220.00, color:'#a5ff7a'}
+  ];
+  var state='title', score=0, combo=0, bestCombo=0, perfect=0, good=0, misses=0, judged=0;
+  var songTime=0, lastTime=0, notes=[], spawnIndex=0, flash=[], judgeTimer=0, judgeMsg='';
+  var audioCtx=null;
+  function initAudio(){
+    if(!audioCtx){
+      try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+    }
+    if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+  }
+  function pluckSound(lane, quality){
+    if(!audioCtx) return;
+    var f=strings[lane].freq * (quality==='perfect'?1:0.995);
+    var t=audioCtx.currentTime;
+    [1,2,3].forEach(function(h,i){
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=i===0?'triangle':'sine'; o.frequency.value=f*h;
+      var vol=(i===0?0.32:0.14/(i+1));
+      g.gain.setValueAtTime(vol,t);
+      g.gain.exponentialRampToValueAtTime(0.001,t+0.9);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t); o.stop(t+0.95);
+    });
+  }
+  function thudSound(){
+    if(!audioCtx) return;
+    var o=audioCtx.createOscillator(), g=audioCtx.createGain(), t=audioCtx.currentTime;
+    o.type='sine'; o.frequency.setValueAtTime(110,t); o.frequency.exponentialRampToValueAtTime(55,t+0.25);
+    g.gain.setValueAtTime(0.22,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.3);
+    o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t+0.32);
+  }
+  function buildSong(){
+    var pattern=[0,1,2,1,3,2,1,0,2,3,1,2,0,3,2,1,0,1,3,2,1,0,2,3,0,1,2,3,1,0,2,1,3,0,1,2];
+    var list=[], t=0.6;
+    for(var i=0;i<72;i++){
+      var lane=pattern[i%pattern.length];
+      if(i%16===15) lane=(lane+1)%4;
+      list.push({lane:lane, spawn:t, y:-40, judged:false});
+      t+= (i%8===7?0.95:0.62);
+    }
+    return list;
+  }
+  function reset(){
+    score=0; combo=0; bestCombo=0; perfect=0; good=0; misses=0; judged=0;
+    songTime=0; notes=buildSong(); spawnIndex=0; flash=[]; judgeMsg=''; judgeTimer=0;
+    statusEl.textContent='Playing'; updateHUD();
+  }
+  function updateHUD(){
+    scoreEl.textContent=score; comboEl.textContent=combo;
+    var acc=judged?Math.round(((perfect+good)/judged)*100):100;
+    accEl.textContent=acc+'%'; missEl.textContent=misses+' / 20';
+    fillEl.style.width=Math.min(100,Math.round((judged/Math.max(1,notes.length))*100))+'%';
+  }
+  function setJudge(msg,color){
+    judgeMsg=msg; judgeTimer=1.1; judgeEl.textContent=msg; judgeEl.style.color=color;
+  }
+  function pluck(lane){
+    if(state!=='playing') return;
+    initAudio();
+    flash[lane]=0.25;
+    var best=null, bestDist=999;
+    notes.forEach(function(n){
+      if(!n.judged && n.y>-20 && n.lane===lane){
+        var d=Math.abs(n.y-TARGET_Y);
+        if(d<bestDist){bestDist=d;best=n;}
+      }
+    });
+    if(best && bestDist<=62){
+      best.judged=true; judged++;
+      var isPerfect=bestDist<=26;
+      if(isPerfect){ perfect++; score+=300+Math.min(combo,20)*5; setJudge('PERFECT!','#ffe08a'); }
+      else{ good++; score+=100+Math.min(combo,20)*2; setJudge('Good','#7ad9ff'); }
+      combo++; if(combo>bestCombo) bestCombo=combo;
+      pluckSound(lane,isPerfect?'perfect':'good');
+    } else {
+      combo=0; thudSound(); setJudge('Off beat...','#ff8a7a');
+    }
+    updateHUD();
+  }
+  function endGame(win,reason){
+    state=win?'win':'over';
+    var acc=judged?Math.round(((perfect+good)/judged)*100):0;
+    statusEl.textContent=win?'You Win!':'Game Over';
+    endTitle.textContent=win?'&#127931; Encore! You Win!':'Serenade Faded Out';
+    endText.textContent=win?('Beautiful playing! '+reason):reason;
+    endStats.textContent='Score: '+score+' | Best combo: '+bestCombo+' | Perfect: '+perfect+' | Good: '+good+' | Misses: '+misses+' | Accuracy: '+acc+'%';
+    endScreen.classList.remove('hidden');
+  }
+  function startGame(){
+    initAudio(); reset(); state='playing';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    lastTime=performance.now(); requestAnimationFrame(loop);
+  }
+  function loop(now){
+    if(state!=='playing') return;
+    var dt=Math.min(0.05,(now-lastTime)/1000); lastTime=now; songTime+=dt;
+    while(spawnIndex<notes.length && songTime>=notes[spawnIndex].spawn){ spawnIndex++; }
+    var speed=235;
+    for(var i=0;i<spawnIndex;i++){
+      var n=notes[i];
+      if(n.judged) continue;
+      n.y+=speed*dt;
+      if(n.y>TARGET_Y+72){
+        n.judged=true; judged++; misses++; combo=0; thudSound(); setJudge('Miss','#ff8a7a');
+        if(misses>=20){ updateHUD(); draw(); endGame(false,'Too many missed notes (20) ended the performance. Try again and keep your eyes on the golden line.'); return; }
+      }
+    }
+    if(judgeTimer>0){ judgeTimer-=dt; if(judgeTimer<=0){ judgeEl.textContent=''; } }
+    for(var l=0;l<4;l++){ if(flash[l]>0) flash[l]-=dt; }
+    updateHUD(); draw();
+    var allDone=notes.every(function(n){return n.judged;});
+    if(allDone){
+      var acc=judged?((perfect+good)/judged)*100:0;
+      if(acc>=65) endGame(true,'You finished the song with '+Math.round(acc)+'% accuracy. The crowd calls for an encore!');
+      else endGame(false,'You finished the song, but at '+Math.round(acc)+'% accuracy you needed 65% to win. Listen for the line and try again.');
+      return;
+    }
+    requestAnimationFrame(loop);
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    var grad=ctx.createLinearGradient(0,0,0,H); grad.addColorStop(0,'#241d33'); grad.addColorStop(1,'#120d1e');
+    ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+    for(var l=0;l<LANES;l++){
+      var x=l*LANE_W;
+      ctx.fillStyle=(flash[l]>0)?'rgba(255,184,77,0.18)':'rgba(255,255,255,0.03)';
+      ctx.fillRect(x,0,LANE_W,H);
+      ctx.strokeStyle='#4a3a66'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(x+LANE_W/2,20); ctx.lineTo(x+LANE_W/2,H-20); ctx.stroke();
+      ctx.fillStyle=strings[l].color; ctx.font='bold 15px Georgia'; ctx.textAlign='center';
+      ctx.fillText(strings[l].name+'  ('+['D','F','J','K'][l]+')',x+LANE_W/2,26);
+      ctx.fillStyle='#2e2347'; ctx.beginPath(); ctx.arc(x+LANE_W/2,TARGET_Y,30,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=strings[l].color; ctx.lineWidth=2; ctx.stroke();
+    }
+    ctx.strokeStyle='#ffb84d'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(0,TARGET_Y); ctx.lineTo(W,TARGET_Y); ctx.stroke();
+    ctx.fillStyle='#ffb84d'; ctx.font='bold 13px Georgia'; ctx.textAlign='left'; ctx.fillText('TARGET LINE',10,TARGET_Y-38);
+    notes.forEach(function(n){
+      if(n.judged||n.y<-40) return;
+      var cx=n.lane*LANE_W+LANE_W/2;
+      ctx.fillStyle=strings[n.lane].color;
+      ctx.beginPath(); ctx.arc(cx,n.y,20,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#14101c'; ctx.font='bold 18px Georgia'; ctx.textAlign='center'; ctx.fillText('\u266A',cx,n.y+6);
+      ctx.strokeStyle='rgba(255,255,255,0.7)'; ctx.lineWidth=1.5; ctx.stroke();
+    });
+    if(state==='title'){
+      ctx.fillStyle='#e8dcc8'; ctx.font='16px Georgia'; ctx.textAlign='center';
+      ctx.fillText('Press Start and pluck when notes touch the golden line.',W/2,120);
+    }
+  }
+  function laneFromEvent(e){
+    var r=canvas.getBoundingClientRect();
+    var clientX=(e.touches&&e.touches[0])?e.touches[0].clientX:e.clientX;
+    var x=(clientX-r.left)*(W/r.width);
+    return Math.max(0,Math.min(3,Math.floor(x/LANE_W)));
+  }
+  document.getElementById('startBtn').addEventListener('click',startGame);
+  document.getElementById('restartBtn').addEventListener('click',startGame);
+  document.getElementById('howBtn').addEventListener('click',function(){
+    var t=document.getElementById('howText'); t.style.display=(t.style.display==='none')?'block':'none';
+  });
+  document.addEventListener('keydown',function(e){
+    var k=e.key.toLowerCase();
+    if(k==='enter' && (state==='title'||state==='win'||state==='over')){ startGame(); return; }
+    var map={d:0,f:1,j:2,k:3,'1':0,'2':1,'3':2,'4':3};
+    if(k in map){ e.preventDefault(); pluck(map[k]); }
+  });
+  canvas.addEventListener('mousedown',function(e){ if(state==='playing'){ pluck(laneFromEvent(e)); } });
+  canvas.addEventListener('touchstart',function(e){ e.preventDefault(); if(state==='playing'){ pluck(laneFromEvent(e)); } },{passive:false});
+  canvas.addEventListener('click',function(e){ if(state==='playing'){ pluck(laneFromEvent(e)); } });
+  draw(); updateHUD();
+})();
+</script>
+</body>
+</html>

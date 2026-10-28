@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Anchor Angler — Precision Fishing</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b2233;color:#eaf7ff;font-family:Arial,Helvetica,sans-serif;overflow:hidden;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  h1{font-size:34px;letter-spacing:1px;text-shadow:0 2px 0 #123}
+  h2{font-size:22px;margin-bottom:8px}
+  p{line-height:1.5}
+  #wrap{width:min(960px,98vw)}
+  #hud{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;background:#123a52;border:2px solid #6ecfff;border-radius:10px;padding:8px 12px;margin:8px 0;font-weight:bold;font-size:15px}
+  #hud span{white-space:nowrap}
+  canvas{display:block;width:100%;height:540px;background:#1a6b8a;border:3px solid #6ecfff;border-radius:12px;touch-action:none;cursor:crosshair}
+  .overlay{position:absolute;inset:0;background:rgba(2,20,32,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:10px}
+  #stage{position:relative}
+  button{background:#ffb703;color:#1a1000;border:0;border-radius:10px;padding:13px 26px;font-size:19px;font-weight:900;cursor:pointer;box-shadow:0 4px 0 #8a5a00}
+  button:active{transform:translateY(3px);box-shadow:none}
+  button.secondary{background:#6ecfff;color:#03263a;box-shadow:0 4px 0 #2a6d96}
+  .card{background:#0f3247;border:1px solid #3a7ea5;border-radius:10px;padding:12px 16px;max-width:620px;text-align:left}
+  .bar{width:100%;height:14px;background:#083049;border-radius:8px;overflow:hidden}
+  .bar i{display:block;height:100%;background:#ffb703;width:0%}
+  .keys{font-size:14px;color:#cfeeff}
+  .hidden{display:none!important}
+  #msg{font-size:18px;min-height:26px;color:#ffe08a;text-align:center}
+  @media(max-width:600px){canvas{height:440px}h1{font-size:26px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>⚓ Anchor Angler</h1>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Casts: <b id="casts">12</b></span>
+    <span>Haul: <b id="haul">0</b> / 8</span>
+    <span>Time: <b id="time">120</b>s</span>
+    <span>Wind: <b id="wind">Calm</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="960" height="540"></canvas>
+    <div id="title" class="overlay">
+      <h2>⚓ Anchor Angler</h2>
+      <p>Cast with precision. Land your hook inside the glowing target rings for the best catch!</p>
+      <div class="card">
+        <strong>How to Play</strong><br>
+        • Drag on the water (or use ← → for angle, ↑ ↓ for power) to aim. Release to cast.<br>
+        • Wind pushes your hook sideways — aim upwind. Wind changes every cast.<br>
+        • Perfect ring = golden fish (50 pts), good ring = 30 pts, edge = 15 pts. Miss = no fish.<br>
+        • After a hit, tap / press SPACE rapidly to reel in before the fish escapes.<br>
+        • Avoid the dark snag rocks: landing on one costs a cast and no fish.<br>
+        • Win by catching a haul of 8 fish before you run out of 12 casts or 120 seconds.
+      </div>
+      <button id="startBtn">▶ Start Fishing</button>
+      <p class="keys">Keyboard: Arrows aim &nbsp;|&nbsp; Space cast / reel &nbsp;|&nbsp; R restart &nbsp;|&nbsp; Mouse &amp; touch supported</p>
+    </div>
+    <div id="end" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <div style="width:min(420px,90%)"><div class="bar"><i id="haulBar"></i></div><p id="endStats"></p></div>
+      <button id="restartBtn">↻ Play Again</button>
+    </div>
+  </div>
+  <div id="msg">Aim carefully — the wind is watching.</div>
+  <p class="keys" style="text-align:center;margin-top:6px">Drag to aim, release to cast. Press SPACE repeatedly to reel in a hooked fish.</p>
+</div>
+<script>
+(function(){
+  var c=document.getElementById('game'), ctx=c.getContext('2d');
+  var scoreEl=document.getElementById('score'), castsEl=document.getElementById('casts'), haulEl=document.getElementById('haul'),
+      timeEl=document.getElementById('time'), windEl=document.getElementById('wind'), statusEl=document.getElementById('status'),
+      msgEl=document.getElementById('msg'), titleEl=document.getElementById('title'), endEl=document.getElementById('end');
+  var W=960,H=540, pierY=430, hookStart={x:120,y:400};
+  var state='title', angle=-0.7, power=0.65, aiming=false, aimX=0, aimY=0;
+  var score=0, casts=12, haul=0, timeLeft=120, lastTime=0, elapsed=0;
+  var wind=0, windLabel='Calm', target={x:600,y:300,r:95,dx:0.7,phase:0};
+  var snags=[{x:430,y:270,r:28},{x:760,y:220,r:32},{x:560,y:350,r:24}];
+  var cast=null, reel=0, reelNeed=0, fish=null, splash=[], bubbles=[], caughtFlash=0, fishList=[];
+  var audio=null, muted=false;
+  function initAudio(){ if(!audio){ try{ audio=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audio&&audio.state==='suspended') audio.resume(); }
+  function beep(f,d,t){ if(!audio||muted) return; try{ var o=audio.createOscillator(),g=audio.createGain(); o.type=t||'sine'; o.frequency.value=f; g.gain.setValueAtTime(0.12,audio.currentTime); g.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+d); o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime+d);}catch(e){} }
+  function newWind(){ wind=(Math.random()*2-1)*90; var a=Math.abs(wind); windLabel = a<15?'Calm':(wind<0?'← West '+Math.round(a):'East '+Math.round(a)+' →'); windEl.textContent=windLabel; }
+  function reset(){
+    score=0;casts=12;haul=0;timeLeft=120;elapsed=0;angle=-0.7;power=0.65;cast=null;fish=null;reel=0;
+    target={x:600,y:300,r:95,dx:0.7,phase:0}; splash=[]; bubbles=[]; caughtFlash=0; fishList=[];
+    newWind(); updateHUD('Ready — drag to aim'); msgEl.textContent='Aim carefully — the wind is watching.';
+    endEl.classList.add('hidden'); titleEl.classList.remove('hidden'); state='title';
+  }
+  function updateHUD(s){ scoreEl.textContent=score; castsEl.textContent=casts; haulEl.textContent=haul; timeEl.textContent=Math.ceil(timeLeft); statusEl.textContent=s||statusEl.textContent; }
+  function startGame(){ initAudio(); titleEl.classList.add('hidden'); endEl.classList.add('hidden'); score=0;casts=12;haul=0;timeLeft=120;elapsed=0; state='aim'; updateHUD('Aiming'); beep(520,0.15); }
+  function doCast(){
+    if(state!=='aim'||casts<=0) return;
+    initAudio(); casts--; var px=hookStart.x+Math.cos(angle)*power*520, py=hookStart.y+Math.sin(angle)*power*260;
+    // wind pushes landing sideways, stronger at longer casts
+    px += wind*power*0.9;
+    cast={x:px,y:Math.max(70,Math.min(400,py)),t:0,fromX:hookStart.x,fromY:hookStart.y,landed:false};
+    state='flying'; updateHUD('Casting…'); beep(300,0.2,'triangle');
+  }
+  function resolveLanding(){
+    var hx=cast.x, hy=cast.y, hitSnag=false;
+    for(var i=0;i<snags.length;i++){ var dx=hx-snags[i].x, dy=hy-snags[i].y; if(Math.sqrt(dx*dx+dy*dy)<snags[i].r+14) hitSnag=true; }
+    var d=Math.sqrt((hx-target.x)*(hx-target.x)+(hy-target.y)*(hy-target.y));
+    splash.push({x:hx,y:hy,r:8,life:1});
+    if(hitSnag){ msgEl.textContent='SNAG! Hook caught on a rock — cast lost.'; updateHUD('Snagged!'); beep(140,0.3,'sawtooth'); cast=null; afterCast(); return; }
+    if(d<=target.r*0.35){ fish={quality:'PERFECT',pts:50,color:'#ffd700',name:'Golden Koi'}; }
+    else if(d<=target.r*0.7){ fish={quality:'GOOD',pts:30,color:'#6ecfff',name:'Silver Trout'}; }
+    else if(d<=target.r){ fish={quality:'EDGE',pts:15,color:'#7bd88a',name:'River Perch'}; }
+    else { msgEl.textContent='Missed the target ring — no bite this time.'; updateHUD('Missed'); beep(200,0.2); cast=null; afterCast(); return; }
+    reel=0; reelNeed= fish.quality==='PERFECT'?9: fish.quality==='GOOD'?7:5;
+    state='reel'; msgEl.textContent='Hooked a '+fish.name+'! Tap / SPACE fast to reel it in!'; updateHUD('Reeling!'); beep(700,0.15);
+  }
+  function afterCast(){
+    // move target, refresh wind, check end
+    target.x=380+Math.random()*480; target.y=180+Math.random()*160; target.dx=(Math.random()<0.5?-1:1)*(0.5+Math.random()*0.8);
+    newWind();
+    if(haul>=8) return endGame(true);
+    if(casts<=0) return endGame(false);
+    state='aim'; updateHUD('Aiming');
+  }
+  function reelStep(){
+    if(state!=='reel') return; initAudio(); reel++; beep(500+reel*40,0.08);
+    // fish struggles: occasional slip
+    if(Math.random()<0.08) reel=Math.max(0,reel-1);
+    if(reel>=reelNeed){
+      score+=fish.pts; haul++; caughtFlash=1;
+      fishList.push(fish.name);
+      msgEl.textContent='Caught '+fish.name+'! '+fish.quality+' catch (+'+fish.pts+' pts). Haul '+haul+'/8.';
+      beep(880,0.25); updateHUD('Caught!');
+      cast=null; fish=null;
+      // brief celebration then next cast
+      setTimeout(afterCast, 700);
+      state='celebrate';
+    }
+  }
+  function endGame(win){
+    state='over';
+    document.getElementById('endTitle').textContent= win ? '🏆 You Win! Full Haul!' : '💧 Game Over';
+    document.getElementById('endText').textContent= win ? 'You filled the boat with a legendary haul!' : (timeLeft<=0?'Time ran out before the haul was full.':'You ran out of casts before the haul was full.');
+    document.getElementById('endStats').textContent='Score: '+score+'  •  Haul: '+haul+'/8  •  Casts left: '+casts;
+    document.getElementById('haulBar').style.width=Math.min(100,haul/8*100)+'%';
+    endEl.classList.remove('hidden'); updateHUD(win?'WIN!':'GAME OVER');
+    beep(win?880:180,0.4, win?'sine':'sawtooth');
+  }
+  function canvasPos(e){
+    var r=c.getBoundingClientRect(), t=e.touches?e.touches[0]:e;
+    return {x:(t.clientX-r.left)*W/r.width, y:(t.clientY-r.top)*H/r.height};
+  }
+  function onDown(e){ initAudio(); if(state==='reel'){ reelStep(); return; } if(state!=='aim') return; aiming=true; var p=canvasPos(e); aimX=p.x; aimY=p.y; updateAim(p); }
+  function updateAim(p){
+    var dx=p.x-hookStart.x, dy=p.y-hookStart.y;
+    angle=Math.atan2(dy,dx); if(angle> -0.15) angle=-0.15; if(angle< -1.45) angle=-1.45;
+    var dist=Math.sqrt(dx*dx+dy*dy); power=Math.max(0.25,Math.min(1,dist/520));
+  }
+  function onMove(e){ if(!aiming||state!=='aim') return; updateAim(canvasPos(e)); }
+  function onUp(e){ if(!aiming) return; aiming=false; if(state==='aim') doCast(); }
+  c.addEventListener('mousedown',onDown); c.addEventListener('mousemove',onMove); c.addEventListener('mouseup',onUp);
+  c.addEventListener('touchstart',function(e){e.preventDefault();onDown(e);},{passive:false});
+  c.addEventListener('touchmove',function(e){e.preventDefault();onMove(e);},{passive:false});
+  c.addEventListener('touchend',function(e){e.preventDefault();onUp(e);},{passive:false});
+  document.addEventListener('keydown',function(e){
+    initAudio();
+    if(e.key===' '){ e.preventDefault(); if(state==='reel') reelStep(); else if(state==='aim') doCast(); else if(state==='title') startGame(); }
+    if(e.key==='ArrowLeft') angle=Math.max(-1.45,angle-0.07);
+    if(e.key==='ArrowRight') angle=Math.min(-0.15,angle+0.07);
+    if(e.key==='ArrowUp') power=Math.min(1,power+0.06);
+    if(e.key==='ArrowDown') power=Math.max(0.25,power-0.06);
+    if(e.key==='r'||e.key==='R'){ if(state==='over'){ reset(); startGame(); } }
+    if(e.key==='Enter'&&state==='title') startGame();
+  });
+  document.getElementById('startBtn').addEventListener('click',startGame);
+  document.getElementById('restartBtn').addEventListener('click',function(){ reset(); startGame(); });
+  function draw(){
+    // sky and water
+    var g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#7ec8e3'); g.addColorStop(0.35,'#3a9db5'); g.addColorStop(1,'#14586e');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,0.5)';
+    for(var i=0;i<8;i++){ var bx=(i*137+Math.floor(elapsed*12))%1000-20; ctx.beginPath(); ctx.ellipse(bx,60+(i%3)*22,34,7,0,0,Math.PI*2); ctx.fill(); }
+    // water ripples
+    ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1.5;
+    for(var y=170;y<430;y+=34){ ctx.beginPath(); for(var x=0;x<=W;x+=24){ var yy=y+Math.sin(x*0.02+elapsed*2+y)*3; if(x===0) ctx.moveTo(x,yy); else ctx.lineTo(x,yy);} ctx.stroke(); }
+    // snags
+    snags.forEach(function(s){ ctx.fillStyle='#263238'; ctx.beginPath(); ctx.ellipse(s.x,s.y,s.r,s.r*0.6,0,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#ff6b6b'; ctx.font='bold 16px Arial'; ctx.textAlign='center'; ctx.fillText('⚠',s.x,s.y+6); });
+    // moving target rings
+    var pulse=1+Math.sin(elapsed*4)*0.05;
+    ctx.beginPath(); ctx.arc(target.x,target.y,target.r*pulse,0,Math.PI*2); ctx.fillStyle='rgba(255,215,0,0.18)'; ctx.fill(); ctx.strokeStyle='#ffd700'; ctx.lineWidth=3; ctx.stroke();
+    ctx.beginPath(); ctx.arc(target.x,target.y,target.r*0.7*pulse,0,Math.PI*2); ctx.strokeStyle='#6ecfff'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(target.x,target.y,target.r*0.35*pulse,0,Math.PI*2); ctx.fillStyle='rgba(255,215,0,0.35)'; ctx.fill(); ctx.strokeStyle='#fff'; ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 15px Arial'; ctx.fillText('TARGET',target.x,target.y-target.r-10);
+    // pier and angler
+    ctx.fillStyle='#8d5a2b'; ctx.fillRect(0,pierY,180,22); ctx.fillRect(0,pierY+22,12,60); ctx.fillRect(150,pierY+22,12,60);
+    ctx.fillStyle='#ffdf80'; ctx.beginPath(); ctx.arc(hookStart.x,hookStart.y-28,16,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#e74c3c'; ctx.fillRect(hookStart.x-10,hookStart.y-12,20,34);
+    // aim line
+    if(state==='aim'){
+      var ex=hookStart.x+Math.cos(angle)*power*520, ey=hookStart.y+Math.sin(angle)*power*260;
+      ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.setLineDash([8,8]); ctx.beginPath(); ctx.moveTo(hookStart.x,hookStart.y); ctx.lineTo(ex,ey); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle='#ffb703'; ctx.beginPath(); ctx.arc(ex,ey,10,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font='bold 14px Arial'; ctx.textAlign='left'; ctx.fillText('Power '+Math.round(power*100)+'%',14,20);
+      ctx.fillText('Wind push: '+(wind>=0?'+':'')+Math.round(wind*power*0.9)+' px',14,40);
+    }
+    // cast line and hook
+    if(cast){
+      ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(hookStart.x,hookStart.y); ctx.lineTo(cast.x,cast.y); ctx.stroke(); ctx.lineWidth=1;
+      ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(cast.x,cast.y,8,0,Math.PI*2); ctx.fill();
+      if(state==='reel'&&fish){ ctx.fillStyle=fish.color; ctx.font='bold 22px Arial'; ctx.textAlign='center'; ctx.fillText('🐟 '+fish.name,cast.x,cast.y-26); }
+    }
+    // splash
+    splash.forEach(function(s){ ctx.strokeStyle='rgba(255,255,255,'+s.life+')'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.stroke(); });
+    if(caughtFlash>0){ ctx.fillStyle='rgba(255,215,0,'+(caughtFlash*0.4)+')'; ctx.fillRect(0,0,W,H); }
+    if(state==='reel'){ ctx.fillStyle='#0b2233'; ctx.fillRect(330,470,300,26); ctx.fillStyle='#ffb703'; ctx.fillRect(332,472,296*reel/reelNeed,22); ctx.fillStyle='#fff'; ctx.font='bold 15px Arial'; ctx.textAlign='center'; ctx.fillText('REEL! '+reel+' / '+reelNeed,480,488); }
+    ctx.textAlign='left';
+  }
+  function loop(ts){
+    requestAnimationFrame(loop);
+    if(!lastTime) lastTime=ts; var dt=(ts-lastTime)/1000; lastTime=ts; elapsed+=dt;
+    if(state==='aim'||state==='reel'||state==='flying'||state==='celebrate'){
+      timeLeft-=dt; if(timeLeft<=0){ timeLeft=0; if(state!=='over') endGame(haul>=8); }
+      updateHUD();
+    }
+    if(state==='aim'||state==='title'){ target.x+=target.dx; if(target.x<340||target.x>900) target.dx*=-1; }
+    if(state==='flying'&&cast){
+      cast.t+=dt*2.2; var k=Math.min(1,cast.t);
+      cast.cx=cast.fromX+(cast.x-cast.fromX)*k; cast.cy=cast.fromY+(cast.y-cast.fromY)*k - Math.sin(k*Math.PI)*90;
+      // draw flying hook using temp override
+      var savedX=cast.x, savedY=cast.y; cast.x=cast.cx; cast.y=cast.cy; draw(); cast.x=savedX; cast.y=savedY;
+      if(k>=1){ cast.landed=true; resolveLanding(); }
+      return;
+    }
+    splash.forEach(function(s){ s.r+=1.2; s.life-=dt*1.5; }); splash=splash.filter(function(s){return s.life>0;});
+    if(caughtFlash>0) caughtFlash-=dt;
+    draw();
+  }
+  reset(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

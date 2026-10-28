@@ -4,9 +4,9 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 200
-- **Latest game:** 0200 — Catapult Castle
-- **Current volume:** 002 (Games 0101 to 0200)
+- **Total games:** 210
+- **Latest game:** 0210 — Anchor Angler
+- **Current volume:** 003 (Games 0201 to 0300)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
 ## Volume index
@@ -15,6 +15,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
+| 003 | 0201–0210 (10 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -28,20 +29,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 020
+## Latest batch — Batch 021
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0191 | Magma Marathon | Arcade / Lava Runner | [Play](./games/game-0191.html) |
-| 0192 | Rune Relay | Puzzle / Rune Sequence Logic | [Play](./games/game-0192.html) |
-| 0193 | Seaport Supervisor | Strategy / Port Management | [Play](./games/game-0193.html) |
-| 0194 | Timpani Thunder | Rhythm / Drum Beat Timing | [Play](./games/game-0194.html) |
-| 0195 | Crossbow Clash | Precision / Crossbow Targeting | [Play](./games/game-0195.html) |
-| 0196 | Bubble Bouncer | Arcade / Bubble Bounce Platformer | [Play](./games/game-0196.html) |
-| 0197 | Mirror Mansion | Puzzle / Mirror Reflection Logic | [Play](./games/game-0197.html) |
-| 0198 | Bakery Blitz | Strategy / Bakery Order Management | [Play](./games/game-0198.html) |
-| 0199 | Marimba Melody | Rhythm / Marimba Note Matching | [Play](./games/game-0199.html) |
-| 0200 | Catapult Castle | Precision / Catapult Siege Aim | [Play](./games/game-0200.html) |
+| 0201 | Zephyr Zipline | Arcade / Zipline Descent | [Play](./games/game-0201.html) |
+| 0202 | Quill Quest | Puzzle / Word Letter Puzzle | [Play](./games/game-0202.html) |
+| 0203 | Lighthouse Keeper | Strategy / Lighthouse Beam Management | [Play](./games/game-0203.html) |
+| 0204 | Sitar Serenade | Rhythm / Sitar Note Timing | [Play](./games/game-0204.html) |
+| 0205 | Boomerang Bandit | Precision / Boomerang Throwing | [Play](./games/game-0205.html) |
+| 0206 | Coral Collector | Arcade / Underwater Collector | [Play](./games/game-0206.html) |
+| 0207 | Circuit Crafter | Puzzle / Circuit Routing | [Play](./games/game-0207.html) |
+| 0208 | Vineyard Venture | Strategy / Vineyard Management | [Play](./games/game-0208.html) |
+| 0209 | Flute Flight | Rhythm / Melody Note Matching | [Play](./games/game-0209.html) |
+| 0210 | Anchor Angler | Precision / Fishing | [Play](./games/game-0210.html) |
 
 
 ## Quality standard
