@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Xylophone Xpress</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #14101f; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 1px; text-align: center; margin: 6px 0 2px; text-shadow: 0 0 14px #ff5da2; }
+  .sub { color: #ffd166; text-align: center; font-size: 14px; margin-bottom: 10px; }
+  #wrap { position: relative; width: min(96vw, 560px); }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#241a3d, #120e22); border: 3px solid #6c5ce7; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-weight: bold; font-size: 15px; flex-wrap: wrap; }
+  #hud span { background: #2a2148; padding: 6px 10px; border-radius: 8px; }
+  #healthOuter { width: 100%; height: 16px; background: #3a2f5e; border-radius: 9px; overflow: hidden; margin-bottom: 8px; border: 1px solid #6c5ce7; }
+  #healthBar { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5da2, #ffd166, #2ed573); transition: width .2s; }
+  #progressOuter { width: 100%; height: 10px; background: #2a2148; border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+  #progressBar { height: 100%; width: 0%; background: #00d2ff; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10, 6, 25, 0.92); border-radius: 14px; padding: 22px; gap: 10px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffd166; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #e8e4ff; max-width: 440px; }
+  .keys { background: #241a3d; border: 1px solid #6c5ce7; border-radius: 10px; padding: 10px 14px; font-size: 14px; line-height: 1.6; }
+  button { font-size: 20px; font-weight: bold; padding: 13px 30px; border: none; border-radius: 12px; cursor: pointer; background: #ff5da2; color: #fff; box-shadow: 0 5px 0 #b81f63; }
+  button:active { transform: translateY(3px); box-shadow: 0 2px 0 #b81f63; }
+  button.secondary { background: #6c5ce7; box-shadow: 0 5px 0 #4834a8; }
+  #judge { position: absolute; left: 0; right: 0; top: 150px; text-align: center; font-size: 34px; font-weight: bold; text-shadow: 0 2px 8px #000; pointer-events: none; z-index: 4; }
+  #laneHint { display: flex; justify-content: space-between; max-width: 560px; margin: 8px auto 0; font-size: 13px; color: #c9c2ee; }
+  #laneHint b { color: #fff; }
+  .small { font-size: 13px; color: #bdb6e8; }
+</style>
+</head>
+<body>
+<h1>🎵 XYLOPHONE XPRESS 🎵</h1>
+<div class="sub">Catch every bar on the beat — finish the song to win!</div>
+
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Combo: <span id="combo">0</span> x<span id="mult">1</span></span>
+    <span>Hits: <span id="hits">0</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="healthOuter"><div id="healthBar"></div></div>
+  <div id="progressOuter"><div id="progressBar"></div></div>
+  <canvas id="game" width="560" height="640"></canvas>
+  <div id="judge"></div>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Xylophone Xpress</h2>
+    <p>Xylophone bars tumble down four rainbow lanes. Tap each bar exactly when it lands on the glowing hit zone and ride the beat to the end of the song.</p>
+    <div class="keys">
+      <b>How to Play</b><br>
+      <b>D</b> = pink lane &nbsp; <b>F</b> = yellow lane<br>
+      <b>J</b> = green lane &nbsp; <b>K</b> = blue lane<br>
+      Mouse: click a lane &nbsp;•&nbsp; Touch: tap a lane<br>
+      Perfect = 100 pts &nbsp;•&nbsp; Good = 50 pts &nbsp;•&nbsp; Miss = lose health<br>
+      Combo streaks raise your multiplier. Health 0 = Game Over.
+    </div>
+    <button id="startBtn">▶ START SONG</button>
+    <p class="small">Song length: about 60 seconds. No sound plays until you press Start.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="endStats" class="keys"></p>
+    <button id="restartBtn">↻ PLAY AGAIN</button>
+  </div>
+</div>
+<div id="laneHint"><span><b>D</b> Pink</span><span><b>F</b> Yellow</span><span><b>J</b> Green</span><span><b>K</b> Blue</span></div>
+<p class="small" style="margin-top:8px">Tip: watch the bar colour — each lane plays its own xylophone note.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var multEl = document.getElementById('mult');
+  var hitsEl = document.getElementById('hits');
+  var statusEl = document.getElementById('status');
+  var healthBar = document.getElementById('healthBar');
+  var progressBar = document.getElementById('progressBar');
+  var judgeEl = document.getElementById('judge');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  var W = 560, H = 640;
+  var LANES = 4;
+  var LANE_W = W / LANES;
+  var HIT_Y = 540;
+  var COLORS = ['#ff5da2', '#ffd166', '#2ed573', '#00d2ff'];
+  var NAMES = ['Pink', 'Yellow', 'Green', 'Blue'];
+  var FREQS = [523.25, 587.33, 659.25, 783.99];
+  var KEYS = ['d', 'f', 'j', 'k'];
+
+  var state = 'title';
+  var score = 0, combo = 0, bestCombo = 0, hits = 0, misses = 0, perfects = 0;
+  var health = 100;
+  var notes = [], particles = [], laneFlash = [0, 0, 0, 0];
+  var startTime = 0, songTime = 0, lastTime = 0, judgeTimer = 0;
+  var audioCtx = null;
+  var SONG_LENGTH = 60;
+
+  function buildChart() {
+    var chart = [];
+    var beat = 0.5;
+    var t = 1.2;
+    var patterns = [
+      [0, 1, 2, 3], [3, 2, 1, 0], [0, 2, 1, 3], [1, 1, 2, 2],
+      [0, 3, 0, 3], [2, 0, 3, 1], [0, 1, 1, 2, 3, 3], [3, 1, 0, 2]
+    ];
+    var pi = 0, step = 0;
+    while (t < SONG_LENGTH - 1) {
+      var pat = patterns[pi % patterns.length];
+      var lane = pat[step % pat.length];
+      chart.push({ lane: lane, time: t, hit: false, y: -80 });
+      if (step % 7 === 3) {
+        chart.push({ lane: (lane + 2) % 4, time: t + 0.18, hit: false, y: -80 });
+      }
+      step++;
+      if (step % pat.length === 0) pi++;
+      t += beat * (t > 40 ? 0.9 : 1);
+    }
+    return chart;
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+
+  function playTone(lane, good) {
+    if (!audioCtx) return;
+    var now = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(FREQS[lane], now);
+    osc.frequency.exponentialRampToValueAtTime(FREQS[lane] * 0.5, now + 0.35);
+    gain.gain.setValueAtTime(good ? 0.28 : 0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.42);
+    var osc2 = audioCtx.createOscillator();
+    var gain2 = audioCtx.createGain();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(FREQS[lane] * 2, now);
+    gain2.gain.setValueAtTime(0.08, now);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.start(now);
+    osc2.stop(now + 0.2);
+  }
+
+  function playMiss() {
+    if (!audioCtx) return;
+    var now = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, now);
+    osc.frequency.exponentialRampToValueAtTime(70, now + 0.25);
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.3);
+  }
+
+  function setJudge(text, color) {
+    judgeEl.textContent = text;
+    judgeEl.style.color = color;
+    judgeTimer = 0.7;
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    comboEl.textContent = combo;
+    multEl.textContent = 1 + Math.floor(combo / 10);
+    hitsEl.textContent = hits;
+    healthBar.style.width = Math.max(0, health) + '%';
+    progressBar.style.width = Math.min(100, (songTime / SONG_LENGTH) * 100) + '%';
+    statusEl.textContent = state === 'playing' ? 'Playing' : (state === 'won' ? 'You Win!' : (state === 'over' ? 'Game Over' : 'Ready'));
+  }
+
+  function spawnParticles(x, y, color) {
+    for (var i = 0; i < 14; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: -Math.random() * 5 - 1, life: 0.6, color: color });
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    notes = buildChart();
+    particles = [];
+    score = 0; combo = 0; bestCombo = 0; hits = 0; misses = 0; perfects = 0;
+    health = 100; songTime = 0; lastTime = performance.now();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    judgeEl.textContent = '';
+    updateHUD();
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '🎉 YOU WIN! 🎉' : '💔 GAME OVER';
+    endText.textContent = won
+      ? 'You finished the whole song! The xylophone crowd goes wild.'
+      : 'Your health ran out before the final note. Tap Play Again and keep the beat!';
+    endStats.innerHTML = 'Final Score: <b>' + score + '</b><br>Hits: ' + hits + ' &nbsp;•&nbsp; Perfect: ' + perfects + ' &nbsp;•&nbsp; Misses: ' + misses + '<br>Best Combo: ' + bestCombo;
+    endScreen.classList.remove('hidden');
+    updateHUD();
+  }
+
+  function hitLane(lane) {
+    if (state !== 'playing') return;
+    laneFlash[lane] = 0.25;
+    var best = null, bestDiff = 999;
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].lane === lane && !notes[i].hit) {
+        var diff = Math.abs(notes[i].time - songTime);
+        if (diff < bestDiff) { bestDiff = diff; best = notes[i]; }
+      }
+    }
+    if (best && bestDiff < 0.28) {
+      best.hit = true;
+      hits++;
+      combo++;
+      if (combo > bestCombo) bestCombo = combo;
+      var mult = 1 + Math.floor(combo / 10);
+      var perfect = bestDiff < 0.13;
+      if (perfect) { perfects++; score += 100 * mult; health = Math.min(100, health + 2); setJudge('PERFECT!', COLORS[lane]); }
+      else { score += 50 * mult; setJudge('GOOD!', '#ffffff'); }
+      playTone(lane, true);
+      spawnParticles(lane * LANE_W + LANE_W / 2, HIT_Y, COLORS[lane]);
+    } else {
+      combo = 0;
+      health -= 4;
+      setJudge('MISS', '#ff4757');
+      playMiss();
+      if (health <= 0) { health = 0; updateHUD(); endGame(false); }
+    }
+    updateHUD();
+  }
+
+  function laneFromX(clientX) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    return Math.max(0, Math.min(3, Math.floor(x / LANE_W)));
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    var idx = KEYS.indexOf(k);
+    if (idx !== -1) { e.preventDefault(); hitLane(idx); }
+    if ((k === 'enter' || k === ' ') && state !== 'playing') { e.preventDefault(); startGame(); }
+  });
+
+  canvas.addEventListener('mousedown', function (e) { hitLane(laneFromX(e.clientX)); });
+  canvas.addEventListener('click', function (e) { if (state !== 'playing') return; });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) { hitLane(laneFromX(e.changedTouches[i].clientX)); }
+  }, { passive: false });
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    for (var l = 0; l < LANES; l++) {
+      ctx.fillStyle = l % 2 === 0 ? '#1d1533' : '#221a3f';
+      ctx.fillRect(l * LANE_W, 0, LANE_W, H);
+      ctx.strokeStyle = '#3a2f5e';
+      ctx.strokeRect(l * LANE_W + 1, 0, LANE_W - 2, H);
+      if (laneFlash[l] > 0) {
+        ctx.fillStyle = COLORS[l];
+        ctx.globalAlpha = laneFlash[l];
+        ctx.fillRect(l * LANE_W, 0, LANE_W, H);
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = COLORS[l];
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(NAMES[l] + ' (' + KEYS[l].toUpperCase() + ')', l * LANE_W + LANE_W / 2, 30);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.fillRect(0, HIT_Y - 45, W, 90);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, HIT_Y);
+    ctx.lineTo(W, HIT_Y);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    for (var n = 0; n < notes.length; n++) {
+      var note = notes[n];
+      if (note.hit) continue;
+      if (note.time < songTime - 0.3 || note.time > songTime + 3) continue;
+      var fallSpeed = 420;
+      var y = HIT_Y - (note.time - songTime) * fallSpeed;
+      var x = note.lane * LANE_W + 12;
+      ctx.fillStyle = COLORS[note.lane];
+      ctx.beginPath();
+      ctx.roundRect(x, y - 28, LANE_W - 24, 56, 12);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(x + (LANE_W - 24) / 2, y, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#14101f';
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText('♪', x + (LANE_W - 24) / 2, y + 5);
+    }
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      ctx.fillStyle = pt.color;
+      ctx.globalAlpha = Math.max(0, pt.life / 0.6);
+      ctx.fillRect(pt.x, pt.y, 7, 7);
+      ctx.globalAlpha = 1;
+    }
+    if (state === 'title') {
+      ctx.fillStyle = '#e8e4ff';
+      ctx.font = '20px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Press START and catch the beat!', W / 2, 320);
+    }
+  }
+
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    if (judgeTimer > 0) { judgeTimer -= dt; if (judgeTimer <= 0) judgeEl.textContent = ''; }
+    for (var i = 0; i < laneFlash.length; i++) { if (laneFlash[i] > 0) laneFlash[i] -= dt; }
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx; particles[p].y += particles[p].vy; particles[p].vy += 0.18; particles[p].life -= dt;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    if (state === 'playing') {
+      songTime += dt;
+      for (var n = 0; n < notes.length; n++) {
+        var note = notes[n];
+        if (!note.hit && note.time < songTime - 0.28) {
+          note.hit = true;
+          misses++; combo = 0; health -= 12;
+          setJudge('MISS', '#ff4757');
+          playMiss();
+          if (health <= 0) { health = 0; updateHUD(); endGame(false); break; }
+        }
+      }
+      if (state === 'playing' && songTime >= SONG_LENGTH) { endGame(true); }
+      updateHUD();
+    }
+    draw();
+  }
+
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

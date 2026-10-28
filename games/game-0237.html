@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Lantern Labyrinth</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b1020; color: #eef2ff; font-family: Arial, Helvetica, sans-serif; text-align: center; }
+  h1 { margin: 14px 0 4px; font-size: 30px; letter-spacing: 1px; color: #ffd166; }
+  p { margin: 6px 12px; line-height: 1.45; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 8px auto; max-width: 720px; }
+  #hud span { background: #1c2547; border: 1px solid #3a4a7a; border-radius: 8px; padding: 6px 10px; font-weight: bold; font-size: 14px; }
+  #wrap { position: relative; width: 660px; max-width: 96vw; margin: 0 auto; }
+  canvas { width: 100%; height: auto; background: #0a0e1d; border: 3px solid #ffd166; border-radius: 10px; display: block; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; background: rgba(5,8,20,0.93); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 18px; }
+  .overlay.hidden { display: none; }
+  button { background: #ffd166; color: #1a1400; border: none; border-radius: 10px; padding: 12px 20px; font-size: 17px; font-weight: bold; margin: 6px; cursor: pointer; }
+  button.secondary { background: #33406e; color: #fff; }
+  button.active { outline: 3px solid #fff; background: #ffe08a; }
+  #controls { margin: 10px auto 20px; max-width: 720px; }
+  #controls button { padding: 9px 14px; font-size: 14px; }
+  #msg { min-height: 22px; color: #ffd166; font-weight: bold; }
+  ul { text-align: left; max-width: 520px; margin: 8px auto; }
+  li { margin: 5px 0; }
+</style>
+</head>
+<body>
+<h1>🕯️ Lantern Labyrinth</h1>
+<p>Light every exit tile by bending lantern beams around the dark maze.</p>
+<div id="hud">
+  <span id="hudScore">Score: 0</span>
+  <span id="hudLives">Lives: ❤️❤️❤️</span>
+  <span id="hudLevel">Level: 1 / 10</span>
+  <span id="hudMirrors">Mirrors left: 4</span>
+  <span id="hudLanterns">Lanterns left: 1</span>
+  <span id="hudMoves">Moves left: 24</span>
+  <span id="hudStatus">Status: Place a lantern</span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="660" height="540"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Lantern Labyrinth</h2>
+    <p><strong>How to Play</strong></p>
+    <ul>
+      <li>The maze is dark. Place lanterns and mirrors to send light to every golden exit tile.</li>
+      <li>Lantern beams travel straight, stop at walls, and bounce off mirrors.</li>
+      <li>Click an empty tile to place the selected tool. Click a mirror to flip it between / and \. Click a lantern to rotate its beam.</li>
+      <li>Lanterns cannot be placed right next to an exit — use mirrors and clever angles instead.</li>
+      <li>Each placement or rotation costs 1 move. Running out of moves costs a life. Lose all 3 lives and it is Game Over.</li>
+      <li>Solve all 10 levels to win.</li>
+    </ul>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Controls: Mouse / touch click tiles &nbsp;•&nbsp; Arrow Keys move cursor &nbsp;•&nbsp; Space place / rotate &nbsp;•&nbsp; R reset level &nbsp;•&nbsp; M switch tool</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Game</button>
+  </div>
+</div>
+<div id="msg"></div>
+<div id="controls">
+  <button id="toolMirror" class="active">🪞 Mirror Tool</button>
+  <button id="toolLantern">🕯️ Lantern Tool</button>
+  <button id="resetBtn" class="secondary">↻ Reset Level (R)</button>
+  <button id="soundBtn" class="secondary">🔊 Sound: On</button>
+</div>
+<p>Tip: A lit exit glows green-gold. Watch the beam path — if it hits a wall, add a mirror just before it.</p>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 11, ROWS = 9, CELL = 60;
+  var levels = [
+    { grid: ["...........","...........","....#......","...........","..........X","...........","......#....","...........","..........."], mirrors: 4, lanterns: 1, moves: 24 },
+    { grid: ["...........","..#........","..#....X...","..#........","...........",".....#.....",".....#.....","...........","..........."], mirrors: 4, lanterns: 1, moves: 24 },
+    { grid: ["...........","...........",".###.......","...........",".....X.....","...........",".......###.","...........","..........."], mirrors: 5, lanterns: 1, moves: 26 },
+    { grid: ["...........",".X.........",".#.........",".#.........","...........",".........#.",".........#.",".........X.","..........."], mirrors: 5, lanterns: 2, moves: 28 },
+    { grid: ["...........","...........","..#####....","..........","....X.......","....#####...","...........","...........",".........X."], mirrors: 5, lanterns: 1, moves: 28 },
+    { grid: ["X..........","#..........","#....#.....","...........",".....#.....","...........","....#......","...........","..........X"], mirrors: 6, lanterns: 2, moves: 30 },
+    { grid: ["...........","..#...#....","..#...#..X.","...........",".#####.....","...........","....#...#..","....#...#..","X.........."], mirrors: 6, lanterns: 2, moves: 30 },
+    { grid: ["...........",".###.###...","...........","...X...X...",".###.###...","...........","...........","...#...#...","..........."], mirrors: 6, lanterns: 2, moves: 32 },
+    { grid: ["X.........#","..........#","....#......","....#...X..","..........","..######...","...........","#..........","#.........X"], mirrors: 6, lanterns: 2, moves: 32 },
+    { grid: ["X..........",".#.........",".#....#....","...........","....X....X.","...........","....#....#.",".........#.","..........X"], mirrors: 7, lanterns: 2, moves: 34 }
+  ];
+  var levelIndex = 0, score = 0, lives = 3, movesLeft = 24;
+  var mirrorsLeft = 4, lanternsLeft = 1, tool = 'mirror';
+  var placed = {}, cursor = { x: 5, y: 4 }, started = false, over = false;
+  var msgEl = document.getElementById('msg');
+  var audioCtx = null, soundOn = true, lastTime = 0;
+
+  function beep(freq, dur, type) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function cellAt(x, y) {
+    var g = levels[levelIndex].grid;
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return '#';
+    return g[y].charAt(x);
+  }
+  function exits() {
+    var out = [];
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) if (cellAt(x, y) === 'X') out.push(x + ',' + y);
+    return out;
+  }
+  function dirsFor(d) { return [[0,-1],[1,0],[0,1],[-1,0]][d]; }
+  function reflect(dir, orient) {
+    // dir 0=N 1=E 2=S 3=W ; '/' mirrors: N->E E->N S->W W->S ; '\' mirrors: N->W W->N S->E E->S
+    if (orient === '/') return [1,0,3,2][dir];
+    return [3,2,1,0][dir];
+  }
+  function computeLight() {
+    var lit = {}, paths = {}, litExits = {};
+    Object.keys(placed).forEach(function (k) {
+      var p = placed[k];
+      if (p.type !== 'lantern') return;
+      var parts = k.split(','), x = +parts[0], y = +parts[1], dir = p.dir;
+      lit[k] = true;
+      var steps = 0;
+      while (steps < 60) {
+        steps++;
+        var d = dirsFor(dir); x += d[0]; y += d[1];
+        if (x < 0 || y < 0 || x >= COLS || y >= ROWS) break;
+        var c = cellAt(x, y);
+        if (c === '#') break;
+        var key = x + ',' + y;
+        lit[key] = true; paths[key] = true;
+        if (c === 'X') { litExits[key] = true; }
+        var obj = placed[key];
+        if (obj && obj.type === 'mirror') { dir = reflect(dir, obj.orient); }
+      }
+    });
+    return { lit: lit, paths: paths, litExits: litExits };
+  }
+  function isAdjacentToExit(x, y) {
+    var ds = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (var i = 0; i < ds.length; i++) if (cellAt(x + ds[i][0], y + ds[i][1]) === 'X') return true;
+    return false;
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+  function updateHUD(status) {
+    document.getElementById('hudScore').textContent = 'Score: ' + score;
+    document.getElementById('hudLives').textContent = 'Lives: ' + '❤️'.repeat(Math.max(0, lives)) + (lives === 0 ? '💀' : '');
+    document.getElementById('hudLevel').textContent = 'Level: ' + (levelIndex + 1) + ' / 10';
+    document.getElementById('hudMirrors').textContent = 'Mirrors left: ' + mirrorsLeft;
+    document.getElementById('hudLanterns').textContent = 'Lanterns left: ' + lanternsLeft;
+    document.getElementById('hudMoves').textContent = 'Moves left: ' + movesLeft;
+    document.getElementById('hudStatus').textContent = 'Status: ' + (status || 'Place a ' + tool);
+    document.getElementById('toolMirror').className = tool === 'mirror' ? 'active' : '';
+    document.getElementById('toolLantern').className = tool === 'lantern' ? 'active' : '';
+  }
+  function loadLevel() {
+    var lv = levels[levelIndex];
+    placed = {}; mirrorsLeft = lv.mirrors; lanternsLeft = lv.lanterns; movesLeft = lv.moves;
+    cursor = { x: 5, y: 4 };
+    setMsg('Level ' + (levelIndex + 1) + ': light all ' + exits().length + ' exit tile(s).');
+    updateHUD();
+  }
+  function checkEnd() {
+    var light = computeLight(), all = exits();
+    var done = all.every(function (k) { return light.litExits[k]; });
+    if (done) {
+      var bonus = movesLeft * 5 + mirrorsLeft * 10 + lanternsLeft * 10;
+      score += 100 + bonus;
+      beep(880, 0.25, 'triangle'); setTimeout(function () { beep(1320, 0.3, 'triangle'); }, 120);
+      if (levelIndex >= 9) { showEnd(true); }
+      else { setMsg('Level solved! Bonus +' + bonus + '. Next level...'); levelIndex++; setTimeout(loadLevel, 900); }
+      updateHUD('Level solved!');
+      return true;
+    }
+    return false;
+  }
+  function failLevel() {
+    lives--;
+    beep(160, 0.4, 'sawtooth');
+    if (lives <= 0) { showEnd(false); updateHUD('Game Over'); return; }
+    setMsg('Out of moves! You lost a life. Level restarted.');
+    loadLevel(); updateHUD('Try again — ' + lives + ' lives left');
+  }
+  function spendMove() {
+    movesLeft--;
+    if (movesLeft <= 0 && !checkEnd()) { failLevel(); }
+    updateHUD();
+  }
+  function actOn(x, y) {
+    if (!started || over) return;
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return;
+    cursor = { x: x, y: y };
+    var base = cellAt(x, y);
+    if (base === '#') { setMsg('A wall blocks that tile. Pick an open tile.'); beep(120, 0.12, 'square'); return; }
+    var key = x + ',' + y, obj = placed[key];
+    if (obj) {
+      if (obj.type === 'mirror') { obj.orient = obj.orient === '/' ? '\\' : '/'; setMsg('Mirror flipped to ' + obj.orient + '.'); }
+      else { obj.dir = (obj.dir + 1) % 4; setMsg('Lantern rotated.'); }
+      beep(520, 0.12, 'sine'); spendMove(); checkEnd(); updateHUD(); return;
+    }
+    if (base === 'X') { setMsg('That is an exit tile — light it, do not cover it.'); return; }
+    if (tool === 'mirror') {
+      if (mirrorsLeft <= 0) { setMsg('No mirrors left. Switch to the lantern tool or reset.'); return; }
+      placed[key] = { type: 'mirror', orient: '/' }; mirrorsLeft--;
+      setMsg('Mirror placed. Click it again to flip it.');
+    } else {
+      if (lanternsLeft <= 0) { setMsg('No lanterns left. Switch to the mirror tool or reset.'); return; }
+      if (isAdjacentToExit(x, y)) { setMsg('Lanterns cannot sit right next to an exit — glare rule. Place it farther away.'); beep(140, 0.15, 'square'); return; }
+      placed[key] = { type: 'lantern', dir: 1 }; lanternsLeft--;
+      setMsg('Lantern placed, beaming east. Click it to rotate.');
+    }
+    beep(660, 0.12, 'sine'); spendMove(); checkEnd(); updateHUD();
+  }
+  function showEnd(win) {
+    over = true;
+    document.getElementById('endTitle').textContent = win ? '🏆 You Win!' : '💀 Game Over';
+    document.getElementById('endText').textContent = win
+      ? 'You lit every exit in all 10 levels! Final score: ' + score + '. Brilliant pathfinding.'
+      : 'You ran out of lives on level ' + (levelIndex + 1) + '. Final score: ' + score + '. Try again — the maze is waiting.';
+    document.getElementById('endScreen').classList.remove('hidden');
+  }
+  function startGame() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    levelIndex = 0; score = 0; lives = 3; over = false;
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    started = true; loadLevel(); beep(440, 0.15, 'sine');
+  }
+  function draw(t) {
+    ctx.clearRect(0, 0, 660, 540);
+    var light = computeLight(), flicker = 0.85 + 0.15 * Math.sin(t / 280);
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        var px = x * CELL, py = y * CELL, key = x + ',' + y, base = cellAt(x, y);
+        var isLit = !!light.lit[key] || !!light.paths[key];
+        ctx.fillStyle = base === '#' ? '#1e2a52' : (isLit ? '#3a2f10' : '#0d1226');
+        ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+        if (light.paths[key]) { ctx.fillStyle = 'rgba(255,209,102,' + (0.28 * flicker) + ')'; ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2); }
+        if (base === '#') { ctx.fillStyle = '#5a6ea8'; ctx.fillRect(px + 8, py + 8, CELL - 16, CELL - 16); ctx.fillStyle = '#2c3a6e'; ctx.fillRect(px + 16, py + 16, CELL - 32, CELL - 32); }
+        if (base === 'X') {
+          var litExit = !!light.litExits[key];
+          ctx.fillStyle = litExit ? '#7dff8a' : '#ffd166';
+          ctx.beginPath(); ctx.moveTo(px + 30, py + 8); ctx.lineTo(px + 52, py + 30); ctx.lineTo(px + 30, py + 52); ctx.lineTo(px + 8, py + 30); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = '#0b1020'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText(litExit ? 'LIT' : 'EXIT', px + 30, py + 34);
+        }
+        var obj = placed[key];
+        if (obj && obj.type === 'mirror') {
+          ctx.strokeStyle = '#bfe3ff'; ctx.lineWidth = 6; ctx.beginPath();
+          if (obj.orient === '/') { ctx.moveTo(px + 10, py + 50); ctx.lineTo(px + 50, py + 10); }
+          else { ctx.moveTo(px + 10, py + 10); ctx.lineTo(px + 50, py + 50); }
+          ctx.stroke();
+        }
+        if (obj && obj.type === 'lantern') {
+          ctx.fillStyle = '#ff9f1c'; ctx.beginPath(); ctx.arc(px + 30, py + 30, 13 * flicker + 4, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#fff3c4'; ctx.beginPath(); ctx.arc(px + 30, py + 30, 6, 0, Math.PI * 2); ctx.fill();
+          var d = dirsFor(obj.dir);
+          ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.moveTo(px + 30 + d[0] * 20, py + 30 + d[1] * 20); ctx.lineTo(px + 30 - d[1] * 7, py + 30 + d[0] * 7); ctx.lineTo(px + 30 + d[1] * 7, py + 30 - d[0] * 7); ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+    if (started && !over) {
+      ctx.strokeStyle = tool === 'mirror' ? '#bfe3ff' : '#ffd166'; ctx.lineWidth = 3;
+      ctx.strokeRect(cursor.x * CELL + 2, cursor.y * CELL + 2, CELL - 4, CELL - 4);
+    }
+    ctx.fillStyle = '#8ea2d8'; ctx.font = '12px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Tool: ' + tool + '  •  Click a tile to place / rotate  •  Arrows move cursor, Space acts, R resets', 8, 535);
+  }
+  function loop(t) { draw(t || 0); requestAnimationFrame(loop); }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('resetBtn').addEventListener('click', function () { if (started && !over) { loadLevel(); beep(330, 0.1, 'sine'); } });
+  document.getElementById('toolMirror').addEventListener('click', function () { tool = 'mirror'; updateHUD(); beep(500, 0.08, 'sine'); });
+  document.getElementById('toolLantern').addEventListener('click', function () { tool = 'lantern'; updateHUD(); beep(500, 0.08, 'sine'); });
+  document.getElementById('soundBtn').addEventListener('click', function () { soundOn = !soundOn; this.textContent = soundOn ? '🔊 Sound: On' : '🔇 Sound: Off'; });
+  canvas.addEventListener('click', function (e) {
+    var r = canvas.getBoundingClientRect();
+    var x = Math.floor((e.clientX - r.left) / r.width * COLS);
+    var y = Math.floor((e.clientY - r.top) / r.height * ROWS);
+    actOn(x, y);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect(), t0 = e.changedTouches[0];
+    var x = Math.floor((t0.clientX - r.left) / r.width * COLS);
+    var y = Math.floor((t0.clientY - r.top) / r.height * ROWS);
+    actOn(x, y);
+  }, { passive: false });
+  window.addEventListener('keydown', function (e) {
+    if (!started || over) return;
+    if (e.key === 'ArrowLeft') { cursor.x = Math.max(0, cursor.x - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { cursor.x = Math.min(COLS - 1, cursor.x + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { cursor.y = Math.max(0, cursor.y - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { cursor.y = Math.min(ROWS - 1, cursor.y + 1); e.preventDefault(); }
+    else if (e.key === ' ') { actOn(cursor.x, cursor.y); e.preventDefault(); }
+    else if (e.key === 'r' || e.key === 'R') { loadLevel(); }
+    else if (e.key === 'm' || e.key === 'M') { tool = tool === 'mirror' ? 'lantern' : 'mirror'; updateHUD(); }
+    updateHUD();
+  });
+  loadLevel(); updateHUD('Press Start'); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

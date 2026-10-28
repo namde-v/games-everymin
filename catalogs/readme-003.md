@@ -35,9 +35,21 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0229 | Drumline Dash | Rhythm / Marching Beat | Space/J/K hit beats, mouse click pads, touch tap pads | [Play](./../games/game-0229.html) |
 | 0230 | Horseshoe Hero | Precision / Horseshoe Toss | Mouse/touch aim and throw, Arrow Keys aim, Space throw | [Play](./../games/game-0230.html) |
 
+| 0231 | Avalanche Ace | Arcade / Snowboard Downhill | Arrow Keys / WASD steer, Space jump, mouse move steer, touch drag | [Play](./../games/game-0231.html) |
+| 0232 | Orbit Oracle | Puzzle / Gravity Orbit Logic | Mouse/touch drag wells, Arrow Keys move selected well, Space launch/reset, R reset level | [Play](./../games/game-0232.html) |
+| 0233 | Tidepool Tycoon | Strategy / Tidepool Ecosystem Management | Mouse/touch click tiles and buttons, Arrow Keys move selection, 1/2/3/4 buy creature, Enter/Space confirm, N next tide | [Play](./../games/game-0233.html) |
+| 0234 | Xylophone Xpress | Rhythm / Xylophone Note Run | D/F/J/K lanes, mouse click lanes, touch tap lanes | [Play](./../games/game-0234.html) |
+| 0235 | Boomerang Bounty | Precision / Boomerang Throwing | Mouse/touch drag aim and release, Arrow Keys aim/curve, Space throw | [Play](./../games/game-0235.html) |
+| 0236 | Coral Cruiser | Arcade / Submarine Reef Explorer | Arrow Keys/WASD move, mouse move steer, touch drag, Space dash | [Play](./../games/game-0236.html) |
+| 0237 | Lantern Labyrinth | Puzzle / Light Maze Logic | Mouse/touch click tiles to place/rotate, Arrow Keys move cursor, Space place/rotate, R reset level | [Play](./../games/game-0237.html) |
+| 0238 | Windmill Warden | Strategy / Windmill Farm Management | Mouse/touch click plots and buttons, Arrow Keys move selection, 1/2/3 build/repair/angle, Enter/Space confirm, N next day | [Play](./../games/game-0238.html) |
+| 0239 | Saxophone Soiree | Rhythm / Saxophone Note Run | D/F/J/K lanes, hold for long notes, mouse click/hold lanes, touch tap/hold lanes | [Play](./../games/game-0239.html) |
+| 0240 | Curling Champion | Precision / Curling Slide | Mouse/touch drag aim and release, Arrow Keys aim/power, Space slide/sweep | [Play](./../games/game-0240.html) |
+
 ## Batch notes
 
 - Batch 021: 10 games, produced in one cycle. Volume 003 opened at game 0201.
 - Batch 022: 10 games, produced in one cycle.
 - Batch 023: 10 games, produced in one cycle.
+- Batch 024: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 230
-- **Latest game:** 0230 — Horseshoe Hero
+- **Total games:** 240
+- **Latest game:** 0240 — Curling Champion
 - **Current volume:** 003 (Games 0201 to 0300)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -15,7 +15,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
-| 003 | 0201–0230 (30 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
+| 003 | 0201–0240 (40 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -29,20 +29,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 023
+## Latest batch — Batch 024
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0221 | Tempest Trek | Arcade / Storm Runner | [Play](./games/game-0221.html) |
-| 0222 | Mosaic Matrix | Puzzle / Tile Pattern Logic | [Play](./games/game-0222.html) |
-| 0223 | Canyon Cartographer | Strategy / Map Expedition | [Play](./games/game-0223.html) |
-| 0224 | Banjo Bonanza | Rhythm / Banjo Picking | [Play](./games/game-0224.html) |
-| 0225 | Catapult Canyon | Precision / Catapult Launch | [Play](./games/game-0225.html) |
-| 0226 | Firefly Frenzy | Arcade / Firefly Catch | [Play](./games/game-0226.html) |
-| 0227 | Sundial Solver | Puzzle / Shadow Logic | [Play](./games/game-0227.html) |
-| 0228 | Glacier Guild | Strategy / Expedition Management | [Play](./games/game-0228.html) |
-| 0229 | Drumline Dash | Rhythm / Marching Beat | [Play](./games/game-0229.html) |
-| 0230 | Horseshoe Hero | Precision / Horseshoe Toss | [Play](./games/game-0230.html) |
+| 0231 | Avalanche Ace | Arcade / Snowboard Downhill | [Play](./games/game-0231.html) |
+| 0232 | Orbit Oracle | Puzzle / Gravity Orbit Logic | [Play](./games/game-0232.html) |
+| 0233 | Tidepool Tycoon | Strategy / Tidepool Ecosystem Management | [Play](./games/game-0233.html) |
+| 0234 | Xylophone Xpress | Rhythm / Xylophone Note Run | [Play](./games/game-0234.html) |
+| 0235 | Boomerang Bounty | Precision / Boomerang Throwing | [Play](./games/game-0235.html) |
+| 0236 | Coral Cruiser | Arcade / Submarine Reef Explorer | [Play](./games/game-0236.html) |
+| 0237 | Lantern Labyrinth | Puzzle / Light Maze Logic | [Play](./games/game-0237.html) |
+| 0238 | Windmill Warden | Strategy / Windmill Farm Management | [Play](./games/game-0238.html) |
+| 0239 | Saxophone Soiree | Rhythm / Saxophone Note Run | [Play](./games/game-0239.html) |
+| 0240 | Curling Champion | Precision / Curling Slide | [Play](./games/game-0240.html) |
 
 
 ## Quality standard
