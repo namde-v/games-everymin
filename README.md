@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 370
-- **Latest game:** 0370 — Starlight Surveyor
+- **Total games:** 380
+- **Latest game:** 0380 — Reef Ranger
 - **Current volume:** 004 (Games 0301 to 0400)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -16,7 +16,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
-| 004 | 0301–0400 (70 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
+| 004 | 0301–0400 (80 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -30,20 +30,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 037
+## Latest batch — Batch 038
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0361 | Aurora Archer | Arcade / Archery Aim | [Play](./games/game-0361.html) |
-| 0362 | Quarry Quandary | Puzzle / Crate Pushing | [Play](./games/game-0362.html) |
-| 0363 | Harbor Harbormaster | Strategy / Port Scheduling | [Play](./games/game-0363.html) |
-| 0364 | Syncopation Station | Rhythm / Off-Beat Timing | [Play](./games/game-0364.html) |
-| 0365 | Tempest Tamer | Arcade / Storm Dodging | [Play](./games/game-0365.html) |
-| 0366 | Rune Reservoir | Puzzle / Rune Flow | [Play](./games/game-0366.html) |
-| 0367 | Assembly Archon | Strategy / Workshop Assembly | [Play](./games/game-0367.html) |
-| 0368 | Pulse Painter | Rhythm / Beat Painting | [Play](./games/game-0368.html) |
-| 0369 | Dune Drifter | Arcade / Sandboarding | [Play](./games/game-0369.html) |
-| 0370 | Starlight Surveyor | Puzzle / Constellation Connect | [Play](./games/game-0370.html) |
+| 0371 | Lantern Lifter | Arcade / Lantern Escort | [Play](./games/game-0371.html) |
+| 0372 | Comet Cartographer | Puzzle / Constellation Tracing | [Play](./games/game-0372.html) |
+| 0373 | Mycelium Mayor | Strategy / Fungal City | [Play](./games/game-0373.html) |
+| 0374 | Cadence Climber | Rhythm / Beat Climbing | [Play](./games/game-0374.html) |
+| 0375 | Frost Ferry | Arcade / Ice Ferry Delivery | [Play](./games/game-0375.html) |
+| 0376 | Saffron Sleuth | Puzzle / Deduction | [Play](./games/game-0376.html) |
+| 0377 | Foundry Flux | Strategy / Factory Routing | [Play](./games/game-0377.html) |
+| 0378 | Echo Engineer | Rhythm / Pattern Repeat | [Play](./games/game-0378.html) |
+| 0379 | Canopy Courier | Arcade / Zipline Delivery | [Play](./games/game-0379.html) |
+| 0380 | Reef Ranger | Strategy / Reef Restoration | [Play](./games/game-0380.html) |
 
 
 ## Quality standard

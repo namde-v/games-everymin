@@ -74,6 +74,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0368 | Pulse Painter | Rhythm / Beat Painting | Keys 1-4 select color, mouse click blobs/palette, touch tap blobs/palette, R restart | [Play](./../games/game-0368.html) |
 | 0369 | Dune Drifter | Arcade / Sandboarding | Arrow Keys / A-D steer, mouse move steer, touch drag, Space/Up/W jump, R restart | [Play](./../games/game-0369.html) |
 | 0370 | Starlight Surveyor | Puzzle / Constellation Connect | Mouse/touch click stars in sequence, Arrow Keys move crosshair, Enter/Space confirm, R restart | [Play](./../games/game-0370.html) |
+| 0371 | Lantern Lifter | Arcade / Lantern Escort | Arrow Keys / WASD move, mouse/touch drag steer, Space shield, R restart | [Play](./../games/game-0371.html) |
+| 0372 | Comet Cartographer | Puzzle / Constellation Tracing | Mouse/touch click stars, Arrow Keys select, Enter confirm, R restart | [Play](./../games/game-0372.html) |
+| 0373 | Mycelium Mayor | Strategy / Fungal City | Mouse/touch click place, Keys 1-4 choose buildings, R restart | [Play](./../games/game-0373.html) |
+| 0374 | Cadence Climber | Rhythm / Beat Climbing | Arrow Keys / Space timed taps, mouse click, touch tap, R restart | [Play](./../games/game-0374.html) |
+| 0375 | Frost Ferry | Arcade / Ice Ferry Delivery | Arrow Keys / WASD thrust, mouse steer, touch drag, R restart | [Play](./../games/game-0375.html) |
+| 0376 | Saffron Sleuth | Puzzle / Deduction | Mouse/touch click clues and suspects, Arrow Keys + Enter select, R restart | [Play](./../games/game-0376.html) |
+| 0377 | Foundry Flux | Strategy / Factory Routing | Mouse/touch click place, R rotate, Keys 1-3 choose pieces, restart button | [Play](./../games/game-0377.html) |
+| 0378 | Echo Engineer | Rhythm / Pattern Repeat | Keys 1-4 / Arrow Keys pads, mouse click, touch tap, R restart | [Play](./../games/game-0378.html) |
+| 0379 | Canopy Courier | Arcade / Zipline Delivery | Space launch/release, mouse click, touch tap, Arrow Keys steer, R restart | [Play](./../games/game-0379.html) |
+| 0380 | Reef Ranger | Strategy / Reef Restoration | Mouse/touch click assign, Keys 1-3 choose actions, R restart | [Play](./../games/game-0380.html) |
 
 ## Batch notes
 
@@ -91,3 +101,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 036: 10 games, produced in one cycle (0351–0360).
 
 - Batch 037: 10 games, produced in one cycle (0361–0370). Four initially proposed titles duplicated earlier games and were replaced before production (Metronome Mine, Storm Surfer, Glyph Grove, Foundry Foreman, Tempo Tinkerer, Beat Blacksmith — replaced with Syncopation Station, Tempest Tamer, Rune Reservoir, Assembly Archon). Also includes a level-layout fix to game-0360 (Labyrinth Ledger).
+
+- Batch 038: 10 games, produced in one cycle (0371–0380). Six initially proposed titles duplicated earlier games and were replaced before production (Ember Escort, Tide Turner, Glacier Glider, Orbit Oracle, Cipher Canyon, Kelp Keeper — replaced with Lantern Lifter, Comet Cartographer, Frost Ferry, Saffron Sleuth, Reef Ranger).

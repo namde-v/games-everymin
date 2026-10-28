@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Canopy Courier</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d2818; color: #f5f0dc; font-family: "Trebuchet MS", Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; letter-spacing: 2px; margin: 6px 0 2px; color: #ffe08a; text-shadow: 2px 2px 0 #1a4d2e; }
+  #hud { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; background: #1a4d2e; border: 2px solid #4caf50; border-radius: 8px; padding: 8px 16px; margin: 8px 0; font-weight: bold; font-size: 15px; width: 820px; max-width: 100%; }
+  #hud span { white-space: nowrap; }
+  #wrap { position: relative; width: 820px; max-width: 100%; }
+  canvas { display: block; width: 100%; background: linear-gradient(#7ec8e3, #a8e6a1); border: 3px solid #2e7d32; border-radius: 10px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(13, 40, 24, 0.82); border-radius: 10px; text-align: center; padding: 20px; }
+  .overlay h2 { font-size: 32px; color: #ffe08a; }
+  .overlay p { max-width: 520px; line-height: 1.5; font-size: 15px; }
+  .overlay .howto { background: rgba(255,255,255,0.1); border: 1px solid #4caf50; border-radius: 8px; padding: 10px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  button { cursor: pointer; background: #ff9800; color: #1a1a1a; border: none; border-radius: 8px; padding: 12px 28px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 0 #c66900; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #c66900; }
+  button:hover { background: #ffb74d; }
+  .hidden { display: none !important; }
+  #hint { font-size: 13px; opacity: 0.8; margin-top: 6px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>&#127795; CANOPY COURIER &#128230;</h1>
+<div id="hud">
+  <span>Score: <span id="score">0</span></span>
+  <span>Lives: <span id="lives">&#10084;&#10084;&#10084;</span></span>
+  <span>Carrying: <span id="carry">None</span></span>
+  <span>Delivered: <span id="delivered">0 / 5</span></span>
+  <span>Status: <span id="status">Ready</span></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="800" height="500"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Canopy Courier</h2>
+    <p>Zipline through the jungle canopy, grab every parcel, and drop it at a glowing delivery platform!</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      &#8226; <b>Space / Click / Tap</b> &mdash; launch onto a zipline, then press again to release mid-swing.<br>
+      &#8226; <b>Arrow keys / on-screen steering</b> &mdash; steer left and right in the air; Up glides.<br>
+      &#8226; <b>Arrow keys on ground</b> &mdash; walk along a platform.<br>
+      &#8226; Touch a <b>brown parcel</b> to pick it up (one at a time), then land on a <b>gold drop platform</b> to deliver it.<br>
+      &#8226; Deliver all <b>5 parcels</b> to win. Fall out of the canopy and you lose a life (3 lives).
+    </div>
+    <button id="startBtn">Start Delivery Run</button>
+  </div>
+  <div id="winScreen" class="overlay hidden">
+    <h2>&#127881; All Parcels Delivered!</h2>
+    <p id="winText"></p>
+    <button id="winRestartBtn">Play Again</button>
+  </div>
+  <div id="overScreen" class="overlay hidden">
+    <h2>Game Over</h2>
+    <p id="overText"></p>
+    <button id="overRestartBtn">Restart</button>
+  </div>
+</div>
+<p id="hint">Space = launch / release &nbsp;|&nbsp; Arrows = steer &amp; walk &nbsp;|&nbsp; Click / tap = launch / release</p>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = 800, H = 500;
+  var scoreEl = document.getElementById("score");
+  var livesEl = document.getElementById("lives");
+  var carryEl = document.getElementById("carry");
+  var deliveredEl = document.getElementById("delivered");
+  var statusEl = document.getElementById("status");
+  var titleScreen = document.getElementById("titleScreen");
+  var winScreen = document.getElementById("winScreen");
+  var overScreen = document.getElementById("overScreen");
+
+  // ---------- Audio (procedural, created only after user interaction) ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type || "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + dur);
+  }
+  function soundLaunch() { beep(520, 0.18, "triangle", 0.15); }
+  function soundRelease() { beep(760, 0.12, "square", 0.10); }
+  function soundPickup() { beep(660, 0.12, "sine", 0.15); setTimeout(function () { beep(880, 0.15, "sine", 0.15); }, 90); }
+  function soundDeliver() { [523, 659, 784].forEach(function (f, i) { setTimeout(function () { beep(f, 0.18, "triangle", 0.15); }, i * 110); }); }
+  function soundFall() { beep(220, 0.4, "sawtooth", 0.12); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.25, "triangle", 0.16); }, i * 140); }); }
+
+  // ---------- World ----------
+  // Platforms: x, y (top), w, kind ("start", "normal", "drop")
+  var platforms = [
+    { x: 30,  y: 420, w: 120, kind: "start" },
+    { x: 220, y: 340, w: 105, kind: "normal" },
+    { x: 410, y: 250, w: 105, kind: "drop" },
+    { x: 590, y: 330, w: 105, kind: "normal" },
+    { x: 180, y: 190, w: 100, kind: "drop" },
+    { x: 480, y: 130, w: 110, kind: "normal" },
+    { x: 640, y: 210, w: 110, kind: "normal" }
+  ];
+  // Ziplines connect platform tops in a chain; each starts at one platform.
+  var ziplines = [
+    { from: 0, to: 1 }, { from: 1, to: 2 }, { from: 2, to: 3 },
+    { from: 3, to: 4 }, { from: 4, to: 5 }, { from: 5, to: 6 },
+    { from: 6, to: 3 }, { from: 3, to: 1 }
+  ];
+  function platformTop(p) { return { x: p.x + p.w / 2, y: p.y }; }
+  function zipEndpoints(z) {
+    var a = platformTop(platforms[z.from]);
+    var b = platformTop(platforms[z.to]);
+    return { ax: a.x, ay: a.y - 34, bx: b.x, by: b.y - 34 };
+  }
+  // Parcels: placed on platforms and mid-cable.
+  var parcelDefs = [
+    { x: 272, y: 312, home: "p" },
+    { x: 315, y: 255, home: "p" },
+    { x: 642, y: 302, home: "p" },
+    { x: 535, y: 102, home: "p" },
+    { x: 695, y: 182, home: "p" }
+  ];
+  var parcels, player, state, score, lives, deliveredCount, carrying;
+
+  function resetGame() {
+    parcels = parcelDefs.map(function (d, i) {
+      return { id: i + 1, x: d.x, y: d.y, taken: false, delivered: false };
+    });
+    player = { x: 90, y: 420, vx: 0, vy: 0, mode: "ground", platform: 0, zip: -1, t: 0 };
+    score = 0; lives = 3; deliveredCount = 0; carrying = null;
+    state = "playing";
+    updateHUD("Ready");
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = "\u2764".repeat(Math.max(0, lives));
+    carryEl.textContent = carrying ? ("Parcel #" + carrying) : "None";
+    deliveredEl.textContent = deliveredCount + " / 5";
+    if (status) statusEl.textContent = status;
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    titleScreen.classList.add("hidden");
+    winScreen.classList.add("hidden");
+    overScreen.classList.add("hidden");
+    updateHUD("On the zipline route!");
+  }
+  function endWin() {
+    state = "win";
+    soundWin();
+    document.getElementById("winText").textContent = "You delivered all 5 parcels with a final score of " + score + " and " + lives + " life(s) to spare. The jungle thanks you!";
+    winScreen.classList.remove("hidden");
+    updateHUD("You win!");
+  }
+  function endGameOver() {
+    state = "over";
+    soundFall();
+    document.getElementById("overText").textContent = "Out of lives! You delivered " + deliveredCount + " of 5 parcels and scored " + score + ". Try the route again!";
+    overScreen.classList.remove("hidden");
+    updateHUD("Game Over");
+  }
+  function loseLife() {
+    lives -= 1;
+    soundFall();
+    if (carrying !== null) {
+      // Return the carried parcel to its home spot.
+      var p = parcels[carrying - 1];
+      if (p) { p.taken = false; p.x = parcelDefs[p.id - 1].x; p.y = parcelDefs[p.id - 1].y; }
+      carrying = null;
+    }
+    if (lives <= 0) { updateHUD("Game Over"); endGameOver(); return; }
+    player = { x: 90, y: 420, vx: 0, vy: 0, mode: "ground", platform: 0, zip: -1, t: 0 };
+    updateHUD("Lost a life - back at base!");
+  }
+
+  // ---------- Input ----------
+  var keys = {};
+  document.addEventListener("keydown", function (e) {
+    if (["Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].indexOf(e.code) >= 0) e.preventDefault();
+    if (e.code === "Space" && state === "playing") { ensureAudio(); doAction(); }
+    keys[e.code] = true;
+  });
+  document.addEventListener("keyup", function (e) { keys[e.code] = false; });
+  canvas.addEventListener("mousedown", function (e) {
+    e.preventDefault();
+    if (state === "playing") { ensureAudio(); doAction(); }
+  });
+  canvas.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    if (state === "playing") { ensureAudio(); doAction(); }
+  }, { passive: false });
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("winRestartBtn").addEventListener("click", startGame);
+  document.getElementById("overRestartBtn").addEventListener("click", startGame);
+
+  function doAction() {
+    if (player.mode === "ground") {
+      // Find a zipline starting at this platform.
+      var zi = -1;
+      for (var i = 0; i < ziplines.length; i++) {
+        if (ziplines[i].from === player.platform) { zi = i; break; }
+      }
+      if (zi >= 0) {
+        player.mode = "zip"; player.zip = zi; player.t = 0;
+        soundLaunch();
+        updateHUD("Zipping!");
+      } else {
+        // Small hop when no zipline leaves this platform.
+        player.mode = "air"; player.vy = -320; player.vx = 0;
+        updateHUD("Hopping!");
+      }
+    } else if (player.mode === "zip") {
+      releaseFromZip();
+    }
+  }
+  function releaseFromZip() {
+    var z = ziplines[player.zip];
+    var e = zipEndpoints(z);
+    var dx = e.bx - e.ax, dy = e.by - e.ay;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    player.mode = "air";
+    player.vx = (dx / len) * 300;
+    player.vy = (dy / len) * 300 - 120;
+    player.zip = -1;
+    soundRelease();
+    updateHUD("Flying - steer with arrows!");
+  }
+
+  // ---------- Update ----------
+  function update(dt) {
+    if (state !== "playing") return;
+    if (player.mode === "ground") {
+      if (keys["ArrowLeft"]) player.x -= 170 * dt;
+      if (keys["ArrowRight"]) player.x += 170 * dt;
+      var pl = platforms[player.platform];
+      if (player.x < pl.x + 12) player.x = pl.x + 12;
+      if (player.x > pl.x + pl.w - 12) player.x = pl.x + pl.w - 12;
+      player.y = pl.y;
+    } else if (player.mode === "zip") {
+      var z = ziplines[player.zip];
+      var e = zipEndpoints(z);
+      player.t += dt * 0.9;
+      if (player.t >= 1) { player.t = 1; releaseFromZip(); }
+      else {
+        player.x = e.ax + (e.bx - e.ax) * player.t;
+        player.y = e.ay + (e.by - e.ay) * player.t;
+      }
+    } else if (player.mode === "air") {
+      if (keys["ArrowLeft"]) player.vx -= 620 * dt;
+      if (keys["ArrowRight"]) player.vx += 620 * dt;
+      var gravity = keys["ArrowUp"] ? 480 : 900;
+      player.vy += gravity * dt;
+      if (player.vx > 380) player.vx = 380;
+      if (player.vx < -380) player.vx = -380;
+      player.x += player.vx * dt;
+      player.y += player.vy * dt;
+      // Landing check.
+      if (player.vy > 0) {
+        for (var i = 0; i < platforms.length; i++) {
+          var p = platforms[i];
+          if (player.x >= p.x - 6 && player.x <= p.x + p.w + 6 &&
+              player.y >= p.y - 14 && player.y <= p.y + 16) {
+            player.mode = "ground"; player.platform = i;
+            player.y = p.y; player.vx = 0; player.vy = 0;
+            if (p.kind === "drop" && carrying !== null) {
+              parcels[carrying - 1].delivered = true;
+              score += 100;
+              deliveredCount += 1;
+              soundDeliver();
+              carrying = null;
+              updateHUD("Delivered! " + deliveredCount + " / 5");
+              if (deliveredCount >= 5) { endWin(); return; }
+            } else {
+              updateHUD("Landed on platform");
+            }
+            break;
+          }
+        }
+      }
+      if (player.y > H + 60) { loseLife(); return; }
+      if (player.x < -20) player.x = -20;
+      if (player.x > W + 20) player.x = W + 20;
+    }
+    // Parcel pickup.
+    if (carrying === null) {
+      for (var j = 0; j < parcels.length; j++) {
+        var pc = parcels[j];
+        if (!pc.taken && !pc.delivered) {
+          var ddx = player.x - pc.x, ddy = player.y - pc.y;
+          if (ddx * ddx + ddy * ddy < 34 * 34) {
+            pc.taken = true; carrying = pc.id;
+            score += 25;
+            soundPickup();
+            updateHUD("Picked up Parcel #" + pc.id + " - deliver it!");
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // ---------- Draw ----------
+  function drawLeaf(x, y, r, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * 0.55, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky, sun, distant canopy.
+    ctx.fillStyle = "#7ec8e3";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#ffeb3b";
+    ctx.beginPath(); ctx.arc(700, 60, 32, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2e7d32";
+    ctx.beginPath();
+    ctx.moveTo(0, 470); ctx.lineTo(0, 420);
+    for (var cx = 0; cx <= W; cx += 80) { ctx.lineTo(cx + 40, 400); ctx.lineTo(cx + 80, 420); }
+    ctx.lineTo(W, 470); ctx.closePath(); ctx.fill();
+    drawLeaf(120, 90, 46, "#388e3c"); drawLeaf(330, 60, 56, "#43a047");
+    drawLeaf(540, 80, 40, "#388e3c"); drawLeaf(250, 150, 34, "#66bb6a");
+    // Ziplines.
+    ctx.strokeStyle = "#5d4037"; ctx.lineWidth = 3;
+    ziplines.forEach(function (z) {
+      var e = zipEndpoints(z);
+      ctx.beginPath(); ctx.moveTo(e.ax, e.ay); ctx.lineTo(e.bx, e.by); ctx.stroke();
+      ctx.fillStyle = "#795548";
+      ctx.beginPath(); ctx.arc(e.ax, e.ay, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e.bx, e.by, 6, 0, Math.PI * 2); ctx.fill();
+    });
+    // Platforms.
+    platforms.forEach(function (p) {
+      ctx.fillStyle = p.kind === "drop" ? "#ffb300" : "#6d4c41";
+      ctx.fillRect(p.x, p.y, p.w, 18);
+      ctx.fillStyle = p.kind === "drop" ? "#ffe082" : "#8d6e63";
+      ctx.fillRect(p.x, p.y, p.w, 6);
+      ctx.fillStyle = "#2e7d32";
+      ctx.fillRect(p.x - 4, p.y + 18, 8, 26);
+      ctx.fillRect(p.x + p.w - 4, p.y + 18, 8, 26);
+      if (p.kind === "drop") {
+        ctx.fillStyle = "#4a2c00";
+        ctx.font = "bold 11px Verdana";
+        ctx.textAlign = "center";
+        ctx.fillText("DROP", p.x + p.w / 2, p.y + 14);
+      }
+    });
+    // Parcels.
+    parcels.forEach(function (pc) {
+      if (pc.taken || pc.delivered) return;
+      ctx.fillStyle = "#a1887f";
+      ctx.fillRect(pc.x - 13, pc.y - 11, 26, 22);
+      ctx.strokeStyle = "#ff7043"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(pc.x, pc.y - 11); ctx.lineTo(pc.x, pc.y + 11); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pc.x - 13, pc.y); ctx.lineTo(pc.x + 13, pc.y); ctx.stroke();
+      ctx.fillStyle = "#3e2723";
+      ctx.font = "bold 11px Verdana"; ctx.textAlign = "center";
+      ctx.fillText("#" + pc.id, pc.x, pc.y - 16);
+    });
+    // Player: courier with backpack, plus carried parcel.
+    var px = player.x, py = player.y;
+    ctx.fillStyle = "#1565c0";
+    ctx.beginPath(); ctx.arc(px, py - 26, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffcc80";
+    ctx.beginPath(); ctx.arc(px, py - 26, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffcc80";
+    ctx.beginPath(); ctx.arc(px, py - 26, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#d32f2f";
+    ctx.fillRect(px - 8, py - 14, 16, 14);
+    ctx.fillStyle = "#ffeb3b";
+    ctx.fillRect(px - 3, py - 14, 6, 14);
+    if (carrying !== null) {
+      ctx.fillStyle = "#a1887f";
+      ctx.fillRect(px + 10, py - 22, 16, 14);
+      ctx.strokeStyle = "#ff7043"; ctx.lineWidth = 2;
+      ctx.strokeRect(px + 10, py - 22, 16, 14);
+    }
+    if (player.mode === "zip") {
+      ctx.strokeStyle = "#37474f"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(px, py - 30); ctx.lineTo(px, py - 46); ctx.stroke();
+    }
+    if (state === "playing") {
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.font = "13px Verdana"; ctx.textAlign = "left";
+      ctx.fillText("Press Space / click / tap to launch or release. Arrows steer.", 12, 20);
+    }
+  }
+
+  // ---------- Main loop ----------
+  var last = 0;
+  function loop(ts) {
+    var dt = Math.min(0.033, (ts - last) / 1000 || 0.016);
+    last = ts;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

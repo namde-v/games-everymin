@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Reef Ranger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #06283b; color: #eafcff; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 28px; letter-spacing: 1px; margin: 6px 0 2px; color: #7fe7ff; text-shadow: 0 2px 0 #003; }
+  p.sub { font-size: 13px; color: #bfeeff; margin-bottom: 8px; text-align: center; max-width: 760px; }
+  #hud { width: 100%; max-width: 780px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; background: #0b3d55; border: 2px solid #2bb3d8; border-radius: 10px; padding: 8px 10px; font-size: 14px; font-weight: bold; }
+  #hud span { white-space: nowrap; }
+  #actions { width: 100%; max-width: 780px; display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; justify-content: center; }
+  .abtn { flex: 1 1 180px; padding: 11px 8px; font-size: 15px; font-weight: bold; border-radius: 10px; border: 2px solid #7fe7ff; background: #104a66; color: #fff; cursor: pointer; }
+  .abtn.active { background: #f2a93b; color: #1a1000; border-color: #ffe08a; }
+  .abtn small { display: block; font-weight: normal; font-size: 12px; margin-top: 3px; }
+  #wrap { position: relative; width: 100%; max-width: 780px; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#0a5a7d, #083a52 55%, #052a3d); border: 3px solid #2bb3d8; border-radius: 12px; touch-action: manipulation; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(2, 25, 40, 0.88); border-radius: 12px; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #7fe7ff; }
+  .overlay p { font-size: 14px; line-height: 1.55; max-width: 560px; color: #dff7ff; }
+  .bigbtn { padding: 14px 30px; font-size: 19px; font-weight: bold; border-radius: 12px; border: 0; background: #ffb020; color: #201200; cursor: pointer; box-shadow: 0 4px 0 #9a5d00; }
+  .bigbtn:active { transform: translateY(3px); box-shadow: none; }
+  #msg { min-height: 20px; font-size: 13px; color: #ffd97a; text-align: center; margin-top: 4px; }
+  #legend { font-size: 12px; color: #a8dcea; text-align: center; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>🪸 Reef Ranger</h1>
+<p class="sub">Restore the reef before the seasons run out. Assign divers, clean pollution, and protect coral from storms and bleaching.</p>
+
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>❤️ Reef Lives: <b id="lives">3</b></span>
+  <span>Reef Health: <b id="health">55%</b></span>
+  <span>Resources: <b id="res">60</b></span>
+  <span>Season: <b id="season">1 / 8</b></span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+
+<div id="actions">
+  <button class="abtn active" id="btn1">1 · Plant Coral<small>Cost 10 · +18 health to a bed</small></button>
+  <button class="abtn" id="btn2">2 · Clean Pollution<small>Cost 8 · removes pollution</small></button>
+  <button class="abtn" id="btn3">3 · Protect Bed<small>Cost 12 · shields next event</small></button>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="780" height="520"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>🪸 Reef Ranger</h2>
+    <p><b>How to Play:</b> Six coral beds need your help. Choose an action with keys <b>1, 2 or 3</b> (or tap the buttons), then click or tap a coral bed to apply it. Plant coral to raise health, clean the dark pollution patches before they spread, and protect beds before storms and bleaching hit.</p>
+    <p>Resources regenerate over time. Reach <b>85% average reef health</b> before Season 8 ends to win. If three beds die, or health collapses, the reef is lost. Storms and heat waves strike each season — protected beds take no damage.</p>
+    <button class="bigbtn" id="startBtn">▶ Start Game</button>
+    <p>Mouse click · Keyboard 1–3 · Touch tap · Fully offline</p>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button class="bigbtn" id="restartBtn">↻ Restart</button>
+  </div>
+</div>
+<div id="msg">Pick an action, then tap a coral bed.</div>
+<div id="legend">Green = healthy coral · Pale = bleached / weak · Dark blob = pollution · 🛡️ = protected · 👨‍🚀 diver team on site</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var healthEl = document.getElementById('health');
+  var resEl = document.getElementById('res');
+  var seasonEl = document.getElementById('season');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var audioCtx = null;
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  var beds = [];
+  var action = 'plant';
+  var resources = 60;
+  var score = 0;
+  var lives = 3;
+  var season = 1;
+  var seasonTime = 0;
+  var seasonLength = 22;
+  var running = false;
+  var over = false;
+  var selected = -1;
+  var eventTimer = 0;
+  var bubbles = [];
+  var divers = 0;
+
+  function makeBeds() {
+    beds = [];
+    var spots = [[130, 150], [390, 130], [650, 155], [130, 380], [390, 400], [650, 380]];
+    for (var i = 0; i < 6; i++) {
+      beds.push({ x: spots[i][0], y: spots[i][1], health: 45 + Math.floor(Math.random() * 25), pollution: false, shield: false, diver: false, pulse: Math.random() * 6 });
+    }
+  }
+  function avgHealth() {
+    var s = 0; for (var i = 0; i < beds.length; i++) s += beds[i].health;
+    return Math.round(s / beds.length);
+  }
+  function deadCount() {
+    var d = 0; for (var i = 0; i < beds.length; i++) if (beds[i].health <= 0) d++;
+    return d;
+  }
+  function setAction(a) {
+    action = a;
+    document.getElementById('btn1').className = 'abtn' + (a === 'plant' ? ' active' : '');
+    document.getElementById('btn2').className = 'abtn' + (a === 'clean' ? ' active' : '');
+    document.getElementById('btn3').className = 'abtn' + (a === 'protect' ? ' active' : '');
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function startGame() {
+    initAudio();
+    makeBeds();
+    resources = 60; score = 0; lives = 3; season = 1; seasonTime = 0;
+    eventTimer = 0; selected = -1; over = false; running = true; divers = 0;
+    titleScreen.className = 'overlay hidden';
+    endScreen.className = 'overlay hidden';
+    setAction('plant');
+    setMsg('Season 1: plant coral and clean any pollution you see.');
+    beep(520, 0.2, 'triangle'); setTimeout(function () { beep(660, 0.2, 'triangle'); }, 140);
+    updateHUD();
+  }
+
+  function endGame(win, reason) {
+    running = false; over = true;
+    endTitle.textContent = win ? '🌊 You Win! Reef Restored!' : '💀 Game Over — Reef Lost';
+    endText.textContent = reason + ' Final score: ' + score + ' · Reef health: ' + avgHealth() + '% · Season: ' + season + ' of 8.';
+    endScreen.className = 'overlay';
+    beep(win ? 880 : 160, 0.4, win ? 'triangle' : 'sawtooth');
+  }
+
+  function applyToBed(i) {
+    if (!running || over || i < 0 || i >= beds.length) return;
+    var b = beds[i];
+    selected = i;
+    if (b.health <= 0) { setMsg('That bed has died — focus on saving the others.'); beep(140, 0.2, 'sawtooth'); return; }
+    if (action === 'plant') {
+      if (resources < 10) { setMsg('Not enough resources (need 10). Wait — they regenerate.'); return; }
+      resources -= 10;
+      var gain = b.pollution ? 8 : 18;
+      b.health = Math.min(100, b.health + gain);
+      b.diver = true; score += gain; divers++;
+      setMsg('Divers planted coral on bed ' + (i + 1) + ' (+' + gain + ' health).');
+      beep(620, 0.12, 'sine');
+    } else if (action === 'clean') {
+      if (!b.pollution) { setMsg('Bed ' + (i + 1) + ' has no pollution — plant or protect it instead.'); return; }
+      if (resources < 8) { setMsg('Not enough resources (need 8).'); return; }
+      resources -= 8; b.pollution = false; b.diver = true; score += 25;
+      setMsg('Pollution cleaned from bed ' + (i + 1) + ' (+25 score).');
+      beep(440, 0.15, 'triangle');
+    } else if (action === 'protect') {
+      if (b.shield) { setMsg('Bed ' + (i + 1) + ' is already protected.'); return; }
+      if (resources < 12) { setMsg('Not enough resources (need 12).'); return; }
+      resources -= 12; b.shield = true; b.diver = true; score += 10;
+      setMsg('Bed ' + (i + 1) + ' is protected against the next storm or bleaching.');
+      beep(760, 0.15, 'sine');
+    }
+    updateHUD();
+    checkEnd();
+  }
+
+  function spawnPollution() {
+    var alive = [];
+    for (var i = 0; i < beds.length; i++) if (beds[i].health > 0 && !beds[i].pollution) alive.push(i);
+    if (!alive.length) return;
+    var pick = alive[Math.floor(Math.random() * alive.length)];
+    beds[pick].pollution = true;
+    setMsg('⚠️ Pollution appeared on bed ' + (pick + 1) + '! Clean it (action 2) before it spreads.');
+    beep(220, 0.25, 'sawtooth');
+  }
+
+  function seasonEvent() {
+    var isStorm = Math.random() < 0.5;
+    var damaged = 0;
+    for (var i = 0; i < beds.length; i++) {
+      var b = beds[i];
+      if (b.health <= 0) continue;
+      if (b.shield) { b.shield = false; continue; }
+      var dmg = isStorm ? 12 + Math.floor(Math.random() * 12) : 10 + Math.floor(Math.random() * 14);
+      if (b.pollution) dmg += 10;
+      b.health = Math.max(0, b.health - dmg);
+      if (b.health > 0) damaged++;
+    }
+    var label = isStorm ? '⛈️ A storm battered the reef!' : '☀️ A bleaching heat wave struck!';
+    setMsg(label + ' Protected beds were safe. Replant and clean up.');
+    beep(isStorm ? 180 : 300, 0.35, 'sawtooth');
+    if (Math.random() < 0.75) spawnPollution();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    healthEl.textContent = avgHealth() + '%';
+    resEl.textContent = Math.floor(resources);
+    seasonEl.textContent = season + ' / 8';
+    statusEl.textContent = over ? 'Finished' : (running ? 'Season in progress' : 'Ready');
+  }
+
+  function checkEnd() {
+    if (over) return;
+    var avg = avgHealth();
+    if (avg >= 85) { endGame(true, 'The reef is thriving at ' + avg + '% health!'); return; }
+    if (deadCount() >= 3 || avg <= 15) {
+      lives = 0;
+      endGame(false, 'Too many coral beds died and the reef collapsed.');
+      return;
+    }
+  }
+
+  function drawCoral(b, t) {
+    var hue = b.health > 65 ? '#2fe08a' : (b.health > 35 ? '#e8c34a' : '#e8a8a0');
+    var wob = Math.sin(t / 400 + b.pulse) * 3;
+    ctx.fillStyle = hue;
+    for (var k = 0; k < 5; k++) {
+      var ang = (k / 5) * Math.PI * 2 + b.pulse;
+      ctx.beginPath();
+      ctx.ellipse(b.x + Math.cos(ang) * 26, b.y + Math.sin(ang) * 18 + wob * 0.3, 16, 22, ang, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#7a4a2b';
+    ctx.beginPath(); ctx.ellipse(b.x, b.y + 26, 42, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#06283b';
+    ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('Bed ' + (beds.indexOf(b) + 1), b.x, b.y - 52);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Verdana';
+    ctx.fillText(Math.round(b.health) + '%', b.x, b.y + 4);
+    if (b.pollution) {
+      ctx.fillStyle = 'rgba(20,20,20,0.85)';
+      ctx.beginPath(); ctx.ellipse(b.x + 34, b.y - 30, 26, 16, 0.4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ff5a5a'; ctx.font = 'bold 12px Verdana';
+      ctx.fillText('POLLUTION', b.x + 34, b.y - 27);
+    }
+    if (b.shield) { ctx.font = '22px Verdana'; ctx.fillText('🛡️', b.x - 46, b.y - 28); }
+    if (b.diver) { ctx.font = '20px Verdana'; ctx.fillText('🤿', b.x + 46, b.y + 30); }
+    if (selected === beds.indexOf(b)) {
+      ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(b.x, b.y, 62, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  function draw(now) {
+    ctx.clearRect(0, 0, 780, 520);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    for (var i = 0; i < bubbles.length; i++) {
+      var bb = bubbles[i];
+      ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.fillStyle = '#c9a86a';
+    ctx.fillRect(0, 470, 780, 50);
+    ctx.fillStyle = '#eafcff'; ctx.font = '13px Verdana'; ctx.textAlign = 'left';
+    ctx.fillText('Season progress: ' + Math.min(100, Math.round(seasonTime / seasonLength * 100)) + '%  ·  Divers deployed: ' + divers + '  ·  Target: 85% health', 14, 500);
+    for (var j = 0; j < beds.length; j++) drawCoral(beds[j], now);
+  }
+
+  var last = 0;
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    if (!last) last = ts;
+    var dt = Math.min(0.1, (ts - last) / 1000);
+    last = ts;
+    if (running && !over) {
+      seasonTime += dt;
+      resources = Math.min(150, resources + dt * 3.2);
+      eventTimer += dt;
+      if (eventTimer > 7) {
+        eventTimer = 0;
+        for (var i = 0; i < beds.length; i++) {
+          if (beds[i].pollution && beds[i].health > 0) beds[i].health = Math.max(0, beds[i].health - 2);
+        }
+        if (Math.random() < 0.35) spawnPollution();
+      }
+      if (seasonTime >= seasonLength) {
+        seasonTime = 0;
+        seasonEvent();
+        season++;
+        if (season > 8) {
+          if (avgHealth() >= 85) endGame(true, 'You reached the health target!');
+          else endGame(false, 'Time ran out after 8 seasons before the reef recovered.');
+        } else {
+          setMsg('Season ' + season + ' begins. Watch for storms, bleaching and pollution.');
+        }
+        for (var k = 0; k < beds.length; k++) beds[k].diver = false;
+      }
+      if (Math.random() < 0.05) bubbles.push({ x: Math.random() * 780, y: 470, r: 2 + Math.random() * 4 });
+      for (var b = 0; b < bubbles.length; b++) { bubbles[b].y -= 1; if (bubbles[b].y < 0) bubbles.splice(b, 1); }
+      updateHUD();
+      checkEnd();
+    }
+    draw(ts);
+  }
+
+  function bedAt(clientX, clientY) {
+    var r = canvas.getBoundingClientRect();
+    var x = (clientX - r.left) * (780 / r.width);
+    var y = (clientY - r.top) * (520 / r.height);
+    for (var i = 0; i < beds.length; i++) {
+      var dx = x - beds[i].x, dy = y - beds[i].y;
+      if (dx * dx + dy * dy < 70 * 70) return i;
+    }
+    return -1;
+  }
+
+  canvas.addEventListener('click', function (e) { initAudio(); var i = bedAt(e.clientX, e.clientY); if (i >= 0) applyToBed(i); });
+  canvas.addEventListener('touchstart', function (e) { initAudio(); e.preventDefault(); var t = e.changedTouches[0]; var i = bedAt(t.clientX, t.clientY); if (i >= 0) applyToBed(i); }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === '1') setAction('plant');
+    else if (e.key === '2') setAction('clean');
+    else if (e.key === '3') setAction('protect');
+    else if ((e.key === 'Enter' || e.key === ' ') && !running && !over) startGame();
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('btn1').addEventListener('click', function () { initAudio(); setAction('plant'); });
+  document.getElementById('btn2').addEventListener('click', function () { initAudio(); setAction('clean'); });
+  document.getElementById('btn3').addEventListener('click', function () { initAudio(); setAction('protect'); });
+
+  makeBeds();
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

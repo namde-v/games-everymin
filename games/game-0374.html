@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cadence Climber</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0e1a2b; font-family: Arial, Helvetica, sans-serif; }
+  #wrap { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #1b3a5c 0%, #0e1a2b 55%, #1a2f1a 100%); }
+  canvas { display: block; background: #12233a; border: 3px solid #ffd166; border-radius: 14px; max-width: 96vw; max-height: 94vh; box-shadow: 0 10px 40px rgba(0,0,0,.6); touch-action: none; }
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 96%; max-width: 820px; pointer-events: none; z-index: 5; }
+  .pill { background: rgba(0,0,0,.68); color: #fff; border: 2px solid #ffd166; border-radius: 999px; padding: 7px 13px; font-size: 15px; font-weight: bold; }
+  .pill.good { color: #7CFC9A; } .pill.bad { color: #ff8a8a; }
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(4,10,20,.72); z-index: 10; padding: 16px; }
+  .card { background: #fdf6e3; color: #13233a; border: 4px solid #ffd166; border-radius: 18px; padding: 26px 24px; max-width: 560px; width: 100%; text-align: center; box-shadow: 0 16px 50px rgba(0,0,0,.5); }
+  .card h1 { font-size: 38px; margin-bottom: 6px; letter-spacing: 1px; }
+  .card h2 { font-size: 30px; margin-bottom: 10px; }
+  .card p { font-size: 16px; line-height: 1.55; margin: 8px 0; }
+  .card .small { font-size: 14px; color: #44546a; }
+  .keys { background: #13233a; color: #ffd166; border-radius: 10px; padding: 10px; font-weight: bold; }
+  button { cursor: pointer; border: none; border-radius: 999px; background: #ef476f; color: #fff; font-size: 20px; font-weight: bold; padding: 13px 30px; margin-top: 14px; box-shadow: 0 5px 0 #a92e4d; }
+  button:active { transform: translateY(3px); box-shadow: 0 2px 0 #a92e4d; }
+  button.secondary { background: #118ab2; box-shadow: 0 5px 0 #0a5a75; }
+  #msg { min-height: 24px; font-weight: bold; font-size: 18px; color: #118ab2; }
+  #beatbar { width: 100%; height: 18px; background: #d9e2ec; border-radius: 999px; overflow: hidden; margin-top: 10px; border: 2px solid #13233a; }
+  #beatfill { height: 100%; width: 0%; background: linear-gradient(90deg, #06d6a0, #ffd166, #ef476f); }
+  @media (max-width: 520px) { .card h1 { font-size: 30px; } .pill { font-size: 13px; padding: 6px 10px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span class="pill" id="scorePill">Score: 0</span>
+    <span class="pill" id="gripPill">Grip: ❤❤❤</span>
+    <span class="pill" id="altPill">Altitude: 0%</span>
+    <span class="pill" id="comboPill">Combo: x0</span>
+    <span class="pill" id="statusPill">Status: Ready</span>
+  </div>
+  <canvas id="game" width="720" height="880"></canvas>
+  <div id="overlay">
+    <div class="card" id="card">
+      <h1>🧗 Cadence Climber</h1>
+      <p><strong>Climb the cliff on the beat — or lose your grip!</strong></p>
+      <p>Golden holds light up in rhythm. Tap, click, or press a key <strong>exactly when the beat ring closes</strong> on the hold to grab it and climb higher. Perfect hits build your combo. Early, late, or missed taps cost grip.</p>
+      <div class="keys">CONTROLS: Arrow Keys / Space = Grab &nbsp;•&nbsp; Mouse Click = Grab &nbsp;•&nbsp; Touch Tap = Grab</div>
+      <p class="small">Reach the summit flag at 100% altitude to win. You have 3 grip hearts. A missed beat or a badly timed grab loses one heart. Chain Perfect grabs for bonus points. Sound is generated live in your browser and starts only after you press Start.</p>
+      <div id="msg"></div>
+      <div id="beatbar"><div id="beatfill"></div></div>
+      <button id="startBtn" type="button">▶ Start Climb</button>
+      <button id="restartBtn" type="button" class="secondary" style="display:none;">↻ Restart</button>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var card = document.getElementById('card');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+  var msgEl = document.getElementById('msg');
+  var scorePill = document.getElementById('scorePill');
+  var gripPill = document.getElementById('gripPill');
+  var altPill = document.getElementById('altPill');
+  var comboPill = document.getElementById('comboPill');
+  var statusPill = document.getElementById('statusPill');
+  var beatFill = document.getElementById('beatfill');
+
+  var W = 720, H = 880;
+  var state = 'title'; // title | playing | win | over
+  var score = 0, grip = 3, combo = 0, bestCombo = 0;
+  var altitude = 0, holdIndex = 0, totalHolds = 30;
+  var bpm = 96, beatMs = 60000 / bpm;
+  var beatStart = 0, lastBeat = 0, beatCount = 0;
+  var nextHold = null, flash = '', flashUntil = 0, shake = 0;
+  var particles = [], stars = [], clouds = [];
+  var audioCtx = null, masterGain = null;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  for (var i = 0; i < 60; i++) { stars.push({ x: Math.random() * W, y: Math.random() * 320, r: rand(1, 2.6), p: Math.random() * 6.28 }); }
+  for (var c = 0; c < 5; c++) { clouds.push({ x: Math.random() * W, y: rand(60, 420), w: rand(70, 150), s: rand(0.15, 0.45) }); }
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.28;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = when || audioCtx.currentTime;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol || 0.5, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(masterGain);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function playBeat() { tone(880, 0.09, 'square', 0.22); tone(440, 0.12, 'sine', 0.28); }
+  function playGood() { tone(660, 0.12, 'sine', 0.4); tone(990, 0.16, 'sine', 0.35, audioCtx.currentTime + 0.07); }
+  function playPerfect() { tone(880, 0.12, 'triangle', 0.45); tone(1174, 0.14, 'triangle', 0.4, audioCtx.currentTime + 0.06); tone(1568, 0.2, 'sine', 0.4, audioCtx.currentTime + 0.12); }
+  function playBad() { tone(160, 0.25, 'sawtooth', 0.35); tone(110, 0.3, 'sawtooth', 0.3, audioCtx.currentTime + 0.05); }
+  function playWin() { [523, 659, 784, 1046, 1318].forEach(function (f, i) { tone(f, 0.28, 'triangle', 0.4, audioCtx.currentTime + i * 0.14); }); }
+
+  function makeHold(idx) {
+    var side = (idx % 2 === 0) ? -1 : 1;
+    return {
+      idx: idx,
+      x: W / 2 + side * rand(95, 150),
+      y: 760 - idx * 0, // y derived from altitude in draw
+      kind: ['gold', 'ruby', 'jade', 'sapphire'][idx % 4],
+      grabbed: false
+    };
+  }
+  function reset() {
+    score = 0; grip = 3; combo = 0; bestCombo = 0;
+    altitude = 0; holdIndex = 0; particles = [];
+    flash = ''; shake = 0; beatCount = 0;
+    nextHold = makeHold(0);
+    updateHUD('Ready');
+  }
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    overlay.style.display = 'none';
+    beatStart = performance.now();
+    lastBeat = beatStart;
+    if (audioCtx) playBeat();
+    updateHUD('Climbing — watch the beat!');
+  }
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    if (win && audioCtx) playWin();
+    if (!win && audioCtx) playBad();
+    overlay.style.display = 'flex';
+    startBtn.style.display = 'none';
+    restartBtn.style.display = 'inline-block';
+    var title = win ? '🏔️ SUMMIT REACHED!' : '💥 YOU SLIPPED!';
+    var body = win
+      ? 'You climbed all ' + totalHolds + ' holds in perfect rhythm! Final score: ' + score + ' — best combo x' + bestCombo + '.'
+      : 'Your grip ran out at ' + Math.round(altitude) + '% altitude with a score of ' + score + '. Listen for the beat and try again!';
+    card.querySelector('h1').textContent = title;
+    card.querySelectorAll('p')[0].innerHTML = '<strong>' + body + '</strong>';
+    card.querySelectorAll('p')[1].textContent = 'Tip: Perfect grabs land inside the golden ring. Good grabs still climb, but break your combo bonus. Missed beats cost a heart.';
+    msgEl.textContent = win ? 'Final Score: ' + score + '  •  Best Combo: x' + bestCombo : 'Score: ' + score + '  •  Holds climbed: ' + holdIndex + ' / ' + totalHolds;
+    updateHUD(win ? 'Summit!' : 'Game Over');
+  }
+  function updateHUD(status) {
+    scorePill.textContent = 'Score: ' + score;
+    gripPill.textContent = 'Grip: ' + ('❤'.repeat(Math.max(0, grip)) + '♡'.repeat(Math.max(0, 3 - grip)));
+    altPill.textContent = 'Altitude: ' + Math.round(altitude) + '%';
+    comboPill.textContent = 'Combo: x' + combo;
+    if (status) statusPill.textContent = 'Status: ' + status;
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 22; i++) {
+      particles.push({ x: x, y: y, vx: rand(-3.5, 3.5), vy: rand(-4.5, -0.5), life: 1, color: color, r: rand(2, 5) });
+    }
+  }
+  function timing(now) {
+    // Distance in ms from the nearest beat centre, using the repeating beat grid.
+    var elapsed = now - beatStart;
+    var phase = elapsed % beatMs;
+    var dist = Math.min(phase, beatMs - phase);
+    return dist;
+  }
+  function beatPhase(now) {
+    var elapsed = Math.max(0, now - beatStart);
+    return (elapsed % beatMs) / beatMs;
+  }
+  function grab() {
+    if (state !== 'playing') return;
+    var now = performance.now();
+    var dist = timing(now);
+    var quality = '';
+    if (dist <= 70) quality = 'PERFECT';
+    else if (dist <= 150) quality = 'GOOD';
+    else if (dist <= 240) quality = 'EARLY/LATE';
+    else quality = 'MISS';
+    if (quality === 'PERFECT') {
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      score += 100 + combo * 15;
+      holdIndex++; altitude = (holdIndex / totalHolds) * 100;
+      flash = 'PERFECT! +' + (100 + combo * 15); flashUntil = now + 900;
+      burst(nextHold.x, 240, '#ffd166');
+      if (audioCtx) playPerfect();
+      nextHold = makeHold(holdIndex);
+      updateHUD('Perfect! Keep climbing');
+    } else if (quality === 'GOOD') {
+      combo = 0; score += 50; holdIndex++; altitude = (holdIndex / totalHolds) * 100;
+      flash = 'GOOD! +50'; flashUntil = now + 900;
+      burst(nextHold.x, 240, '#06d6a0');
+      if (audioCtx) playGood();
+      nextHold = makeHold(holdIndex);
+      updateHUD('Good grab');
+    } else {
+      combo = 0; grip--; shake = 14;
+      flash = quality === 'MISS' ? 'MISSED THE BEAT!' : 'OFF BEAT! -1 Grip';
+      flashUntil = now + 1100;
+      if (audioCtx) playBad();
+      updateHUD(grip > 0 ? 'Off beat — focus!' : 'No grip left');
+      if (grip <= 0) { endGame(false); return; }
+    }
+    if (holdIndex >= totalHolds) { altitude = 100; updateHUD('Summit!'); endGame(true); }
+  }
+  function checkMissedBeat(now) {
+    if (state !== 'playing') return;
+    if (now - lastBeat >= beatMs) {
+      var beatsPassed = Math.floor((now - lastBeat) / beatMs);
+      lastBeat += beatsPassed * beatMs;
+      beatCount += beatsPassed;
+      if (audioCtx) playBeat();
+      // A full beat passed with no grab: the climber slips a little.
+      // Only penalise every other missed beat so the game stays fair.
+      if (beatCount % 2 === 0 && holdIndex < totalHolds) {
+        grip--; combo = 0; shake = 10;
+        flash = 'BEAT MISSED! -1 Grip'; flashUntil = now + 1000;
+        if (audioCtx) playBad();
+        updateHUD(grip > 0 ? 'Missed beat!' : 'No grip left');
+        if (grip <= 0) { endGame(false); }
+      }
+    }
+  }
+  function drawClimber() {
+    var cx = W / 2, cy = 470;
+    // Rope from summit anchor
+    ctx.strokeStyle = '#e9ecef'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(cx, 150); ctx.lineTo(cx + Math.sin(performance.now() / 400) * 6, cy - 40); ctx.stroke();
+    // Body
+    ctx.fillStyle = '#ef476f';
+    ctx.beginPath(); ctx.arc(cx, cy - 10, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(cx, cy - 14, 17, 0, Math.PI * 2); ctx.fill(); // helmet
+    ctx.strokeStyle = '#13233a'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx, cy + 16); ctx.lineTo(cx - 18, cy + 58); ctx.moveTo(cx, cy + 16); ctx.lineTo(cx + 20, cy + 58); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - 26, cy - 2); ctx.lineTo(cx - 44, cy + 22); ctx.moveTo(cx + 26, cy - 2); ctx.lineTo(cx + 44, cy + 22); ctx.stroke();
+  }
+  function draw(now) {
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    if (shake > 0) { ctx.translate(rand(-shake, shake) * 0.5, rand(-shake, shake) * 0.5); shake *= 0.88; if (shake < 0.5) shake = 0; }
+    // Sky, moon, stars, clouds
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#1b3a5c'); grad.addColorStop(0.55, '#12233a'); grad.addColorStop(1, '#243b2a');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(600, 90, 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    stars.forEach(function (s) { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(now / 500 + s.p); ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    clouds.forEach(function (cl) { cl.x += cl.s; if (cl.x > W + 80) cl.x = -160; ctx.beginPath(); ctx.ellipse(cl.x, cl.y, cl.w / 2, 18, 0, 0, Math.PI * 2); ctx.fill(); });
+    // Cliff faces
+    ctx.fillStyle = '#5b4a3a';
+    ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, 180); ctx.lineTo(210, 150); ctx.lineTo(190, H); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W, H); ctx.lineTo(W, 180); ctx.lineTo(510, 150); ctx.lineTo(530, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    for (var i = 0; i < 14; i++) { ctx.fillRect(30 + (i * 37) % 140, 220 + i * 46, 60, 8); ctx.fillRect(W - 200 + (i * 29) % 130, 230 + i * 44, 60, 8); }
+    // Summit flag
+    ctx.fillStyle = '#06d6a0'; ctx.fillRect(W / 2 - 2, 118, 4, 54);
+    ctx.fillStyle = '#ef476f'; ctx.beginPath(); ctx.moveTo(W / 2 + 2, 118); ctx.lineTo(W / 2 + 62, 130); ctx.lineTo(W / 2 + 2, 142); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText('SUMMIT', W / 2 + 30, 108);
+    // Progress rope on the right
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(W - 42, 180, 16, 560);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(W - 42, 180 + 560 * (1 - altitude / 100), 16, 560 * (altitude / 100));
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText(Math.round(altitude) + '%', W - 34, 770);
+    // Target hold with closing beat ring
+    if (state === 'playing' && nextHold) {
+      var phase = beatPhase(now);
+      var ringR = 78 - phase * 52; // ring closes onto the hold each beat
+      var colors = { gold: '#ffd166', ruby: '#ef476f', jade: '#06d6a0', sapphire: '#4cc9f0' };
+      var col = colors[nextHold.kind] || '#ffd166';
+      ctx.strokeStyle = 'rgba(255,209,102,0.9)'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(nextHold.x, 240, ringR, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(nextHold.x, 240, 30, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#13233a'; ctx.font = 'bold 20px Arial'; ctx.fillText('✦', nextHold.x, 247);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 17px Arial'; ctx.fillText('TAP ON THE BEAT!', W / 2, 330);
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px Arial'; ctx.fillText('Hold ' + (holdIndex + 1) + ' of ' + totalHolds, W / 2, 356);
+    }
+    drawClimber();
+    // Particles
+    particles = particles.filter(function (p) { return p.life > 0; });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life -= 0.03; ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    // Flash judgement text
+    if (flash && now < flashUntil) {
+      ctx.fillStyle = flash.indexOf('PERFECT') === 0 ? '#7CFC9A' : (flash.indexOf('GOOD') === 0 ? '#06d6a0' : '#ff8a8a');
+      ctx.font = 'bold 34px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(flash, W / 2, 420);
+    }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '15px Arial';
+    ctx.fillText('Score ' + score + '  •  Combo x' + combo + '  •  Grip ' + grip + '  •  Beat ' + bpm + ' BPM', W / 2, 850);
+    ctx.restore();
+    // Beat bar fill for the overlay card
+    if (state === 'playing') { beatFill.style.width = Math.round(beatPhase(now) * 100) + '%'; }
+  }
+  function loop(now) {
+    checkMissedBeat(now);
+    draw(now);
+    requestAnimationFrame(loop);
+  }
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', function () {
+    card.querySelector('h1').textContent = '🧗 Cadence Climber';
+    card.querySelectorAll('p')[0].innerHTML = '<strong>Climb the cliff on the beat — or lose your grip!</strong>';
+    startBtn.style.display = 'inline-block';
+    restartBtn.style.display = 'none';
+    msgEl.textContent = '';
+    startGame();
+  });
+  canvas.addEventListener('click', function () { if (state === 'playing') grab(); });
+  canvas.addEventListener('mousedown', function (e) { e.preventDefault(); if (state === 'playing') grab(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      if (state === 'playing') grab();
+      else if (state === 'title') startGame();
+    }
+    if (e.key === 'Enter' && (state === 'win' || state === 'over')) { restartBtn.click(); }
+  });
+  document.addEventListener('touchstart', function (e) {
+    if (e.target === startBtn || e.target === restartBtn) return;
+    if (state === 'playing') { e.preventDefault(); grab(); }
+  }, { passive: false });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (state === 'playing') grab(); }, { passive: false });
+  window.addEventListener('resize', function () { /* canvas keeps its fixed playfield for consistent timing */ });
+  reset();
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

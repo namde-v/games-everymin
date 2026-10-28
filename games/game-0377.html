@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Foundry Flux</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#1a1210;color:#f5e9d8;font-family:system-ui,Arial,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh}
+  h1{margin:10px 0 2px;font-size:26px;letter-spacing:1px;color:#ffb347}
+  p{margin:4px 0}
+  #hud{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;background:#2b1d18;border:2px solid #7a4a2b;border-radius:10px;padding:8px 12px;margin:6px;max-width:760px}
+  #hud b{color:#ffd166}
+  #tools{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:4px}
+  button{cursor:pointer;border:2px solid #ffb347;background:#4a2c1a;color:#fff;padding:9px 16px;border-radius:9px;font-size:16px;font-weight:bold}
+  button:hover{background:#6b3f22}
+  button.sel{background:#ffb347;color:#1a1210}
+  canvas{background:#241812;border:3px solid #7a4a2b;border-radius:10px;touch-action:none;max-width:96vw}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.86);display:flex;align-items:center;justify-content:center;z-index:10;padding:16px}
+  .card{background:#2b1d18;border:3px solid #ffb347;border-radius:14px;padding:22px;max-width:560px;text-align:center}
+  .card h2{color:#ffb347;margin-top:0;font-size:30px}
+  .hidden{display:none}
+  .alloy{display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:middle;margin-right:4px}
+  .copper{background:#ff6b35}.steel{background:#7ec8ff}.brass{background:#ffd166}
+  #msg{text-align:center;min-height:22px;font-weight:bold;color:#ffd166}
+  #legend{font-size:14px;text-align:center;max-width:760px;line-height:1.5}
+</style>
+</head>
+<body>
+<h1>FOUNDRY FLUX</h1>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Lives: <b id="lives">5</b></span>
+  <span>Status: <b id="status">Place pieces, then press Start</b></span>
+  <span>Delivered: <b id="delivered">0 / 12</b></span>
+</div>
+<div id="tools">
+  <button id="b1" class="sel">1 Straight</button>
+  <button id="b2">2 Corner</button>
+  <button id="b3">3 Sorter</button>
+  <button id="rotBtn">Rotate (R)</button>
+  <button id="clearBtn">Clear Path</button>
+  <button id="startBtn2">Start Flow</button>
+</div>
+<canvas id="cv" width="720" height="504"></canvas>
+<div id="msg"></div>
+<p id="legend">Furnace on the left pours molten blobs. Build a pipe path to the three molds on the right. Copper goes to the top mold, Steel to the middle, Brass to the bottom. Blobs cool down over time — deliver them before they freeze. A wrong mold, a dead end, or a frozen blob costs a life.</p>
+
+<div id="titleScreen" class="overlay"><div class="card">
+  <h2>FOUNDRY FLUX</h2>
+  <p>Route molten metal through your factory before it cools.</p>
+  <p><b>How to Play:</b> Tap or click a grid cell to place the selected piece. Click a placed piece to rotate it. Press <b>R</b> to rotate the piece you are about to place. Press <b>1</b> Straight pipe, <b>2</b> Corner pipe, <b>3</b> Sorter. The Sorter sends Copper straight ahead and all other alloys turning right. Straight pipes run both ways along their axis; Corner pipes bend at a right angle. Fill every mold order to win. You have 5 lives.</p>
+  <p><span class="alloy copper"></span>Copper &rarr; Top Mold &nbsp; <span class="alloy steel"></span>Steel &rarr; Middle Mold &nbsp; <span class="alloy brass"></span>Brass &rarr; Bottom Mold</p>
+  <button id="startBtn">Start</button>
+</div></div>
+
+<div id="endScreen" class="overlay hidden"><div class="card">
+  <h2 id="endTitle">You Win</h2>
+  <p id="endText"></p>
+  <button id="restartBtn">Restart</button>
+</div></div>
+
+<script>
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const COLS=10, ROWS=7, CELL=72;
+const ALLOYS=['Copper','Steel','Brass'];
+const COLORS=['#ff6b35','#7ec8ff','#ffd166'];
+const MOLD_ROWS=[1,3,5];
+const NEED=[4,4,4];
+let grid, blobs, score, lives, delivered, running, playing, selected, rot, spawnT, frame, audioCtx, needLeft, won, gameOver;
+const DIRS=[[1,0],[0,1],[-1,0],[0,-1]]; // right, down, left, up
+function beep(f,d,type){
+  if(!audioCtx) return;
+  try{
+    const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type=type||'sine'; o.frequency.value=f; g.gain.value=0.12;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+d); o.stop(audioCtx.currentTime+d);
+  }catch(e){}
+}
+function ensureAudio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); }
+function reset(){
+  grid=[];
+  for(let y=0;y<ROWS;y++){ grid.push([]); for(let x=0;x<COLS;x++) grid[y][x]=null; }
+  blobs=[]; score=0; lives=5; delivered=0; running=false; playing=false; selected=1; rot=0; spawnT=0; won=false; gameOver=false;
+  needLeft=[4,4,4];
+  document.getElementById('endScreen').classList.add('hidden');
+  updateHud('Place pieces, then press Start'); updateTools(); setMsg('Click a cell to lay pipe. Click a placed pipe to rotate it.');
+}
+function setMsg(t){ document.getElementById('msg').textContent=t; }
+function updateHud(s){
+  document.getElementById('score').textContent=score;
+  document.getElementById('lives').textContent=lives;
+  document.getElementById('delivered').textContent=delivered+' / 12';
+  if(s!==undefined) document.getElementById('status').textContent=s;
+}
+function updateTools(){
+  for(let i=1;i<=3;i++) document.getElementById('b'+i).classList.toggle('sel', selected===i);
+  document.getElementById('rotBtn').textContent='Rotate (R) : '+['Right','Down','Left','Up'][rot];
+}
+// Tile exits: Straight: axis rot (0 horizontal, 1 vertical). Corner: [rot, rot+1]. Sorter: [rot, rot+1] with alloy routing.
+function exits(t){
+  if(!t) return [];
+  if(t.type===1) return t.rot===0?[0,2]:[1,3];
+  return [t.rot,(t.rot+1)%4];
+}
+function nextDir(blob, tile){
+  const ex=exits(tile);
+  const entry=(blob.dir+2)%4; // direction blob came from
+  const opts=ex.filter(d=>d!==entry);
+  if(opts.length===0) return -1;
+  if(tile.type===3 && opts.length>1){
+    // Copper goes straight (first exit), other alloys take the bend.
+    return blob.alloy===0 ? opts[0] : opts[1];
+  }
+  return opts[0];
+}
+function cellAt(e){
+  const r=cv.getBoundingClientRect();
+  const x=(e.clientX!==undefined?e.clientX:e.touches[0].clientX);
+  const y=(e.clientY!==undefined?e.clientY:e.touches[0].clientY);
+  return [Math.floor((x-r.left)/r.width*COLS), Math.floor((y-r.top)/r.height*ROWS)];
+}
+function placeAt(cx,cy){
+  ensureAudio();
+  if(cx<0||cx>=COLS||cy<0||cy>=ROWS) return;
+  if(cx===0&&cy===3) return; // furnace cell
+  if(cx===9&&MOLD_ROWS.includes(cy)) return; // mold cells
+  const cur=grid[cy][cx];
+  if(cur){ cur.rot=(cur.rot+1)%4; beep(300,0.08,'square'); setMsg('Rotated piece.'); }
+  else { grid[cy][cx]={type:selected, rot:rot}; beep(520,0.08,'square'); setMsg('Piece placed. Build a path from the furnace to a mold.'); }
+  updateTools();
+}
+cv.addEventListener('mousedown', e=>{ placeAt(...cellAt(e)); });
+cv.addEventListener('touchstart', e=>{ e.preventDefault(); placeAt(...cellAt(e)); }, {passive:false});
+document.addEventListener('keydown', e=>{
+  if(e.key==='1'){selected=1;updateTools();}
+  if(e.key==='2'){selected=2;updateTools();}
+  if(e.key==='3'){selected=3;updateTools();}
+  if(e.key==='r'||e.key==='R'){rot=(rot+1)%4;updateTools();beep(400,0.07,'square');}
+  if(e.key==='Enter' && !playing && !gameOver && !won) startFlow();
+});
+document.getElementById('b1').addEventListener('click', ()=>{ensureAudio();selected=1;updateTools();});
+document.getElementById('b2').addEventListener('click', ()=>{ensureAudio();selected=2;updateTools();});
+document.getElementById('b3').addEventListener('click', ()=>{ensureAudio();selected=3;updateTools();});
+document.getElementById('rotBtn').addEventListener('click', ()=>{ensureAudio();rot=(rot+1)%4;updateTools();});
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  ensureAudio();
+  for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) if(!(x===0&&y===3)&&!(x===9&&MOLD_ROWS.includes(y))) grid[y][x]=null;
+  blobs=[]; setMsg('Path cleared. Lay a new route.');
+});
+function startFlow(){
+  ensureAudio();
+  document.getElementById('titleScreen').classList.add('hidden');
+  playing=true; running=true; spawnT=0;
+  updateHud('Metal flowing! Watch the heat bars.'); setMsg('Flow started. Deliver 4 of each alloy.');
+  beep(660,0.15,'triangle');
+}
+document.getElementById('startBtn').addEventListener('click', startFlow);
+document.getElementById('startBtn2').addEventListener('click', startFlow);
+function endGame(win){
+  running=false; playing=false; won=win; gameOver=!win;
+  document.getElementById('endTitle').textContent=win?'YOU WIN!':'GAME OVER';
+  document.getElementById('endText').textContent=win
+    ? 'Every mold is filled. Final score: '+score+'. You kept the foundry running.'
+    : 'The foundry went cold. Final score: '+score+'. Rebuild the route and try again.';
+  document.getElementById('endScreen').classList.remove('hidden');
+  beep(win?880:180,0.4, win?'triangle':'sawtooth');
+  updateHud(win?'All orders filled!':'Out of lives');
+}
+document.getElementById('restartBtn').addEventListener('click', ()=>{
+  ensureAudio(); reset();
+  document.getElementById('titleScreen').classList.add('hidden');
+  startFlow();
+});
+function loseLife(reason){
+  lives--; score=Math.max(0,score-10); beep(160,0.25,'sawtooth');
+  setMsg(reason+' Life lost. Lives left: '+lives+'.');
+  updateHud('Life lost: '+reason);
+  if(lives<=0) endGame(false);
+}
+function spawnBlob(){
+  const alloy=Math.floor(Math.random()*3);
+  blobs.push({cx:0, cy:3, px:0.5, py:3.5, dir:0, alloy:alloy, heat:26, moving:true});
+}
+function update(dt){
+  if(!running) return;
+  spawnT+=dt;
+  if(spawnT>2.6){ spawnT=0; spawnBlob(); }
+  for(const b of blobs){
+    b.heat-=dt;
+    if(b.heat<=0){ b.dead=true; continue; }
+    // Move toward center of current tile, then to next tile.
+    const tx=b.cx+0.5, ty=b.cy+0.5;
+    const speed=2.2*dt;
+    const dx=tx-b.px, dy=ty-b.py, dist=Math.hypot(dx,dy);
+    if(dist>0.05){
+      b.px+=dx/dist*Math.min(speed,dist); b.py+=dy/dist*Math.min(speed,dist);
+    } else {
+      b.px=tx; b.py=ty;
+      const tile=(b.cx===0&&b.cy===3)?{type:1,rot:0}:grid[b.cy][b.cx];
+      const nd=nextDir(b, tile);
+      if(nd<0){ b.dead=true; b.fell=true; continue; }
+      b.dir=nd;
+      const nx=b.cx+DIRS[nd][0], ny=b.cy+DIRS[nd][1];
+      if(nx<0||nx>=COLS||ny<0||ny>=ROWS){ b.dead=true; b.fell=true; continue; }
+      if(nx===9&&MOLD_ROWS.includes(ny)){
+        const mi=MOLD_ROWS.indexOf(ny);
+        if(b.alloy===mi){
+          needLeft[mi]--; delivered++; score+=100+Math.round(b.heat)*2;
+          beep(880,0.12,'triangle'); setMsg(ALLOYS[b.alloy]+' delivered to mold '+(mi+1)+'. Remaining: '+needLeft.join(', ')+'.');
+          if(needLeft.every(n=>n<=0)){ b.dead=true; updateHud('All orders filled!'); endGame(true); continue; }
+        } else {
+          b.dead=true; b.wrong=true; continue;
+        }
+      }
+      b.cx=nx; b.cy=ny;
+    }
+  }
+  const fallen=blobs.filter(b=>b.dead&&(b.fell||b.wrong||b.heat<=0));
+  for(const b of fallen){
+    if(running) loseLife(b.wrong?'Wrong alloy in mold':(b.heat<=0?'Blob cooled and froze':'Blob ran off the path'));
+  }
+  blobs=blobs.filter(b=>!b.dead);
+  updateHud();
+}
+function drawTile(x,y,t){
+  const px=x*CELL, py=y*CELL;
+  ctx.fillStyle='#3a241c'; ctx.fillRect(px+3,py+3,CELL-6,CELL-6);
+  ctx.strokeStyle='#ffb347'; ctx.lineWidth=5; ctx.lineCap='round';
+  ctx.beginPath();
+  if(t.type===1){
+    if(t.rot===0){ ctx.moveTo(px+6,py+CELL/2); ctx.lineTo(px+CELL-6,py+CELL/2); }
+    else { ctx.moveTo(px+CELL/2,py+6); ctx.lineTo(px+CELL/2,py+CELL-6); }
+  } else if(t.type===2){
+    const a=[[px+CELL/2,py+6],[px+CELL-6,py+CELL/2],[px+CELL/2,py+CELL-6],[px+6,py+CELL/2]];
+    const c=[px+CELL/2,py+CELL/2];
+    ctx.moveTo(a[t.rot][0],a[t.rot][1]); ctx.lineTo(c[0],c[1]); ctx.lineTo(a[(t.rot+1)%4][0],a[(t.rot+1)%4][1]);
+  } else {
+    ctx.strokeStyle='#ff5da2';
+    const a=[[px+CELL/2,py+6],[px+CELL-6,py+CELL/2],[px+CELL/2,py+CELL-6],[px+6,py+CELL/2]];
+    ctx.moveTo(a[t.rot][0],a[t.rot][1]); ctx.lineTo(px+CELL/2,py+CELL/2); ctx.lineTo(a[(t.rot+1)%4][0],a[(t.rot+1)%4][1]);
+    ctx.fillStyle='#ff5da2'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center'; ctx.fillText('S',px+CELL/2,py+CELL/2+22);
+  }
+  ctx.stroke();
+  // direction arrow
+  ctx.fillStyle='#ffd166'; ctx.font='bold 18px sans-serif'; ctx.textAlign='center';
+  const arrows=['\u2192','\u2193','\u2190','\u2191'];
+  ctx.fillText(arrows[t.rot],px+CELL/2,py+CELL/2+6);
+}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='#241812'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.strokeStyle='#4a2c1a'; ctx.lineWidth=1;
+  for(let x=0;x<=COLS;x++){ ctx.beginPath(); ctx.moveTo(x*CELL,0); ctx.lineTo(x*CELL,ROWS*CELL); ctx.stroke(); }
+  for(let y=0;y<=ROWS;y++){ ctx.beginPath(); ctx.moveTo(0,y*CELL); ctx.lineTo(COLS*CELL,y*CELL); ctx.stroke(); }
+  // Furnace
+  ctx.fillStyle='#ff6b35'; ctx.fillRect(2,3*CELL+6,CELL-8,CELL-12);
+  ctx.fillStyle='#fff'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center'; ctx.fillText('FURNACE',CELL/2,3*CELL+38);
+  // Molds
+  MOLD_ROWS.forEach((my,mi)=>{
+    ctx.fillStyle='#3a5a7a'; ctx.fillRect(9*CELL+3,my*CELL+3,CELL-6,CELL-6);
+    ctx.fillStyle='#fff'; ctx.font='bold 13px sans-serif';
+    ctx.fillText(ALLOYS[mi],9*CELL+CELL/2,my*CELL+30);
+    ctx.fillText('Need: '+needLeft[mi],9*CELL+CELL/2,my*CELL+50);
+  });
+  for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) if(grid[y][x]) drawTile(x,y,grid[y][x]);
+  for(const b of blobs){
+    ctx.beginPath(); ctx.arc(b.px*CELL,b.py*CELL,16,0,Math.PI*2);
+    ctx.fillStyle=COLORS[b.alloy]; ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#222'; ctx.fillRect(b.px*CELL-18,b.py*CELL-30,36,6);
+    ctx.fillStyle=b.heat>8?'#7dff8a':'#ff5d5d'; ctx.fillRect(b.px*CELL-18,b.py*CELL-30,36*Math.max(0,b.heat/26),6);
+  }
+  ctx.fillStyle='#ffd166'; ctx.font='14px sans-serif'; ctx.textAlign='left';
+  ctx.fillText('Selected: '+['','Straight','Corner','Sorter'][selected]+'  facing '+['Right','Down','Left','Up'][rot],8,ROWS*CELL-8);
+}
+let last=0;
+function loop(ts){
+  const dt=Math.min(0.05,(ts-last)/1000||0.016); last=ts;
+  update(dt); draw();
+  frame=requestAnimationFrame(loop);
+}
+reset();
+frame=requestAnimationFrame(loop);
+</script>
+</body>
+</html>
