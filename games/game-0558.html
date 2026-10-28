@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sonar Salvage</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #03121f; color: #dff6ff; font-family: Arial, Helvetica, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 12px; }
+  h1 { font-size: 28px; letter-spacing: 2px; color: #7fe7ff; text-shadow: 0 0 12px #1fb6ff; margin: 6px 0 2px; text-align: center; }
+  .tag { font-size: 13px; color: #9fd8ec; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; max-width: 760px; margin-bottom: 10px; }
+  .pill { background: #0a2a44; border: 1px solid #2aa8d8; border-radius: 20px; padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .pill span { color: #ffe066; }
+  #wrap { position: relative; width: 100%; max-width: 760px; }
+  canvas { display: block; width: 100%; height: auto; background: #06283f; border: 3px solid #2aa8d8; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(2, 18, 32, 0.88); border-radius: 12px; padding: 20px; }
+  .overlay h2 { font-size: 30px; color: #7fe7ff; margin-bottom: 10px; }
+  .overlay p { font-size: 15px; line-height: 1.55; max-width: 520px; margin-bottom: 8px; color: #d7f2ff; }
+  .overlay .small { font-size: 13px; color: #9fd8ec; }
+  button { background: #ffbf2e; color: #10202e; border: none; border-radius: 10px; padding: 12px 26px; font-size: 18px; font-weight: bold; cursor: pointer; margin: 10px 6px 0; }
+  button:hover { background: #ffd75e; }
+  button.secondary { background: #1fb6ff; color: #06283f; }
+  #actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  #actions button { font-size: 15px; padding: 10px 18px; }
+  #msg { min-height: 22px; font-size: 15px; font-weight: bold; color: #ffe066; text-align: center; margin-top: 8px; }
+  .hidden { display: none !important; }
+  .keys { font-size: 13px; color: #9fd8ec; text-align: center; margin-top: 8px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>SONAR SALVAGE</h1>
+<div class="tag">Precision / Sonar Targeting &mdash; Ping the deep, then drop the claw exactly on target.</div>
+
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Lives: <span id="lives">3</span></div>
+  <div class="pill">Treasures: <span id="found">0</span>/5</div>
+  <div class="pill">Pings: <span id="pings">15</span></div>
+  <div class="pill">Claws: <span id="claws">10</span></div>
+  <div class="pill">Status: <span id="status">Ready</span></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="480"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>SONAR SALVAGE</h2>
+    <p><strong>How to Play:</strong> Five treasures lie hidden on the sea floor. You cannot see them &mdash; you must find them with sonar.</p>
+    <p>1) Move the crosshair and press <strong>Ping</strong> (or P) to send a sonar pulse. The colour tells you how close the nearest treasure is: red = very close, orange = near, yellow = far, blue = cold.</p>
+    <p>2) When a ping glows hot, press <strong>Drop Claw</strong> (or Space) right on that spot. A precise drop recovers the treasure. A miss costs a life.</p>
+    <p>3) Recover all 5 treasures before you run out of lives, pings and claws.</p>
+    <p class="small">Mouse: move + click to aim &middot; Touch: tap to aim &middot; Keyboard: Arrow keys / WASD to aim, P to ping, Space to drop claw.</p>
+    <button id="startBtn" type="button">Start Salvage</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p class="small">Press Restart to dive again with a fresh sea floor.</p>
+    <button id="restartBtn" type="button">Restart</button>
+  </div>
+</div>
+
+<div id="actions">
+  <button id="pingBtn" type="button" class="secondary">Send Ping (P)</button>
+  <button id="clawBtn" type="button">Drop Claw (Space)</button>
+  <button id="resetBtn" type="button" class="secondary">New Dive (R)</button>
+</div>
+<div id="msg">Move the crosshair over the water, then ping to hunt for treasure.</div>
+<div class="keys">Arrows / WASD: move crosshair &nbsp;|&nbsp; P: sonar ping &nbsp;|&nbsp; Space / Enter: drop claw &nbsp;|&nbsp; R: restart &nbsp;|&nbsp; Click / tap: aim</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var foundEl = document.getElementById('found');
+  var pingsEl = document.getElementById('pings');
+  var clawsEl = document.getElementById('claws');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, lives = 3, pingsLeft = 15, clawsLeft = 10;
+  var treasures = [], pings = [], rings = [], particles = [];
+  var cursor = { x: W / 2, y: H / 2 };
+  var clawAnim = null, flash = 0, flashColor = '#ffffff', time = 0;
+  var audioCtx = null;
+
+  function rand(min, max) { return min + Math.random() * (max - min); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function newGame() {
+    score = 0; lives = 3; pingsLeft = 15; clawsLeft = 10;
+    pings = []; rings = []; particles = []; clawAnim = null; flash = 0;
+    treasures = [];
+    var tries = 0;
+    while (treasures.length < 5 && tries < 500) {
+      tries++;
+      var t = { x: rand(70, W - 70), y: rand(80, H - 60), found: false, r: 26 };
+      var ok = true;
+      for (var i = 0; i < treasures.length; i++) {
+        if (dist(t, treasures[i]) < 120) { ok = false; break; }
+      }
+      if (ok) treasures.push(t);
+    }
+    cursor = { x: W / 2, y: H / 2 };
+    setMsg('New dive! Send a ping to hunt for treasure.');
+    setStatus('Diving');
+    updateHud();
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable, game continues silently */ }
+  }
+
+  function setMsg(s) { msgEl.textContent = s; }
+  function setStatus(s) { statusEl.textContent = s; }
+  function foundCount() { var n = 0; for (var i = 0; i < treasures.length; i++) if (treasures[i].found) n++; return n; }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    foundEl.textContent = foundCount();
+    pingsEl.textContent = pingsLeft;
+    clawsEl.textContent = clawsLeft;
+  }
+
+  function heatColor(d) {
+    if (d < 55) return '#ff3b30';
+    if (d < 110) return '#ff9500';
+    if (d < 190) return '#ffe066';
+    return '#4db8ff';
+  }
+  function heatWord(d) {
+    if (d < 55) return 'RED HOT';
+    if (d < 110) return 'WARM';
+    if (d < 190) return 'COOL';
+    return 'COLD';
+  }
+
+  function sendPing() {
+    if (state !== 'playing') return;
+    if (pingsLeft <= 0) { setMsg('No pings left! Drop the claw on your best guess.'); tone(160, 0.2, 'square', 0.1); return; }
+    pingsLeft--;
+    var nearest = Infinity, target = null;
+    for (var i = 0; i < treasures.length; i++) {
+      if (treasures[i].found) continue;
+      var d = dist(cursor, treasures[i]);
+      if (d < nearest) { nearest = d; target = treasures[i]; }
+    }
+    pings.push({ x: cursor.x, y: cursor.y, d: nearest, color: heatColor(nearest) });
+    rings.push({ x: cursor.x, y: cursor.y, r: 8, max: Math.min(nearest + 40, 240), color: heatColor(nearest) });
+    tone(880, 0.6, 'sine', 0.18, 220);
+    setTimeout(function () { tone(440, 0.4, 'sine', 0.12, 180); }, 120);
+    if (target) {
+      score += 10;
+      setMsg('Ping: ' + heatWord(nearest) + ' — nearest treasure about ' + Math.round(nearest) + 'px away.');
+    } else {
+      setMsg('Ping: nothing left but open water. Drop the claw!');
+    }
+    setStatus('Ping sent');
+    updateHud();
+    checkEnd();
+  }
+
+  function dropClaw() {
+    if (state !== 'playing' || clawAnim) return;
+    if (clawsLeft <= 0) { setMsg('No claw drops left!'); tone(160, 0.2, 'square', 0.1); return; }
+    clawsLeft--;
+    clawAnim = { x: cursor.x, y: cursor.y, depth: 0, phase: 'down', hit: null };
+    for (var i = 0; i < treasures.length; i++) {
+      if (!treasures[i].found && dist(cursor, treasures[i]) <= 34) { clawAnim.hit = treasures[i]; break; }
+    }
+    tone(300, 0.3, 'triangle', 0.15, 120);
+    setStatus('Claw dropping...');
+    updateHud();
+  }
+
+  function resolveClaw() {
+    var c = clawAnim; clawAnim = null;
+    if (c.hit) {
+      c.hit.found = true;
+      score += 500 + (pingsLeft * 10) + (clawsLeft * 5);
+      flash = 14; flashColor = '#ffe066';
+      for (var i = 0; i < 26; i++) particles.push({ x: c.x, y: c.y, vx: rand(-2.5, 2.5), vy: rand(-3, -0.5), life: 40, color: '#ffe066' });
+      tone(660, 0.25, 'sine', 0.2); setTimeout(function () { tone(990, 0.35, 'sine', 0.2); }, 130);
+      setMsg('Treasure recovered! ' + foundCount() + ' of 5 found.');
+      setStatus('Treasure found!');
+    } else {
+      lives--;
+      flash = 10; flashColor = '#ff3b30';
+      tone(220, 0.4, 'sawtooth', 0.15, 90);
+      setMsg('Claw missed! The treasure was not there. Lives left: ' + lives + '.');
+      setStatus('Missed claw');
+    }
+    updateHud();
+    checkEnd();
+  }
+
+  function checkEnd() {
+    if (foundCount() >= 5) {
+      state = 'win';
+      score += lives * 200;
+      updateHud();
+      endTitle.textContent = 'You Win!';
+      endText.textContent = 'All 5 treasures recovered! Final score: ' + score + '. Brilliant salvage work, captain.';
+      endScreen.classList.remove('hidden');
+      tone(523, 0.25, 'sine', 0.2); setTimeout(function () { tone(659, 0.25, 'sine', 0.2); }, 160); setTimeout(function () { tone(784, 0.45, 'sine', 0.2); }, 320);
+      setStatus('WIN');
+      return;
+    }
+    if (lives <= 0 || (pingsLeft <= 0 && clawsLeft <= 0)) {
+      state = 'over';
+      endTitle.textContent = 'Game Over';
+      endText.textContent = 'The expedition ran out of steam with ' + foundCount() + ' of 5 treasures recovered. Final score: ' + score + '. Try a new dive!';
+      endScreen.classList.remove('hidden');
+      setStatus('Game Over');
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    newGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    setMsg('Diving! Send a ping to locate the first treasure.');
+    tone(523, 0.2, 'sine', 0.15); setTimeout(function () { tone(784, 0.3, 'sine', 0.15); }, 140);
+  }
+
+  function restartGame() {
+    ensureAudio();
+    newGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : cursor.x);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : cursor.y);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  function draw() {
+    time++;
+    ctx.clearRect(0, 0, W, H);
+    // Water gradient and grid
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0a4a72'); g.addColorStop(1, '#03243d');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(127,231,255,0.12)'; ctx.lineWidth = 1;
+    for (var gx = 0; gx <= W; gx += 76) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+    for (var gy = 0; gy <= H; gy += 60) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+    // Bubbles
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    for (var b = 0; b < 14; b++) {
+      var bx = (b * 57 + time * 0.3) % W, by = (H - ((b * 89 + time * 0.7) % H));
+      ctx.beginPath(); ctx.arc(bx, by, 2 + (b % 3), 0, Math.PI * 2); ctx.fill();
+    }
+    // Ping markers
+    for (var i = 0; i < pings.length; i++) {
+      var p = pings[i];
+      ctx.strokeStyle = p.color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.font = 'bold 11px Arial'; ctx.fillStyle = '#ffffff';
+      ctx.fillText(Math.round(p.d) + 'px', p.x + 18, p.y - 8);
+    }
+    // Expanding sonar rings
+    for (var r = rings.length - 1; r >= 0; r--) {
+      var ring = rings[r];
+      ring.r += 5;
+      ctx.strokeStyle = ring.color; ctx.globalAlpha = Math.max(0, 1 - ring.r / ring.max); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      if (ring.r >= ring.max) rings.splice(r, 1);
+    }
+    // Found treasures
+    for (var t = 0; t < treasures.length; t++) {
+      var tr = treasures[t];
+      if (!tr.found) continue;
+      ctx.fillStyle = '#ffe066';
+      ctx.fillRect(tr.x - 16, tr.y - 10, 32, 20);
+      ctx.fillStyle = '#b8860b';
+      ctx.fillRect(tr.x - 16, tr.y - 10, 32, 6);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('$', tr.x, tr.y + 5); ctx.textAlign = 'left';
+    }
+    // Particles
+    for (var q = particles.length - 1; q >= 0; q--) {
+      var pt = particles[q];
+      pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.06; pt.life--;
+      ctx.fillStyle = pt.color; ctx.fillRect(pt.x, pt.y, 4, 4);
+      if (pt.life <= 0) particles.splice(q, 1);
+    }
+    // Claw animation
+    if (clawAnim) {
+      ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(clawAnim.x, 0); ctx.lineTo(clawAnim.x, clawAnim.depth); ctx.stroke();
+      ctx.fillStyle = '#ffbf2e';
+      ctx.beginPath(); ctx.arc(clawAnim.x, clawAnim.depth, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#10202e'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('C', clawAnim.x, clawAnim.depth + 4); ctx.textAlign = 'left';
+    }
+    // Crosshair cursor
+    if (state === 'playing') {
+      ctx.strokeStyle = '#7fe7ff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cursor.x, cursor.y, 16, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cursor.x - 24, cursor.y); ctx.lineTo(cursor.x - 8, cursor.y);
+      ctx.moveTo(cursor.x + 8, cursor.y); ctx.lineTo(cursor.x + 24, cursor.y);
+      ctx.moveTo(cursor.x, cursor.y - 24); ctx.lineTo(cursor.x, cursor.y - 8);
+      ctx.moveTo(cursor.x, cursor.y + 8); ctx.lineTo(cursor.x, cursor.y + 24); ctx.stroke();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cursor.x, cursor.y, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    if (flash > 0) {
+      flash--;
+      ctx.fillStyle = flashColor; ctx.globalAlpha = 0.18;
+      ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1;
+    }
+  }
+
+  function loop() {
+    if (clawAnim) {
+      if (clawAnim.phase === 'down') {
+        clawAnim.depth += 14;
+        if (clawAnim.depth >= clawAnim.y) { clawAnim.phase = 'up'; }
+      } else {
+        clawAnim.depth -= 16;
+        if (clawAnim.depth <= 0) resolveClaw();
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: mouse, touch, keyboard, buttons
+  canvas.addEventListener('mousemove', function (e) { var p = canvasPos(e); cursor.x = p.x; cursor.y = p.y; });
+  canvas.addEventListener('mousedown', function (e) { var p = canvasPos(e); cursor.x = p.x; cursor.y = p.y; if (state === 'playing') sendPing(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); var p = canvasPos(e); cursor.x = p.x; cursor.y = p.y; if (state === 'playing') sendPing(); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); var p = canvasPos(e); cursor.x = p.x; cursor.y = p.y; }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    var step = e.shiftKey ? 24 : 12;
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { cursor.x = Math.max(10, cursor.x - step); e.preventDefault(); }
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { cursor.x = Math.min(W - 10, cursor.x + step); e.preventDefault(); }
+    else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { cursor.y = Math.max(10, cursor.y - step); e.preventDefault(); }
+    else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { cursor.y = Math.min(H - 10, cursor.y + step); e.preventDefault(); }
+    else if (e.key === 'p' || e.key === 'P') { sendPing(); }
+    else if (e.key === ' ' || e.key === 'Enter') { if (state === 'playing') { dropClaw(); e.preventDefault(); } }
+    else if (e.key === 'r' || e.key === 'R') { if (state !== 'title') restartGame(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', restartGame);
+  document.getElementById('pingBtn').addEventListener('click', function () { ensureAudio(); sendPing(); });
+  document.getElementById('clawBtn').addEventListener('click', function () { ensureAudio(); dropClaw(); });
+  document.getElementById('resetBtn').addEventListener('click', restartGame);
+  document.getElementById('pingBtn').addEventListener('touchstart', function () { ensureAudio(); sendPing(); });
+  document.getElementById('clawBtn').addEventListener('touchstart', function () { ensureAudio(); dropClaw(); });
+
+  newGame();
+  state = 'title';
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

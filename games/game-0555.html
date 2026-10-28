@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Canyon Echo</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #120a08; color: #ffe9c9; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { margin: 6px 0 2px; font-size: 30px; letter-spacing: 2px; color: #ffcf7d; text-shadow: 0 0 14px rgba(255,170,60,.7); }
+  p.sub { margin: 0 0 8px; color: #d8b48a; font-size: 14px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: min(860px, 96vw); margin-bottom: 8px; }
+  .pill { background: #2a160d; border: 1px solid #7a4a22; border-radius: 999px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill span { color: #ffd166; }
+  #wrap { position: relative; width: min(860px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#1b2a4a, #3a1f2e 55%, #572a12); border: 3px solid #8a5a2b; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; background: rgba(10,5,3,.86); border-radius: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; margin: 0 0 10px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; }
+  .howto { background: rgba(255,209,102,.10); border: 1px solid #7a4a22; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; }
+  button { margin-top: 14px; padding: 13px 28px; font-size: 18px; font-weight: bold; border: 0; border-radius: 999px; background: #ffb020; color: #201003; cursor: pointer; box-shadow: 0 4px 0 #9a5d00; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #9a5d00; }
+  button.secondary { background: #e8dcc8; box-shadow: 0 4px 0 #8a7d66; }
+  #hint { margin-top: 8px; font-size: 13px; color: #c9a97e; text-align: center; max-width: 860px; }
+  #aimReadout { font-size: 13px; color: #ffe9c9; }
+</style>
+</head>
+<body>
+<h1>CANYON ECHO</h1>
+<p class="sub">Precision / Echo Bounce Aim &mdash; bend your echo around the rock and find every hidden crystal.</p>
+
+<div id="hud" aria-label="Game status">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Lives: <span id="lives">3</span></div>
+  <div class="pill">Level: <span id="level">1</span> / 5</div>
+  <div class="pill">Pulses: <span id="pulses">6</span></div>
+  <div class="pill">Targets left: <span id="left">0</span></div>
+  <div class="pill">Status: <span id="status">Ready</span></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="600"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>CANYON ECHO</h2>
+    <p>Hidden echo crystals are tucked behind canyon rock. Your pulse can bounce off walls and angled rock slabs &mdash; use ricochets to reach what you cannot hit directly.</p>
+    <div class="howto">
+      <strong>How to Play</strong><br>
+      &bull; <strong>Aim:</strong> move the mouse, drag on touch, or press &larr; / &rarr; to rotate the launcher.<br>
+      &bull; <strong>Fire:</strong> click / tap the canyon, or press Space / Enter. Each shot costs one pulse.<br>
+      &bull; <strong>Win a level:</strong> hit every crystal before your pulses run out.<br>
+      &bull; <strong>Lives:</strong> running out of pulses on a level costs one life. Lose all 3 lives and the run ends.<br>
+      &bull; <strong>Win the game:</strong> clear all 5 levels. Press R at any time to restart.
+    </div>
+    <button id="startBtn" type="button">Start Game</button>
+    <p id="aimReadout">Aim the golden launcher and listen for the echo.</p>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>YOU WIN!</h2>
+    <p>The whole canyon is singing back. You found every hidden crystal across all 5 levels.</p>
+    <p>Final score: <strong id="finalWinScore">0</strong></p>
+    <button id="winRestartBtn" type="button">Play Again</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <h2>GAME OVER</h2>
+    <p>The canyon falls silent. Your echoes ran out before the last crystal was found.</p>
+    <p>Final score: <strong id="finalOverScore">0</strong></p>
+    <button id="overRestartBtn" type="button">Restart</button>
+  </div>
+</div>
+
+<p id="hint">Tip: a shallow angle gives more wall bounces. Watch the dotted aim guide &mdash; the first bounce is shown, but the rest is up to your echo sense. Sound starts only after you press Start.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var pulsesEl = document.getElementById('pulses');
+  var leftEl = document.getElementById('left');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  // Procedural audio: created only after the Start interaction.
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (kind === 'fire') tone(520, 0.22, 'sine', 0.16, 180);
+    else if (kind === 'bounce') tone(300, 0.12, 'triangle', 0.12, 420);
+    else if (kind === 'hit') { tone(760, 0.18, 'sine', 0.18, 1180); setTimeout(function(){ tone(1180, 0.25, 'sine', 0.12, 1520); }, 70); }
+    else if (kind === 'clear') { [660, 830, 990, 1320].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.22, 'sine', 0.14); }, i * 90); }); }
+    else if (kind === 'lose') tone(220, 0.5, 'sawtooth', 0.10, 90);
+  }
+
+  function seg(x1, y1, x2, y2) { return { x1: x1, y1: y1, x2: x2, y2: y2 }; }
+  // Targets are tucked behind rock slabs, so a straight shot is rarely enough.
+  var LEVELS = [
+    { pulses: 6, targets: [{x: 620, y: 150, r: 22}, {x: 250, y: 180, r: 22}], rocks: [seg(430, 330, 620, 260)] },
+    { pulses: 6, targets: [{x: 150, y: 140, r: 22}, {x: 700, y: 210, r: 22}, {x: 430, y: 110, r: 20}], rocks: [seg(300, 360, 520, 290), seg(560, 380, 740, 300)] },
+    { pulses: 7, targets: [{x: 120, y: 320, r: 22}, {x: 740, y: 130, r: 22}, {x: 430, y: 260, r: 20}], rocks: [seg(240, 220, 430, 150), seg(430, 430, 630, 350), seg(170, 470, 330, 400)] },
+    { pulses: 7, targets: [{x: 680, y: 330, r: 22}, {x: 170, y: 120, r: 22}, {x: 430, y: 170, r: 20}, {x: 260, y: 380, r: 20}], rocks: [seg(300, 240, 510, 170), seg(520, 430, 700, 350), seg(160, 290, 330, 360)] },
+    { pulses: 8, targets: [{x: 130, y: 160, r: 22}, {x: 730, y: 350, r: 22}, {x: 430, y: 110, r: 20}, {x: 620, y: 180, r: 20}, {x: 230, y: 420, r: 20}], rocks: [seg(280, 270, 480, 190), seg(500, 390, 690, 310), seg(170, 320, 340, 250), seg(420, 470, 610, 400)] }
+  ];
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, lives = 3, levelIndex = 0;
+  var aim = -Math.PI / 2; // straight up
+  var launcher = { x: W / 2, y: H - 52 };
+  var pulsesLeft = 6, targets = [], rocks = [];
+  var pulse = null, particles = [], message = '', messageUntil = 0;
+
+  function cloneLevel(i) {
+    var lv = LEVELS[i];
+    pulsesLeft = lv.pulses;
+    targets = lv.targets.map(function(t){ return { x: t.x, y: t.y, r: t.r, hit: false, reveal: 0 }; });
+    rocks = lv.rocks.slice();
+    pulse = null;
+    setStatus('Level ' + (i + 1) + ': find the hidden crystals!');
+  }
+  function targetsLeft() { return targets.filter(function(t){ return !t.hit; }).length; }
+  function setStatus(s) { statusEl.textContent = s; }
+  function updateHud() {
+    scoreEl.textContent = score; livesEl.textContent = lives;
+    levelEl.textContent = levelIndex + 1; pulsesEl.textContent = pulsesLeft;
+    leftEl.textContent = targetsLeft();
+  }
+  function show(el) { el.classList.remove('hidden'); }
+  function hide(el) { el.classList.add('hidden'); }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; lives = 3; levelIndex = 0; aim = -Math.PI / 2;
+    cloneLevel(0); state = 'playing';
+    hide(titleScreen); hide(winScreen); hide(overScreen);
+    setStatus('Level 1: find the hidden crystals!'); updateHud(); sfx('clear');
+  }
+  function endWin() {
+    state = 'won'; document.getElementById('finalWinScore').textContent = score;
+    show(winScreen); setStatus('You win!'); updateHud(); sfx('clear');
+  }
+  function endOver() {
+    state = 'over'; document.getElementById('finalOverScore').textContent = score;
+    show(overScreen); setStatus('Game Over'); updateHud(); sfx('lose');
+  }
+  function loseLevel() {
+    lives -= 1; sfx('lose'); updateHud();
+    if (lives <= 0) { endOver(); return; }
+    message = 'Out of pulses! One life lost — try this canyon again.';
+    messageUntil = Date.now() + 2400;
+    setStatus('Out of pulses — retrying level');
+    cloneLevel(levelIndex); updateHud();
+  }
+  function nextLevel() {
+    sfx('clear');
+    if (levelIndex + 1 >= LEVELS.length) { endWin(); return; }
+    levelIndex += 1; cloneLevel(levelIndex); updateHud();
+  }
+
+  function aimFromPoint(clientX, clientY) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    var y = (clientY - rect.top) * (H / rect.height);
+    var a = Math.atan2(y - launcher.y, x - launcher.x);
+    // Keep the aim in the upper hemisphere so shots go into the canyon.
+    if (a > -0.12 && a < Math.PI / 2) a = -0.12;
+    if (a >= Math.PI / 2) a = -Math.PI + 0.12;
+    aim = a;
+  }
+  function fire() {
+    if (state !== 'playing' || pulse || pulsesLeft <= 0) return;
+    pulsesLeft -= 1;
+    pulse = { x: launcher.x, y: launcher.y - 18, vx: Math.cos(aim) * 7.2, vy: Math.sin(aim) * 7.2, bounces: 0, life: 0, trail: [] };
+    sfx('fire'); setStatus('Echo travelling…'); updateHud();
+  }
+
+  function reflectSegment(px, py, vx, vy, s) {
+    // Reflect velocity across the segment normal if the next step crosses it.
+    var dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+    var len = Math.sqrt(dx * dx + dy * dy); if (!len) return null;
+    var nx = -dy / len, ny = dx / len;
+    var d1 = (px - s.x1) * nx + (py - s.y1) * ny;
+    var nx2 = px + vx, ny2 = py + vy;
+    var d2 = (nx2 - s.x1) * nx + (ny2 - s.y1) * ny;
+    if (d1 === 0 || d1 * d2 >= 0) return null;
+    var t = ((px - s.x1) * dx + (py - s.y1) * dy) / (len * len);
+    if (t < -0.05 || t > 1.05) return null;
+    var dot = vx * nx + vy * ny;
+    return { vx: vx - 2 * dot * nx, vy: vy - 2 * dot * ny };
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 22; i++) {
+      var a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 3.5;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 26, color: color });
+    }
+  }
+  function update() {
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.vy += 0.03; p.life -= 1; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    targets.forEach(function(t){
+      if (pulse) {
+        var d = Math.hypot(pulse.x - t.x, pulse.y - t.y);
+        if (d < 130) t.reveal = Math.min(1, t.reveal + 0.06);
+      }
+    });
+    if (!pulse) return;
+    pulse.life += 1; pulse.trail.push({ x: pulse.x, y: pulse.y });
+    if (pulse.trail.length > 42) pulse.trail.shift();
+    var nx = pulse.x + pulse.vx, ny = pulse.y + pulse.vy;
+    var bounced = false;
+    if (nx < 14 || nx > W - 14) { pulse.vx *= -1; bounced = true; }
+    if (ny < 14 || ny > H - 14) { pulse.vy *= -1; bounced = true; }
+    if (bounced) { pulse.bounces += 1; sfx('bounce'); }
+    for (var i = 0; i < rocks.length; i++) {
+      var r = reflectSegment(pulse.x, pulse.y, pulse.vx, pulse.vy, rocks[i]);
+      if (r) { pulse.vx = r.vx; pulse.vy = r.vy; pulse.bounces += 1; sfx('bounce'); break; }
+    }
+    pulse.x += pulse.vx; pulse.y += pulse.vy;
+    for (var j = 0; j < targets.length; j++) {
+      var t = targets[j];
+      if (!t.hit && Math.hypot(pulse.x - t.x, pulse.y - t.y) < t.r + 10) {
+        t.hit = true; score += 100 + pulse.bounces * 25; burst(t.x, t.y, '#7df9ff'); sfx('hit');
+        message = 'Crystal found! +' + (100 + pulse.bounces * 25) + ' (ricochet bonus included)';
+        messageUntil = Date.now() + 1800;
+        pulse = null; updateHud();
+        if (targetsLeft() === 0) { setTimeout(nextLevel, 650); }
+        return;
+      }
+    }
+    if (pulse && (pulse.life > 520 || pulse.bounces > 14)) {
+      pulse = null; updateHud();
+      if (targetsLeft() > 0 && pulsesLeft <= 0) setTimeout(loseLevel, 350);
+    }
+  }
+
+  function drawCanyon() {
+    ctx.fillStyle = '#1b2a4a'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,180,90,.10)';
+    ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(90, 0); ctx.lineTo(180, H); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W, H); ctx.lineTo(W - 90, 0); ctx.lineTo(W - 180, H); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    rocks.forEach(function(s){
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.strokeStyle = '#c98a4b'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 10;
+    });
+    targets.forEach(function(t){
+      if (t.hit) return;
+      var alpha = 0.22 + t.reveal * 0.78;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#7df9ff'; ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(t.x, t.y, t.r * 0.45, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(125,249,255,.7)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.r + 7, 0, Math.PI * 2); ctx.stroke();
+    });
+  }
+  function drawLauncher() {
+    ctx.save(); ctx.translate(launcher.x, launcher.y); ctx.rotate(aim + Math.PI / 2);
+    ctx.fillStyle = '#ffb020'; ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(18, 14); ctx.lineTo(-18, 14); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#201003'; ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    if (state === 'playing' && !pulse) {
+      ctx.strokeStyle = 'rgba(255,209,102,.55)'; ctx.setLineDash([6, 8]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(launcher.x, launcher.y - 20);
+      ctx.lineTo(launcher.x + Math.cos(aim) * 110, launcher.y - 20 + Math.sin(aim) * 110); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  function draw() {
+    drawCanyon();
+    if (pulse) {
+      ctx.strokeStyle = 'rgba(125,249,255,.55)'; ctx.lineWidth = 2;
+      ctx.beginPath(); pulse.trail.forEach(function(p, i){ if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }); ctx.stroke();
+      ctx.fillStyle = '#eaffff'; ctx.beginPath(); ctx.arc(pulse.x, pulse.y, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7df9ff'; ctx.beginPath(); ctx.arc(pulse.x, pulse.y, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    particles.forEach(function(p){
+      ctx.globalAlpha = Math.max(0, p.life / 26); ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 3, p.y - 3, 6, 6); ctx.globalAlpha = 1;
+    });
+    drawLauncher();
+    if (message && Date.now() < messageUntil) {
+      ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.fillRect(150, 18, 560, 34);
+      ctx.fillStyle = '#ffe9c9'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText(message, W / 2, 40); ctx.textAlign = 'left';
+    }
+  }
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+  // Controls: keyboard, mouse, and touch.
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowLeft') { aim = Math.max(-Math.PI + 0.12, aim - 0.07); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { aim = Math.min(-0.12, aim + 0.07); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter') { if (state === 'playing') fire(); e.preventDefault(); }
+    else if (e.key === 'r' || e.key === 'R') { if (state !== 'title') startGame(); }
+  });
+  canvas.addEventListener('mousemove', function(e) { if (state === 'playing') aimFromPoint(e.clientX, e.clientY); });
+  canvas.addEventListener('mousedown', function(e) {
+    if (state !== 'playing') return;
+    aimFromPoint(e.clientX, e.clientY); fire();
+  });
+  canvas.addEventListener('click', function(e) {
+    if (state === 'playing') { aimFromPoint(e.clientX, e.clientY); }
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    if (state !== 'playing') return;
+    e.preventDefault();
+    var t = e.touches[0]; aimFromPoint(t.clientX, t.clientY); fire();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    if (state !== 'playing') return;
+    e.preventDefault();
+    var t = e.touches[0]; aimFromPoint(t.clientX, t.clientY);
+  }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+
+  cloneLevel(0); updateHud(); loop();
+})();
+</script>
+</body>
+</html>

@@ -54,3 +54,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0548 | Glass Harmonica | Rhythm / Melody Memory and Timing | 1-4 / A/S/D/F play bowls, mouse click, touch tap bowls | [Play](./../games/game-0548.html) |
 | 0549 | Trident Toss | Precision / Trident Throw Aim | Mouse/touch drag aim and release, Arrow Keys adjust, Space throw | [Play](./../games/game-0549.html) |
 | 0550 | Ashfall Ascent | Arcade / Volcano Climb Dodger | Arrow Keys/WASD move and jump, Space jump, mouse/touch tap move/jump | [Play](./../games/game-0550.html) |
+| 0551 | Skyline Skater | Arcade / Rooftop Grind Runner | Arrow Keys/WASD move and jump, Space jump, mouse/touch tap jump | [Play](./../games/game-0551.html) |
+| 0552 | Prism Pantry | Puzzle / Color Mixing Logic | 1-4 add drops, M serve, C clear, mouse click, touch tap | [Play](./../games/game-0552.html) |
+| 0553 | Harbor Hauler | Strategy / Port Cargo Logistics | 1-3 select cargo, mouse/touch click ships to load | [Play](./../games/game-0553.html) |
+| 0554 | Neon Tide Drummer | Rhythm / Wave Beat Sync | D/F/J/K hit lanes, mouse click, touch tap lanes | [Play](./../games/game-0554.html) |
+| 0555 | Canyon Echo | Precision / Echo Bounce Aim | Mouse/touch drag aim and release, Arrow Keys adjust, Space fire | [Play](./../games/game-0555.html) |
+| 0556 | Solar Orchard | Strategy / Solar Farm Planning | Mouse/touch click grid to place, Arrow Keys select, Enter place | [Play](./../games/game-0556.html) |
+| 0557 | Sundial Sorting | Puzzle / Sundial Shadow Logic | Arrow Keys rotate sun, mouse/touch click slots to place stones | [Play](./../games/game-0557.html) |
+| 0558 | Sonar Salvage | Precision / Sonar Targeting | Mouse/touch click ping and claw, Arrow Keys move, Space ping/claw | [Play](./../games/game-0558.html) |
+| 0559 | Emberline Express | Arcade / Fire Train Track Switcher | Arrow Keys/WASD switch tracks, mouse/touch tap switch | [Play](./../games/game-0559.html) |
+| 0560 | Stardust Stepper | Rhythm / Dance Step Timing | Arrow Keys/A/S/W/D step pads, mouse click, touch tap pads | [Play](./../games/game-0560.html) |

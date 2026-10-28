@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Skyline Skater</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1026; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 12px; overflow: hidden; }
+  h1 { font-size: 28px; letter-spacing: 2px; margin-bottom: 6px; text-shadow: 2px 2px 0 #ff5e78; }
+  #wrap { position: relative; width: min(900px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#1a2456, #3b2a6b 55%, #ff7a4d 100%); border: 3px solid #ffd166; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 4px; font-weight: bold; font-size: 17px; }
+  #hud span { background: #1f2a5a; border: 1px solid #ffd166; border-radius: 8px; padding: 5px 10px; white-space: nowrap; }
+  #status { color: #ffd166; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(8, 10, 35, 0.86); border-radius: 12px; padding: 20px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.5; font-size: 16px; }
+  .howto { background: rgba(255,255,255,0.10); border: 1px solid #888; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 15px; line-height: 1.6; }
+  button { font-size: 20px; font-weight: bold; padding: 12px 28px; border: none; border-radius: 10px; background: #ffd166; color: #1a1430; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button:hover { background: #ffe08a; }
+  #bigScore { font-size: 22px; color: #7CFC9A; font-weight: bold; }
+  #hint { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>🛹 SKYLINE SKATER</h1>
+<div id="wrap">
+  <div id="hud">
+    <span id="scoreEl">Score: 0</span>
+    <span id="livesEl">Lives: ❤️❤️❤️</span>
+    <span id="distEl">Distance: 0m</span>
+    <span id="status">Status: Ready</span>
+  </div>
+  <canvas id="game" width="900" height="460"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>SKYLINE SKATER</h2>
+    <p>Skate across the city rooftops! Leap the gaps, grind the rails, dodge obstacles and grab every star on the way to the finish line.</p>
+    <div class="howto">
+      <strong>How to Play:</strong><br>
+      • <strong>Jump:</strong> Space / ↑ / W, mouse click, or tap the screen<br>
+      • <strong>Grind:</strong> Land on a glowing yellow rail — you grind automatically and earn bonus points!<br>
+      • <strong>Dodge:</strong> Jump over air vents, stay low under birds. Falling into a gap costs a life.<br>
+      • <strong>Win:</strong> Reach the checkered finish rooftop. You have 3 lives. Good luck!
+    </div>
+    <button id="startBtn">▶ START SKATING</button>
+    <div id="hint">Sound starts only after you press Start. Works with keyboard, mouse, and touch.</div>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>🏆 YOU WIN!</h2>
+    <p>You reached the rooftop finish line like a true skyline legend!</p>
+    <div id="bigScore">Score: 0</div>
+    <button id="winRestartBtn">↻ PLAY AGAIN</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <h2>💥 GAME OVER</h2>
+    <p>You ran out of lives. The city skyline is unforgiving — try again!</p>
+    <div id="overScore">Score: 0</div>
+    <button id="overRestartBtn">↻ RESTART</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('scoreEl');
+  var livesEl = document.getElementById('livesEl');
+  var distEl = document.getElementById('distEl');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+  var winScoreEl = document.getElementById('bigScore');
+  var overScoreEl = document.getElementById('overScore');
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, lives = 3, distance = 0, grindScore = 0;
+  var FINISH = 2600;
+  var speed = 5.2;
+  var frame = 0;
+
+  // Audio: created lazily only after user interaction
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sJump() { beep(380, 0.16, 'square', 0.10); }
+  function sStar() { beep(880, 0.12, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.14, 'sine', 0.12); }, 70); }
+  function sHit() { beep(140, 0.3, 'sawtooth', 0.16); }
+  function sWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.14); }, i * 130); }); }
+
+  // World generation: buildings, rails, obstacles, stars, finish
+  var buildings = [];
+  function buildWorld() {
+    buildings = [];
+    var x = -50;
+    var heights = [300, 270, 320, 250, 295, 265, 330, 285, 255, 310];
+    var i = 0;
+    while (x < FINISH + 700) {
+      var w = 240 + (i % 3) * 40;
+      var top = heights[i % heights.length];
+      var b = { x: x, w: w, top: top, obstacles: [], stars: [], rail: null };
+      // Obstacles on most roofs (not the first two, not the finish)
+      if (i >= 2 && x < FINISH) {
+        if (i % 2 === 0) b.obstacles.push({ dx: w * 0.45, w: 34, h: 34, kind: 'vent' });
+        if (i % 3 === 1) b.obstacles.push({ dx: w * 0.70, w: 30, h: 22, kind: 'bird', bob: 0 });
+      }
+      // Stars: arc of 3 above most roofs
+      if (i >= 1 && x < FINISH) {
+        for (var s = 0; s < 3; s++) b.stars.push({ dx: w * 0.25 + s * 42, dy: 78 - Math.abs(s - 1) * 22, taken: false });
+      }
+      // Rails on every 3rd roof
+      if (i % 3 === 2 && x < FINISH) b.rail = { dx: 20, w: w - 40, y: top - 34 };
+      buildings.push(b);
+      x += w + (i % 2 === 0 ? 110 : 150); // gap between rooftops
+      i++;
+    }
+    // Finish building: wide, checkered
+    buildings.push({ x: FINISH, w: 420, top: 290, obstacles: [], stars: [], rail: null, finish: true });
+  }
+
+  var player = { x: 130, y: 0, vy: 0, w: 30, h: 44, grounded: true, grinding: false, invuln: 0 };
+
+  function resetGame() {
+    score = 0; lives = 3; distance = 0; grindScore = 0; speed = 5.2; frame = 0;
+    buildWorld();
+    player.y = buildings[0].top - player.h;
+    player.vy = 0; player.grounded = true; player.grinding = false; player.invuln = 0;
+    updateHUD('Skating!');
+  }
+  function hearts() { return '❤️'.repeat(lives) + '🖤'.repeat(Math.max(0, 3 - lives)); }
+  function updateHUD(status) {
+    scoreEl.textContent = 'Score: ' + Math.floor(score);
+    livesEl.textContent = 'Lives: ' + hearts();
+    distEl.textContent = 'Distance: ' + Math.floor(distance) + 'm / ' + FINISH + 'm';
+    if (status) statusEl.textContent = 'Status: ' + status;
+  }
+
+  function currentRoof(px) {
+    // px is world x; returns building whose span contains px, or null over a gap
+    for (var i = 0; i < buildings.length; i++) {
+      var b = buildings[i];
+      if (px >= b.x && px <= b.x + b.w) return b;
+    }
+    return null;
+  }
+
+  function doJump() {
+    if (state !== 'playing') return;
+    if (player.grounded || player.grinding) {
+      player.vy = -13.5;
+      player.grounded = false; player.grinding = false;
+      sJump();
+    }
+  }
+  function loseLife(reason) {
+    if (player.invuln > 0) return;
+    lives--; sHit(); player.invuln = 90;
+    updateHUD(reason);
+    if (lives <= 0) { endGame(false); return; }
+    // Respawn on the nearest roof behind / under the player
+    var roof = currentRoof(camX + player.x) || buildings[0];
+    player.y = roof.top - player.h; player.vy = 0; player.grounded = true; player.grinding = false;
+  }
+
+  var camX = 0;
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    if (won) { sWin(); winScoreEl.textContent = 'Final Score: ' + Math.floor(score); winScreen.classList.remove('hidden'); updateHUD('Finished!'); }
+    else { overScoreEl.textContent = 'Final Score: ' + Math.floor(score); overScreen.classList.remove('hidden'); updateHUD('Game Over'); }
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+    state = 'playing';
+    updateHUD('Skating!');
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+
+  // Keyboard, mouse, and touch controls
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      if (state === 'title') startGame(); else if (state === 'playing') doJump();
+      else startGame();
+    }
+    if (e.code === 'Enter' && state !== 'playing') startGame();
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (e.target && e.target.tagName === 'BUTTON') return;
+    if (state === 'playing') doJump();
+  });
+  canvas.addEventListener('click', function () { if (state === 'playing') doJump(); });
+  document.addEventListener('touchstart', function (e) {
+    if (e.target && e.target.tagName === 'BUTTON') return;
+    if (state === 'playing') { e.preventDefault(); doJump(); }
+  }, { passive: false });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (state === 'playing') doJump(); }, { passive: false });
+
+  function drawBackground() {
+    // Stars, moon, skyline silhouettes
+    ctx.fillStyle = '#fff';
+    for (var i = 0; i < 40; i++) {
+      var sx = (i * 173) % 900, sy = (i * 67) % 180;
+      ctx.globalAlpha = 0.5 + (i % 3) * 0.2;
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#ffe9a8';
+    ctx.beginPath(); ctx.arc(790, 60, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(20,22,60,0.55)';
+    for (var k = 0; k < 9; k++) {
+      var bx = k * 110 - (camX * 0.25 % 110);
+      ctx.fillRect(bx, 170 + (k % 3) * 30, 70, 300);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, 900, 460);
+    drawBackground();
+    // Buildings
+    for (var i = 0; i < buildings.length; i++) {
+      var b = buildings[i];
+      var sx = b.x - camX;
+      if (sx + b.w < -20 || sx > 920) continue;
+      ctx.fillStyle = b.finish ? '#2b3a67' : '#3a3f6e';
+      ctx.fillRect(sx, b.top, b.w, 460 - b.top);
+      ctx.fillStyle = '#ffd166';
+      ctx.fillRect(sx, b.top, b.w, 6);
+      // Windows
+      ctx.fillStyle = '#ffe9a8';
+      for (var wx = 14; wx < b.w - 20; wx += 36) {
+        for (var wy = b.top + 26; wy < 430; wy += 44) {
+          if (((wx + wy) % 72) === 0) ctx.fillRect(sx + wx, wy, 16, 20);
+        }
+      }
+      if (b.finish) {
+        // Checkered finish banner
+        for (var cx = 0; cx < 10; cx++) {
+          ctx.fillStyle = (cx % 2 === 0) ? '#fff' : '#111';
+          ctx.fillRect(sx + cx * 22, b.top - 58, 22, 22);
+          ctx.fillStyle = (cx % 2 === 0) ? '#111' : '#fff';
+          ctx.fillRect(sx + cx * 22, b.top - 36, 22, 22);
+        }
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.fillText('FINISH', sx + 60, b.top - 66);
+      }
+      // Rail
+      if (b.rail) {
+        ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 5; ctx.beginPath();
+        ctx.moveTo(sx + b.rail.dx, b.rail.y); ctx.lineTo(sx + b.rail.dx + b.rail.w, b.rail.y); ctx.stroke();
+        ctx.fillStyle = '#ffe14d';
+        ctx.fillRect(sx + b.rail.dx, b.rail.y + 4, 4, 30);
+        ctx.fillRect(sx + b.rail.dx + b.rail.w - 4, b.rail.y + 4, 4, 30);
+      }
+      // Obstacles
+      for (var oi = 0; oi < b.obstacles.length; oi++) {
+        var ob = b.obstacles[oi];
+        var ox = sx + ob.dx;
+        if (ob.kind === 'vent') {
+          ctx.fillStyle = '#c0392b'; ctx.fillRect(ox, b.top - ob.h, ob.w, ob.h);
+          ctx.fillStyle = '#e74c3c'; ctx.fillRect(ox, b.top - ob.h, ob.w, 8);
+        } else {
+          var bobY = b.top - 90 + Math.sin(frame / 12 + ob.dx) * 14;
+          ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(ox + 15, bobY, 18, 10, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(ox + 28, bobY - 2, 4, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      // Stars
+      for (var si = 0; si < b.stars.length; si++) {
+        var st = b.stars[si];
+        if (st.taken) continue;
+        var stx = sx + st.dx, sty = b.top - st.dy + Math.sin(frame / 15 + st.dx) * 4;
+        ctx.fillStyle = '#ffe14d'; ctx.font = '26px Arial'; ctx.fillText('★', stx, sty);
+      }
+    }
+    // Player: skater with board, leaning when grinding
+    var px = player.x, py = player.y;
+    ctx.save();
+    ctx.translate(px + 15, py + 22);
+    if (player.grinding) ctx.rotate(-0.15);
+    else if (!player.grounded) ctx.rotate(0.25);
+    ctx.fillStyle = '#222'; ctx.fillRect(-18, 16, 38, 5); // board
+    ctx.fillStyle = '#ff5e78'; ctx.fillRect(-8, -16, 16, 22); // body
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(0, -24, 9, 0, Math.PI * 2); ctx.fill(); // head
+    ctx.fillStyle = '#1a1430'; ctx.fillRect(-6, -32, 12, 5); // cap
+    ctx.restore();
+    if (player.invuln > 0 && Math.floor(frame / 6) % 2 === 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(px - 4, py - 4, 40, 52);
+    }
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    if (player.invuln > 0) player.invuln--;
+    speed = Math.min(8.5, 5.2 + distance / 900);
+    camX += speed;
+    distance += speed * 0.55;
+    score += speed * 0.28;
+    if (player.grinding) score += 1.2;
+
+    var worldX = camX + player.x;
+    var roof = currentRoof(worldX + 15);
+    var prevY = player.y;
+
+    // Gravity
+    player.vy += 0.75;
+    player.y += player.vy;
+
+    // Rail grinding: snap to rail when falling onto it
+    var grindingNow = false;
+    if (roof && roof.rail && player.vy >= 0) {
+      var railWorldX = roof.x + roof.rail.dx;
+      var railWorldX2 = railWorldX + roof.rail.w;
+      var railY = roof.rail.y - player.h;
+      if (worldX + 15 >= railWorldX && worldX + 15 <= railWorldX2 && prevY <= railY && player.y >= railY) {
+        player.y = railY; player.vy = 0; player.grounded = true; grindingNow = true;
+      }
+    }
+    player.grinding = grindingNow;
+
+    // Landing on a roof
+    if (!grindingNow && roof && player.vy >= 0) {
+      var roofY = roof.top - player.h;
+      if (prevY <= roofY && player.y >= roofY) {
+        player.y = roofY; player.vy = 0; player.grounded = true;
+      } else if (player.y > roofY && prevY >= roofY) {
+        // Already standing / walking on roof: keep grounded if not jumping
+        if (player.vy > 0 && player.y >= roofY && player.y <= roofY + 30) { player.y = roofY; player.vy = 0; player.grounded = true; }
+      }
+    }
+    // Walked off a roof edge -> airborne
+    if (player.grounded && !grindingNow) {
+      var under = currentRoof(worldX + 15);
+      if (!under) player.grounded = false;
+      else if (player.y < under.top - player.h - 2) player.grounded = false;
+    }
+    if (!player.grounded && !player.grinding && player.vy === 0 && roof) {
+      // Edge case: standing exactly at roof level keeps grounded
+    }
+
+    // Obstacle collisions
+    if (roof && player.invuln <= 0) {
+      for (var oi = 0; oi < roof.obstacles.length; oi++) {
+        var ob = roof.obstacles[oi];
+        var obX = roof.x + ob.dx;
+        var obTop = (ob.kind === 'bird') ? roof.top - 130 : roof.top - ob.h;
+        var obBottom = (ob.kind === 'bird') ? roof.top - 55 : roof.top;
+        if (worldX + 28 > obX && worldX + 2 < obX + ob.w && player.y + player.h > obTop && player.y < obBottom) {
+          loseLife('Hit an obstacle!');
+          break;
+        }
+      }
+    }
+    // Star collection
+    if (roof) {
+      for (var si = 0; si < roof.stars.length; si++) {
+        var st = roof.stars[si];
+        if (st.taken) continue;
+        var stX = roof.x + st.dx, stY = roof.top - st.dy;
+        if (Math.abs(worldX + 15 - stX) < 30 && Math.abs(player.y + 22 - stY) < 38) {
+          st.taken = true; score += 50; sStar();
+        }
+      }
+    }
+    // Fell into a gap
+    if (player.y > 470) { loseLife('Fell in a gap!'); }
+    // Win: reach finish building
+    var finishB = buildings[buildings.length - 1];
+    if (worldX >= finishB.x + 60) { score += 500; endGame(true); return; }
+    if (distance >= FINISH && worldX >= finishB.x) { endGame(true); return; }
+
+    updateHUD(player.grinding ? 'Grinding! +bonus' : 'Skating!');
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  resetGame();
+  state = 'title';
+  updateHUD('Ready');
+  loop();
+})();
+</script>
+</body>
+</html>

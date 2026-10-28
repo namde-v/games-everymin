@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Solar Orchard — Strategy / Solar Farm Planning</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0e1f14;color:#f2f5e9;font-family:Arial,Helvetica,sans-serif;text-align:center}
+  h1{margin:10px 0 2px;font-size:30px}
+  p{margin:6px 12px;line-height:1.45}
+  #wrap{max-width:760px;margin:0 auto;padding:10px 12px 24px}
+  #hud{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:10px 0}
+  .pill{background:#1e3a26;border:1px solid #4d7a57;border-radius:20px;padding:7px 12px;font-weight:bold;font-size:14px}
+  .pill b{color:#ffe066}
+  #tools{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:8px 0}
+  button{cursor:pointer;border:0;border-radius:10px;padding:11px 16px;font-size:15px;font-weight:bold;background:#ffd23f;color:#18220f}
+  button:hover{filter:brightness(1.08)} button.active{outline:3px solid #fff;background:#7ee787}
+  button.secondary{background:#2e5d3a;color:#fff}
+  canvas{display:block;margin:12px auto;background:#9cc184;border:4px solid #2f5d33;border-radius:12px;touch-action:none;max-width:100%;height:auto}
+  #msg{min-height:52px;background:#16291c;border:1px solid #3d6b47;border-radius:10px;padding:10px;margin:10px 0}
+  #screens{position:relative}
+  .screen{display:none;background:#142b1a;border:2px solid #5b8a5e;border-radius:14px;padding:20px;margin:12px auto;max-width:620px}
+  .screen.show{display:block}
+  .legend{font-size:14px;background:#203d25;border-radius:10px;padding:10px}
+  .big{font-size:42px;margin:6px 0}
+  #seasonBar{height:14px;background:#243b28;border-radius:8px;overflow:hidden;margin:8px 0}
+  #seasonFill{height:100%;width:16%;background:linear-gradient(90deg,#ffd23f,#7ee787)}
+  @media(max-width:520px){h1{font-size:24px}canvas{width:100%}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>☀️ Solar Orchard 🌳</h1>
+  <p>Strategy / Solar Farm Planning — grow clean energy without drying out your land.</p>
+
+  <div id="hud" aria-label="Game status">
+    <span class="pill">Score / Energy: <b id="energy">0</b> / 120</span>
+    <span class="pill">Coins: <b id="coins">100</b></span>
+    <span class="pill">Water: <b id="water">50</b></span>
+    <span class="pill">Lives: <b id="lives">❤️❤️❤️</b></span>
+    <span class="pill">Season: <b id="season">1 / 6 — Spring</b></span>
+    <span class="pill">Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="seasonBar"><div id="seasonFill"></div></div>
+
+  <div id="tools">
+    <button id="toolPanel" class="active">☀️ Panel (10 coins) [1]</button>
+    <button id="toolTree">🌳 Tree (5 coins) [2]</button>
+    <button id="toolErase">🧹 Clear (free) [3]</button>
+    <button id="nextBtn" class="secondary">▶ End Season [N]</button>
+    <button id="restartBtn" class="secondary">↻ Restart [R]</button>
+  </div>
+
+  <div id="screens">
+    <div id="titleScreen" class="screen show">
+      <div class="big">☀️🌳</div>
+      <h2>Solar Orchard</h2>
+      <p><strong>How to Play:</strong> Choose a tool, then tap or click a square on the 8×8 farm grid. Panels make energy; trees keep water in the soil. A tree next to a panel shades it and cuts that panel's energy — so plan sunny rows for panels and shady groves for trees.</p>
+      <p>Each season you may place up to <strong>8 tiles</strong>. Press <strong>End Season</strong> to harvest energy and water. Reach <strong>120 energy before the end of Season 6</strong> to win. If water falls below zero you lose a life; lose all 3 lives and the farm fails.</p>
+      <p class="legend">☀️ Panel: +5 Summer, +4 Spring/Autumn, +2 Winter (minus 2 if shaded) &nbsp;|&nbsp; 🌳 Tree: +3 water per season &nbsp;|&nbsp; Keyboard: 1/2/3 tools, N next season, R restart</p>
+      <button id="startBtn" style="font-size:20px;padding:14px 28px">▶ Start Game</button>
+    </div>
+    <div id="winScreen" class="screen">
+      <div class="big">🏆☀️</div>
+      <h2>You Win!</h2>
+      <p id="winText">Your orchard powers the valley!</p>
+      <button class="restart" style="font-size:19px;padding:13px 26px">↻ Play Again</button>
+    </div>
+    <div id="overScreen" class="screen">
+      <div class="big">💧🥀</div>
+      <h2>Game Over</h2>
+      <p id="overText">The farm ran out of seasons.</p>
+      <button class="restart" style="font-size:19px;padding:13px 26px">↻ Try Again</button>
+    </div>
+  </div>
+
+  <canvas id="game" width="520" height="520" aria-label="Solar farm grid"></canvas>
+  <div id="msg">Pick a tool and plant your first panel. Sunlight is strongest in Summer — save some open space for it!</div>
+  <p style="font-size:13px;opacity:.85">Mouse: click a cell &nbsp;•&nbsp; Touch: tap a cell &nbsp;•&nbsp; Keyboard: 1 Panel, 2 Tree, 3 Clear, N End Season, R Restart</p>
+</div>
+<script>
+(function(){
+  var canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+  var SIZE=8, CELL=65, grid=[], season=1, energy=0, coins=100, water=50, lives=3, placed=0, started=false, over=false;
+  var tool='panel', seasons=['Spring','Summer','Autumn','Winter','Spring','Summer'], base={Spring:4,Summer:5,Autumn:4,Winter:2};
+  var audioCtx=null;
+  function beep(f,d){ if(!audioCtx) return; try{ var o=audioCtx.createOscillator(), g=audioCtx.createGain(); o.type='sine'; o.frequency.value=f; g.gain.value=0.08; o.connect(g); g.connect(audioCtx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+d); o.stop(audioCtx.currentTime+d);}catch(e){} }
+  function newGrid(){ grid=[]; for(var y=0;y<SIZE;y++){ var row=[]; for(var x=0;x<SIZE;x++) row.push(''); grid.push(row);} }
+  function setTool(t){ tool=t; ['toolPanel','toolTree','toolErase'].forEach(function(id){ document.getElementById(id).classList.remove('active'); }); document.getElementById(t==='panel'?'toolPanel':t==='tree'?'toolTree':'toolErase').classList.add('active'); }
+  function shadeAt(x,y){ var dirs=[[1,0],[-1,0],[0,1],[0,-1]]; for(var i=0;i<dirs.length;i++){ var nx=x+dirs[i][0], ny=y+dirs[i][1]; if(nx>=0&&nx<SIZE&&ny>=0&&ny<SIZE&&grid[ny][nx]==='tree') return true; } return false; }
+  function counts(){ var p=0,t=0; for(var y=0;y<SIZE;y++) for(var x=0;x<SIZE;x++){ if(grid[y][x]==='panel') p++; if(grid[y][x]==='tree') t++; } return {p:p,t:t}; }
+  function updateHUD(){ document.getElementById('energy').textContent=energy; document.getElementById('coins').textContent=coins; document.getElementById('water').textContent=water; document.getElementById('lives').textContent='❤️'.repeat(Math.max(0,lives)); document.getElementById('season').textContent=season+' / 6 — '+seasons[season-1]; document.getElementById('seasonFill').style.width=(season/6*100)+'%'; document.getElementById('status').textContent=over?'Finished':(started?'Season '+season+' — '+placed+'/8 placed':'Ready'); }
+  function show(id){ ['titleScreen','winScreen','overScreen'].forEach(function(s){ document.getElementById(s).classList.remove('show'); }); if(id) document.getElementById(id).classList.add('show'); }
+  function draw(){
+    ctx.clearRect(0,0,520,520);
+    for(var y=0;y<SIZE;y++) for(var x=0;x<SIZE;x++){
+      var px=x*CELL, py=y*CELL, v=grid[y][x];
+      ctx.fillStyle=(x+y)%2? '#8ab86a':'#a2cc7d'; ctx.fillRect(px+2,py+2,CELL-4,CELL-4);
+      ctx.strokeStyle='#2f5d33'; ctx.strokeRect(px+2,py+2,CELL-4,CELL-4);
+      ctx.font='34px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      if(v==='panel'){ ctx.fillStyle='#173a5e'; ctx.fillRect(px+10,py+14,CELL-20,CELL-28); ctx.fillStyle='#ffd23f'; ctx.fillText('☀',px+CELL/2,py+CELL/2); if(shadeAt(x,y)){ ctx.font='16px Arial'; ctx.fillText('◐ shaded',px+CELL/2,py+CELL-12); } }
+      else if(v==='tree'){ ctx.fillText('🌳',px+CELL/2,py+CELL/2); }
+    }
+    ctx.font='bold 14px Arial'; ctx.fillStyle='#123'; ctx.textAlign='left';
+    ctx.fillText('Season '+season+': '+seasons[season-1]+'  •  Placed this season: '+placed+'/8',10,512);
+  }
+  function placeAt(x,y){
+    if(!started||over) return;
+    if(x<0||x>=SIZE||y<0||y>=SIZE) return;
+    var cur=grid[y][x];
+    if(tool==='erase'){ if(cur){ grid[y][x]=''; beep(220,0.12); document.getElementById('msg').textContent='Cleared a square. Reuse it wisely!'; } draw(); updateHUD(); return; }
+    if(cur) { document.getElementById('msg').textContent='That square is already used — clear it first.'; beep(140,0.12); return; }
+    if(placed>=8){ document.getElementById('msg').textContent='You have placed 8 tiles this season. End the season to place more.'; beep(140,0.15); return; }
+    var cost=tool==='panel'?10:5;
+    if(coins<cost){ document.getElementById('msg').textContent='Not enough coins for that tile.'; beep(140,0.15); return; }
+    coins-=cost; grid[y][x]=tool; placed++; beep(tool==='panel'?660:520,0.15);
+    document.getElementById('msg').textContent=(tool==='panel'?'Panel planted! Keep it away from trees for full sun.':'Tree planted! It will store water every season.');
+    draw(); updateHUD();
+  }
+  function cellFromEvent(e){ var r=canvas.getBoundingClientRect(); var cx=(e.clientX-r.left)*(canvas.width/r.width), cy=(e.clientY-r.top)*(canvas.height/r.height); return {x:Math.floor(cx/CELL), y:Math.floor(cy/CELL)}; }
+  function endSeason(){
+    if(!started||over) return;
+    var c=counts(), gained=0, name=seasons[season-1];
+    for(var y=0;y<SIZE;y++) for(var x=0;x<SIZE;x++) if(grid[y][x]==='panel'){ var v=base[name]; if(shadeAt(x,y)) v=Math.max(0,v-2); gained+=v; }
+    water += c.t*3 - c.p*1; energy += gained; placed=0;
+    var note='Season '+season+' ('+name+'): +'+gained+' energy from '+c.p+' panels, '+(c.t*3-c.p)+' water from '+c.t+' trees.';
+    beep(880,0.2);
+    if(water<0){ lives--; water=20; note+=' Drought! You lost a life.'; beep(180,0.3); }
+    if(energy>=120){ over=true; show('winScreen'); document.getElementById('winText').textContent='You reached '+energy+' energy in season '+season+' with '+lives+' lives left. Your orchard powers the valley!'; document.getElementById('status').textContent='You Win!'; beep(990,0.4); draw(); updateHUD(); return; }
+    if(lives<=0){ over=true; show('overScreen'); document.getElementById('overText').textContent='Drought ended the farm at '+energy+' / 120 energy.'; draw(); updateHUD(); return; }
+    if(season>=6){ over=true; show('overScreen'); document.getElementById('overText').textContent='After 6 seasons you reached '+energy+' / 120 energy. Plan more sun and less shade next time!'; draw(); updateHUD(); return; }
+    season++; document.getElementById('msg').textContent=note+' Now in '+seasons[season-1]+'. Place up to 8 more tiles.';
+    draw(); updateHUD();
+  }
+  function startGame(){
+    if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+    if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume();
+    newGrid(); season=1; energy=0; coins=100; water=50; lives=3; placed=0; started=true; over=false; show(null);
+    document.getElementById('msg').textContent='Season 1 — Spring! Place up to 8 tiles, then end the season.';
+    beep(740,0.2); draw(); updateHUD();
+  }
+  function restart(){ startGame(); }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.querySelectorAll('.restart').forEach(function(b){ b.addEventListener('click', restart); });
+  document.getElementById('toolPanel').addEventListener('click', function(){ setTool('panel'); });
+  document.getElementById('toolTree').addEventListener('click', function(){ setTool('tree'); });
+  document.getElementById('toolErase').addEventListener('click', function(){ setTool('erase'); });
+  document.getElementById('nextBtn').addEventListener('click', endSeason);
+  document.getElementById('restartBtn').addEventListener('click', restart);
+  canvas.addEventListener('mousedown', function(e){ var c=cellFromEvent(e); placeAt(c.x,c.y); });
+  canvas.addEventListener('click', function(e){ /* click support for assistive input; placement handled on mousedown */ });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); var t=e.touches[0]; var c=cellFromEvent(t); placeAt(c.x,c.y); }, {passive:false});
+  document.addEventListener('keydown', function(e){
+    var k=e.key.toLowerCase();
+    if(k==='1') setTool('panel'); else if(k==='2') setTool('tree'); else if(k==='3') setTool('erase');
+    else if(k==='n') endSeason(); else if(k==='r') restart();
+    else if(k==='enter' && !started) startGame();
+  });
+  newGrid(); updateHUD(); draw();
+  var last=0;
+  function loop(ts){ requestAnimationFrame(loop); if(ts-last>500){ last=ts; draw(); } }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
