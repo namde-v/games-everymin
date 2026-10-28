@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pogo Pioneer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1033; font-family: Arial, Helvetica, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; touch-action: none; }
+  #wrap { position: relative; width: 480px; max-width: 98vw; }
+  canvas { display: block; width: 100%; height: 640px; background: linear-gradient(#2b1a5e, #12081f); border: 3px solid #ffd23f; border-radius: 12px; }
+  #hud { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: space-between; color: #fff; font-weight: bold; font-size: 16px; text-shadow: 1px 1px 2px #000; pointer-events: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,5,25,0.82); color: #fff; padding: 24px; border-radius: 12px; }
+  .overlay h1 { font-size: 44px; color: #ffd23f; margin-bottom: 8px; }
+  .overlay h2 { font-size: 34px; color: #ff5d8f; margin-bottom: 10px; }
+  .overlay p { line-height: 1.55; margin: 6px 0; max-width: 380px; }
+  .overlay .small { font-size: 13px; color: #d8d0ff; }
+  button { margin-top: 16px; padding: 13px 30px; font-size: 20px; font-weight: bold; border: none; border-radius: 10px; background: #ffd23f; color: #241238; cursor: pointer; }
+  button:hover { background: #ffe27a; }
+  #touch { position: absolute; bottom: 12px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 14px; }
+  #touch button { width: 76px; height: 56px; padding: 0; font-size: 28px; background: rgba(255,255,255,0.22); color: #fff; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="480" height="640"></canvas>
+  <div id="hud"><span id="score">Score: 0</span><span id="height">Height: 0m</span><span id="lives">Lives: 3</span></div>
+
+  <div id="title" class="overlay">
+    <h1>Pogo Pioneer</h1>
+    <p><strong>How to Play</strong></p>
+    <p>Your pogo hero bounces automatically! Steer left and right in mid-air to land on platforms, grab stars, and climb as high as you can.</p>
+    <p>Watch out: platforms shrink as you climb, spikes end a bounce, and falling into a gap costs a life.</p>
+    <p>Controls: <strong>Arrow keys / A &amp; D</strong> to steer, <strong>mouse</strong> to steer toward the pointer, <strong>touch</strong> left/right side of the screen. Reach 500m to WIN!</p>
+    <p class="small">Collect stars for bonus points. A perfect centre landing gives a super bounce.</p>
+    <button id="startBtn">Start</button>
+  </div>
+
+  <div id="over" class="overlay hidden">
+    <h2 id="overTitle">Game Over</h2>
+    <p id="overText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+
+  <div id="touch">
+    <button id="leftBtn" aria-label="Move left">&#8592;</button>
+    <button id="rightBtn" aria-label="Move right">&#8594;</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var heightEl = document.getElementById('height');
+  var livesEl = document.getElementById('lives');
+  var titleEl = document.getElementById('title');
+  var overEl = document.getElementById('over');
+  var overTitle = document.getElementById('overTitle');
+  var overText = document.getElementById('overText');
+
+  var state = 'title'; // title | playing | over
+  var player, platforms, stars, spikes, cameraY, maxHeight, score, lives;
+  var keys = {}, pointerX = null, touchDir = 0, lastTime = 0;
+  var audioCtx = null;
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'square';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function reset() {
+    player = { x: W / 2, y: H - 120, vx: 0, vy: 0, w: 26, h: 44, grounded: false };
+    platforms = [];
+    stars = [];
+    spikes = [];
+    // Ground platform plus a staircase of platforms upward (negative y = higher).
+    platforms.push({ x: 40, y: H - 60, w: 400, h: 18, solid: true });
+    var y = H - 150;
+    for (var i = 0; i < 60; i++) {
+      var w = Math.max(52, 120 - Math.floor(i / 8) * 10);
+      var x = 20 + Math.random() * (W - 40 - w);
+      platforms.push({ x: x, y: y, w: w, h: 16, solid: true });
+      if (i % 3 === 1) stars.push({ x: x + w / 2, y: y - 34, taken: false });
+      if (i > 6 && i % 5 === 2) spikes.push({ x: x + w / 2 - 14, y: y - 12, w: 28 });
+      y -= 82 + Math.random() * 28;
+    }
+    cameraY = 0; maxHeight = 0; score = 0; lives = 3;
+    player.vy = -13;
+    updateHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = 'Score: ' + score;
+    heightEl.textContent = 'Height: ' + Math.floor(maxHeight) + 'm';
+    livesEl.textContent = 'Lives: ' + lives;
+  }
+
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleEl.classList.add('hidden');
+    overEl.classList.add('hidden');
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(win) {
+    state = 'over';
+    overTitle.textContent = win ? 'You Win!' : 'Game Over';
+    overText.textContent = win
+      ? 'You climbed 500m like a true Pogo Pioneer! Final score: ' + score + '.'
+      : 'The pogo ran out of bounces. Final score: ' + score + ', height: ' + Math.floor(maxHeight) + 'm.';
+    overEl.classList.remove('hidden');
+    beep(win ? 880 : 160, 0.5, win ? 'sine' : 'sawtooth');
+  }
+
+  function loseLife() {
+    lives--;
+    beep(140, 0.3, 'sawtooth');
+    updateHud();
+    if (lives <= 0) { endGame(false); return; }
+    // Respawn on the nearest platform below the fall point.
+    player.x = W / 2; player.y = H - 140 - cameraY; player.vx = 0; player.vy = -13;
+    cameraY = Math.max(0, cameraY - 100);
+  }
+
+  function update(dt) {
+    var speed = 5.2;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) player.vx = -speed;
+    else if (keys['ArrowRight'] || keys['d'] || keys['D']) player.vx = speed;
+    else if (touchDir !== 0) player.vx = speed * touchDir;
+    else if (pointerX !== null) player.vx = (pointerX < player.x - 8 ? -speed : (pointerX > player.x + 8 ? speed : 0));
+    else player.vx *= 0.85;
+
+    player.x += player.vx;
+    if (player.x < 8) player.x = 8;
+    if (player.x > W - 8 - player.w) player.x = W - 8 - player.w;
+
+    player.vy += 0.55; // gravity
+    var prevBottom = player.y + player.h;
+    player.y += player.vy;
+
+    // Platform landing: only when falling and crossing the platform top.
+    if (player.vy > 0) {
+      for (var i = 0; i < platforms.length; i++) {
+        var p = platforms[i];
+        if (player.x + player.w > p.x && player.x < p.x + p.w &&
+            prevBottom <= p.y + 4 && player.y + player.h >= p.y) {
+          player.y = p.y - player.h;
+          var centre = Math.abs((player.x + player.w / 2) - (p.x + p.w / 2));
+          var superBounce = centre < 14;
+          player.vy = superBounce ? -16.5 : -13.5;
+          score += superBounce ? 25 : 10;
+          beep(superBounce ? 720 : 440, 0.12, 'square');
+          break;
+        }
+      }
+    }
+
+    // Stars
+    for (var s = 0; s < stars.length; s++) {
+      var st = stars[s];
+      if (!st.taken && Math.abs(player.x + player.w / 2 - st.x) < 30 && Math.abs(player.y + player.h / 2 - st.y) < 32) {
+        st.taken = true; score += 50; beep(980, 0.15, 'sine');
+      }
+    }
+    // Spikes: a bounce onto spikes ends the life.
+    for (var k = 0; k < spikes.length; k++) {
+      var sp = spikes[k];
+      if (player.x + player.w > sp.x && player.x < sp.x + sp.w &&
+          player.y + player.h > sp.y && player.y < sp.y + 14) {
+        loseLife();
+        if (state !== 'playing') return;
+        break;
+      }
+    }
+
+    // Camera follows upward progress; height in metres.
+    var screenY = player.y + cameraY;
+    if (screenY < H * 0.35) cameraY += (H * 0.35 - screenY);
+    var h = Math.max(0, (H - 120 - player.y) / 10);
+    if (h > maxHeight) { maxHeight = h; score = Math.max(score, Math.floor(maxHeight) * 2 + score % 1); }
+    score = Math.max(score, Math.floor(maxHeight) * 2);
+    // Keep score monotonic with star/bounce bonuses: recompute display score from base + bonuses is complex,
+    // so instead track height bonus separately below by only raising it.
+    updateHud();
+
+    if (maxHeight >= 500) { endGame(true); return; }
+    // Fell below the visible bottom.
+    if (player.y + cameraY > H + 60) loseLife();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky dots / clouds parallax.
+    ctx.fillStyle = '#ffffff';
+    for (var i = 0; i < 24; i++) {
+      var cy = ((i * 173 + cameraY * 0.3) % (H + 80)) - 40;
+      ctx.globalAlpha = 0.25;
+      ctx.beginPath(); ctx.arc((i * 97) % W, cy, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = '#7bd389';
+    platforms.forEach(function (p) {
+      var y = p.y + cameraY;
+      if (y < -30 || y > H + 30) return;
+      ctx.fillRect(p.x, y, p.w, p.h);
+      ctx.fillStyle = '#4caf50'; ctx.fillRect(p.x, y, p.w, 5); ctx.fillStyle = '#7bd389';
+    });
+    ctx.fillStyle = '#ffd23f';
+    stars.forEach(function (st) {
+      if (st.taken) return;
+      var y = st.y + cameraY;
+      if (y < -30 || y > H + 30) return;
+      ctx.beginPath(); ctx.arc(st.x, y, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('\u2605', st.x, y + 5); ctx.fillStyle = '#ffd23f';
+    });
+    ctx.fillStyle = '#ff3b3b';
+    spikes.forEach(function (sp) {
+      var y = sp.y + cameraY;
+      if (y < -30 || y > H + 30) return;
+      ctx.beginPath();
+      ctx.moveTo(sp.x, y + 12); ctx.lineTo(sp.x + 7, y); ctx.lineTo(sp.x + 14, y + 12);
+      ctx.lineTo(sp.x + 21, y); ctx.lineTo(sp.x + 28, y + 12);
+      ctx.closePath(); ctx.fill();
+    });
+
+    // Pogo hero: body, head, pogo stick and spring.
+    var py = player.y + cameraY;
+    ctx.fillStyle = '#ff5d8f';
+    ctx.fillRect(player.x, py, player.w, 30);
+    ctx.fillStyle = '#ffe1ec';
+    ctx.beginPath(); ctx.arc(player.x + player.w / 2, py - 4, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#241238';
+    ctx.fillRect(player.x + 7, py - 8, 3, 3); ctx.fillRect(player.x + 16, py - 8, 3, 3);
+    ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(player.x + player.w / 2, py + 30); ctx.lineTo(player.x + player.w / 2, py + player.h); ctx.stroke();
+    ctx.fillStyle = '#333'; ctx.fillRect(player.x + player.w / 2 - 8, py + player.h - 4, 16, 6);
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(32, now - lastTime); lastTime = now;
+    update(dt);
+    if (state === 'playing') { draw(); requestAnimationFrame(loop); }
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if ((e.key === ' ' || e.key === 'Enter') && state !== 'playing') startGame();
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousedown', function (e) {
+    initAudio();
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+  });
+  canvas.addEventListener('mouseup', function () { pointerX = null; });
+  canvas.addEventListener('click', function () { initAudio(); });
+  document.getElementById('leftBtn').addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); touchDir = -1; }, { passive: false });
+  document.getElementById('rightBtn').addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); touchDir = 1; }, { passive: false });
+  document.getElementById('leftBtn').addEventListener('touchend', function () { touchDir = 0; });
+  document.getElementById('rightBtn').addEventListener('touchend', function () { touchDir = 0; });
+  document.getElementById('leftBtn').addEventListener('mousedown', function () { touchDir = -1; });
+  document.getElementById('rightBtn').addEventListener('mousedown', function () { touchDir = 1; });
+  document.addEventListener('touchstart', function () { initAudio(); }, { passive: true });
+
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>

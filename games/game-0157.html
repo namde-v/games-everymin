@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mosaic Maker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1430; color: #f5f0ff; font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px;
+    -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+  h1 { font-size: 30px; margin: 6px 0 2px; color: #ffd166; text-align: center; }
+  p.sub { color: #c9b8ff; font-size: 14px; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 6px 0; width: 100%; max-width: 520px; }
+  .pill { background: #2d2352; border: 1px solid #5a4a9e; border-radius: 999px; padding: 5px 12px; font-size: 14px; font-weight: bold; }
+  .pill b { color: #ffd166; }
+  canvas { background: #241c48; border: 3px solid #6a5acd; border-radius: 12px; display: block; max-width: 100%; height: auto; touch-action: none; }
+  #overlay { position: fixed; inset: 0; background: rgba(10,6,24,.88); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  #panel { background: #2d2352; border: 2px solid #8b7bd8; border-radius: 16px; padding: 24px; max-width: 480px; width: 100%; text-align: center; }
+  #panel h2 { color: #ffd166; font-size: 28px; margin-bottom: 10px; }
+  #panel p, #panel li { font-size: 15px; line-height: 1.55; color: #e8e0ff; text-align: left; }
+  #panel ul { margin: 10px 0 14px 20px; }
+  #panel .big { font-size: 20px; text-align: center; margin: 10px 0; }
+  button { background: #ffd166; color: #241c48; border: none; border-radius: 10px; padding: 12px 22px; font-size: 17px; font-weight: bold; cursor: pointer; margin: 6px 4px; }
+  button:hover { background: #ffdf8a; }
+  button.secondary { background: #6a5acd; color: #fff; }
+  #palette { display: flex; gap: 8px; justify-content: center; margin: 10px 0 4px; flex-wrap: wrap; }
+  .swatch { width: 44px; height: 44px; border-radius: 10px; border: 3px solid transparent; cursor: pointer; }
+  .swatch.sel { border-color: #fff; transform: scale(1.1); }
+  .swatch.erase { background: #241c48; color: #fff; font-size: 22px; display: flex; align-items: center; justify-content: center; }
+  #msg { min-height: 22px; font-weight: bold; color: #ffd166; text-align: center; margin-top: 4px; }
+  #hint { font-size: 13px; color: #c9b8ff; text-align: center; margin-top: 2px; }
+</style>
+</head>
+<body>
+<h1>🧩 Mosaic Maker</h1>
+<p class="sub">Memorize the pattern. Rebuild it tile by tile.</p>
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Puzzle: <b id="puzzle">1 / 5</b></div>
+  <div class="pill">Moves: <b id="moves">40</b></div>
+  <div class="pill">Time: <b id="time">60s</b></div>
+  <div class="pill">Lives: <b id="lives">❤️❤️❤️</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+</div>
+<canvas id="game" width="480" height="480"></canvas>
+<div id="palette"></div>
+<div id="msg">Pick a color, then tap a cell to place it.</div>
+<div id="hint">Keys: 1-6 pick a color, 0 = eraser, R = restart, Enter = start. Click or tap the grid to place tiles.</div>
+
+<div id="overlay">
+  <div id="panel">
+    <h2 id="panelTitle">🧩 Mosaic Maker</h2>
+    <div id="panelBody">
+      <p><b>How to Play:</b></p>
+      <ul>
+        <li>A target mosaic pattern flashes on screen for a few seconds. Memorize it!</li>
+        <li>Then the grid clears. Pick a color from the palette and tap cells to recreate the pattern exactly.</li>
+        <li>Each puzzle has a move limit and a time limit. Finish before either runs out.</li>
+        <li>Tap <b>Check</b> when you think it matches, or finish all 5 puzzles to win.</li>
+        <li>Wrong or timed-out puzzles cost a life. Lose all 3 lives and it is Game Over.</li>
+      </ul>
+      <p><b>Controls:</b> Mouse click, touch tap, or keys 1-6 for colors, 0 for eraser, R to restart.</p>
+      <p><b>Scoring:</b> +10 per correct cell, +50 puzzle bonus, +time bonus. Accuracy matters!</p>
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var puzzleEl = document.getElementById('puzzle');
+  var movesEl = document.getElementById('moves');
+  var timeEl = document.getElementById('time');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var overlay = document.getElementById('overlay');
+  var panelTitle = document.getElementById('panelTitle');
+  var panelBody = document.getElementById('panelBody');
+  var startBtn = document.getElementById('startBtn');
+  var howBtn = document.getElementById('howBtn');
+  var paletteEl = document.getElementById('palette');
+
+  var COLORS = ['#e63946', '#f4a261', '#ffd166', '#2a9d8f', '#4361ee', '#9b5de5'];
+  var NAMES = ['Red', 'Orange', 'Yellow', 'Teal', 'Blue', 'Purple'];
+  var GRID = 8, CELL = 60;
+  var TOTAL_PUZZLES = 5;
+  var state = 'title'; // title | memorize | play | win | over
+  var score = 0, puzzle = 1, lives = 3, moves = 0, timeLeft = 60;
+  var target = [], board = [], selected = 0, memorizeLeft = 0, lastTick = 0, flash = 0, shake = 0;
+  var lastPlaceCell = '', lastPlaceTime = 0;
+  var audioCtx = null;
+
+  function beep(freq, dur, type) {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable, play silently */ }
+  }
+  function sndGood() { beep(660, 0.12, 'sine'); setTimeout(function () { beep(880, 0.15, 'sine'); }, 90); }
+  function sndBad() { beep(180, 0.25, 'sawtooth'); }
+  function sndWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.2, 'triangle'); }, i * 120); }); }
+
+  function newTarget() {
+    target = [];
+    var paletteSize = puzzle < 3 ? 4 : 6;
+    // Symmetric-ish random mosaic: mirror a random half for a pleasing pattern.
+    for (var r = 0; r < GRID; r++) {
+      var row = [];
+      for (var c = 0; c < GRID; c++) row.push(-1);
+      target.push(row);
+    }
+    var blobs = 4 + puzzle;
+    for (var b = 0; b < blobs; b++) {
+      var col = Math.floor(Math.random() * paletteSize);
+      var sr = Math.floor(Math.random() * GRID), sc = Math.floor(Math.random() * 4);
+      var len = 2 + Math.floor(Math.random() * 4);
+      for (var i = 0; i < len; i++) {
+        var rr = sr + (Math.random() < 0.5 ? 1 : -1) * Math.floor(Math.random() * 2);
+        var cc = sc + Math.floor(Math.random() * 2);
+        if (rr >= 0 && rr < GRID && cc >= 0 && cc < 4) {
+          target[rr][cc] = col;
+          target[rr][GRID - 1 - cc] = col; // mirror for a mosaic feel
+        }
+      }
+    }
+    // Fill remaining cells with a light background color choice (use -1 = empty, keep it)
+    board = [];
+    for (var y = 0; y < GRID; y++) { var br = []; for (var x = 0; x < GRID; x++) br.push(-1); board.push(br); }
+  }
+
+  function startPuzzle() {
+    newTarget();
+    moves = 40; timeLeft = 60; memorizeLeft = 5; lastTick = performance.now();
+    state = 'memorize';
+    statusEl.textContent = 'Memorize!';
+    msgEl.textContent = 'Memorize the pattern! It hides in a few seconds...';
+    beep(520, 0.12, 'triangle');
+  }
+
+  function startGame() {
+    score = 0; puzzle = 1; lives = 3;
+    overlay.style.display = 'none';
+    startPuzzle();
+    updateHUD();
+  }
+
+  function checkPuzzle() {
+    var correct = 0, total = GRID * GRID;
+    for (var r = 0; r < GRID; r++) for (var c = 0; c < GRID; c++) if (board[r][c] === target[r][c]) correct++;
+    var accuracy = correct / total;
+    var gained = Math.round(correct * 10 + (accuracy >= 0.95 ? 50 : 0) + Math.max(0, timeLeft));
+    score += gained;
+    if (accuracy >= 0.9) {
+      msgEl.textContent = 'Puzzle complete! Accuracy ' + Math.round(accuracy * 100) + '% — +' + gained + ' points.';
+      sndGood(); flash = 1;
+      if (puzzle >= TOTAL_PUZZLES) { endGame(true); }
+      else { puzzle++; setTimeout(startPuzzle, 1400); }
+    } else {
+      lives--; shake = 8; sndBad();
+      msgEl.textContent = 'Only ' + Math.round(accuracy * 100) + '% correct. A life is lost!';
+      if (lives <= 0) { endGame(false); }
+      else { setTimeout(startPuzzle, 1400); }
+    }
+    updateHUD();
+  }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    statusEl.textContent = won ? 'You Win!' : 'Game Over';
+    panelTitle.textContent = won ? '🎉 You Win!' : '💔 Game Over';
+    panelBody.innerHTML = '<p class="big">' + (won ? 'You rebuilt every mosaic!' : 'Out of lives. Better luck next time!') + '</p>' +
+      '<p class="big">Final Score: <b>' + score + '</b> &nbsp;|&nbsp; Puzzles reached: ' + puzzle + ' / ' + TOTAL_PUZZLES + '</p>' +
+      '<p>Press Restart to play again. Your score is kept on this screen only — no data leaves this device.</p>';
+    startBtn.textContent = '↻ Restart';
+    overlay.style.display = 'flex';
+    if (won) sndWin();
+  }
+
+  function showHow() {
+    panelTitle.textContent = '🧩 How to Play';
+    panelBody.innerHTML = '<ul>' +
+      '<li>Study the target mosaic while it is shown.</li>' +
+      '<li>Pick a color below the board, then tap cells to place tiles.</li>' +
+      '<li>Tap the eraser (✕) to clear a cell. Each placement costs 1 move.</li>' +
+      '<li>Tap Check (or fill the board) to score the puzzle. 90%+ accuracy passes.</li>' +
+      '<li>Finish all 5 puzzles before your 3 lives run out to win.</li></ul>' +
+      '<p><b>Controls:</b> mouse, touch, or keys 1-6 / 0 / R / Enter.</p>';
+    startBtn.textContent = '▶ Start Game';
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    puzzleEl.textContent = puzzle + ' / ' + TOTAL_PUZZLES;
+    movesEl.textContent = moves;
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft)) + 's';
+    livesEl.textContent = '❤️'.repeat(Math.max(0, lives)) || '—';
+    if (state === 'memorize') statusEl.textContent = 'Memorize!';
+    else if (state === 'play') statusEl.textContent = 'Build it!';
+  }
+
+  function drawCell(r, c, val, ghost) {
+    var x = c * CELL, y = r * CELL;
+    ctx.fillStyle = val >= 0 ? COLORS[val] : '#171233';
+    ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4);
+    ctx.strokeStyle = ghost ? '#ffd166' : '#4a3f8a';
+    ctx.lineWidth = ghost ? 3 : 1;
+    ctx.strokeRect(x + 2, y + 2, CELL - 4, CELL - 4);
+    if (val >= 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(x + 2, y + 2, CELL - 4, 12);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    var ox = shake ? (Math.random() - 0.5) * shake : 0;
+    ctx.save(); ctx.translate(ox, 0);
+    var show = (state === 'memorize') ? target : board;
+    for (var r = 0; r < GRID; r++) for (var c = 0; c < GRID; c++) drawCell(r, c, show[r][c], false);
+    if (state === 'memorize') {
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, 0, canvas.width, 34);
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('MEMORIZE — ' + Math.ceil(memorizeLeft) + 's', canvas.width / 2, 24);
+    }
+    if (flash > 0) { ctx.fillStyle = 'rgba(255,209,102,' + (flash * 0.35) + ')'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    ctx.restore();
+    // Check button drawn as HUD text under canvas via DOM is separate; draw a check strip
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    if (state === 'play') ctx.fillText('Tap CHECK below the palette when done — or tap cells to keep building', canvas.width / 2, canvas.height - 8);
+  }
+
+  function loop(now) {
+    if (state === 'memorize') {
+      var dt = (now - lastTick) / 1000; lastTick = now;
+      memorizeLeft -= dt;
+      if (memorizeLeft <= 0) { state = 'play'; statusEl.textContent = 'Build it!'; msgEl.textContent = 'Now rebuild it from memory!'; }
+    } else if (state === 'play') {
+      var dt2 = (now - lastTick) / 1000; lastTick = now;
+      timeLeft -= dt2;
+      if (timeLeft <= 0) {
+        lives--; shake = 8; sndBad();
+        msgEl.textContent = 'Time ran out! A life is lost.';
+        if (lives <= 0) endGame(false); else setTimeout(startPuzzle, 1200);
+      }
+      if (moves <= 0 && state === 'play') { msgEl.textContent = 'Out of moves — checking your mosaic...'; checkPuzzle(); }
+    }
+    if (flash > 0) flash -= 0.03;
+    if (shake > 0) shake -= 0.5;
+    updateHUD();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function placeAt(clientX, clientY) {
+    if (state !== 'play') return;
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (canvas.width / rect.width);
+    var y = (clientY - rect.top) * (canvas.height / rect.height);
+    var c = Math.floor(x / CELL), r = Math.floor(y / CELL);
+    if (r < 0 || r >= GRID || c < 0 || c >= GRID) return;
+    // Dedupe: mouse fires mousedown, pointerdown and click for one press.
+    var now = performance.now();
+    if (lastPlaceCell === r + ',' + c && now - lastPlaceTime < 300) return;
+    lastPlaceCell = r + ',' + c; lastPlaceTime = now;
+    if (moves <= 0) return;
+    board[r][c] = selected;
+    moves--;
+    beep(440 + selected * 60, 0.07, 'square');
+    updateHUD();
+  }
+
+  function buildPalette() {
+    paletteEl.innerHTML = '';
+    COLORS.forEach(function (col, i) {
+      var d = document.createElement('div');
+      d.className = 'swatch' + (i === selected ? ' sel' : '');
+      d.style.background = col; d.title = NAMES[i];
+      d.addEventListener('click', function () { selected = i; beep(500 + i * 50, 0.06, 'sine'); buildPalette(); });
+      paletteEl.appendChild(d);
+    });
+    var er = document.createElement('div');
+    er.className = 'swatch erase' + (selected === -1 ? ' sel' : ''); er.textContent = '✕'; er.title = 'Eraser';
+    er.addEventListener('click', function () { selected = -1; buildPalette(); });
+    paletteEl.appendChild(er);
+    var chk = document.createElement('button');
+    chk.textContent = '✓ Check'; chk.style.marginLeft = '10px';
+    chk.addEventListener('click', function () { if (state === 'play') checkPuzzle(); });
+    paletteEl.appendChild(chk);
+  }
+
+  canvas.addEventListener('click', function (e) { placeAt(e.clientX, e.clientY); });
+  canvas.addEventListener('mousedown', function (e) { placeAt(e.clientX, e.clientY); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); var t = e.touches[0]; placeAt(t.clientX, t.clientY); }, { passive: false });
+  canvas.addEventListener('pointerdown', function (e) { placeAt(e.clientX, e.clientY); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key >= '1' && e.key <= '6') { selected = parseInt(e.key, 10) - 1; buildPalette(); }
+    else if (e.key === '0') { selected = -1; buildPalette(); }
+    else if (e.key === 'r' || e.key === 'R') { if (state !== 'title') startGame(); }
+    else if (e.key === 'Enter') { if (state === 'title' || state === 'win' || state === 'over') startGame(); }
+  });
+
+  startBtn.addEventListener('click', function () { startGame(); });
+  howBtn.addEventListener('click', function () { showHow(); });
+
+  buildPalette();
+  newTarget();
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

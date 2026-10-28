@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Knot Keeper</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #101820; color: #eef6ff; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { margin: 12px 0 4px; font-size: 28px; letter-spacing: 1px; color: #ffd166; text-align: center; }
+  p.tag { margin: 0 0 10px; color: #9fc3e8; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: min(860px, 96vw); margin-bottom: 8px; }
+  .pill { background: #1d2f42; border: 2px solid #35506e; border-radius: 999px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill b { color: #ffd166; }
+  .pill.bad { border-color: #ff6b6b; color: #ffb3b3; }
+  #wrap { position: relative; width: min(860px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; background: radial-gradient(circle at 50% 40%, #1b3348, #0e1a26); border: 3px solid #35506e; border-radius: 14px; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(8, 16, 24, 0.88); border-radius: 14px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffd166; margin: 0 0 10px; font-size: 30px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; }
+  .overlay ul { text-align: left; line-height: 1.6; max-width: 560px; }
+  button { margin-top: 14px; background: #ffd166; color: #1a1200; border: none; border-radius: 10px; padding: 12px 24px; font-size: 18px; font-weight: bold; cursor: pointer; }
+  button:hover, button:focus { background: #ffe08a; outline: 3px solid #fff; }
+  button.secondary { background: #35506e; color: #fff; }
+  #msg { min-height: 24px; margin-top: 8px; color: #a7f3d0; font-weight: bold; text-align: center; }
+  #keys { color: #9fc3e8; font-size: 13px; text-align: center; max-width: 860px; padding: 0 12px 16px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🪢 Knot Keeper</h1>
+<p class="tag">Untangle every rope before your moves run out!</p>
+
+<div id="hud">
+  <div class="pill">Level: <b id="level">1</b> / 5</div>
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Lives: <b id="lives">♥♥♥</b></div>
+  <div class="pill">Moves left: <b id="moves">14</b></div>
+  <div class="pill" id="crossPill">Crossings: <b id="cross">—</b></div>
+  <div class="pill">Best: <b id="best">0</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Knot Keeper</h2>
+    <p>A tangled web of ropes has appeared. Drag the glowing knots until no two ropes cross.</p>
+    <ul>
+      <li><b>Mouse / touch:</b> drag any knot to a new spot. Releasing it counts as one move.</li>
+      <li><b>Keyboard:</b> press Tab (or [ and ]) to pick a knot, arrow keys to nudge it, Enter to confirm a move.</li>
+      <li><b>Goal:</b> clear all crossings before the move limit runs out.</li>
+      <li><b>Levels:</b> 5 levels, each with more knots and fewer spare moves. You have 3 lives.</li>
+    </ul>
+    <p><b>How to Play:</b> Crossed ropes glow red. Untangled ropes glow green. Plan your drags — every move counts!</p>
+    <button id="startBtn" type="button">Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn" type="button">Restart</button>
+  </div>
+</div>
+
+<div id="msg" role="status"></div>
+<p id="keys">Mouse: drag knots &nbsp;|&nbsp; Touch: drag knots &nbsp;|&nbsp; Keyboard: Tab / [ ] select, Arrows move, Enter confirm &nbsp;|&nbsp; R: restart level</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var msgEl = document.getElementById('msg');
+  var levelEl = document.getElementById('level');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var movesEl = document.getElementById('moves');
+  var crossEl = document.getElementById('cross');
+  var crossPill = document.getElementById('crossPill');
+  var bestEl = document.getElementById('best');
+
+  var W = canvas.width, H = canvas.height;
+  var state = 'title'; // title, playing, won, over
+  var level = 1, score = 0, best = 0, lives = 3, movesLeft = 14;
+  var nodes = [], edges = [];
+  var selected = 0, dragIndex = -1, dragMoved = false, dragStart = null;
+  var audioCtx = null, pulse = 0;
+
+  function msg(t) { msgEl.textContent = t; }
+  function hearts(n) { var s = ''; for (var i = 0; i < 3; i++) s += (i < n ? '♥' : '♡'); return s; }
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function beep(freq, dur, type) {
+    var ac = audio(); if (!ac) return;
+    try {
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+      o.connect(g); g.connect(ac.destination);
+      o.start(); o.stop(ac.currentTime + dur);
+    } catch (e) {}
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  // Segment intersection test (proper crossing, shared endpoints do not count).
+  function segCross(p1, p2, p3, p4) {
+    function orient(a, b, c) { var v = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y); return v > 0 ? 1 : (v < 0 ? -1 : 0); }
+    var o1 = orient(p1, p2, p3), o2 = orient(p1, p2, p4), o3 = orient(p3, p4, p1), o4 = orient(p3, p4, p2);
+    return o1 !== o2 && o3 !== o4;
+  }
+  function findCrossings() {
+    var out = [];
+    for (var i = 0; i < edges.length; i++) {
+      for (var j = i + 1; j < edges.length; j++) {
+        var e1 = edges[i], e2 = edges[j];
+        if (e1.a === e2.a || e1.a === e2.b || e1.b === e2.a || e1.b === e2.b) continue;
+        if (segCross(nodes[e1.a], nodes[e1.b], nodes[e2.a], nodes[e2.b])) out.push([i, j]);
+      }
+    }
+    return out;
+  }
+
+  function buildLevel(n) {
+    var count = 5 + n; // 6, 7, 8, 9, 10 knots
+    nodes = [];
+    // Place knots on a neat circle first (this layout is always solvable),
+    // then shuffle their positions to create the tangle.
+    var cx = W / 2, cy = H / 2, rx = 320, ry = 200;
+    var solved = [];
+    for (var i = 0; i < count; i++) {
+      var ang = (i / count) * Math.PI * 2 - Math.PI / 2;
+      solved.push({ x: cx + Math.cos(ang) * rx, y: cy + Math.sin(ang) * ry });
+    }
+    edges = [];
+    for (var k = 0; k < count; k++) {
+      edges.push({ a: k, b: (k + 1) % count });
+      if (k % 2 === 0 && count > 6) edges.push({ a: k, b: (k + 3) % count });
+    }
+    // Shuffle positions so the starting board is tangled.
+    var order = solved.slice();
+    for (var s = order.length - 1; s > 0; s--) { var r = Math.floor(Math.random() * (s + 1)); var t = order[s]; order[s] = order[r]; order[r] = t; }
+    nodes = order.map(function (p, idx) { return { x: p.x, y: p.y, id: idx }; });
+    movesLeft = 16 - n; // 15, 14, 13, 12, 11
+    if (n === 1) movesLeft = 14;
+    selected = 0;
+    dragIndex = -1;
+    msg('Level ' + n + ': untangle ' + count + ' knots. Crossed ropes glow red.');
+    updateHUD();
+  }
+
+  function updateHUD() {
+    levelEl.textContent = level;
+    scoreEl.textContent = score;
+    livesEl.textContent = hearts(lives);
+    movesEl.textContent = movesLeft;
+    bestEl.textContent = best;
+    var c = (state === 'playing') ? findCrossings().length : 0;
+    crossEl.textContent = (state === 'playing') ? c : '—';
+    crossPill.className = 'pill' + ((state === 'playing' && c > 0) ? ' bad' : '');
+  }
+
+  function spendMove() {
+    movesLeft--;
+    beep(300, 0.08, 'triangle');
+    updateHUD();
+    var c = findCrossings().length;
+    if (c === 0) { winLevel(); return; }
+    if (movesLeft <= 0) { loseLife(); }
+  }
+
+  function winLevel() {
+    var bonus = 100 + movesLeft * 25;
+    score += bonus;
+    if (score > best) best = score;
+    beep(660, 0.15, 'sine'); setTimeout(function () { beep(880, 0.2, 'sine'); }, 120);
+    if (level >= 5) {
+      state = 'won';
+      endTitle.textContent = 'You Win! Master Knot Keeper!';
+      endText.textContent = 'You untangled all 5 levels with a final score of ' + score + '. Brilliant rope work!';
+      endScreen.classList.remove('hidden');
+    } else {
+      msg('Level ' + level + ' clear! Bonus +' + bonus + '. Next level loading...');
+      level++;
+      setTimeout(function () { if (state === 'playing') { buildLevel(level); } }, 1100);
+    }
+    updateHUD();
+  }
+
+  function loseLife() {
+    lives--;
+    beep(160, 0.3, 'sawtooth');
+    if (lives <= 0) {
+      state = 'over';
+      endTitle.textContent = 'Game Over';
+      endText.textContent = 'The knots beat you on level ' + level + '. Final score: ' + score + '. Try again — every tangle has a solution!';
+      endScreen.classList.remove('hidden');
+    } else {
+      msg('Out of moves! You lose a life. Level ' + level + ' resets.');
+      setTimeout(function () { if (state === 'playing') { buildLevel(level); } }, 1100);
+    }
+    updateHUD();
+  }
+
+  function startGame() {
+    audio();
+    level = 1; score = 0; lives = 3;
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    buildLevel(1);
+    beep(520, 0.12, 'sine');
+  }
+
+  function posFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches.length) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches.length) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function nodeAt(p) {
+    for (var i = nodes.length - 1; i >= 0; i--) {
+      if (Math.hypot(nodes[i].x - p.x, nodes[i].y - p.y) < 34) return i;
+    }
+    return -1;
+  }
+
+  function onDown(e) {
+    if (state !== 'playing') return;
+    audio();
+    var p = posFromEvent(e);
+    var idx = nodeAt(p);
+    if (idx >= 0) {
+      dragIndex = idx; selected = idx; dragMoved = false;
+      dragStart = { x: nodes[idx].x, y: nodes[idx].y };
+      if (e.cancelable) e.preventDefault();
+    }
+  }
+  function onMove(e) {
+    if (state !== 'playing' || dragIndex < 0) return;
+    var p = posFromEvent(e);
+    nodes[dragIndex].x = Math.max(26, Math.min(W - 26, p.x));
+    nodes[dragIndex].y = Math.max(26, Math.min(H - 26, p.y));
+    if (dragStart && dist(nodes[dragIndex], dragStart) > 12) dragMoved = true;
+    if (e.cancelable) e.preventDefault();
+  }
+  function onUp(e) {
+    if (state !== 'playing' || dragIndex < 0) return;
+    var used = dragMoved;
+    dragIndex = -1;
+    if (used) spendMove(); else updateHUD();
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp);
+  canvas.addEventListener('click', function () { if (state === 'playing') audio(); });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function (e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    if ((state === 'won' || state === 'over') && e.key === 'Enter') { startGame(); return; }
+    if (state !== 'playing') return;
+    audio();
+    if (e.key === 'Tab' || e.key === '[') { selected = (selected + nodes.length - 1) % nodes.length; e.preventDefault(); beep(440, 0.06, 'sine'); }
+    else if (e.key === ']') { selected = (selected + 1) % nodes.length; e.preventDefault(); beep(440, 0.06, 'sine'); }
+    else if (e.key === 'ArrowLeft') { nodes[selected].x = Math.max(26, nodes[selected].x - 14); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { nodes[selected].x = Math.min(W - 26, nodes[selected].x + 14); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { nodes[selected].y = Math.max(26, nodes[selected].y - 14); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { nodes[selected].y = Math.min(H - 26, nodes[selected].y + 14); e.preventDefault(); }
+    else if (e.key === 'Enter') { spendMove(); }
+    else if (e.key === 'r' || e.key === 'R') { buildLevel(level); }
+    updateHUD();
+  });
+
+  function draw() {
+    pulse += 0.03;
+    ctx.clearRect(0, 0, W, H);
+    // faint board dots
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (var gx = 40; gx < W; gx += 80) for (var gy = 40; gy < H; gy += 80) { ctx.beginPath(); ctx.arc(gx, gy, 2, 0, Math.PI * 2); ctx.fill(); }
+
+    if (state !== 'title' && nodes.length) {
+      var crossed = findCrossings();
+      var crossedSet = {};
+      crossed.forEach(function (pair) { crossedSet[pair[0]] = true; crossedSet[pair[1]] = true; });
+      edges.forEach(function (edge, i) {
+        var a = nodes[edge.a], b = nodes[edge.b];
+        ctx.strokeStyle = crossedSet[i] ? '#ff6b6b' : '#4ade80';
+        ctx.lineWidth = crossedSet[i] ? 5 : 3;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      });
+      nodes.forEach(function (n, i) {
+        var isSel = (i === selected || i === dragIndex);
+        var r = isSel ? 26 + Math.sin(pulse * 2) * 2 : 22;
+        ctx.fillStyle = isSel ? '#ffd166' : '#38bdf8';
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#0b1520'; ctx.font = 'bold 16px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(i + 1), n.x, n.y);
+      });
+      if (state === 'playing') {
+        ctx.fillStyle = '#eef6ff'; ctx.font = 'bold 16px Verdana'; ctx.textAlign = 'left';
+        ctx.fillText('Crossings: ' + crossed.length + '  —  drag knots until none remain', 16, 28);
+      }
+    } else {
+      ctx.fillStyle = '#9fc3e8'; ctx.font = '20px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to untangle your first knot web!', W / 2, H / 2);
+    }
+    requestAnimationFrame(draw);
+  }
+  updateHUD();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

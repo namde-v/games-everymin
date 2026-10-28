@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Railroad Tycoonlet</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #1d2b1f; color: #f2f0e6; font-family: Verdana, Geneva, sans-serif; text-align: center; }
+  h1 { margin: 10px 0 4px; font-size: 26px; letter-spacing: 1px; }
+  p.sub { margin: 0 0 10px; color: #cfe3b8; font-size: 14px; }
+  #wrap { max-width: 720px; margin: 0 auto; padding: 8px; position: relative; }
+  #hud { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 8px 0; }
+  .pill { background: #2f4a2e; border: 2px solid #8fbf6f; border-radius: 10px; padding: 6px 10px; font-weight: bold; font-size: 14px; }
+  .pill.warn { background: #5a2e22; border-color: #e08a5a; }
+  #controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 8px 0; }
+  button { font-size: 16px; font-weight: bold; padding: 10px 16px; border-radius: 10px; border: 2px solid #ffd76a; background: #b7791f; color: #fff; cursor: pointer; }
+  button.active { background: #2e7d32; border-color: #a5d6a7; }
+  button.secondary { background: #37474f; border-color: #90a4ae; }
+  canvas { background: #7cb35c; border: 4px solid #4a3220; border-radius: 10px; max-width: 100%; height: auto; touch-action: none; display: block; margin: 0 auto; }
+  #msg { min-height: 24px; font-weight: bold; color: #ffe082; margin: 6px 0; }
+  #demand { background: #263238; border-radius: 8px; padding: 8px; font-size: 14px; }
+  .overlay { position: absolute; left: 12px; right: 12px; top: 118px; background: rgba(20,30,20,0.96); border: 3px solid #ffd76a; border-radius: 14px; padding: 20px; z-index: 5; }
+  .overlay h2 { margin-top: 0; }
+  .overlay ul { text-align: left; max-width: 520px; margin: 10px auto; line-height: 1.55; }
+  .overlay.hidden { display: none; }
+  #legend { font-size: 13px; color: #dcedc8; margin-top: 8px; line-height: 1.5; }
+  .big { font-size: 20px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Railroad Tycoonlet</h1>
+  <p class="sub">Build the rails. Run the trains. Feed the towns before the clock runs out.</p>
+
+  <div id="hud">
+    <span class="pill">Score: <span id="score">0</span> / 300</span>
+    <span class="pill">Credits: <span id="credits">80</span></span>
+    <span class="pill">Lives: <span id="lives">3</span></span>
+    <span class="pill" id="timePill">Time: <span id="time">180</span>s</span>
+    <span class="pill">Trains: <span id="trains">0</span></span>
+  </div>
+
+  <div id="demand">Demand: press Start to begin.</div>
+  <div id="msg">Welcome, Tycoonlet!</div>
+
+  <div id="controls">
+    <button id="buildBtn" class="active">Build Track (5 credits)</button>
+    <button id="eraseBtn" class="secondary">Erase Track</button>
+    <button id="dispatchBtn">Dispatch Train</button>
+    <button id="restartBtn" class="secondary">Restart</button>
+  </div>
+
+  <canvas id="game" width="672" height="448"></canvas>
+
+  <div id="legend">
+    Keyboard: Arrow keys move cursor, Space builds / erases, D dispatches, E toggles erase, R restarts.<br>
+    Mouse / Touch: tap a grass square to lay track, tap Dispatch to send a train from Central Depot.<br>
+    Do not erase track under a moving train, and do not let two trains share a square.
+  </div>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Railroad Tycoonlet</h2>
+    <p class="big">Can you run a tiny railroad empire?</p>
+    <ul>
+      <li><b>Build:</b> Tap grass squares to lay track. Each piece costs 5 credits. Connect Central Depot to a factory, then on to a town.</li>
+      <li><b>Dispatch:</b> Read the demand at the top, then press Dispatch Train. The train picks up cargo at the factory and delivers it to the town.</li>
+      <li><b>Earn:</b> Every delivery scores 60 points. Reach 300 points before time runs out to win.</li>
+      <li><b>Avoid disaster:</b> Erasing track under a train derails it. Two trains on the same square collide. Each disaster costs 1 life. Lose all 3 lives and the railroad closes.</li>
+      <li><b>Plan:</b> A missing link means no route. Watch the message line for route hints.</li>
+    </ul>
+    <p>How to Play: Build, Dispatch, Deliver, Repeat. Use mouse, touch, or keyboard.</p>
+    <button id="startBtn">Start</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn2">Restart</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 12, ROWS = 8, CELL = 56;
+  var scoreEl = document.getElementById('score');
+  var creditsEl = document.getElementById('credits');
+  var livesEl = document.getElementById('lives');
+  var timeEl = document.getElementById('time');
+  var trainsEl = document.getElementById('trains');
+  var demandEl = document.getElementById('demand');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var buildBtn = document.getElementById('buildBtn');
+  var eraseBtn = document.getElementById('eraseBtn');
+
+  var stations = [
+    { x: 1, y: 1, kind: 'town', name: 'Millfield', short: 'M' },
+    { x: 10, y: 1, kind: 'town', name: 'Harborview', short: 'H' },
+    { x: 5, y: 7, kind: 'town', name: 'Sunnyvale', short: 'S' },
+    { x: 1, y: 6, kind: 'factory', name: 'Coal Mine', short: 'C' },
+    { x: 10, y: 6, kind: 'factory', name: 'Steelworks', short: 'W' },
+    { x: 5, y: 3, kind: 'depot', name: 'Central Depot', short: 'D' }
+  ];
+  var cargoes = ['Coal', 'Steel', 'Grain', 'Timber', 'Tools'];
+  var track = {};
+  var trains = [];
+  var score = 0, credits = 80, lives = 3, timeLeft = 180;
+  var mode = 'build';
+  var started = false, over = false, won = false;
+  var cursor = { x: 5, y: 2 };
+  var demand = null;
+  var lastTime = 0, timeAcc = 0;
+  var audioCtx = null;
+
+  function key(x, y) { return x + ',' + y; }
+  function stationAt(x, y) {
+    for (var i = 0; i < stations.length; i++) {
+      if (stations[i].x === x && stations[i].y === y) return stations[i];
+    }
+    return null;
+  }
+  function isWalkable(x, y) {
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return false;
+    return !!track[key(x, y)] || !!stationAt(x, y);
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+  function updateHud() {
+    scoreEl.textContent = score;
+    creditsEl.textContent = credits;
+    livesEl.textContent = lives;
+    timeEl.textContent = Math.ceil(timeLeft);
+    trainsEl.textContent = trains.length;
+  }
+  function newDemand() {
+    var towns = stations.filter(function (s) { return s.kind === 'town'; });
+    var factories = stations.filter(function (s) { return s.kind === 'factory'; });
+    var town = towns[Math.floor(Math.random() * towns.length)];
+    var factory = factories[Math.floor(Math.random() * factories.length)];
+    var cargo = cargoes[Math.floor(Math.random() * cargoes.length)];
+    demand = { town: town, factory: factory, cargo: cargo };
+    demandEl.textContent = 'Demand: Carry ' + cargo + ' from ' + factory.name + ' to ' + town.name + ' for 60 points.';
+  }
+  function bfsPath(sx, sy, tx, ty) {
+    var q = [{ x: sx, y: sy }];
+    var came = {}; came[key(sx, sy)] = null;
+    var dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    while (q.length) {
+      var cur = q.shift();
+      if (cur.x === tx && cur.y === ty) break;
+      for (var i = 0; i < dirs.length; i++) {
+        var nx = cur.x + dirs[i][0], ny = cur.y + dirs[i][1];
+        if (!isWalkable(nx, ny)) continue;
+        var k = key(nx, ny);
+        if (came.hasOwnProperty(k)) continue;
+        came[k] = cur;
+        q.push({ x: nx, y: ny });
+      }
+    }
+    var endK = key(tx, ty);
+    if (!came.hasOwnProperty(endK)) return null;
+    var path = [], cur2 = { x: tx, y: ty };
+    while (cur2) { path.unshift(cur2); cur2 = came[key(cur2.x, cur2.y)]; }
+    return path;
+  }
+  // Procedural Web Audio only: every sound is an OscillatorNode created after user interaction.
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'square';
+      o.frequency.value = freq;
+      g.gain.value = vol || 0.08;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start();
+      o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function setMode(m) {
+    mode = m;
+    buildBtn.className = (m === 'build') ? 'active' : 'secondary';
+    eraseBtn.className = (m === 'erase') ? 'active' : 'secondary';
+  }
+  function applyCell(x, y) {
+    if (!started || over) return;
+    var st = stationAt(x, y);
+    if (st) { setMsg(st.name + ': ' + (st.kind === 'depot' ? 'trains start here.' : st.kind === 'town' ? 'a town waiting for cargo.' : 'a factory that loads cargo.')); return; }
+    var k = key(x, y);
+    if (mode === 'build') {
+      if (track[k]) { setMsg('Track already here. Switch to Erase to remove it.'); return; }
+      if (credits < 5) { setMsg('Not enough credits to build track. Deliver cargo to earn more.'); beep(140, 0.2, 'sawtooth', 0.06); return; }
+      credits -= 5; track[k] = true; beep(520, 0.08, 'square', 0.07); setMsg('Track laid. Keep connecting Depot, factory and town.');
+    } else {
+      if (!track[k]) { setMsg('No track here to erase.'); return; }
+      delete track[k];
+      credits += 2; beep(300, 0.1, 'triangle', 0.07); setMsg('Track removed, 2 credits refunded.');
+      checkDerail();
+    }
+    updateHud();
+  }
+  function checkDerail() {
+    for (var i = trains.length - 1; i >= 0; i--) {
+      var t = trains[i];
+      var cell = t.path[Math.min(Math.floor(t.pos), t.path.length - 1)];
+      if (!isWalkable(cell.x, cell.y)) {
+        trains.splice(i, 1);
+        loseLife('Derailment! You removed track under a moving train.');
+      }
+    }
+  }
+  function loseLife(reason) {
+    lives -= 1; beep(110, 0.5, 'sawtooth', 0.12); setMsg(reason + ' Lives left: ' + lives);
+    updateHud();
+    if (lives <= 0) endGame(false, 'The railroad closed after too many disasters.');
+  }
+  function dispatch() {
+    if (!started || over) return;
+    if (!demand) return;
+    var depot = stations.filter(function (s) { return s.kind === 'depot'; })[0];
+    var p1 = bfsPath(depot.x, depot.y, demand.factory.x, demand.factory.y);
+    if (!p1) { setMsg('No route: connect Central Depot to ' + demand.factory.name + ' first.'); beep(160, 0.25, 'sawtooth', 0.08); return; }
+    var p2 = bfsPath(demand.factory.x, demand.factory.y, demand.town.x, demand.town.y);
+    if (!p2) { setMsg('No route: connect ' + demand.factory.name + ' to ' + demand.town.name + '.'); beep(160, 0.25, 'sawtooth', 0.08); return; }
+    var full = p1.concat(p2.slice(1));
+    trains.push({ path: full, pos: 0, speed: 4.2, loaded: false, demand: demand, cargo: demand.cargo });
+    beep(440, 0.12, 'square', 0.08); setTimeout(function () { beep(660, 0.12, 'square', 0.08); }, 130);
+    setMsg('Train dispatched! ' + demand.cargo + ' run: Depot to ' + demand.factory.name + ' to ' + demand.town.name + '.');
+    updateHud();
+  }
+  function endGame(isWin, reason) {
+    over = true; won = isWin;
+    endTitle.textContent = isWin ? 'You Win! Railroad Hero!' : 'Game Over';
+    endText.textContent = (isWin ? 'Score ' + score + ' reached! ' : 'Final score: ' + score + '. ') + reason + ' Press Restart to play again.';
+    endScreen.className = 'overlay';
+    if (isWin) { beep(523, 0.15, 'square', 0.1); setTimeout(function () { beep(659, 0.15, 'square', 0.1); }, 160); setTimeout(function () { beep(784, 0.3, 'square', 0.1); }, 320); }
+  }
+  function resetGame() {
+    track = {}; trains = []; score = 0; credits = 80; lives = 3; timeLeft = 180;
+    started = false; over = false; won = false; cursor = { x: 5, y: 2 };
+    endScreen.className = 'overlay hidden';
+    titleScreen.className = 'overlay';
+    newDemand(); updateHud(); setMsg('Welcome, Tycoonlet!');
+  }
+  function startGame() {
+    initAudio();
+    started = true; over = false;
+    titleScreen.className = 'overlay hidden';
+    endScreen.className = 'overlay hidden';
+    newDemand(); updateHud(); setMsg('Build track from Central Depot to a factory and a town, then Dispatch!');
+    beep(523, 0.12, 'square', 0.09);
+  }
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    var x = Math.floor((cx - rect.left) * COLS / rect.width);
+    var y = Math.floor((cy - rect.top) * ROWS / rect.height);
+    return { x: x, y: y };
+  }
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        ctx.fillStyle = ((x + y) % 2 === 0) ? '#7cb35c' : '#74a854';
+        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      }
+    }
+    var dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (var k in track) {
+      var parts = k.split(','); var tx = parseInt(parts[0], 10), ty = parseInt(parts[1], 10);
+      var cx = tx * CELL + CELL / 2, cy = ty * CELL + CELL / 2;
+      ctx.fillStyle = '#5d4037';
+      ctx.fillRect(tx * CELL + 4, ty * CELL + 4, CELL - 8, CELL - 8);
+      ctx.strokeStyle = '#9e9e9e'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      for (var d = 0; d < dirs.length; d++) {
+        var nx = tx + dirs[d][0], ny = ty + dirs[d][1];
+        if (isWalkable(nx, ny)) {
+          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(nx * CELL + CELL / 2, ny * CELL + CELL / 2); ctx.stroke();
+        }
+      }
+    }
+    stations.forEach(function (s) {
+      var px = s.x * CELL, py = s.y * CELL;
+      ctx.fillStyle = s.kind === 'town' ? '#1565c0' : s.kind === 'factory' ? '#e65100' : '#6a1b9a';
+      ctx.fillRect(px + 3, py + 3, CELL - 6, CELL - 6);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(px + 3, py + 3, CELL - 6, CELL - 6);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 22px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(s.short, px + CELL / 2, py + CELL / 2 - 6);
+      ctx.font = 'bold 9px Verdana'; ctx.fillText(s.name.split(' ')[0], px + CELL / 2, py + CELL - 10);
+    });
+    if (started && !over) {
+      ctx.strokeStyle = '#ffeb3b'; ctx.lineWidth = 3;
+      ctx.strokeRect(cursor.x * CELL + 2, cursor.y * CELL + 2, CELL - 4, CELL - 4);
+    }
+    trains.forEach(function (t) {
+      var idx = Math.floor(t.pos);
+      var frac = t.pos - idx;
+      var a = t.path[Math.min(idx, t.path.length - 1)];
+      var b = t.path[Math.min(idx + 1, t.path.length - 1)];
+      var px = (a.x + (b.x - a.x) * frac) * CELL + CELL / 2;
+      var py = (a.y + (b.y - a.y) * frac) * CELL + CELL / 2;
+      ctx.fillStyle = '#d32f2f';
+      ctx.beginPath(); ctx.arc(px, py, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(t.loaded ? 'C' : 'T', px, py);
+    });
+  }
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min((ts - lastTime) / 1000, 0.1);
+    lastTime = ts;
+    if (started && !over) {
+      timeAcc += dt;
+      if (timeAcc >= 1) { timeLeft -= Math.floor(timeAcc); timeAcc -= Math.floor(timeAcc); updateHud(); }
+      if (timeLeft <= 0) {
+        timeLeft = 0; updateHud();
+        if (score >= 300) endGame(true, 'You hit the target just in time.');
+        else endGame(false, 'Time ran out before you reached 300 points.');
+      }
+      for (var i = trains.length - 1; i >= 0; i--) {
+        var t = trains[i];
+        t.pos += t.speed * dt;
+        var cellIdx = Math.floor(t.pos);
+        var factoryIdx = -1;
+        for (var fi = 0; fi < t.path.length; fi++) {
+          if (t.path[fi].x === t.demand.factory.x && t.path[fi].y === t.demand.factory.y) { factoryIdx = fi; break; }
+        }
+        if (!t.loaded && cellIdx >= factoryIdx && factoryIdx >= 0) { t.loaded = true; beep(880, 0.12, 'triangle', 0.09); setMsg('Loaded ' + t.cargo + ' at ' + t.demand.factory.name + '. Now heading to ' + t.demand.town.name + '.'); }
+        if (t.pos >= t.path.length - 1) {
+          trains.splice(i, 1);
+          score += 60; credits += 25;
+          beep(659, 0.12, 'square', 0.09); setTimeout(function () { beep(784, 0.2, 'square', 0.09); }, 140);
+          setMsg('Delivered! +60 points, +25 credits.');
+          newDemand(); updateHud();
+          if (score >= 300) { endGame(true, 'Your network delivered the winning cargo.'); }
+        }
+      }
+      for (var a = 0; a < trains.length; a++) {
+        for (var b = a + 1; b < trains.length; b++) {
+          var ca = trains[a].path[Math.min(Math.floor(trains[a].pos), trains[a].path.length - 1)];
+          var cb = trains[b].path[Math.min(Math.floor(trains[b].pos), trains[b].path.length - 1)];
+          if (ca.x === cb.x && ca.y === cb.y) {
+            trains.splice(b, 1); trains.splice(a, 1);
+            loseLife('Collision! Two trains met on the same square.');
+            break;
+          }
+        }
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('dispatchBtn').addEventListener('click', function () { initAudio(); dispatch(); });
+  document.getElementById('buildBtn').addEventListener('click', function () { initAudio(); setMode('build'); });
+  document.getElementById('eraseBtn').addEventListener('click', function () { initAudio(); setMode('erase'); });
+  document.getElementById('restartBtn').addEventListener('click', function () { initAudio(); resetGame(); });
+  document.getElementById('restartBtn2').addEventListener('click', function () { initAudio(); resetGame(); });
+
+  canvas.addEventListener('click', function (e) { var c = cellFromEvent(e); cursor = c; applyCell(c.x, c.y); });
+  canvas.addEventListener('mousedown', function (e) { initAudio(); var c = cellFromEvent(e); cursor = c; });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); var c = cellFromEvent(e); cursor = c; applyCell(c.x, c.y); }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (!started || over) {
+      if (e.key === 'Enter') startGame();
+      if (e.key === 'r' || e.key === 'R') resetGame();
+      return;
+    }
+    if (e.key === 'ArrowLeft') cursor.x = Math.max(0, cursor.x - 1);
+    else if (e.key === 'ArrowRight') cursor.x = Math.min(COLS - 1, cursor.x + 1);
+    else if (e.key === 'ArrowUp') cursor.y = Math.max(0, cursor.y - 1);
+    else if (e.key === 'ArrowDown') cursor.y = Math.min(ROWS - 1, cursor.y + 1);
+    else if (e.key === ' ') { e.preventDefault(); applyCell(cursor.x, cursor.y); }
+    else if (e.key === 'd' || e.key === 'D') dispatch();
+    else if (e.key === 'e' || e.key === 'E') setMode(mode === 'build' ? 'erase' : 'build');
+    else if (e.key === 'r' || e.key === 'R') resetGame();
+  });
+  document.addEventListener('click', function () { initAudio(); });
+
+  newDemand(); updateHud(); draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Brewmaster Bay</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b2233; color: #fff7e6; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 10px; }
+  h1 { margin: 6px 0 2px; font-size: 26px; letter-spacing: 1px; color: #ffd166; text-align: center; }
+  p.sub { margin: 0 0 10px; color: #bfe3ff; text-align: center; font-size: 14px; }
+  #wrap { position: relative; width: min(840px, 100vw); }
+  canvas { display: block; width: 100%; background: #173a4d; border: 4px solid #8a5a2b; border-radius: 14px; touch-action: none; }
+  #buttons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 10px 0; }
+  button { font-size: 17px; font-weight: bold; padding: 11px 20px; border-radius: 10px; border: 2px solid #ffd166; background: #e76f51; color: white; cursor: pointer; }
+  button.secondary { background: #2a9d8f; }
+  button.hidden { display: none; }
+  #howto { display: none; background: #123; border: 2px solid #ffd166; border-radius: 12px; padding: 14px 18px; max-width: 840px; line-height: 1.55; }
+  #howto.show { display: block; }
+  #howto h2 { margin-top: 0; color: #ffd166; }
+  #hudline { text-align: center; font-size: 15px; color: #ffe8a3; min-height: 22px; margin-bottom: 4px; }
+  kbd { background: #fff; color: #222; padding: 1px 6px; border-radius: 4px; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>🍺 Brewmaster Bay ⚓</h1>
+<p class="sub">A seaside tavern strategy game — serve the bay before the day shift ends!</p>
+<div id="hudline">Welcome to the bay! Press Start to open the tavern.</div>
+<div id="wrap">
+  <canvas id="game" width="840" height="600"></canvas>
+</div>
+<div id="buttons">
+  <button id="startBtn">▶ Start Shift</button>
+  <button id="howBtn" class="secondary">📖 How to Play</button>
+  <button id="restartBtn" class="secondary hidden">↻ Restart</button>
+</div>
+<div id="howto">
+  <h2>How to Play</h2>
+  <p><b>Goal:</b> Earn <b>150 coins</b> before the 150-second day shift ends. Lose 3 customers to impatience and the tavern's reputation sinks — game over!</p>
+  <p><b>1. Read the order:</b> Each customer at the bar shows a coloured drink bubble above their head. <b>2. Brew it:</b> Tap a drink button at the bottom (or press <kbd>1</kbd>–<kbd>4</kbd>) if you have its ingredient and a free brewing pot. Brewing takes 3 seconds. <b>3. Serve it:</b> Tap the matching customer (or select with <kbd>←</kbd> <kbd>→</kbd> and press <kbd>Enter</kbd> / <kbd>Space</kbd>) once the drink is ready. Fast service earns a tip!</p>
+  <p><b>Drinks:</b> Sea Ale (Barley, 10 coins) · Honey Mead (Honey, 14) · Herbal Tea (Herb, 8) · Apple Cider (Fruit, 12). A supply crate adds +3 of every ingredient every 25 seconds. Watch the patience bars — they drain the longer a customer waits!</p>
+  <p><b>Controls:</b> Mouse click, touch tap, or keyboard. <kbd>R</kbd> restarts instantly on the end screen.</p>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 840, H = 600;
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+  var howBtn = document.getElementById('howBtn');
+  var howto = document.getElementById('howto');
+  var hudline = document.getElementById('hudline');
+
+  var DRINKS = [
+    { name: 'Sea Ale', short: 'ALE', color: '#f4a261', price: 10, ing: 'Barley' },
+    { name: 'Honey Mead', short: 'MEAD', color: '#ffd166', price: 14, ing: 'Honey' },
+    { name: 'Herbal Tea', short: 'TEA', color: '#90be6d', price: 8, ing: 'Herb' },
+    { name: 'Apple Cider', short: 'CIDER', color: '#ef476f', price: 12, ing: 'Fruit' }
+  ];
+
+  var state = 'title'; // title, playing, win, over
+  var coins = 0, lives = 3, served = 0, lost = 0;
+  var timeLeft = 150, dayLength = 150, goal = 150;
+  var ingredients = [10, 10, 10, 10];
+  var customers = [];
+  var brewSlots = [{ drink: -1, t: 0 }, { drink: -1, t: 0 }];
+  var readyTray = [];
+  var selected = 0;
+  var spawnTimer = 1.5, crateTimer = 25, msg = '', msgTimer = 0, lastTime = 0;
+  var flash = '', flashTimer = 0;
+  var mouseDown = false;
+
+  // ---- Procedural audio, created only after user interaction ----
+  var AC = null;
+  function audio() {
+    if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (AC && AC.state === 'suspended') { AC.resume(); }
+    return AC;
+  }
+  function tone(freq, dur, type, delay, vol) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    var t = ac.currentTime + (delay || 0);
+    g.gain.setValueAtTime(vol || 0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function sfx(kind) {
+    if (kind === 'brew') tone(220, 0.15, 'triangle');
+    else if (kind === 'ready') { tone(523, 0.12, 'sine'); tone(784, 0.15, 'sine', 0.1); }
+    else if (kind === 'coin') { tone(880, 0.1, 'square', 0, 0.08); tone(1320, 0.18, 'square', 0.08, 0.08); }
+    else if (kind === 'bad') tone(140, 0.35, 'sawtooth', 0, 0.12);
+    else if (kind === 'win') { [523, 659, 784, 1046].forEach(function(f, i) { tone(f, 0.25, 'triangle', i * 0.15); }); }
+    else if (kind === 'lose') { [330, 262, 196, 131].forEach(function(f, i) { tone(f, 0.3, 'sawtooth', i * 0.18, 0.08); }); }
+  }
+
+  function reset() {
+    coins = 0; lives = 3; served = 0; lost = 0; timeLeft = dayLength;
+    ingredients = [10, 10, 10, 10]; customers = [];
+    brewSlots = [{ drink: -1, t: 0 }, { drink: -1, t: 0 }];
+    readyTray = []; selected = 0; spawnTimer = 1.2; crateTimer = 25;
+    msg = 'Tavern open! First customers are sailing in...'; msgTimer = 3;
+    state = 'playing';
+    startBtn.classList.add('hidden');
+    restartBtn.classList.remove('hidden');
+    hudline.textContent = 'Goal: 150 coins. Serve fast for tips!';
+  }
+
+  function setMsg(text, secs) { msg = text; msgTimer = secs || 2.5; }
+
+  function spawnCustomer() {
+    if (customers.length >= 3) return;
+    var slots = [0, 1, 2].filter(function(s) { return !customers.some(function(c) { return c.slot === s; }); });
+    if (!slots.length) return;
+    var faces = ['😀', '🧔', '👩', '🧑', '👴', '👵'];
+    customers.push({
+      slot: slots[0], drink: Math.floor(Math.random() * 4),
+      patience: 30, max: 30, face: faces[Math.floor(Math.random() * faces.length)],
+      leaving: 0, happy: 0
+    });
+  }
+
+  function tryBrew(i) {
+    if (state !== 'playing') return;
+    if (ingredients[i] <= 0) { setMsg('Out of ' + DRINKS[i].ing + '! Wait for the next supply crate.'); sfx('bad'); return; }
+    var slot = brewSlots.find(function(s) { return s.drink === -1; });
+    if (!slot) { setMsg('Both brewing pots are busy!'); sfx('bad'); return; }
+    ingredients[i]--; slot.drink = i; slot.t = 0;
+    setMsg('Brewing ' + DRINKS[i].name + '...'); sfx('brew');
+  }
+
+  function tryServe(cust) {
+    if (state !== 'playing' || !cust) return;
+    var idx = readyTray.indexOf(cust.drink);
+    if (idx === -1) {
+      var want = DRINKS[cust.drink].name;
+      var have = readyTray.length ? readyTray.map(function(d) { return DRINKS[d].short; }).join(', ') : 'nothing ready';
+      setMsg('No ' + want + ' ready yet! Tray: ' + have + '. Brew it first.'); sfx('bad');
+      flash = 'Need ' + want; flashTimer = 1.2;
+      return;
+    }
+    readyTray.splice(idx, 1);
+    var tip = cust.patience > cust.max * 0.5 ? 3 : 0;
+    coins += DRINKS[cust.drink].price + tip;
+    served++; cust.happy = 1.2;
+    setMsg('Served ' + DRINKS[cust.drink].name + ' + ' + (DRINKS[cust.drink].price + tip) + ' coins' + (tip ? ' (includes tip!)' : ''));
+    sfx('coin');
+    setTimeout(function() { customers = customers.filter(function(c) { return c !== cust; }); }, 700);
+    if (coins >= goal) endGame(true);
+  }
+
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    if (win) sfx('win'); else sfx('lose');
+    hudline.textContent = win ? 'You did it! The tavern is the talk of the bay!' : 'The tavern closes early. Try another shift!';
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    timeLeft -= dt;
+    if (msgTimer > 0) msgTimer -= dt;
+    if (flashTimer > 0) flashTimer -= dt;
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnCustomer(); spawnTimer = 3.8 + Math.random() * 1.5; }
+    crateTimer -= dt;
+    if (crateTimer <= 0) {
+      for (var i = 0; i < 4; i++) ingredients[i] += 3;
+      crateTimer = 25; setMsg('Supply crate arrived! +3 of every ingredient.');
+      tone(440, 0.12, 'sine'); tone(660, 0.12, 'sine', 0.12);
+    }
+    brewSlots.forEach(function(s) {
+      if (s.drink !== -1) {
+        s.t += dt;
+        if (s.t >= 3) { readyTray.push(s.drink); setMsg(DRINKS[s.drink].name + ' is ready! Serve it now.'); sfx('ready'); s.drink = -1; s.t = 0; }
+      }
+    });
+    for (var j = customers.length - 1; j >= 0; j--) {
+      var c = customers[j];
+      if (c.happy > 0) { c.happy -= dt; continue; }
+      c.patience -= dt;
+      if (c.patience <= 0) {
+        customers.splice(j, 1); lives--; lost++;
+        setMsg('A customer stormed out! Reputation -1 heart.'); sfx('bad');
+        if (lives <= 0) { endGame(false); return; }
+      }
+    }
+    if (timeLeft <= 0) { timeLeft = 0; endGame(coins >= goal); }
+  }
+
+  function rr(x, y, w, h, r, fill) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sea + sky backdrop
+    ctx.fillStyle = '#7ec8e3'; ctx.fillRect(0, 0, W, 120);
+    ctx.fillStyle = '#f7d774'; ctx.beginPath(); ctx.arc(740, 42, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2a6f97'; ctx.fillRect(0, 78, W, 42);
+    ctx.fillStyle = '#ffffff'; ctx.font = '20px Verdana'; ctx.fillText('~ ~ ~  ⛵  ~ ~ ~', 40, 108);
+    // Tavern interior
+    ctx.fillStyle = '#5b3a1e'; ctx.fillRect(0, 120, W, 480);
+    ctx.fillStyle = '#8a5a2b'; ctx.fillRect(0, 120, W, 10);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 20px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('BREWMASTER BAY  •  Seaside Tavern', W / 2, 152);
+    ctx.textAlign = 'left';
+    // HUD bar
+    ctx.fillStyle = '#0b2233'; ctx.fillRect(0, 160, W, 44);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 18px Verdana';
+    ctx.fillText('Coins: ' + coins + ' / ' + goal, 16, 189);
+    ctx.fillText('Time: ' + Math.ceil(Math.max(0, timeLeft)) + 's', 250, 189);
+    ctx.fillStyle = '#ff6b6b'; ctx.fillText('♥'.repeat(Math.max(0, lives)) + '☆'.repeat(Math.max(0, 3 - lives)), 430, 189);
+    ctx.fillStyle = '#bfe3ff'; ctx.fillText('Served: ' + served, 620, 189);
+    // Bar counter
+    ctx.fillStyle = '#a4713b'; rr(30, 330, 780, 26, 8, '#a4713b');
+    ctx.fillStyle = '#d9a05b'; ctx.fillRect(30, 330, 780, 8);
+    // Customers
+    var slotX = [180, 420, 660];
+    customers.forEach(function(c, idx) {
+      var x = slotX[c.slot], y = 300;
+      if (idx === selected && state === 'playing') { ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y - 42, 58, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.font = '64px Verdana'; ctx.textAlign = 'center'; ctx.fillText(c.face, x, y);
+      ctx.textAlign = 'left';
+      // Order bubble
+      var d = DRINKS[c.drink];
+      rr(x - 72, 196, 144, 52, 12, '#fff7e6');
+      ctx.fillStyle = d.color; ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(d.short, x, 220);
+      ctx.fillStyle = '#333'; ctx.font = '13px Verdana'; ctx.fillText(d.price + ' coins', x, 238);
+      ctx.textAlign = 'left';
+      // Patience bar
+      var pct = Math.max(0, c.patience / c.max);
+      ctx.fillStyle = '#222'; ctx.fillRect(x - 55, 256, 110, 12);
+      ctx.fillStyle = pct > 0.5 ? '#51cf66' : (pct > 0.25 ? '#ffd166' : '#ff6b6b');
+      ctx.fillRect(x - 55, 256, 110 * pct, 12);
+      if (c.happy > 0) { ctx.font = '22px Verdana'; ctx.textAlign = 'center'; ctx.fillStyle = '#ffd166'; ctx.fillText('★ Thank you! ★', x, 182); ctx.textAlign = 'left'; }
+    });
+    if (!customers.length && state === 'playing') {
+      ctx.fillStyle = '#bfe3ff'; ctx.font = '17px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('No customers right now — the next boat is on its way...', W / 2, 280); ctx.textAlign = 'left';
+    }
+    // Brewing pots
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 17px Verdana';
+    ctx.fillText('Brewing pots (3 sec each):', 30, 388);
+    brewSlots.forEach(function(s, i) {
+      var x = 30 + i * 200;
+      rr(x, 398, 180, 44, 10, s.drink === -1 ? '#2a4a5e' : DRINKS[s.drink].color);
+      ctx.fillStyle = s.drink === -1 ? '#bfe3ff' : '#222'; ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(s.drink === -1 ? 'Empty pot' : DRINKS[s.drink].name + ' ' + Math.ceil(3 - s.t) + 's', x + 90, 426);
+      ctx.textAlign = 'left';
+    });
+    ctx.fillStyle = '#ffffff'; ctx.font = '15px Verdana';
+    ctx.fillText('Ready tray: ' + (readyTray.length ? readyTray.map(function(d) { return DRINKS[d].short; }).join('  •  ') : '— empty —'), 450, 426);
+    // Drink buttons
+    ctx.font = 'bold 15px Verdana';
+    DRINKS.forEach(function(d, i) {
+      var x = 30 + i * 200;
+      rr(x, 462, 180, 66, 12, d.color);
+      ctx.fillStyle = '#222'; ctx.textAlign = 'center';
+      ctx.fillText((i + 1) + ' · ' + d.name, x + 90, 486);
+      ctx.font = '14px Verdana';
+      ctx.fillText(d.ing + ': ' + ingredients[i] + '  •  ' + d.price + 'c', x + 90, 508);
+      ctx.font = 'bold 15px Verdana';
+      ctx.textAlign = 'left';
+    });
+    ctx.fillStyle = '#ffe8a3'; ctx.font = '15px Verdana';
+    ctx.fillText('Tap a drink to brew  •  Tap a customer to serve  •  ← → select, Enter serve  •  Crate in ' + Math.ceil(crateTimer) + 's', 30, 556);
+    ctx.fillStyle = '#ffffff'; ctx.font = '16px Verdana'; ctx.textAlign = 'center';
+    if (msgTimer > 0) ctx.fillText(msg, W / 2, 580);
+    if (flashTimer > 0) { ctx.fillStyle = '#ff6b6b'; ctx.font = 'bold 20px Verdana'; ctx.fillText(flash, W / 2, 216); }
+    ctx.textAlign = 'left';
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(5,20,32,0.88)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 44px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('Brewmaster Bay', W / 2, 170);
+      ctx.fillStyle = '#ffffff'; ctx.font = '22px Verdana';
+      ctx.fillText('Run the busiest tavern on the bay!', W / 2, 215);
+      ctx.font = '18px Verdana'; ctx.fillStyle = '#bfe3ff';
+      ctx.fillText('Brew the right drink. Serve it before patience runs out.', W / 2, 250);
+      ctx.fillText('Earn 150 coins in 150 seconds. Lose 3 customers and you close!', W / 2, 280);
+      ctx.fillStyle = '#e76f51'; rr(W / 2 - 130, 320, 260, 58, 14, '#e76f51');
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Verdana'; ctx.fillText('▶  START SHIFT', W / 2, 358);
+      ctx.fillStyle = '#bfe3ff'; ctx.font = '16px Verdana';
+      ctx.fillText('Or press the Start Shift button below, or press Enter.', W / 2, 410);
+      ctx.fillText('Keys 1–4 brew · ← → select customer · Enter serves', W / 2, 440);
+      ctx.textAlign = 'left';
+    }
+    if (state === 'win' || state === 'over') {
+      ctx.fillStyle = 'rgba(5,20,32,0.88)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = state === 'win' ? '#51cf66' : '#ff6b6b';
+      ctx.font = 'bold 44px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(state === 'win' ? '🏆 TAVERN LEGEND! 🏆' : '💔 TAVERN CLOSED 💔', W / 2, 210);
+      ctx.fillStyle = '#ffffff'; ctx.font = '21px Verdana';
+      ctx.fillText('Coins earned: ' + coins + '  •  Customers served: ' + served + '  •  Lost: ' + lost, W / 2, 260);
+      ctx.fillText(state === 'win' ? 'The whole bay is singing your name tonight!' : 'The regulars will give you one more chance...', W / 2, 300);
+      ctx.fillStyle = '#2a9d8f'; rr(W / 2 - 120, 340, 240, 56, 14, '#2a9d8f');
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 21px Verdana'; ctx.fillText('↻  RESTART', W / 2, 377);
+      ctx.fillStyle = '#bfe3ff'; ctx.font = '16px Verdana'; ctx.fillText('Press the Restart button below, or press R.', W / 2, 430);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime) / 1000); lastTime = ts;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0].clientX));
+    var cy = (e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0].clientY));
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+
+  function handlePointer(x, y) {
+    if (state === 'title') {
+      if (x >= W / 2 - 130 && x <= W / 2 + 130 && y >= 320 && y <= 378) { audio(); reset(); }
+      return;
+    }
+    if (state === 'win' || state === 'over') {
+      if (x >= W / 2 - 120 && x <= W / 2 + 120 && y >= 340 && y <= 396) { audio(); reset(); }
+      return;
+    }
+    // Drink buttons
+    if (y >= 462 && y <= 528) {
+      for (var i = 0; i < 4; i++) { var bx = 30 + i * 200; if (x >= bx && x <= bx + 180) { tryBrew(i); return; } }
+    }
+    // Customers
+    var slotX = [180, 420, 660];
+    for (var j = 0; j < customers.length; j++) {
+      if (Math.abs(x - slotX[customers[j].slot]) < 80 && y >= 190 && y <= 330) { selected = j; tryServe(customers[j]); return; }
+    }
+  }
+
+  canvas.addEventListener('click', function(e) { var p = canvasPos(e); handlePointer(p.x, p.y); });
+  canvas.addEventListener('mousedown', function() { mouseDown = true; });
+  canvas.addEventListener('mouseup', function() { mouseDown = false; });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); var p = canvasPos(e); handlePointer(p.x, p.y); }, { passive: false });
+  canvas.addEventListener('touchend', function() { mouseDown = false; });
+
+  window.addEventListener('keydown', function(e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { audio(); reset(); return; }
+    if ((state === 'win' || state === 'over') && (e.key === 'r' || e.key === 'R' || e.key === 'Enter')) { audio(); reset(); return; }
+    if (state !== 'playing') return;
+    if (e.key >= '1' && e.key <= '4') tryBrew(parseInt(e.key, 10) - 1);
+    else if (e.key === 'ArrowLeft') { selected = Math.max(0, selected - 1); }
+    else if (e.key === 'ArrowRight') { selected = Math.min(Math.max(0, customers.length - 1), selected + 1); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (customers[selected]) tryServe(customers[selected]); }
+  });
+
+  startBtn.addEventListener('click', function() { audio(); if (state === 'title' || state === 'win' || state === 'over') reset(); });
+  restartBtn.addEventListener('click', function() { audio(); reset(); });
+  howBtn.addEventListener('click', function() { howto.classList.toggle('show'); });
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

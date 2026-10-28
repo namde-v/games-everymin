@@ -55,6 +55,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0148 | Apiary Architect | Strategy / Bee Colony | Click/tap build comb and assign roles, Space speed up day | [Play](./../games/game-0148.html) |
 | 0149 | Metronome March | Rhythm / Marching Steps | Arrow Keys step, mouse click step buttons, touch tap | [Play](./../games/game-0149.html) |
 | 0150 | Zip Line Zephyr | Precision / Zipline Timing | Space / Down Arrow / click / tap release | [Play](./../games/game-0150.html) |
+| 0151 | Volcano Voyager | Arcade / Lava Flow Runner | Space / Up / W jump, click / tap jump | [Play](./../games/game-0151.html) |
+| 0152 | Knot Keeper | Puzzle / Rope Untangling | Mouse/touch drag knots, Arrow Keys move, Enter confirm | [Play](./../games/game-0152.html) |
+| 0153 | Brewmaster Bay | Strategy / Tavern Management | Click/tap drink buttons, number keys brew, mouse/touch | [Play](./../games/game-0153.html) |
+| 0154 | Flamenco Fury | Rhythm / Clap Timing | A clap, S stomp, D snap, mouse/touch tap pads | [Play](./../games/game-0154.html) |
+| 0155 | Harpoon Harbor | Precision / Harpoon Fishing | Mouse/touch drag aim and release, Arrow Keys angle/power, Space fire | [Play](./../games/game-0155.html) |
+| 0156 | Pogo Pioneer | Arcade / Pogo Platforming | Arrow Keys / A-D steer, mouse steer, touch | [Play](./../games/game-0156.html) |
+| 0157 | Mosaic Maker | Puzzle / Tile Mosaic | Click/tap palette and cells, Check to submit | [Play](./../games/game-0157.html) |
+| 0158 | Railroad Tycoonlet | Strategy / Train Network | Click/tap build track, Arrow Keys cursor, Space build, D dispatch | [Play](./../games/game-0158.html) |
+| 0159 | Ukulele Uprising | Rhythm / Strum Timing | Chord keys / tap chord buttons, mouse/touch | [Play](./../games/game-0159.html) |
+| 0160 | Tightrope Titan | Precision / Balance Walk | Arrow Keys / A-D lean, mouse/touch lean | [Play](./../games/game-0160.html) |
 
 ## Batch notes
 
@@ -63,4 +73,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 013: 10 games, produced in one cycle.
 - Batch 014: 10 games, produced in one cycle.
 - Batch 015: 10 games, produced in one cycle.
+- Batch 016: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

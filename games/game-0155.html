@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harpoon Harbor</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06283d; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { margin: 8px 0 4px; font-size: 30px; letter-spacing: 1px; }
+  p.sub { color: #9fd8ef; margin-bottom: 10px; }
+  #hud { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; background: #0a3d5c; border: 2px solid #2fa8c9; border-radius: 10px; padding: 8px 16px; margin-bottom: 10px; font-weight: bold; }
+  #hud span { color: #ffd166; }
+  canvas { background: linear-gradient(#7ec8e3 0%, #1d7fa8 35%, #0b3d66 100%); border: 3px solid #2fa8c9; border-radius: 12px; max-width: 96vw; touch-action: none; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(3, 25, 40, 0.82); border-radius: 12px; text-align: center; padding: 20px; }
+  #wrap { position: relative; }
+  button { background: #ffb703; color: #06283d; border: none; border-radius: 10px; padding: 12px 26px; font-size: 18px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffd166; }
+  .how { max-width: 520px; line-height: 1.55; color: #d7eefb; }
+  .how b { color: #ffd166; }
+  #msg { min-height: 22px; color: #ffd166; font-weight: bold; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Harpoon Harbor</h1>
+<p class="sub">Precision / Harpoon Fishing &mdash; aim the harpoon, mind the current, catch the catch of the day.</p>
+<div id="hud">
+  <div>Score: <span id="score">0</span></div>
+  <div>Harpoons: <span id="lives">8</span></div>
+  <div>Level: <span id="level">1</span></div>
+  <div>Caught: <span id="caught">0</span> / <span id="goal">5</span></div>
+  <div>Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="760" height="480"></canvas>
+  <div id="overlay">
+    <h2 id="ovTitle">Harpoon Harbor</h2>
+    <div class="how">
+      <b>How to Play:</b> You stand on the dock at the top left. Drag with the mouse or finger to aim the harpoon &mdash; the arrow shows angle and power. Release to fire. Harpoons arc and drift with the underwater current, so aim a little upstream of moving fish. Catch the target number of fish to clear the level. Sharks cost you a harpoon and a score penalty, and missing wastes a harpoon. Clear 3 levels to win!<br>
+      <b>Keyboard:</b> Left/Right or Up/Down adjust angle and power, Space fires, R restarts. <b>Mouse:</b> drag and release to aim and fire. <b>Touch:</b> drag and release on the water.
+    </div>
+    <button id="startBtn">Start</button>
+  </div>
+</div>
+<div id="msg"></div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const ovTitle = document.getElementById('ovTitle');
+const startBtn = document.getElementById('startBtn');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const levelEl = document.getElementById('level');
+const caughtEl = document.getElementById('caught');
+const goalEl = document.getElementById('goal');
+const statusEl = document.getElementById('status');
+const msgEl = document.getElementById('msg');
+
+let audioCtx = null;
+function beep(freq, dur) {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  } catch (e) {}
+}
+
+const DOCK = { x: 70, y: 60 };
+let state = 'title';
+let score = 0, harpoons = 8, level = 1, caught = 0, goal = 5;
+let angle = -0.5, power = 160;
+let aiming = false, aimX = 0, aimY = 0;
+let harpoon = null;
+let fishes = [], sharks = [], bubbles = [];
+let current = 0.15;
+let trail = [];
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+function spawnLevel() {
+  fishes = []; sharks = []; bubbles = [];
+  goal = 4 + level;
+  goalEl.textContent = goal;
+  current = rand(-0.35, 0.35);
+  const nf = 5 + level;
+  for (let i = 0; i < nf; i++) {
+    fishes.push({ x: rand(220, 720), y: rand(180, 430), vx: rand(18, 42) * (Math.random() < 0.5 ? -1 : 1), r: rand(13, 20), hue: Math.floor(rand(10, 200)), wob: rand(0, 6.28) });
+  }
+  for (let i = 0; i < level; i++) {
+    sharks.push({ x: rand(300, 700), y: rand(220, 420), vx: rand(25, 50) * (Math.random() < 0.5 ? -1 : 1), r: 26, wob: rand(0, 6.28) });
+  }
+  caught = 0;
+  caughtEl.textContent = caught;
+  statusEl.textContent = 'Aim and fire!';
+}
+
+function updateHud() {
+  scoreEl.textContent = score;
+  livesEl.textContent = harpoons;
+  levelEl.textContent = level;
+  caughtEl.textContent = caught;
+}
+
+function showOverlay(title, btnLabel) {
+  ovTitle.textContent = title;
+  startBtn.textContent = btnLabel;
+  overlay.style.display = 'flex';
+}
+function hideOverlay() { overlay.style.display = 'none'; }
+
+function startGame() {
+  beep(520, 0.15);
+  score = 0; harpoons = 8; level = 1;
+  state = 'aiming'; harpoon = null;
+  spawnLevel(); updateHud(); hideOverlay();
+  msgEl.textContent = 'Drag to aim, release to fire!';
+}
+
+function endGame(won) {
+  state = won ? 'win' : 'over';
+  statusEl.textContent = won ? 'You win!' : 'Game Over';
+  showOverlay(won ? 'You Win! Harbor Hero!' : 'Game Over', 'Restart');
+  msgEl.textContent = won ? 'Final score: ' + score : 'Final score: ' + score + ' - press Restart to try again.';
+  beep(won ? 880 : 160, 0.4);
+}
+
+function fire() {
+  if (state !== 'aiming' || harpoons <= 0) return;
+  harpoons--;
+  harpoon = { x: DOCK.x + 20, y: DOCK.y + 30, vx: Math.cos(angle) * power * 2.2, vy: Math.sin(angle) * power * 2.2 };
+  trail = [];
+  state = 'flying';
+  statusEl.textContent = 'Harpoon away!';
+  beep(300, 0.12);
+  updateHud();
+}
+
+function posFromEvent(e) {
+  const r = canvas.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return { x: (t.clientX - r.left) * (canvas.width / r.width), y: (t.clientY - r.top) * (canvas.height / r.height) };
+}
+
+function onAimStart(e) {
+  if (state !== 'aiming') return;
+  e.preventDefault();
+  aiming = true;
+  const p = posFromEvent(e); aimX = p.x; aimY = p.y;
+}
+function onAimMove(e) {
+  if (!aiming || state !== 'aiming') return;
+  e.preventDefault();
+  const p = posFromEvent(e); aimX = p.x; aimY = p.y;
+  const dx = aimX - DOCK.x, dy = aimY - DOCK.y;
+  angle = Math.atan2(dy, dx);
+  if (angle < -1.45) angle = -1.45;
+  if (angle > 1.35) angle = 1.35;
+  power = Math.min(260, Math.max(60, Math.hypot(dx, dy)));
+}
+function onAimEnd(e) {
+  if (!aiming) return;
+  aiming = false;
+  if (state === 'aiming') fire();
+}
+
+canvas.addEventListener('mousedown', onAimStart);
+canvas.addEventListener('mousemove', onAimMove);
+canvas.addEventListener('mouseup', onAimEnd);
+canvas.addEventListener('touchstart', onAimStart, { passive: false });
+canvas.addEventListener('touchmove', onAimMove, { passive: false });
+canvas.addEventListener('touchend', onAimEnd);
+canvas.addEventListener('click', function () {});
+document.addEventListener('keydown', function (e) {
+  if (state === 'aiming') {
+    if (e.key === 'ArrowLeft') angle -= 0.08;
+    if (e.key === 'ArrowRight') angle += 0.08;
+    if (e.key === 'ArrowUp') power = Math.max(60, power - 12);
+    if (e.key === 'ArrowDown') power = Math.min(260, power + 12);
+    if (e.key === ' ') { e.preventDefault(); fire(); }
+  }
+  if (e.key === 'r' || e.key === 'R') { if (state !== 'title') startGame(); }
+});
+startBtn.addEventListener('click', startGame);
+
+function update(dt) {
+  if (state === 'title' || state === 'over' || state === 'win') return;
+  for (const f of fishes) {
+    f.wob += dt * 4;
+    f.x += f.vx * dt;
+    f.y += Math.sin(f.wob) * 12 * dt;
+    if (f.x < 180) { f.x = 180; f.vx = Math.abs(f.vx); }
+    if (f.x > 740) { f.x = 740; f.vx = -Math.abs(f.vx); }
+  }
+  for (const s of sharks) {
+    s.wob += dt * 3;
+    s.x += s.vx * dt;
+    s.y += Math.sin(s.wob) * 10 * dt;
+    if (s.x < 200) { s.x = 200; s.vx = Math.abs(s.vx); }
+    if (s.x > 730) { s.x = 730; s.vx = -Math.abs(s.vx); }
+  }
+  if (Math.random() < dt * 3) bubbles.push({ x: rand(120, 740), y: 470, r: rand(2, 5), v: rand(20, 50) });
+  for (const b of bubbles) b.y -= b.v * dt;
+  bubbles = bubbles.filter(b => b.y > 120);
+
+  if (state === 'flying' && harpoon) {
+    harpoon.vy += 320 * dt;
+    harpoon.vx += current * 60 * dt;
+    harpoon.x += harpoon.vx * dt;
+    harpoon.y += harpoon.vy * dt;
+    trail.push({ x: harpoon.x, y: harpoon.y });
+    if (trail.length > 40) trail.shift();
+    let hit = false;
+    for (let i = fishes.length - 1; i >= 0; i--) {
+      const f = fishes[i];
+      if (Math.hypot(harpoon.x - f.x, harpoon.y - f.y) < f.r + 6) {
+        fishes.splice(i, 1);
+        score += 100; caught++;
+        msgEl.textContent = 'Caught one! +100';
+        beep(760, 0.18); hit = true; break;
+      }
+    }
+    if (!hit) {
+      for (const s of sharks) {
+        if (Math.hypot(harpoon.x - s.x, harpoon.y - s.y) < s.r + 6) {
+          score = Math.max(0, score - 50);
+          msgEl.textContent = 'Ouch! A shark snapped the line. -50';
+          beep(140, 0.3); hit = true; break;
+        }
+      }
+    }
+    const out = harpoon.x < 0 || harpoon.x > 760 || harpoon.y > 480 || harpoon.y < 0;
+    if (hit || out) {
+      harpoon = null;
+      if (caught >= goal) {
+        if (level >= 3) { updateHud(); endGame(true); return; }
+        level++; harpoons = Math.min(10, harpoons + 2);
+        msgEl.textContent = 'Level ' + level + '! +2 harpoons.';
+        beep(660, 0.2);
+        spawnLevel(); state = 'aiming';
+      } else if (harpoons <= 0) {
+        updateHud(); endGame(false); return;
+      } else {
+        state = 'aiming';
+        statusEl.textContent = 'Aim and fire!';
+      }
+      updateHud();
+    }
+  }
+}
+
+function drawFish(f) {
+  ctx.save(); ctx.translate(f.x, f.y);
+  ctx.scale(f.vx >= 0 ? 1 : -1, 1);
+  ctx.fillStyle = 'hsl(' + f.hue + ', 80%, 55%)';
+  ctx.beginPath(); ctx.ellipse(0, 0, f.r, f.r * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-f.r, 0); ctx.lineTo(-f.r - 10, -8); ctx.lineTo(-f.r - 10, 8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#06283d'; ctx.beginPath(); ctx.arc(f.r * 0.5, -2, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+function drawShark(s) {
+  ctx.save(); ctx.translate(s.x, s.y);
+  ctx.scale(s.vx >= 0 ? 1 : -1, 1);
+  ctx.fillStyle = '#5a6d80';
+  ctx.beginPath(); ctx.ellipse(0, 0, s.r, s.r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-s.r, 0); ctx.lineTo(-s.r - 14, -10); ctx.lineTo(-s.r - 14, 10); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-4, -s.r * 0.5); ctx.lineTo(4, -s.r - 10); ctx.lineTo(12, -s.r * 0.5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.r * 0.55, -2, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#06283d'; ctx.beginPath(); ctx.arc(s.r * 0.55, -2, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, 760, 480);
+  ctx.fillStyle = '#8b5a2b';
+  ctx.fillRect(10, 40, 130, 26);
+  ctx.fillStyle = '#5d3a1a';
+  ctx.fillRect(20, 66, 10, 60); ctx.fillRect(110, 66, 10, 60);
+  ctx.fillStyle = '#eaf6ff';
+  ctx.font = 'bold 20px Arial'; ctx.fillText('Fisher', DOCK.x - 8, DOCK.y + 22);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '13px Arial'; ctx.fillText('Current: ' + (current >= 0 ? 'right ' : 'left ') + Math.abs(current).toFixed(2), 560, 20);
+  for (const b of bubbles) { ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke(); }
+  for (const f of fishes) drawFish(f);
+  for (const s of sharks) drawShark(s);
+  if (state === 'aiming') {
+    const ax = DOCK.x + 20 + Math.cos(angle) * (power * 0.7);
+    const ay = DOCK.y + 30 + Math.sin(angle) * (power * 0.7);
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(DOCK.x + 20, DOCK.y + 30); ctx.lineTo(ax, ay); ctx.stroke();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(ax, ay, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#eaf6ff'; ctx.font = '13px Arial';
+    ctx.fillText('Power ' + Math.round(power), DOCK.x + 30, DOCK.y + 110);
+  }
+  if (harpoon) {
+    ctx.strokeStyle = 'rgba(255,209,102,0.7)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < trail.length; i++) { if (i === 0) ctx.moveTo(trail[i].x, trail[i].y); else ctx.lineTo(trail[i].x, trail[i].y); }
+    ctx.stroke();
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(DOCK.x + 20, DOCK.y + 30); ctx.lineTo(harpoon.x, harpoon.y); ctx.stroke();
+    ctx.fillStyle = '#ff595e';
+    ctx.beginPath(); ctx.arc(harpoon.x, harpoon.y, 5, 0, Math.PI * 2); ctx.fill();
+  }
+  if (state === 'title') {
+    ctx.fillStyle = 'rgba(3,25,40,0.35)';
+    ctx.fillRect(0, 0, 760, 480);
+  }
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+spawnLevel();
+updateHud();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Volcano Voyager</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a0a08;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; font-family: 'Segoe UI', Arial, sans-serif; color: #ffe8d0;
+    overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  h1 { font-size: 28px; letter-spacing: 2px; color: #ff6b35; text-shadow: 0 0 18px #ff4500; margin: 10px 0 4px; }
+  .subtitle { color: #ffb347; font-size: 14px; margin-bottom: 8px; }
+  #wrap { position: relative; width: min(860px, 96vw); }
+  canvas {
+    width: 100%; height: auto; display: block; background: #2b0f0a;
+    border: 3px solid #ff6b35; border-radius: 12px; box-shadow: 0 0 30px rgba(255,69,0,.5);
+  }
+  #hud {
+    display: flex; justify-content: space-between; padding: 8px 12px;
+    background: rgba(0,0,0,.55); border-radius: 8px; margin-bottom: 6px;
+    font-weight: bold; font-size: 16px;
+  }
+  #hud span { color: #ffd166; }
+  #hud .lives { color: #ff5d5d; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(10, 2, 0, 0.78); border-radius: 12px; padding: 20px; gap: 10px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ff6b35; font-size: 30px; text-shadow: 0 0 16px #ff4500; }
+  .overlay p { max-width: 560px; line-height: 1.5; font-size: 15px; color: #ffe8d0; }
+  .howto { background: rgba(255,107,53,.14); border: 1px solid #ff6b35; border-radius: 10px; padding: 12px 16px; font-size: 14px; line-height: 1.6; text-align: left; }
+  .howto b { color: #ffd166; }
+  button {
+    background: linear-gradient(180deg, #ff8c42, #e63900); color: #fff; border: none;
+    padding: 14px 34px; font-size: 19px; font-weight: bold; border-radius: 10px;
+    cursor: pointer; box-shadow: 0 4px 0 #8f1d00; margin-top: 6px;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #8f1d00; }
+  button:hover { filter: brightness(1.15); }
+  .hint { font-size: 12px; color: #cbb; margin-top: 6px; }
+</style>
+</head>
+<body>
+  <h1>&#127756; VOLCANO VOYAGER &#127756;</h1>
+  <div class="subtitle">Outrun the eruption. Reach the summit before the mountain does you in.</div>
+  <div id="wrap">
+    <div id="hud">
+      <div>Score: <span id="score">0</span></div>
+      <div>Distance: <span id="dist">0</span>m / 1200m</div>
+      <div>Gems: <span id="gems">0</span></div>
+      <div>Lives: <span class="lives" id="lives">&#10084;&#10084;&#10084;</span></div>
+      <div>Status: <span id="status">READY</span></div>
+    </div>
+    <canvas id="game" width="860" height="460"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>VOLCANO VOYAGER</h2>
+      <p>The volcano is erupting! Sprint across the scorched ridge, leap the lava pools, dodge falling rocks, and grab every ember gem on the way to the summit.</p>
+      <div class="howto">
+        <b>How to Play:</b><br>
+        &#8226; <b>Jump:</b> Press <b>Space / Up Arrow / W</b>, click, or tap the screen.<br>
+        &#8226; <b>Double Jump:</b> Press jump again mid-air for a second boost.<br>
+        &#8226; <b>Goal:</b> Survive 1200m to reach the summit and WIN.<br>
+        &#8226; <b>Hazards:</b> Lava pools and falling rocks cost 1 life. You have 3 lives.<br>
+        &#8226; <b>Score:</b> Distance points + 50 per ember gem. Rocks smashed by landing on them? No &mdash; avoid them!<br>
+        &#8226; Speed increases the further you run. Good luck, Voyager!
+      </div>
+      <button id="startBtn">START RUN</button>
+      <div class="hint">Sound starts after you press Start. Best on keyboard, mouse, or touch.</div>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">GAME OVER</h2>
+      <p id="endText"></p>
+      <p id="endScore"></p>
+      <button id="restartBtn">RESTART</button>
+    </div>
+  </div>
+  <div class="hint">Space / Up / W / Click / Tap = Jump &amp; Double Jump</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var GROUND = 380;
+
+  var scoreEl = document.getElementById('score');
+  var distEl = document.getElementById('dist');
+  var gemsEl = document.getElementById('gems');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  // ---- Procedural audio (created only after user interaction) ----
+  var audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type || 'square';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + dur);
+  }
+
+  // ---- Game state ----
+  var state = 'title'; // title | playing | over | win
+  var player, obstacles, rocks, gems, particles, embers;
+  var speed, distance, score, gemCount, lives, invuln, frame;
+  var spawnTimer, rockTimer, gemTimer;
+  var keys = {};
+
+  function reset() {
+    player = { x: 110, y: GROUND - 44, w: 36, h: 44, vy: 0, jumps: 0, grounded: true, run: 0 };
+    obstacles = []; rocks = []; gems = []; particles = []; embers = [];
+    speed = 4.2; distance = 0; score = 0; gemCount = 0; lives = 3;
+    invuln = 0; frame = 0; spawnTimer = 0; rockTimer = 0; gemTimer = 0;
+    updateHUD();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = Math.floor(score);
+    distEl.textContent = Math.floor(distance);
+    gemsEl.textContent = gemCount;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, lives));
+    statusEl.textContent = state === 'playing' ? 'RUNNING' : state === 'win' ? 'SUMMIT!' : state === 'over' ? 'DEFEATED' : 'READY';
+  }
+
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    beep(520, 0.15, 'square', 0.1);
+    setTimeout(function () { beep(780, 0.2, 'square', 0.1); }, 120);
+  }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? 'YOU REACHED THE SUMMIT!' : 'GAME OVER';
+    endText.textContent = won
+      ? 'The Voyager plants a flag on the smoking summit as the eruption fades behind you. Legendary run!'
+      : 'The volcano claims another runner. The lava bubbles mockingly. Try again, Voyager!';
+    endScore.textContent = 'Final Score: ' + Math.floor(score) + '  |  Distance: ' + Math.floor(distance) + 'm  |  Gems: ' + gemCount;
+    endScreen.classList.remove('hidden');
+    updateHUD();
+    if (won) { beep(523, 0.2, 'triangle', 0.12); setTimeout(function(){ beep(659,0.2,'triangle',0.12); },180); setTimeout(function(){ beep(784,0.35,'triangle',0.12); },360); }
+    else { beep(160, 0.4, 'sawtooth', 0.12); }
+  }
+
+  function doJump() {
+    if (state !== 'playing') return;
+    initAudio();
+    if (player.grounded) {
+      player.vy = -15.5; player.grounded = false; player.jumps = 1;
+      beep(440, 0.12, 'square', 0.08);
+    } else if (player.jumps < 2) {
+      player.vy = -13.5; player.jumps = 2;
+      beep(660, 0.12, 'square', 0.08);
+      burst(player.x + 18, player.y + 40, '#ffd166', 6);
+    }
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: -Math.random() * 5, life: 22 + Math.random() * 14, color: color });
+    }
+  }
+
+  function hitHazard() {
+    if (invuln > 0) return;
+    lives--; invuln = 90;
+    burst(player.x + 18, player.y + 20, '#ff4500', 18);
+    beep(140, 0.3, 'sawtooth', 0.14);
+    if (lives <= 0) { updateHUD(); endGame(false); }
+    else updateHUD();
+  }
+
+  function spawnObstacle() {
+    var type = Math.random() < 0.55 ? 'lava' : 'rockpile';
+    var w = type === 'lava' ? 60 + Math.random() * 70 : 44 + Math.random() * 30;
+    obstacles.push({ x: W + 40, y: GROUND - (type === 'lava' ? 18 : 34), w: w, h: type === 'lava' ? 18 : 34, type: type });
+  }
+  function spawnRock() {
+    rocks.push({ x: 120 + Math.random() * (W - 200), y: -30, vy: 3 + Math.random() * 2 + speed * 0.2, r: 16 + Math.random() * 10 });
+  }
+  function spawnGem() {
+    gems.push({ x: W + 40, y: GROUND - 90 - Math.random() * 120, r: 12, bob: Math.random() * 6 });
+  }
+
+  function collide(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    speed = Math.min(10.5, 4.2 + distance / 260);
+    distance += speed * 0.09;
+    score += speed * 0.09;
+
+    // Player physics
+    player.vy += 0.85;
+    player.y += player.vy;
+    player.run += speed * 0.15;
+    if (player.y >= GROUND - player.h) {
+      player.y = GROUND - player.h;
+      player.vy = 0; player.grounded = true; player.jumps = 0;
+    }
+    if (invuln > 0) invuln--;
+
+    // Spawning
+    spawnTimer -= speed;
+    if (spawnTimer <= 0) { spawnObstacle(); spawnTimer = 260 + Math.random() * 220; }
+    rockTimer--;
+    if (rockTimer <= 0) { spawnRock(); rockTimer = 120 + Math.random() * 160; }
+    gemTimer -= speed;
+    if (gemTimer <= 0) { spawnGem(); gemTimer = 200 + Math.random() * 260; }
+
+    // Obstacles
+    for (var i = obstacles.length - 1; i >= 0; i--) {
+      var o = obstacles[i]; o.x -= speed;
+      if (o.x + o.w < -10) { obstacles.splice(i, 1); continue; }
+      if (collide(player, o)) hitHazard();
+    }
+    // Falling rocks
+    for (var j = rocks.length - 1; j >= 0; j--) {
+      var r = rocks[j]; r.y += r.vy;
+      if (r.y - r.r > H) { rocks.splice(j, 1); continue; }
+      var box = { x: r.x - r.r, y: r.y - r.r, w: r.r * 2, h: r.r * 2 };
+      if (collide(player, box)) { rocks.splice(j, 1); hitHazard(); }
+    }
+    // Gems
+    for (var k = gems.length - 1; k >= 0; k--) {
+      var g = gems[k]; g.x -= speed; g.bob += 0.08;
+      if (g.x + g.r < -10) { gems.splice(k, 1); continue; }
+      var dx = (player.x + 18) - g.x, dy = (player.y + 22) - (g.y + Math.sin(g.bob) * 5);
+      if (dx * dx + dy * dy < 34 * 34) {
+        gems.splice(k, 1); gemCount++; score += 50;
+        burst(g.x, g.y, '#ffd166', 10); beep(880, 0.12, 'sine', 0.1);
+      }
+    }
+    // Particles
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p]; pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.2; pt.life--;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    // Ambient embers
+    if (Math.random() < 0.3) embers.push({ x: Math.random() * W, y: H, vy: -1 - Math.random(), life: 120 });
+    for (var e = embers.length - 1; e >= 0; e--) {
+      embers[e].y += embers[e].vy; embers[e].life--;
+      if (embers[e].life <= 0) embers.splice(e, 1);
+    }
+
+    if (distance >= 1200) { endGame(true); return; }
+    updateHUD();
+  }
+
+  function drawBackground() {
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#3d0d08'); grad.addColorStop(0.6, '#5a1408'); grad.addColorStop(1, '#1a0a08');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // Volcano silhouette
+    ctx.fillStyle = '#120302';
+    ctx.beginPath();
+    ctx.moveTo(520, GROUND); ctx.lineTo(700, 90); ctx.lineTo(760, 90); ctx.lineTo(860, GROUND);
+    ctx.closePath(); ctx.fill();
+    // Lava glow in crater
+    ctx.fillStyle = '#ff4500';
+    ctx.beginPath(); ctx.ellipse(730, 92, 32, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,69,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(730, 92, 55, 18, 0, 0, Math.PI * 2); ctx.fill();
+    // Distant mountains
+    ctx.fillStyle = '#240a06';
+    ctx.beginPath(); ctx.moveTo(0, GROUND);
+    for (var x = 0; x <= W; x += 60) ctx.lineTo(x, GROUND - 60 - Math.sin(x * 0.02) * 30);
+    ctx.lineTo(W, GROUND); ctx.closePath(); ctx.fill();
+    // Ground
+    ctx.fillStyle = '#3a1c10'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#572a16'; ctx.fillRect(0, GROUND, W, 6);
+    // Scrolling ground texture
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    for (var gx = 0; gx < W; gx += 70) {
+      var off = (frame * speed) % 70;
+      ctx.fillRect(gx - off, GROUND + 22 + (gx % 3) * 8, 26, 4);
+    }
+    // Progress marker
+    var prog = Math.min(1, distance / 1200);
+    ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(20, 16, W - 40, 8);
+    ctx.fillStyle = '#ff6b35'; ctx.fillRect(20, 16, (W - 40) * prog, 8);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial';
+    ctx.fillText('SUMMIT ' + Math.floor(prog * 100) + '%', 24, 12);
+  }
+
+  function draw() {
+    drawBackground();
+    // Gems
+    gems.forEach(function (g) {
+      var gy = g.y + Math.sin(g.bob) * 5;
+      ctx.save(); ctx.translate(g.x, gy); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = '#ff9d00'; ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 14;
+      ctx.fillRect(-9, -9, 18, 18); ctx.restore();
+      ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillRect(g.x - 3, gy - 6, 5, 5);
+    });
+    // Lava pools and rock piles
+    obstacles.forEach(function (o) {
+      if (o.type === 'lava') {
+        ctx.fillStyle = '#ff4500'; ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.fillStyle = '#ffd166';
+        for (var bx = o.x + 4; bx < o.x + o.w - 6; bx += 14) {
+          ctx.beginPath(); ctx.arc(bx, o.y + 5 + Math.sin(frame * 0.15 + bx) * 3, 4, 0, Math.PI * 2); ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = '#6b3a24'; ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.fillStyle = '#8a4f30'; ctx.fillRect(o.x + 4, o.y + 4, o.w - 8, 10);
+      }
+    });
+    // Falling rocks
+    rocks.forEach(function (r) {
+      ctx.fillStyle = '#4a2c1a';
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7a4a2a';
+      ctx.beginPath(); ctx.arc(r.x - r.r * 0.3, r.y - r.r * 0.3, r.r * 0.4, 0, Math.PI * 2); ctx.fill();
+    });
+    // Particles
+    particles.forEach(function (pt) {
+      ctx.globalAlpha = Math.max(0, pt.life / 30);
+      ctx.fillStyle = pt.color; ctx.fillRect(pt.x, pt.y, 5, 5);
+      ctx.globalAlpha = 1;
+    });
+    // Embers
+    ctx.fillStyle = '#ffb347';
+    embers.forEach(function (em) { ctx.fillRect(em.x, em.y, 3, 3); });
+    // Player (blink while invulnerable)
+    if (!(invuln > 0 && Math.floor(frame / 5) % 2 === 0)) {
+      var legSwing = Math.sin(player.run) * 8;
+      ctx.fillStyle = '#1e3a5f';
+      ctx.fillRect(player.x + 6, player.y + 30, 10, 14 + (player.grounded ? legSwing * 0.3 : 0));
+      ctx.fillRect(player.x + 20, player.y + 30, 10, 14 - (player.grounded ? legSwing * 0.3 : 0));
+      ctx.fillStyle = '#ff6b35';
+      ctx.fillRect(player.x, player.y, 36, 32);
+      ctx.fillStyle = '#ffd166';
+      ctx.fillRect(player.x + 4, player.y + 4, 28, 8); // backpack
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(player.x + 24, player.y + 10, 8, 8); // eye
+      ctx.fillStyle = '#000';
+      ctx.fillRect(player.x + 29, player.y + 12, 3, 4);
+    }
+    // Idle hint
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press START and run for your life!', W / 2, 200);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Controls: keyboard, mouse, touch ----
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      if (state === 'playing') doJump();
+      else if (state === 'title') startGame();
+      else startGame();
+    }
+    if (e.code === 'Enter' && state !== 'playing') startGame();
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  canvas.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    if (state === 'playing') doJump();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state === 'playing') doJump();
+  }, { passive: false });
+  document.addEventListener('touchstart', function () { initAudio(); }, { passive: true });
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
