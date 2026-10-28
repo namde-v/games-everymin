@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Wordfall Anagram</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { background: #0f172a; color: #f1f5f9; font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #facc15; text-shadow: 0 2px 0 #854d0e; margin-bottom: 4px; text-align: center; }
+  .tagline { color: #94a3b8; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#1e293b, #0f172a);
+    border: 3px solid #facc15; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; background: rgba(2, 6, 23, 0.88); border-radius: 14px; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 28px; color: #facc15; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #e2e8f0; max-width: 380px; }
+  .howto { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px 14px;
+    font-size: 14px; line-height: 1.6; text-align: left; color: #cbd5e1; max-width: 400px; }
+  .howto b { color: #facc15; }
+  button { cursor: pointer; background: #facc15; color: #1e293b; border: none; border-radius: 10px;
+    font-size: 19px; font-weight: bold; padding: 13px 30px; margin-top: 6px; box-shadow: 0 4px 0 #a16207; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #a16207; }
+  button.secondary { background: #38bdf8; box-shadow: 0 4px 0 #0369a1; color: #082f49; }
+  .big { font-size: 22px; font-weight: bold; color: #4ade80; }
+  .bad { color: #f87171; }
+  #hint { margin-top: 10px; font-size: 13px; color: #94a3b8; text-align: center; }
+  @media (max-width: 520px) { h1 { font-size: 24px; } .overlay p { font-size: 14px; } }
+</style>
+</head>
+<body>
+<h1>WORDFALL ANAGRAM</h1>
+<p class="tagline">Catch falling letters. Spell the word. Beat the clock.</p>
+<div id="wrap">
+  <canvas id="game" width="480" height="640"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>WORDFALL</h2>
+    <p>Catch the falling letter tiles in the right order to spell each target word before it hits the ground!</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      &bull; Move the catcher with <b>Arrow keys / A &amp; D</b>, the <b>mouse</b>, or <b>touch-drag</b>.<br>
+      &bull; Catch the <b>next letter</b> of the target word, shown at the top.<br>
+      &bull; Wrong letters just bounce away &mdash; no penalty.<br>
+      &bull; Lose a life if a <b>needed letter hits the ground</b> or the <b>word timer runs out</b>.<br>
+      &bull; Spell <b>6 words</b> to win. You have <b>3 lives</b>.
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p class="big" id="endScore"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<p id="hint">Move: ← → or A / D &nbsp;•&nbsp; Mouse &nbsp;•&nbsp; Touch-drag &nbsp;•&nbsp; Press Enter to start / restart</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var WORDS = ['ORBIT','COMET','GALAXY','ROCKET','PLANET','STARDUST','MOONLIGHT','ASTEROID',
+    'NEBULA','QUASAR','METEOR','ECLIPSE','COSMOS','SATURN','JUPITER','VENUS'];
+  var LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  var state = 'title'; // title | playing | over
+  var score = 0, lives = 3, wordsDone = 0, wordIndex = 0;
+  var target = '', progress = 0, wordTime = 45, wordTimeLeft = 45;
+  var tiles = [], particles = [], spawnTimer = 0, shake = 0;
+  var catcher = { x: W / 2 - 45, y: H - 70, w: 90, h: 26, speed: 7 };
+  var keys = {};
+  var audioCtx = null, muted = false;
+
+  function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    return arr;
+  }
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function fanfare() {
+    [523, 659, 784, 1047].forEach(function (f, i) {
+      setTimeout(function () { beep(f, 0.22, 'triangle', 0.14); }, i * 130);
+    });
+  }
+  function newWord() {
+    target = WORDS[wordIndex % WORDS.length];
+    progress = 0;
+    wordTimeLeft = 45;
+    tiles = [];
+    spawnTimer = 0;
+  }
+  function startGame() {
+    initAudio();
+    score = 0; lives = 3; wordsDone = 0; wordIndex = 0;
+    catcher.x = W / 2 - 45;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    newWord();
+    state = 'playing';
+    beep(660, 0.15, 'square', 0.1);
+  }
+  function endGame(win) {
+    state = 'over';
+    endTitle.textContent = win ? 'You Win!' : 'Game Over';
+    endTitle.className = win ? '' : 'bad';
+    endText.textContent = win
+      ? 'Brilliant! You spelled all 6 target words before running out of lives.'
+      : 'Out of lives. You spelled ' + wordsDone + ' of 6 words. Try again!';
+    endScore.textContent = 'Final Score: ' + score;
+    endScreen.classList.remove('hidden');
+    if (win) fanfare(); else beep(160, 0.5, 'sawtooth', 0.12);
+  }
+  function loseLife(reason) {
+    lives--;
+    shake = 10;
+    beep(140, 0.35, 'sawtooth', 0.14);
+    burst(catcher.x + catcher.w / 2, catcher.y, '#f87171');
+    if (lives <= 0) { endGame(false); return; }
+    // Fresh attempt at the same word after a miss, with a fresh timer.
+    wordTimeLeft = 45; tiles = [];
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: -Math.random() * 4,
+        life: 30, color: color });
+    }
+  }
+  function spawnTile() {
+    var needed = (progress < target.length) ? target.charAt(progress) : null;
+    var letter;
+    // 55% chance the tile is the needed next letter, otherwise a random distractor.
+    if (needed && Math.random() < 0.55) letter = needed;
+    else letter = LETTERS.charAt(Math.floor(Math.random() * LETTERS.length));
+    var size = 40;
+    tiles.push({
+      letter: letter, needed: letter === needed,
+      x: 10 + Math.random() * (W - 20 - size), y: -size, size: size,
+      vy: 1.3 + Math.random() * 1.1 + wordsDone * 0.12,
+      wobble: Math.random() * Math.PI * 2
+    });
+  }
+  function update(dt) {
+    if (state !== 'playing') return;
+    if (keys.ArrowLeft || keys.a || keys.A) catcher.x -= catcher.speed;
+    if (keys.ArrowRight || keys.d || keys.D) catcher.x += catcher.speed;
+    catcher.x = Math.max(0, Math.min(W - catcher.w, catcher.x));
+
+    wordTimeLeft -= dt;
+    if (wordTimeLeft <= 0) { loseLife('timeout'); if (state !== 'playing') return; }
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnTile(); spawnTimer = 0.55 + Math.random() * 0.5; }
+
+    for (var i = tiles.length - 1; i >= 0; i--) {
+      var t = tiles[i];
+      t.y += t.vy; t.wobble += 0.05; t.x += Math.sin(t.wobble) * 0.3;
+      var caught = t.y + t.size >= catcher.y && t.y + t.size <= catcher.y + catcher.h + 14 &&
+        t.x + t.size > catcher.x && t.x < catcher.x + catcher.w;
+      if (caught) {
+        if (t.needed) {
+          progress++;
+          score += 10;
+          burst(t.x + t.size / 2, t.y + t.size / 2, '#4ade80');
+          beep(520 + progress * 60, 0.12, 'sine', 0.12);
+          if (progress >= target.length) {
+            score += 100 + Math.round(wordTimeLeft) * 2;
+            wordsDone++; wordIndex++;
+            burst(W / 2, 120, '#facc15');
+            fanfare();
+            if (wordsDone >= 6) { endGame(true); return; }
+            newWord();
+          }
+        } else {
+          beep(300, 0.08, 'triangle', 0.06);
+          burst(t.x + t.size / 2, t.y + t.size / 2, '#94a3b8');
+        }
+        tiles.splice(i, 1);
+        continue;
+      }
+      if (t.y > H) {
+        if (t.needed) { tiles.splice(i, 1); loseLife('missed'); if (state !== 'playing') return; }
+        else tiles.splice(i, 1);
+      }
+    }
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var p = particles[j];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--;
+      if (p.life <= 0) particles.splice(j, 1);
+    }
+    if (shake > 0) shake--;
+  }
+  function drawTile(t) {
+    var cx = t.x + t.size / 2, cy = t.y + t.size / 2;
+    ctx.fillStyle = t.needed ? '#facc15' : '#334155';
+    ctx.strokeStyle = t.needed ? '#fef08a' : '#64748b';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(t.x, t.y, t.size, t.size, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = t.needed ? '#422006' : '#e2e8f0';
+    ctx.font = 'bold 24px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(t.letter, cx, cy + 1);
+  }
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    ctx.clearRect(0, 0, W, H);
+    // Starfield background.
+    ctx.fillStyle = '#e2e8f0';
+    for (var s = 0; s < 40; s++) {
+      var sx = (s * 97) % W, sy = (s * 53) % H;
+      ctx.globalAlpha = 0.25 + (s % 3) * 0.2;
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    if (state === 'playing' || state === 'over') {
+      // HUD panel.
+      ctx.fillStyle = 'rgba(2,6,23,0.75)';
+      ctx.fillRect(0, 0, W, 96);
+      ctx.fillStyle = '#facc15'; ctx.font = 'bold 17px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Score: ' + score, 14, 26);
+      ctx.fillStyle = '#f87171';
+      ctx.fillText('Lives: ' + '♥'.repeat(Math.max(0, lives)), 150, 26);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText('Word ' + (wordsDone + 1) + ' / 6', 330, 26);
+      ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 20px Arial';
+      ctx.fillText('Target: ' + target, 14, 56);
+      ctx.fillStyle = '#94a3b8'; ctx.font = '15px Arial';
+      ctx.fillText('Time: ' + Math.max(0, Math.ceil(wordTimeLeft)) + 's', 330, 56);
+      // Progress letters.
+      var spelled = target.slice(0, progress);
+      var rest = target.slice(progress);
+      ctx.font = 'bold 26px monospace'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#4ade80'; ctx.fillText(spelled, 14, 88);
+      var wSpelled = ctx.measureText(spelled).width;
+      ctx.fillStyle = '#64748b'; ctx.fillText(rest, 14 + wSpelled, 88);
+      // Ground line.
+      ctx.strokeStyle = '#f87171'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(0, H - 30); ctx.lineTo(W, H - 30); ctx.stroke();
+      // Catcher.
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath(); ctx.roundRect(catcher.x, catcher.y, catcher.w, catcher.h, 8); ctx.fill();
+      ctx.fillStyle = '#e0f2fe'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('CATCH', catcher.x + catcher.w / 2, catcher.y + 17);
+      tiles.forEach(drawTile);
+      particles.forEach(function (p) {
+        ctx.globalAlpha = Math.max(0, p.life / 30);
+        ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 5, 5);
+      });
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = '#475569'; ctx.font = '18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to play Wordfall!', W / 2, H / 2 + 90);
+    }
+    ctx.restore();
+  }
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  function moveCatcherTo(clientX) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    catcher.x = Math.max(0, Math.min(W - catcher.w, x - catcher.w / 2));
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === 'Enter' && (state === 'title' || state === 'over')) startGame();
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function (e) { if (state === 'playing') moveCatcherTo(e.clientX); });
+  canvas.addEventListener('touchstart', function (e) { initAudio(); if (state === 'playing') { moveCatcherTo(e.touches[0].clientX); } e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { if (state === 'playing') { moveCatcherTo(e.touches[0].clientX); } e.preventDefault(); }, { passive: false });
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Marble Magnet Maze</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b1220;color:#eef2ff;font-family:Arial,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:12px;overflow:hidden}
+  #wrap{width:100%;max-width:900px}
+  h1{font-size:28px;text-align:center;margin-bottom:6px;color:#facc15;letter-spacing:1px}
+  #hud{display:flex;justify-content:space-between;gap:8px;background:#17233d;border:2px solid #334155;border-radius:10px;padding:9px 12px;font-weight:bold;flex-wrap:wrap}
+  #hud span{white-space:nowrap}
+  #stage{position:relative;margin-top:10px;border:3px solid #64748b;border-radius:12px;overflow:hidden;background:#111827;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  canvas{display:block;width:100%;height:560px;touch-action:none;background:#0f172a}
+  .overlay{position:absolute;inset:0;background:rgba(2,6,23,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;z-index:5}
+  .overlay h2{font-size:34px;color:#facc15;margin-bottom:10px}
+  .overlay p{max-width:620px;line-height:1.55;margin:6px 0;color:#dbeafe}
+  .how{background:#1e293b;border:1px solid #475569;border-radius:10px;padding:14px 18px;margin:14px 0;text-align:left;max-width:620px}
+  .how b{color:#facc15}
+  button{background:#facc15;color:#111827;border:0;border-radius:999px;padding:13px 26px;font-size:18px;font-weight:bold;cursor:pointer;margin-top:12px;box-shadow:0 4px 0 #a16207}
+  button:active{transform:translateY(3px);box-shadow:none}
+  button.secondary{background:#38bdf8;box-shadow:0 4px 0 #0369a1}
+  #magnetBar{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+  .magBtn{background:#1e293b;color:#fff;border:2px solid #64748b;border-radius:999px;padding:9px 15px;font-weight:bold;cursor:pointer}
+  .magBtn.active{background:#ef4444;border-color:#fca5a5;color:#fff}
+  #msg{text-align:center;min-height:22px;margin-top:7px;color:#a5f3fc;font-weight:bold}
+  @media(max-width:600px){canvas{height:480px}h1{font-size:23px}.overlay h2{font-size:28px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🧲 Marble Magnet Maze</h1>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>⭐ Stars: <span id="stars">0</span>/9</span>
+    <span>❤️ Lives: <span id="lives">3</span></span>
+    <span>Maze: <span id="level">1</span>/3</span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="880" height="560"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>Marble Magnet Maze</h2>
+      <p>Guide a steel marble through three magnetic mazes. Magnets pull the marble — choose the right one at the right moment!</p>
+      <div class="how">
+        <b>How to Play</b><br>
+        • Click / tap a magnet, or press <b>1–4</b>, to make it the active magnet.<br>
+        • Press <b>← / →</b> to cycle magnets. Arrow keys / WASD also give a gentle nudge.<br>
+        • Collect stars, avoid pits, bounce off walls, and reach the glowing goal.<br>
+        • Falling into a pit costs a life. Complete all 3 mazes to win!
+      </div>
+      <button id="startBtn">▶ Start Game</button>
+    </div>
+    <div class="overlay" id="endScreen" style="display:none">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">↻ Play Again</button>
+    </div>
+  </div>
+  <div id="magnetBar"></div>
+  <div id="msg">Choose a magnet and watch the marble follow its pull.</div>
+</div>
+<script>
+(function(){
+  const canvas=document.getElementById('game');
+  const ctx=canvas.getContext('2d');
+  const W=880,H=560;
+  const scoreEl=document.getElementById('score'),starsEl=document.getElementById('stars'),livesEl=document.getElementById('lives'),levelEl=document.getElementById('level'),statusEl=document.getElementById('status'),msgEl=document.getElementById('msg');
+  const titleScreen=document.getElementById('titleScreen'),endScreen=document.getElementById('endScreen');
+  const bar=document.getElementById('magnetBar');
+  let audioCtx=null,running=false,levelIdx=0,score=0,starCount=0,lives=3,active=0,keys={};
+  let marble,level,particles=[];
+
+  function beep(freq,dur,type,vol){
+    if(!audioCtx) return;
+    try{
+      const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+      o.type=type||'sine';o.frequency.value=freq;g.gain.value=vol||0.12;
+      o.connect(g);g.connect(audioCtx.destination);o.start();
+      g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+      o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function initAudio(){ if(!audioCtx){ try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); }
+
+  const LEVELS=[
+    {start:{x:70,y:280},goal:{x:800,y:280},
+     walls:[{x:180,y:60,w:26,h:300},{x:180,y:440,w:26,h:60},{x:360,y:120,w:26,h:380},{x:540,y:60,w:26,h:300},{x:540,y:440,w:26,h:60},{x:700,y:180,w:26,h:240}],
+     pits:[{x:270,y:450,r:30},{x:460,y:120,r:30},{x:630,y:450,r:30}],
+     stars:[{x:270,y:120},{x:450,y:280},{x:640,y:120}],
+     magnets:[{x:130,y:90,label:'A'},{x:430,y:90,label:'B'},{x:620,y:460,label:'C'},{x:810,y:470,label:'D'}]},
+    {start:{x:70,y:90},goal:{x:800,y:470},
+     walls:[{x:160,y:140,w:420,h:26},{x:160,y:330,w:26,h:200},{x:330,y:330,w:420,h:26},{x:700,y:60,w:26,h:300},{x:330,y:470,w:26,h:70}],
+     pits:[{x:250,y:450,r:32},{x:500,y:210,r:32},{x:620,y:440,r:32}],
+     stars:[{x:250,y:240},{x:500,y:90},{x:600,y:280}],
+     magnets:[{x:120,y:470,label:'A'},{x:430,y:470,label:'B'},{x:780,y:120,label:'C'},{x:430,y:90,label:'D'}]},
+    {start:{x:70,y:470},goal:{x:800,y:90},
+     walls:[{x:150,y:80,w:26,h:340},{x:150,y:80,w:560,h:26},{x:330,y:220,w:26,h:300},{x:330,y:220,w:400,h:26},{x:520,y:330,w:26,h:200},{x:680,y:60,w:26,h:300}],
+     pits:[{x:250,y:280,r:30},{x:430,y:450,r:30},{x:620,y:150,r:30}],
+     stars:[{x:250,y:90},{x:430,y:280},{x:620,y:470}],
+     magnets:[{x:120,y:90,label:'A'},{x:430,y:120,label:'B'},{x:790,y:470,label:'C'},{x:250,y:470,label:'D'}]}
+  ];
+
+  function loadLevel(i){
+    levelIdx=i; level=JSON.parse(JSON.stringify(LEVELS[i]));
+    marble={x:level.start.x,y:level.start.y,vx:0,vy:0,r:15};
+    active=0; level.stars.forEach(s=>s.taken=false); particles=[];
+    levelEl.textContent=i+1; statusEl.textContent='Maze '+(i+1);
+    buildMagnetBar(); msgEl.textContent='Maze '+(i+1)+': pull the marble to the glowing goal!';
+  }
+  function buildMagnetBar(){
+    bar.innerHTML='';
+    level.magnets.forEach((m,i)=>{
+      const b=document.createElement('button'); b.className='magBtn'+(i===active?' active':''); b.textContent='Magnet '+m.label+' ('+(i+1)+')';
+      b.addEventListener('click',()=>{initAudio();setActive(i);});
+      bar.appendChild(b);
+    });
+  }
+  function setActive(i){
+    active=i; buildMagnetBar(); beep(520,0.08,'triangle',0.08);
+    statusEl.textContent='Magnet '+level.magnets[i].label+' active';
+  }
+  function updateHUD(){
+    scoreEl.textContent=score; starsEl.textContent=starCount; livesEl.textContent=lives;
+  }
+  function burst(x,y,color){
+    for(let i=0;i<14;i++) particles.push({x,y,vx:(Math.random()-0.5)*5,vy:(Math.random()-0.5)*5,life:28,color});
+  }
+  function collideWalls(){
+    level.walls.forEach(w=>{
+      const nx=Math.max(w.x,Math.min(marble.x,w.x+w.w)), ny=Math.max(w.y,Math.min(marble.y,w.y+w.h));
+      const dx=marble.x-nx, dy=marble.y-ny, d=Math.hypot(dx,dy);
+      if(d<marble.r){
+        if(d===0){ marble.x=w.x-marble.r; marble.vx*=-0.4; }
+        else{ marble.x=nx+dx/d*marble.r; marble.y=ny+dy/d*marble.r;
+          const dot=marble.vx*dx/d+marble.vy*dy/d;
+          if(dot<0){ marble.vx-=1.6*dot*dx/d; marble.vy-=1.6*dot*dy/d; }
+        }
+      }
+    });
+  }
+  function loseLife(reason){
+    lives--; updateHUD(); beep(160,0.35,'sawtooth',0.12); burst(marble.x,marble.y,'#ef4444');
+    msgEl.textContent=reason+' — a life is lost!';
+    if(lives<=0){ gameOver(); }
+    else{ marble.x=level.start.x; marble.y=level.start.y; marble.vx=0; marble.vy=0; statusEl.textContent='Try again'; }
+  }
+  function gameOver(){
+    running=false; statusEl.textContent='Game Over';
+    document.getElementById('endTitle').textContent='Game Over';
+    document.getElementById('endText').textContent='The marble ran out of lives on maze '+(levelIdx+1)+'. Final score: '+score+' with '+starCount+' stars.';
+    endScreen.style.display='flex';
+  }
+  function winGame(){
+    running=false; statusEl.textContent='You Win!';
+    document.getElementById('endTitle').textContent='🏆 You Win!';
+    document.getElementById('endText').textContent='You cleared all 3 mazes! Final score: '+score+' with '+starCount+' stars. Brilliant magnetic navigation!';
+    endScreen.style.display='flex'; beep(880,0.25,'sine',0.14); setTimeout(()=>beep(1100,0.3,'sine',0.14),180);
+  }
+  function update(){
+    if(!running) return;
+    const m=level.magnets[active];
+    const dx=m.x-marble.x, dy=m.y-marble.y, dist=Math.max(40,Math.hypot(dx,dy));
+    const pull=2600/dist; // stronger when close, gentle when far
+    marble.vx+=dx/dist*pull*0.016; marble.vy+=dy/dist*pull*0.016;
+    if(keys.ArrowLeft||keys.a) marble.vx-=1.1;
+    if(keys.ArrowRight||keys.d) marble.vx+=1.1;
+    if(keys.ArrowUp||keys.w) marble.vy-=1.1;
+    if(keys.ArrowDown||keys.s) marble.vy+=1.1;
+    marble.vx*=0.985; marble.vy*=0.985;
+    marble.x+=marble.vx; marble.y+=marble.vy;
+    if(marble.x<marble.r){marble.x=marble.r;marble.vx=Math.abs(marble.vx)*0.5;}
+    if(marble.x>W-marble.r){marble.x=W-marble.r;marble.vx=-Math.abs(marble.vx)*0.5;}
+    if(marble.y<marble.r){marble.y=marble.r;marble.vy=Math.abs(marble.vy)*0.5;}
+    if(marble.y>H-marble.r){marble.y=H-marble.r;marble.vy=-Math.abs(marble.vy)*0.5;}
+    collideWalls();
+    level.pits.forEach(p=>{ if(Math.hypot(marble.x-p.x,marble.y-p.y)<p.r+marble.r-6) loseLife('The marble fell into a pit'); });
+    if(!running) return;
+    level.stars.forEach(s=>{ if(!s.taken && Math.hypot(marble.x-s.x,marble.y-s.y)<34){ s.taken=true; score+=100; starCount++; updateHUD(); burst(s.x,s.y,'#facc15'); beep(880,0.12,'sine',0.12); msgEl.textContent='Star collected! +100 points.'; } });
+    if(Math.hypot(marble.x-level.goal.x,marble.y-level.goal.y)<38){
+      score+=250; updateHUD(); burst(level.goal.x,level.goal.y,'#22c55e'); beep(660,0.18,'triangle',0.13);
+      if(levelIdx>=2) winGame();
+      else{ msgEl.textContent='Maze complete! +250 bonus. Next maze…'; setTimeout(()=>{loadLevel(levelIdx+1);},650); }
+    }
+    particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;});
+    particles=particles.filter(p=>p.life>0);
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#0f172a'; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='#1e293b'; ctx.lineWidth=1;
+    for(let x=0;x<W;x+=44){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<H;y+=44){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    // goal
+    const pulse=1+Math.sin(Date.now()/250)*0.08;
+    ctx.beginPath(); ctx.arc(level.goal.x,level.goal.y,30*pulse,0,Math.PI*2); ctx.fillStyle='#22c55e'; ctx.fill();
+    ctx.fillStyle='#052e16'; ctx.font='bold 20px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('GOAL',level.goal.x,level.goal.y);
+    // pits
+    level.pits.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fillStyle='#000'; ctx.fill(); ctx.strokeStyle='#ef4444'; ctx.lineWidth=3; ctx.stroke(); ctx.fillStyle='#ef4444'; ctx.font='bold 18px Arial'; ctx.fillText('!',p.x,p.y); });
+    // walls
+    level.walls.forEach(w=>{ ctx.fillStyle='#475569'; ctx.fillRect(w.x,w.y,w.w,w.h); ctx.strokeStyle='#94a3b8'; ctx.lineWidth=2; ctx.strokeRect(w.x,w.y,w.w,w.h); });
+    // stars
+    level.stars.forEach(s=>{ if(!s.taken){ ctx.fillStyle='#facc15'; ctx.font='26px Arial'; ctx.fillText('★',s.x,s.y); } });
+    // magnetic field line to active magnet
+    const am=level.magnets[active];
+    ctx.strokeStyle='rgba(239,68,68,.55)'; ctx.lineWidth=2; ctx.setLineDash([8,8]);
+    ctx.beginPath(); ctx.moveTo(marble.x,marble.y); ctx.lineTo(am.x,am.y); ctx.stroke(); ctx.setLineDash([]);
+    // magnets
+    level.magnets.forEach((m,i)=>{
+      ctx.beginPath(); ctx.arc(m.x,m.y,22,0,Math.PI*2); ctx.fillStyle=i===active?'#ef4444':'#64748b'; ctx.fill();
+      ctx.strokeStyle=i===active?'#fecaca':'#cbd5e1'; ctx.lineWidth=3; ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.font='bold 18px Arial'; ctx.fillText(m.label,m.x,m.y);
+      if(i===active){ ctx.fillStyle='#fecaca'; ctx.font='bold 14px Arial'; ctx.fillText('ACTIVE',m.x,m.y+38); }
+    });
+    // marble with shine
+    const grad=ctx.createRadialGradient(marble.x-5,marble.y-6,2,marble.x,marble.y,18);
+    grad.addColorStop(0,'#ffffff'); grad.addColorStop(0.4,'#cbd5e1'); grad.addColorStop(1,'#475569');
+    ctx.beginPath(); ctx.arc(marble.x,marble.y,marble.r,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill(); ctx.strokeStyle='#e2e8f0'; ctx.lineWidth=2; ctx.stroke();
+    particles.forEach(p=>{ ctx.globalAlpha=Math.max(0,p.life/28); ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; });
+  }
+  function loop(){ update(); draw(); requestAnimationFrame(loop); }
+  function startGame(){
+    initAudio(); score=0; starCount=0; lives=3; updateHUD();
+    titleScreen.style.display='none'; endScreen.style.display='none';
+    loadLevel(0); running=true; statusEl.textContent='Playing'; beep(440,0.12,'triangle',0.1);
+  }
+  document.getElementById('startBtn').addEventListener('click',startGame);
+  document.getElementById('restartBtn').addEventListener('click',startGame);
+  document.addEventListener('keydown',e=>{
+    keys[e.key]=true;
+    if(['1','2','3','4'].includes(e.key)) setActive(parseInt(e.key,10)-1);
+    if(e.key==='ArrowLeft') setActive((active+level.magnets.length-1)%level.magnets.length);
+    if(e.key==='ArrowRight') setActive((active+1)%level.magnets.length);
+    if(e.key==='Enter' && (titleScreen.style.display!=='none'||endScreen.style.display!=='none')) startGame();
+  });
+  document.addEventListener('keyup',e=>{keys[e.key]=false;});
+  function pickMagnet(clientX,clientY){
+    const r=canvas.getBoundingClientRect();
+    const x=(clientX-r.left)*W/r.width, y=(clientY-r.top)*H/r.height;
+    let best=0,bestD=1e9;
+    level.magnets.forEach((m,i)=>{ const d=Math.hypot(x-m.x,y-m.y); if(d<bestD){bestD=d;best=i;} });
+    setActive(best);
+  }
+  canvas.addEventListener('mousedown',e=>{initAudio();pickMagnet(e.clientX,e.clientY);});
+  canvas.addEventListener('mousemove',e=>{ if(e.buttons) pickMagnet(e.clientX,e.clientY); });
+  canvas.addEventListener('touchstart',e=>{ e.preventDefault(); initAudio(); const t=e.touches[0]; pickMagnet(t.clientX,t.clientY); },{passive:false});
+  canvas.addEventListener('touchmove',e=>{ e.preventDefault(); const t=e.touches[0]; pickMagnet(t.clientX,t.clientY); },{passive:false});
+  canvas.addEventListener('click',e=>{initAudio();});
+  loadLevel(0); updateHUD(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

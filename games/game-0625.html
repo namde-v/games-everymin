@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ember Canyon Runner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a0f08; color: #ffe8c8; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { color: #ff9a2e; text-shadow: 0 0 14px #ff5500; font-size: 28px; margin: 6px 0 2px; text-align: center; }
+  .tag { color: #ffb37a; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(860px, 96vw); }
+  #hud { display: flex; justify-content: space-between; gap: 8px; background: #2b1508; border: 2px solid #ff6a1a; border-radius: 10px 10px 0 0; padding: 8px 12px; font-weight: bold; font-size: 15px; flex-wrap: wrap; }
+  #hud span { white-space: nowrap; }
+  #lives { color: #ff5a5a; letter-spacing: 2px; }
+  #status { color: #7dff9a; }
+  canvas { display: block; width: 100%; height: auto; background: #2a1206; border: 2px solid #ff6a1a; border-top: none; border-radius: 0 0 10px 10px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(10,4,0,0.86); text-align: center; padding: 20px; border-radius: 0 0 10px 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ff9a2e; font-size: 30px; }
+  .overlay p { max-width: 560px; line-height: 1.5; font-size: 15px; }
+  .howto { background: #331a0a; border: 1px solid #ff6a1a; border-radius: 8px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; max-width: 560px; }
+  .howto b { color: #ffd27a; }
+  button { background: #ff6a1a; color: #fff; border: none; border-radius: 8px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #a33a00; }
+  button:hover { background: #ff8a3a; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #controls { display: flex; gap: 10px; margin-top: 12px; }
+  #controls button { flex: 1; padding: 14px; font-size: 16px; background: #5a2a0a; box-shadow: 0 4px 0 #2b1508; }
+  .hint { font-size: 13px; color: #d8a87a; margin-top: 8px; text-align: center; }
+  .big { font-size: 20px; font-weight: bold; color: #ffd27a; }
+</style>
+</head>
+<body>
+<h1>🔥 EMBER CANYON RUNNER 🔥</h1>
+<div class="tag">Arcade / Lava Canyon Runner &bull; Survive 1500m through the burning canyon!</div>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Distance: <span id="dist">0</span>m / 1500m</span>
+    <span>Gems: <span id="gems">0</span></span>
+    <span>Lives: <span id="lives">❤️❤️❤️</span></span>
+    <span id="status">READY</span>
+  </div>
+  <canvas id="game" width="860" height="420"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>EMBER CANYON RUNNER</h2>
+    <p>Dash through a blazing canyon! The ground crumbles into lava, rocks tumble from the cliffs, and ember gems glitter in the heat. Reach <b>1500 metres</b> to win — you have <b>3 lives</b>.</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      ⬆️ / Space / Tap upper screen / JUMP button — <b>Jump</b> over lava gaps and rolling boulders<br>
+      ⬇️ / S / Hold lower screen / DUCK button — <b>Duck</b> under falling rocks and cliff overhangs<br>
+      💎 Collect <b>ember gems</b> for +50 points each<br>
+      ⚠️ Watch the red warning marker: a rock is about to fall there!<br>
+      🏆 Survive to <b>1500m</b> to WIN. Three hits and the run ends.
+    </div>
+    <button id="startBtn">▶ START RUN</button>
+    <p class="hint">Keyboard: Space / ArrowUp to jump, ArrowDown to duck. Mouse and touch work too.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText"></p>
+    <p class="big" id="endScore"></p>
+    <button id="restartBtn">↻ RESTART INSTANTLY</button>
+    <p class="hint">Press R, Space, or tap Restart to play again.</p>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="jumpBtn">⬆ JUMP</button>
+  <button id="duckBtn">⬇ DUCK (hold)</button>
+</div>
+<p class="hint">Tip: jump early for wide lava pools. Duck the moment a falling rock locks into place overhead. Speed rises as you go!</p>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 860, H = 420, GROUND = 352;
+  var scoreEl = document.getElementById('score');
+  var distEl = document.getElementById('dist');
+  var gemsEl = document.getElementById('gems');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var state = 'title'; // title, playing, won, over
+  var score = 0, distance = 0, gemCount = 0, lives = 3;
+  var speed = 4.2, baseSpeed = 4.2;
+  var obstacles = [], gems = [], particles = [], clouds = [];
+  var spawnTimer = 0, gemTimer = 0, frame = 0, invuln = 0, flash = 0;
+  var player = { x: 110, y: GROUND, vy: 0, w: 42, h: 62, ducking: false, grounded: true, runPhase: 0 };
+
+  // Procedural Web Audio - created only after user interaction
+  var audioCtx = null, masterGain = null;
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfxJump() { beep(320, 0.18, 'square', 0.4); }
+  function sfxGem() { beep(880, 0.12, 'sine', 0.6); setTimeout(function(){ beep(1320, 0.15, 'sine', 0.5); }, 60); }
+  function sfxHit() { beep(140, 0.35, 'sawtooth', 0.7); }
+  function sfxWin() { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,0.3,'triangle',0.6); }, i*140); }); }
+
+  for (var i = 0; i < 6; i++) clouds.push({ x: Math.random()*W, y: 30 + Math.random()*90, s: 0.4 + Math.random()*0.6, w: 60 + Math.random()*70 });
+
+  function reset() {
+    score = 0; distance = 0; gemCount = 0; lives = 3;
+    speed = baseSpeed; obstacles = []; gems = []; particles = [];
+    spawnTimer = 40; gemTimer = 30; invuln = 0; frame = 0;
+    player.y = GROUND; player.vy = 0; player.ducking = false; player.grounded = true;
+    updateHUD(); statusEl.textContent = 'RUNNING';
+  }
+  function updateHUD() {
+    scoreEl.textContent = Math.floor(score);
+    distEl.textContent = Math.floor(distance);
+    gemsEl.textContent = gemCount;
+    livesEl.textContent = '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(Math.max(0, 3 - lives));
+  }
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    statusEl.textContent = 'RUNNING';
+    beep(440, 0.15, 'square', 0.5);
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    statusEl.textContent = won ? 'YOU WIN!' : 'GAME OVER';
+    endTitle.textContent = won ? '🏆 YOU WIN! 🏆' : '💀 GAME OVER 💀';
+    endText.textContent = won
+      ? 'You survived the full 1500m canyon dash! The ember trail is yours, runner.'
+      : 'The canyon claimed your run. Dust yourself off and dash again!';
+    endScore.textContent = 'Score: ' + Math.floor(score) + '  •  Distance: ' + Math.floor(distance) + 'm  •  Gems: ' + gemCount;
+    endScreen.classList.remove('hidden');
+    if (won) sfxWin(); else sfxHit();
+  }
+
+  function jump() {
+    if (state !== 'playing') return;
+    if (player.grounded) { player.vy = -15.5; player.grounded = false; player.ducking = false; sfxJump(); }
+  }
+  function setDuck(on) { if (state === 'playing') player.ducking = on; }
+
+  function spawnObstacle() {
+    var roll = Math.random();
+    var type = roll < 0.42 ? 'lava' : (roll < 0.72 ? 'falling' : 'boulder');
+    var ob = { type: type, x: W + 40, w: 56, h: 20, y: GROUND - 20, fallY: 0, targetY: 0, falling: false, settled: false };
+    if (type === 'lava') { ob.w = 58 + Math.random()*40; ob.h = 20; ob.y = GROUND - 20; }
+    else if (type === 'boulder') { ob.w = 46; ob.h = 44; ob.y = GROUND - 44; }
+    else { // falling rock: drops from sky, hangs low enough to duck under
+      ob.w = 64; ob.h = 52; ob.y = -70; ob.targetY = GROUND - 92; ob.falling = true; ob.settled = false;
+    }
+    obstacles.push(ob);
+  }
+  function spawnGem() {
+    var high = Math.random() < 0.5;
+    gems.push({ x: W + 30, y: high ? GROUND - 130 : GROUND - 55, r: 13, bob: Math.random()*6 });
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) particles.push({ x: x, y: y, vx: (Math.random()-0.5)*7, vy: -Math.random()*6, life: 26, color: color });
+  }
+  function playerRect() {
+    var h = player.ducking ? 32 : 62;
+    return { x: player.x, y: player.y - h, w: 42, h: h };
+  }
+  function hit(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+
+  function update() {
+    frame++;
+    if (state === 'playing') {
+      speed = baseSpeed + distance / 420; // speed increases over time
+      distance += speed * 0.16;
+      score += speed * 0.12;
+      if (invuln > 0) invuln--;
+      if (flash > 0) flash--;
+
+      // Physics
+      if (!player.grounded) {
+        player.vy += 0.85; player.y += player.vy;
+        if (player.y >= GROUND) { player.y = GROUND; player.vy = 0; player.grounded = true; }
+      }
+      player.runPhase += speed * 0.06;
+
+      // Spawning
+      spawnTimer--;
+      if (spawnTimer <= 0) { spawnObstacle(); spawnTimer = 62 + Math.floor(Math.random()*46) - Math.min(18, distance/120); if (spawnTimer < 44) spawnTimer = 44; }
+      gemTimer--;
+      if (gemTimer <= 0) { spawnGem(); gemTimer = 70 + Math.floor(Math.random()*90); }
+
+      // Obstacles
+      for (var i = obstacles.length - 1; i >= 0; i--) {
+        var ob = obstacles[i];
+        if (ob.type === 'falling' && !ob.settled) {
+          ob.y += 7;
+          if (ob.y >= ob.targetY) { ob.y = ob.targetY; ob.settled = true; }
+          // falling rocks hover in place briefly, then lift away after passing player
+        } else { ob.x -= speed; }
+        if (ob.type === 'falling' && ob.settled) ob.x -= speed;
+        if (ob.x + ob.w < -20) { obstacles.splice(i, 1); continue; }
+        // Collision
+        if (invuln === 0) {
+          var pr = playerRect();
+          var br = { x: ob.x, y: ob.y, w: ob.w, h: ob.h };
+          // Lava and boulders: only hit when player is low / on ground path
+          if (hit(pr, br)) {
+            lives--; invuln = 90; flash = 12; sfxHit();
+            burst(player.x + 20, player.y - 30, '#ff5500');
+            obstacles.splice(i, 1);
+            if (lives <= 0) { updateHUD(); endGame(false); return; }
+          }
+        }
+      }
+      // Gems
+      for (var j = gems.length - 1; j >= 0; j--) {
+        var g = gems[j]; g.x -= speed; g.bob += 0.1;
+        if (g.x < -20) { gems.splice(j, 1); continue; }
+        var pr2 = playerRect();
+        var gy = g.y + Math.sin(g.bob) * 5;
+        if (pr2.x < g.x + g.r && pr2.x + pr2.w > g.x - g.r && pr2.y < gy + g.r && pr2.y + pr2.h > gy - g.r) {
+          gems.splice(j, 1); gemCount++; score += 50; sfxGem(); burst(g.x, gy, '#ffcc33');
+        }
+      }
+      // Particles
+      for (var k = particles.length - 1; k >= 0; k--) {
+        var p = particles[k]; p.x += p.vx; p.y += p.vy; p.vy += 0.3; p.life--;
+        if (p.life <= 0) particles.splice(k, 1);
+      }
+      for (var c = 0; c < clouds.length; c++) { clouds[c].x -= speed * 0.2; if (clouds[c].x < -100) { clouds[c].x = W + 20; clouds[c].y = 30 + Math.random()*90; } }
+      updateHUD();
+      if (distance >= 1500) { score += 500; updateHUD(); endGame(true); return; }
+    }
+  }
+
+  function drawBackground() {
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#3a1404'); grad.addColorStop(0.55, '#7a2a08'); grad.addColorStop(1, '#1a0f08');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // Sun / ember glow
+    ctx.fillStyle = '#ff7a1a'; ctx.beginPath(); ctx.arc(720, 70, 38, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,150,50,0.25)'; ctx.beginPath(); ctx.arc(720, 70, 62, 0, Math.PI*2); ctx.fill();
+    // Clouds of smoke
+    ctx.fillStyle = 'rgba(60,25,8,0.8)';
+    clouds.forEach(function(cl){ ctx.beginPath(); ctx.ellipse(cl.x, cl.y, cl.w*cl.s, 16*cl.s, 0, 0, Math.PI*2); ctx.fill(); });
+    // Canyon walls
+    ctx.fillStyle = '#4a1e08';
+    ctx.beginPath(); ctx.moveTo(0, 190);
+    for (var x = 0; x <= W; x += 80) ctx.lineTo(x, 175 + Math.sin(x*0.02 + frame*0.002)*14);
+    ctx.lineTo(W, GROUND); ctx.lineTo(0, GROUND); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5e280c';
+    ctx.beginPath(); ctx.moveTo(0, 250);
+    for (var x2 = 0; x2 <= W; x2 += 70) ctx.lineTo(x2, 240 + Math.sin(x2*0.03)*10);
+    ctx.lineTo(W, GROUND); ctx.lineTo(0, GROUND); ctx.closePath(); ctx.fill();
+    // Ground
+    ctx.fillStyle = '#2b1508'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#ff5500'; ctx.fillRect(0, GROUND, W, 4);
+    // Ground texture dashes moving with speed
+    ctx.fillStyle = '#4a2a12';
+    var off = (frame * speed) % 60;
+    for (var gx = -60 + off; gx < W; gx += 60) ctx.fillRect(gx, GROUND + 26, 30, 6);
+    // Lava glow at bottom
+    ctx.fillStyle = 'rgba(255,85,0,0.35)'; ctx.fillRect(0, H - 26, W, 26);
+  }
+  function drawPlayer() {
+    var pr = playerRect();
+    if (invuln > 0 && Math.floor(frame/4) % 2 === 0) return; // blink while invulnerable
+    var leg = Math.sin(player.runPhase) * 10;
+    ctx.fillStyle = '#ffd27a';
+    // Body
+    ctx.fillRect(pr.x, pr.y, 42, pr.h);
+    ctx.fillStyle = '#ff6a1a'; ctx.fillRect(pr.x, pr.y, 42, 12); // helmet band
+    ctx.fillStyle = '#222'; ctx.fillRect(pr.x + 28, pr.y + 8, 8, 6); // eye visor
+    ctx.fillStyle = '#ffcc33'; ctx.fillRect(pr.x + 4, pr.y + 22, 34, 8); // jacket stripe
+    // Legs
+    ctx.fillStyle = '#222';
+    if (player.grounded && !player.ducking) {
+      ctx.fillRect(pr.x + 6, pr.y + pr.h - 2, 10, 14 + leg*0.3);
+      ctx.fillRect(pr.x + 26, pr.y + pr.h - 2, 10, 14 - leg*0.3);
+    }
+    if (flash > 0) { ctx.fillStyle = 'rgba(255,0,0,0.4)'; ctx.fillRect(pr.x - 4, pr.y - 4, 50, pr.h + 8); }
+  }
+  function draw() {
+    drawBackground();
+    // Warning markers for falling rocks
+    obstacles.forEach(function(ob){
+      if (ob.type === 'falling' && !ob.settled) {
+        ctx.fillStyle = 'rgba(255,0,0,0.5)';
+        ctx.fillRect(ob.x, GROUND - 8, ob.w, 8);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Arial'; ctx.fillText('!', ob.x + ob.w/2 - 5, GROUND - 14);
+      }
+    });
+    // Gems
+    gems.forEach(function(g){
+      var gy = g.y + Math.sin(g.bob) * 5;
+      ctx.fillStyle = '#ffcc33'; ctx.save(); ctx.translate(g.x, gy); ctx.rotate(Math.PI/4);
+      ctx.fillRect(-9, -9, 18, 18); ctx.restore();
+      ctx.fillStyle = '#fff2b0'; ctx.fillRect(g.x - 4, gy - 4, 8, 8);
+    });
+    // Obstacles
+    obstacles.forEach(function(ob){
+      if (ob.type === 'lava') {
+        ctx.fillStyle = '#ff3300'; ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+        ctx.fillStyle = '#ffcc00';
+        for (var bx = ob.x + 4; bx < ob.x + ob.w - 4; bx += 14) { ctx.beginPath(); ctx.arc(bx, ob.y + 4, 4, 0, Math.PI*2); ctx.fill(); }
+      } else if (ob.type === 'boulder') {
+        ctx.fillStyle = '#5a3a22'; ctx.beginPath(); ctx.arc(ob.x + ob.w/2, ob.y + ob.h/2, ob.w/2, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#7a5230'; ctx.beginPath(); ctx.arc(ob.x + 16, ob.y + 16, 9, 0, Math.PI*2); ctx.fill();
+      } else {
+        ctx.fillStyle = '#6a4a2e'; ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+        ctx.fillStyle = '#8a6a44'; ctx.fillRect(ob.x + 6, ob.y + 6, ob.w - 12, 12);
+        ctx.fillStyle = '#333'; ctx.fillRect(ob.x + 10, ob.y - 6, 8, 10); ctx.fillRect(ob.x + ob.w - 18, ob.y - 6, 8, 10);
+      }
+    });
+    drawPlayer();
+    // Particles
+    particles.forEach(function(p){ ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 5, 5); });
+    // Distance progress bar
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(20, 16, W - 40, 10);
+    ctx.fillStyle = '#ffcc33'; ctx.fillRect(20, 16, (W - 40) * Math.min(1, distance/1500), 10);
+    if (state === 'title') { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center'; ctx.fillText('Press START to begin your canyon dash!', W/2, GROUND - 110); ctx.textAlign = 'left'; }
+  }
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+  // Controls: keyboard
+  document.addEventListener('keydown', function(e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); if (state === 'title' || state === 'won' || state === 'over') { if (state === 'title') startGame(); else startGame(); } else jump(); }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); setDuck(true); }
+    if (e.code === 'KeyR' && (state === 'won' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function(e) {
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') setDuck(false);
+  });
+  // Controls: mouse
+  canvas.addEventListener('mousedown', function(e) {
+    if (state === 'playing') { var r = canvas.getBoundingClientRect(); var y = (e.clientY - r.top) / r.height * H; if (y > GROUND - 60) setDuck(true); else jump(); }
+  });
+  document.addEventListener('mouseup', function() { setDuck(false); });
+  canvas.addEventListener('click', function() { if (state === 'title') startGame(); });
+  // Controls: touch
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (state === 'playing') { var t = e.touches[0]; var r = canvas.getBoundingClientRect(); var y = (t.clientY - r.top) / r.height * H; if (y > GROUND - 60) setDuck(true); else jump(); }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e) { e.preventDefault(); setDuck(false); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('jumpBtn').addEventListener('click', function(){ initAudio(); if (state === 'playing') jump(); });
+  var duckBtn = document.getElementById('duckBtn');
+  duckBtn.addEventListener('mousedown', function(){ initAudio(); setDuck(true); });
+  duckBtn.addEventListener('mouseup', function(){ setDuck(false); });
+  duckBtn.addEventListener('touchstart', function(e){ e.preventDefault(); initAudio(); setDuck(true); }, { passive: false });
+  duckBtn.addEventListener('touchend', function(e){ e.preventDefault(); setDuck(false); }, { passive: false });
+
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

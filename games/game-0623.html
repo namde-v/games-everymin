@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Skyport Air Traffic</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1d33; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 22px; margin: 8px 0 2px; letter-spacing: 1px; }
+  #hud { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; font-size: 15px; font-weight: bold; padding: 6px; }
+  #hud span { background: #16365e; border: 1px solid #3d6ea5; border-radius: 8px; padding: 4px 10px; }
+  #wrap { position: relative; width: min(96vw, 860px); }
+  canvas { display: block; width: 100%; height: 520px; background: #122f4d; border: 2px solid #3d6ea5; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(4, 16, 32, 0.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #cfe0f5; }
+  .howto { background: #16365e; border: 1px solid #3d6ea5; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  button { font-size: 18px; font-weight: bold; padding: 12px 26px; border: 0; border-radius: 10px; background: #ffb703; color: #1a1200; cursor: pointer; }
+  button:hover { background: #ffd166; }
+  .keys { font-size: 13px; color: #9fb8d8; }
+  .legend { font-size: 14px; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin: 0 3px 0 10px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<h1>✈️ Skyport Air Traffic</h1>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Lives: <b id="lives">♥♥♥</b></span>
+  <span>Landed: <b id="landed">0</b> / 15</span>
+  <span>Status: <b id="status">Ready</b></span>
+  <span>Fuel Alert: <b id="fuelwarn">—</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>✈️ Skyport Air Traffic</h2>
+    <p>You are the tower controller. Guide every incoming plane to the runway that matches its color before its fuel runs out — and keep them from colliding!</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      • <b>Mouse / Touch:</b> press on a plane and drag to draw its route, release to send it.<br>
+      • <b>Click:</b> click a plane to select it, then click anywhere to add a waypoint.<br>
+      • <b>Keyboard:</b> 1–9 select a plane, Arrow keys nudge its next waypoint, Space pauses, R restarts.<br>
+      • Land a plane on its matching runway: <span class="dot" style="background:#ff595e"></span>Red <span class="dot" style="background:#4cc9f0"></span>Blue <span class="dot" style="background:#80ed99"></span>Green <span class="dot" style="background:#ffd166"></span>Yellow<br>
+      • Wrong runway = the plane keeps flying. Crash or fuel-out costs a life. Land 15 planes to win!
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+    <div class="keys">Tip: low-fuel planes flash red and beep — route them first!</div>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+    <div class="keys">Press R or tap Restart to play again.</div>
+  </div>
+</div>
+<script>
+(function () {
+  var cv = document.getElementById('game');
+  var ctx = cv.getContext('2d');
+  var W = cv.width, H = cv.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var landedEl = document.getElementById('landed');
+  var statusEl = document.getElementById('status');
+  var fuelEl = document.getElementById('fuelwarn');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var RUNWAYS = [
+    { x: 200, y: 260, color: '#ff595e', name: 'Red' },
+    { x: 430, y: 150, color: '#4cc9f0', name: 'Blue' },
+    { x: 430, y: 370, color: '#80ed99', name: 'Green' },
+    { x: 660, y: 260, color: '#ffd166', name: 'Yellow' }
+  ];
+  var WIN_LANDINGS = 15;
+  var state = null;
+  var audioCtx = null;
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sound(kind) {
+    if (kind === 'land') { beep(660, 0.12); setTimeout(function () { beep(880, 0.18); }, 110); }
+    if (kind === 'crash') { beep(140, 0.35, 'sawtooth'); }
+    if (kind === 'warn') { beep(980, 0.08, 'square'); }
+    if (kind === 'click') { beep(440, 0.06); }
+  }
+
+  function newGame() {
+    state = {
+      planes: [], routes: {}, selected: -1, score: 0, lives: 3,
+      landed: 0, running: true, paused: false, spawnTimer: 0,
+      time: 0, lastWarn: 0, dragging: false, over: false
+    };
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    spawnPlane(); spawnPlane();
+    updateHud('Controlling the skies!');
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function spawnPlane() {
+    var edge = Math.floor(Math.random() * 4);
+    var x, y, heading;
+    if (edge === 0) { x = -20; y = rand(40, H - 40); heading = 0; }
+    else if (edge === 1) { x = W + 20; y = rand(40, H - 40); heading = Math.PI; }
+    else if (edge === 2) { x = rand(40, W - 40); y = -20; heading = Math.PI / 2; }
+    else { x = rand(40, W - 40); y = H + 20; heading = -Math.PI / 2; }
+    var rw = RUNWAYS[Math.floor(Math.random() * RUNWAYS.length)];
+    state.planes.push({
+      id: Date.now() + Math.random(), x: x, y: y, heading: heading,
+      speed: rand(55, 85), fuel: 100, color: rw.color, runway: rw,
+      waypoints: [], trail: [], blink: 0
+    });
+  }
+
+  function pos(e) {
+    var r = cv.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  function planeAt(p) {
+    for (var i = state.planes.length - 1; i >= 0; i--) {
+      var pl = state.planes[i];
+      if (Math.hypot(pl.x - p.x, pl.y - p.y) < 26) return i;
+    }
+    return -1;
+  }
+
+  function onDown(e) {
+    if (!state || !state.running || state.paused) return;
+    e.preventDefault();
+    var p = pos(e);
+    var idx = planeAt(p);
+    if (idx >= 0) {
+      state.selected = idx; state.dragging = true;
+      state.routes[state.planes[idx].id] = [];
+      sound('click');
+    }
+  }
+  function onMove(e) {
+    if (!state || !state.dragging || state.selected < 0) return;
+    e.preventDefault();
+    var p = pos(e);
+    var pl = state.planes[state.selected];
+    if (!pl) return;
+    var route = state.routes[pl.id];
+    var last = route.length ? route[route.length - 1] : { x: pl.x, y: pl.y };
+    if (Math.hypot(p.x - last.x, p.y - last.y) > 18) route.push(p);
+    pl.waypoints = route.slice();
+  }
+  function onUp(e) {
+    if (!state) return;
+    if (state.dragging) { state.dragging = false; return; }
+    if (!state.running || state.paused) return;
+    var p = pos(e);
+    var idx = planeAt(p);
+    if (idx >= 0) { state.selected = idx; sound('click'); }
+    else if (state.selected >= 0 && state.planes[state.selected]) {
+      state.planes[state.selected].waypoints.push(p);
+    }
+  }
+
+  cv.addEventListener('mousedown', onDown);
+  cv.addEventListener('mousemove', onMove);
+  cv.addEventListener('mouseup', onUp);
+  cv.addEventListener('touchstart', onDown, { passive: false });
+  cv.addEventListener('touchmove', onMove, { passive: false });
+  cv.addEventListener('touchend', onUp, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (!state) return;
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      if (state.running && !state.over) { state.paused = !state.paused; updateHud(state.paused ? 'Paused' : 'Controlling the skies!'); }
+      e.preventDefault();
+    }
+    if (e.key === 'r' || e.key === 'R') { newGame(); return; }
+    var n = parseInt(e.key, 10);
+    if (n >= 1 && n <= state.planes.length) { state.selected = n - 1; sound('click'); return; }
+    if (state.selected >= 0 && state.planes[state.selected]) {
+      var pl = state.planes[state.selected];
+      var wp = pl.waypoints.length ? pl.waypoints[pl.waypoints.length - 1] : { x: pl.x, y: pl.y };
+      var step = 22;
+      if (e.key === 'ArrowLeft') wp.x -= step;
+      if (e.key === 'ArrowRight') wp.x += step;
+      if (e.key === 'ArrowUp') wp.y -= step;
+      if (e.key === 'ArrowDown') wp.y += step;
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].indexOf(e.key) >= 0) {
+        if (!pl.waypoints.length) pl.waypoints.push(wp);
+        e.preventDefault();
+      }
+    }
+  });
+
+  function updateHud(msg) {
+    if (!state) return;
+    scoreEl.textContent = state.score;
+    livesEl.textContent = '♥'.repeat(Math.max(0, state.lives)) || '—';
+    landedEl.textContent = state.landed;
+    if (msg) statusEl.textContent = msg;
+    var low = state.planes.filter(function (p) { return p.fuel < 30; }).length;
+    fuelEl.textContent = low ? low + ' plane(s) LOW!' : 'OK';
+  }
+
+  function endGame(win) {
+    state.running = false; state.over = true;
+    endTitle.textContent = win ? '🏆 You Win!' : '💥 Game Over';
+    endText.textContent = win
+      ? 'Tower legend! You safely landed all 15 planes with a score of ' + state.score + '.'
+      : 'The skies got the better of you. You landed ' + state.landed + ' planes and scored ' + state.score + '. Try again!';
+    endScreen.classList.remove('hidden');
+    sound(win ? 'land' : 'crash');
+  }
+
+  function loseLife(reason) {
+    state.lives--;
+    updateHud(reason);
+    sound('crash');
+    if (state.lives <= 0) endGame(false);
+  }
+
+  function update(dt) {
+    if (!state || !state.running || state.paused || state.over) return;
+    state.time += dt;
+    state.spawnTimer -= dt;
+    var targetCount = Math.min(3 + Math.floor(state.landed / 4), 6);
+    if (state.spawnTimer <= 0 && state.planes.length < targetCount) {
+      spawnPlane(); state.spawnTimer = rand(2.5, 5);
+    }
+    for (var i = state.planes.length - 1; i >= 0; i--) {
+      var pl = state.planes[i];
+      pl.fuel -= dt * 1.6;
+      pl.blink += dt;
+      if (pl.fuel < 30 && state.time - state.lastWarn > 2) { state.lastWarn = state.time; sound('warn'); }
+      if (pl.fuel <= 0) {
+        state.planes.splice(i, 1);
+        if (state.selected >= i) state.selected = -1;
+        loseLife('Fuel out — plane lost!'); continue;
+      }
+      var target = pl.waypoints.length ? pl.waypoints[0] : pl.runway;
+      var want = Math.atan2(target.y - pl.y, target.x - pl.x);
+      var diff = want - pl.heading;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      var turn = Math.max(-1.6 * dt, Math.min(1.6 * dt, diff));
+      pl.heading += turn;
+      pl.x += Math.cos(pl.heading) * pl.speed * dt;
+      pl.y += Math.sin(pl.heading) * pl.speed * dt;
+      if (pl.waypoints.length && Math.hypot(pl.waypoints[0].x - pl.x, pl.waypoints[0].y - pl.y) < 14) pl.waypoints.shift();
+      if (!pl.waypoints.length) {
+        var rw = pl.runway;
+        if (Math.hypot(rw.x - pl.x, rw.y - pl.y) < 34) {
+          state.planes.splice(i, 1);
+          state.score += 100 + Math.round(pl.fuel);
+          state.landed++;
+          sound('land');
+          updateHud('Landed on ' + rw.name + ' runway! +' + (100 + Math.round(pl.fuel)));
+          if (state.selected >= i) state.selected = -1;
+          if (state.landed >= WIN_LANDINGS) { endGame(true); return; }
+          continue;
+        }
+      }
+      if (pl.x < -60 || pl.x > W + 60 || pl.y < -60 || pl.y > H + 60) {
+        state.planes.splice(i, 1);
+        if (state.selected >= i) state.selected = -1;
+        loseLife('Plane left controlled airspace!');
+      }
+    }
+    for (var a = 0; a < state.planes.length; a++) {
+      for (var b = a + 1; b < state.planes.length; b++) {
+        var p1 = state.planes[a], p2 = state.planes[b];
+        if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < 22) {
+          state.planes.splice(b, 1); state.planes.splice(a, 1);
+          state.selected = -1;
+          loseLife('Mid-air collision!');
+          break;
+        }
+      }
+      if (state.over) break;
+    }
+    updateHud();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#122f4d'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+    for (var gx = 0; gx <= W; gx += 86) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+    for (var gy = 0; gy <= H; gy += 86) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+    RUNWAYS.forEach(function (rw) {
+      ctx.fillStyle = rw.color;
+      ctx.fillRect(rw.x - 55, rw.y - 10, 110, 20);
+      ctx.fillStyle = '#0b1d33'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(rw.name.toUpperCase(), rw.x, rw.y + 4);
+      ctx.strokeStyle = rw.color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(rw.x, rw.y, 34, 0, Math.PI * 2); ctx.stroke();
+    });
+    if (!state) return;
+    state.planes.forEach(function (pl, idx) {
+      if (pl.waypoints.length) {
+        ctx.strokeStyle = pl.color; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+        ctx.beginPath(); ctx.moveTo(pl.x, pl.y);
+        pl.waypoints.forEach(function (w) { ctx.lineTo(w.x, w.y); });
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+      var low = pl.fuel < 30;
+      ctx.save(); ctx.translate(pl.x, pl.y); ctx.rotate(pl.heading);
+      ctx.fillStyle = (low && Math.floor(pl.blink * 3) % 2 === 0) ? '#ff2222' : pl.color;
+      ctx.beginPath();
+      ctx.moveTo(14, 0); ctx.lineTo(-8, -9); ctx.lineTo(-4, 0); ctx.lineTo(-8, 9);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(pl.fuel), pl.x, pl.y - 16);
+      if (idx === state.selected) {
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(pl.x, pl.y, 22, 0, Math.PI * 2); ctx.stroke();
+      }
+    });
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+    sound('click');
+    newGame();
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

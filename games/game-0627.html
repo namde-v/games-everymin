@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ant Colony Architect</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1207; color: #f5e6c8; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 22px; margin: 6px 0 2px; color: #ffcc66; text-align: center; }
+  p.sub { font-size: 13px; color: #d8c49a; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 8px; width: 100%; max-width: 820px; }
+  .stat { background: #3a2a12; border: 1px solid #6b5228; border-radius: 8px; padding: 6px 10px; font-size: 14px; font-weight: bold; }
+  .stat span { color: #ffcc66; }
+  #wrap { position: relative; width: 100%; max-width: 820px; }
+  canvas { display: block; width: 100%; height: auto; background: #2b1d0e; border: 3px solid #6b5228; border-radius: 10px; touch-action: none; cursor: crosshair; }
+  #overlay { position: absolute; inset: 0; background: rgba(20,12,2,0.92); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; gap: 10px; }
+  #overlay h2 { color: #ffcc66; font-size: 28px; }
+  #overlay p, #overlay li { font-size: 14px; line-height: 1.5; color: #efe0bd; }
+  #overlay ul { text-align: left; max-width: 520px; }
+  button { background: #e8a020; color: #201303; border: none; border-radius: 8px; padding: 11px 20px; font-size: 16px; font-weight: bold; cursor: pointer; margin: 3px; }
+  button:hover { background: #ffc94d; }
+  button:disabled { background: #6b6252; color: #ccc; cursor: not-allowed; }
+  #controls { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; }
+  #msg { min-height: 20px; font-size: 14px; color: #a8e6a1; margin-top: 6px; text-align: center; }
+  #rallyNote { font-size: 12px; color: #d8c49a; text-align: center; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>🐜 Ant Colony Architect</h1>
+<p class="sub">Grow a mighty colony, gather food, expand the nest, and repel the beetles!</p>
+<div id="hud">
+  <div class="stat">Score: <span id="score">0</span></div>
+  <div class="stat">Food: <span id="food">30</span></div>
+  <div class="stat">Ants: <span id="ants">5</span> / <span id="cap">10</span></div>
+  <div class="stat">Chambers: <span id="chambers">1</span></div>
+  <div class="stat">Colony Health: <span id="health">100</span></div>
+  <div class="stat">Beetles Repelled: <span id="kills">0</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="820" height="560"></canvas>
+  <div id="overlay">
+    <h2 id="ovTitle">Ant Colony Architect</h2>
+    <p id="ovText">The queen needs you! Direct her workers, stockpile food, and build a colony of 50 ants before the beetles destroy the nest.</p>
+    <div id="howto">
+      <h3>How to Play</h3>
+      <ul>
+        <li><b>Mouse / Touch:</b> Tap or click anywhere to set the rally point — nearby workers rush there. Tap a beetle to squash it and defend the nest.</li>
+        <li><b>Keyboard:</b> Arrow keys / WASD move the rally point. Press <b>B</b> to build a chamber (20 food, +10 ant capacity), <b>S</b> to hatch a worker (10 food), <b>R</b> to restart.</li>
+        <li><b>Goal:</b> Workers automatically collect golden crumbs and carry them home. Each crumb is +5 food. Reach <b>50 ants</b> to WIN. If colony health hits 0, the colony falls.</li>
+        <li><b>Balance:</b> Spending food on chambers and workers grows the colony, but beetles get stronger over time — keep some ants near the nest!</li>
+      </ul>
+    </div>
+    <button id="startBtn">Start Colony</button>
+  </div>
+</div>
+<div id="controls">
+  <button id="buildBtn">Build Chamber (20 Food) [B]</button>
+  <button id="spawnBtn">Hatch Worker (10 Food) [S]</button>
+  <button id="soundBtn">Sound: ON</button>
+</div>
+<div id="msg"></div>
+<div id="rallyNote">Click / tap the soil to move the rally flag. Click beetles to squash them!</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var ovTitle = document.getElementById('ovTitle');
+  var ovText = document.getElementById('ovText');
+  var howto = document.getElementById('howto');
+  var startBtn = document.getElementById('startBtn');
+  var buildBtn = document.getElementById('buildBtn');
+  var spawnBtn = document.getElementById('spawnBtn');
+  var soundBtn = document.getElementById('soundBtn');
+  var msgEl = document.getElementById('msg');
+  var els = {};
+  ['score','food','ants','cap','chambers','health','kills'].forEach(function(id){ els[id]=document.getElementById(id); });
+
+  var W = canvas.width, H = canvas.height;
+  var state = 'title';
+  var score, food, health, kills, chambers, cap, spawnTimer, beetleTimer, crumbTimer, time;
+  var ants = [], crumbs = [], beetles = [], particles = [];
+  var nest = { x: W/2, y: H-90 };
+  var rally = { x: W/2, y: H-200 };
+  var soundOn = true, audioCtx = null;
+
+  function beep(freq, dur, type, vol){
+    if(!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e){}
+  }
+  function initAudio(){
+    if(!audioCtx){
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){}
+    }
+    if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function reset(){
+    score = 0; food = 30; health = 100; kills = 0; chambers = 1; cap = 10;
+    spawnTimer = 0; beetleTimer = 240; crumbTimer = 0; time = 0;
+    ants = []; crumbs = []; beetles = []; particles = [];
+    rally = { x: W/2, y: H-200 };
+    for(var i=0;i<5;i++) ants.push(makeAnt());
+    for(var j=0;j<10;j++) spawnCrumb();
+    updateHUD(); msgEl.textContent = 'Colony founded! Workers are foraging.';
+  }
+  function makeAnt(){
+    return { x: nest.x + rand(-40,40), y: nest.y + rand(-30,30), vx:0, vy:0,
+      carrying:false, target:null, speed: rand(1.2,1.8), angle: rand(0,Math.PI*2) };
+  }
+  function spawnCrumb(){
+    crumbs.push({ x: rand(30,W-30), y: rand(30,H-180), r: 5 });
+  }
+  function spawnBeetle(){
+    var side = Math.random() < 0.5 ? 20 : W-20;
+    beetles.push({ x: side, y: rand(30,H-200), hp: 2 + Math.floor(time/6000), speed: rand(0.6,1.0), r: 16 });
+  }
+  function burst(x,y,color,n){
+    for(var i=0;i<n;i++) particles.push({x:x,y:y,vx:rand(-2,2),vy:rand(-2,2),life:20,color:color});
+  }
+  function buildChamber(){
+    if(state !== 'playing') return;
+    if(food >= 20){
+      food -= 20; chambers++; cap += 10; score += 25;
+      burst(nest.x, nest.y, '#ffcc66', 18); beep(520,0.15,'triangle',0.1);
+      msgEl.textContent = 'New chamber built! Ant capacity is now ' + cap + '.';
+    } else { msgEl.textContent = 'Need 20 food to build a chamber.'; beep(120,0.15,'sawtooth',0.08); }
+    updateHUD();
+  }
+  function hatchWorker(){
+    if(state !== 'playing') return;
+    if(ants.length >= cap){ msgEl.textContent = 'At capacity! Build a chamber first.'; return; }
+    if(food >= 10){
+      food -= 10; ants.push(makeAnt()); score += 10;
+      burst(nest.x, nest.y, '#a8e6a1', 12); beep(660,0.12,'sine',0.1);
+      msgEl.textContent = 'A new worker hatches!';
+      if(ants.length >= 50) winGame();
+    } else { msgEl.textContent = 'Need 10 food to hatch a worker.'; beep(120,0.15,'sawtooth',0.08); }
+    updateHUD();
+  }
+  function winGame(){
+    state = 'win'; score += 500;
+    ovTitle.textContent = '🏆 COLONY TRIUMPH!';
+    ovText.textContent = 'Your colony reached 50 ants! Score: ' + score + ' | Beetles repelled: ' + kills + '. The queen reigns supreme.';
+    howto.style.display = 'none'; startBtn.textContent = 'Play Again';
+    overlay.style.display = 'flex'; beep(880,0.3,'triangle',0.12);
+    updateHUD();
+  }
+  function gameOver(){
+    state = 'over';
+    ovTitle.textContent = '💀 COLONY DESTROYED';
+    ovText.textContent = 'The beetles overran the nest. Final score: ' + score + ' | Ants: ' + ants.length + ' | Beetles repelled: ' + kills + '.';
+    howto.style.display = 'none'; startBtn.textContent = 'Restart Colony';
+    overlay.style.display = 'flex'; beep(90,0.5,'sawtooth',0.12);
+  }
+  function startGame(){
+    initAudio(); reset(); state = 'playing';
+    overlay.style.display = 'none'; beep(440,0.15,'triangle',0.1);
+  }
+  function updateHUD(){
+    els.score.textContent = score; els.food.textContent = food;
+    els.ants.textContent = ants.length; els.cap.textContent = cap;
+    els.chambers.textContent = chambers; els.health.textContent = Math.max(0,Math.round(health));
+    els.kills.textContent = kills;
+  }
+  function canvasPos(e){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0].clientX);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0].clientY);
+    return { x: (cx-rect.left) * (W/rect.width), y: (cy-rect.top) * (H/rect.height) };
+  }
+  function onPointer(e){
+    if(state !== 'playing') return;
+    initAudio();
+    var p = canvasPos(e);
+    // Squash a beetle if tapped close enough
+    for(var i=beetles.length-1;i>=0;i--){
+      if(Math.hypot(beetles[i].x-p.x, beetles[i].y-p.y) < 30){
+        beetles.splice(i,1); kills++; score += 20;
+        burst(p.x,p.y,'#ff6666',16); beep(300,0.12,'square',0.1);
+        msgEl.textContent = 'Beetle squashed! +20 score.';
+        updateHUD(); return;
+      }
+    }
+    rally.x = p.x; rally.y = p.y;
+    burst(p.x,p.y,'#ffcc66',6); beep(700,0.07,'sine',0.06);
+    msgEl.textContent = 'Rally point moved — workers head this way.';
+  }
+  canvas.addEventListener('mousedown', onPointer);
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); onPointer(e); }, {passive:false});
+  canvas.addEventListener('click', function(){ initAudio(); });
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    if(k === 'r' && state !== 'playing'){ startGame(); return; }
+    if(state !== 'playing') return;
+    initAudio();
+    if(k === 'b') buildChamber();
+    else if(k === 's') hatchWorker();
+    else if(k === 'arrowleft' || k === 'a') rally.x = Math.max(10, rally.x-25);
+    else if(k === 'arrowright' || k === 'd') rally.x = Math.min(W-10, rally.x+25);
+    else if(k === 'arrowup' || k === 'w') rally.y = Math.max(10, rally.y-25);
+    else if(k === 'arrowdown' || k === 's') rally.y = Math.min(H-10, rally.y+25);
+    if(e.key.indexOf('Arrow') === 0) e.preventDefault();
+  });
+  startBtn.addEventListener('click', startGame);
+  buildBtn.addEventListener('click', function(){ initAudio(); buildChamber(); });
+  spawnBtn.addEventListener('click', function(){ initAudio(); hatchWorker(); });
+  soundBtn.addEventListener('click', function(){
+    initAudio(); soundOn = !soundOn;
+    soundBtn.textContent = 'Sound: ' + (soundOn ? 'ON' : 'OFF');
+  });
+
+  function update(){
+    if(state !== 'playing') return;
+    time++;
+    crumbTimer--; beetleTimer--;
+    if(crumbTimer <= 0){ spawnCrumb(); crumbTimer = 90; }
+    if(beetleTimer <= 0){ spawnBeetle(); beetleTimer = Math.max(180, 420 - Math.floor(time/60)); }
+    // Ants: seek food, carry home, or follow rally
+    ants.forEach(function(a){
+      var target = null;
+      if(a.carrying){ target = nest; }
+      else {
+        var best = null, bd = 1e9;
+        crumbs.forEach(function(c){ var d = dist(a,c); if(d < bd){ bd = d; best = c; } });
+        // Rally influence: if rally is near food, ants prefer it; otherwise drift toward rally when idle far away
+        if(best && bd < 320) target = best;
+        else if(dist(a, rally) > 60) target = rally;
+        else if(best) target = best;
+      }
+      if(target){
+        var dx = target.x - a.x, dy = target.y - a.y, d = Math.hypot(dx,dy) || 1;
+        a.x += dx/d * a.speed; a.y += dy/d * a.speed; a.angle = Math.atan2(dy,dx);
+        if(!a.carrying && target !== nest && d < 12){
+          var idx = crumbs.indexOf(target);
+          if(idx >= 0){ crumbs.splice(idx,1); a.carrying = true; }
+        } else if(a.carrying && d < 45){
+          a.carrying = false; food += 5; score += 5;
+          burst(nest.x, nest.y, '#ffcc66', 5); beep(900,0.05,'sine',0.04);
+        }
+      } else { a.x += Math.cos(a.angle)*0.5; a.y += Math.sin(a.angle)*0.5; a.angle += rand(-0.2,0.2); }
+      a.x = Math.max(10, Math.min(W-10, a.x)); a.y = Math.max(10, Math.min(H-10, a.y));
+    });
+    // Beetles march on the nest
+    beetles.forEach(function(b){
+      var dx = nest.x - b.x, dy = nest.y - b.y, d = Math.hypot(dx,dy) || 1;
+      b.x += dx/d * b.speed; b.y += dy/d * b.speed;
+    });
+    for(var i=beetles.length-1;i>=0;i--){
+      if(dist(beetles[i], nest) < 55){
+        beetles.splice(i,1); health -= 15; score = Math.max(0, score-10);
+        burst(nest.x, nest.y, '#ff4444', 20); beep(150,0.3,'sawtooth',0.12);
+        msgEl.textContent = 'A beetle breached the nest! Colony health -15.';
+        if(health <= 0){ updateHUD(); gameOver(); return; }
+      }
+    }
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    updateHUD();
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // Soil texture dots
+    ctx.fillStyle = '#2b1d0e'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#3a2a15';
+    for(var i=0;i<60;i++){ var sx = (i*137)%W, sy = (i*89)%H; ctx.fillRect(sx, sy, 3, 3); }
+    // Tunnels from nest
+    ctx.strokeStyle = '#5a4020'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(nest.x, nest.y);
+    ctx.lineTo(nest.x-90, nest.y-40); ctx.moveTo(nest.x, nest.y);
+    ctx.lineTo(nest.x+90, nest.y-40); ctx.moveTo(nest.x, nest.y);
+    ctx.lineTo(nest.x, nest.y-70); ctx.stroke();
+    // Rally flag
+    if(state === 'playing'){
+      ctx.strokeStyle = '#ffcc66'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(rally.x, rally.y); ctx.lineTo(rally.x, rally.y-22); ctx.stroke();
+      ctx.fillStyle = '#e8a020';
+      ctx.beginPath(); ctx.moveTo(rally.x, rally.y-22); ctx.lineTo(rally.x+16, rally.y-17); ctx.lineTo(rally.x, rally.y-12); ctx.closePath(); ctx.fill();
+    }
+    // Crumbs
+    crumbs.forEach(function(c){
+      ctx.fillStyle = '#ffcc66'; ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#d8a020'; ctx.beginPath(); ctx.arc(c.x-1.5, c.y-1.5, 2, 0, Math.PI*2); ctx.fill();
+    });
+    // Nest / queen chamber
+    ctx.fillStyle = '#6b3a12'; ctx.beginPath(); ctx.arc(nest.x, nest.y, 42, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#8a5220'; ctx.beginPath(); ctx.arc(nest.x, nest.y, 30, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffcc66'; ctx.font = 'bold 20px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('👑', nest.x, nest.y+7);
+    ctx.fillStyle = '#f5e6c8'; ctx.font = '11px Verdana';
+    ctx.fillText('QUEEN', nest.x, nest.y+52);
+    // Ants
+    ants.forEach(function(a){
+      ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.angle);
+      ctx.fillStyle = '#c0392b';
+      ctx.beginPath(); ctx.arc(-5,0,4,0,Math.PI*2); ctx.arc(1,0,4.5,0,Math.PI*2); ctx.arc(7,0,3.5,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 1;
+      for(var l=-1;l<=1;l++){ ctx.beginPath(); ctx.moveTo(0,l*3); ctx.lineTo(5,l*5); ctx.stroke(); }
+      ctx.restore();
+      if(a.carrying){ ctx.fillStyle = '#ffcc66'; ctx.beginPath(); ctx.arc(a.x, a.y-10, 4, 0, Math.PI*2); ctx.fill(); }
+    });
+    // Beetles
+    beetles.forEach(function(b){
+      ctx.fillStyle = '#1a1a2e'; ctx.beginPath(); ctx.ellipse(b.x, b.y, b.r, b.r*0.75, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#4444aa'; ctx.beginPath(); ctx.arc(b.x+b.r*0.5, b.y-4, 3, 0, Math.PI*2); ctx.arc(b.x+b.r*0.5, b.y+4, 3, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ff4444'; ctx.font = 'bold 12px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('!', b.x, b.y - b.r - 4);
+    });
+    // Particles
+    particles.forEach(function(p){ ctx.fillStyle = p.color; ctx.globalAlpha = p.life/20; ctx.fillRect(p.x, p.y, 4, 4); ctx.globalAlpha = 1; });
+    // Status banner
+    if(state === 'playing'){
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(10, 10, 300, 22);
+      ctx.fillStyle = '#f5e6c8'; ctx.font = '13px Verdana'; ctx.textAlign = 'left';
+      ctx.fillText('Goal: 50 ants  •  Tap beetles to squash them', 18, 25);
+    }
+  }
+  function loop(){ update(); draw(); requestAnimationFrame(loop); }
+  reset(); state = 'title';
+  ovTitle.textContent = 'Ant Colony Architect';
+  ovText.textContent = 'The queen needs you! Direct her workers, stockpile food, and build a colony of 50 ants before the beetles destroy the nest.';
+  howto.style.display = 'block'; startBtn.textContent = 'Start Colony';
+  updateHUD(); loop();
+})();
+</script>
+</body>
+</html>

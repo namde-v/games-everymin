@@ -24,3 +24,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0618 | Pendulum Painter | Precision / Pendulum Timing Painting | Space/click release paint, mouse/touch tap, Keys select color | [Play](./../games/game-0618.html) |
 | 0619 | Subzero Skater | Arcade / Ice Skating Collect | Arrow Keys/WASD slide, mouse/touch steer | [Play](./../games/game-0619.html) |
 | 0620 | Orbit Docking | Precision / Spacecraft Docking | Arrow Keys thrust/rotate, mouse/touch thrust, Space dock | [Play](./../games/game-0620.html) |
+| 0621 | Tidepool Treasure Dive | Arcade / Underwater Treasure Diving | Arrow Keys/WASD swim, mouse/touch steer | [Play](./../games/game-0621.html) |
+| 0622 | Rune Vault Cipher | Puzzle / Rune Sequence Logic | Mouse/touch click runes, Keys select | [Play](./../games/game-0622.html) |
+| 0623 | Skyport Air Traffic | Strategy / Air Traffic Control | Mouse/touch drag routes, Keys 1-4 select planes | [Play](./../games/game-0623.html) |
+| 0624 | Metro Step Sync | Rhythm / Dance Step Timing | Arrow Keys dance steps, mouse/touch tap pads | [Play](./../games/game-0624.html) |
+| 0625 | Ember Canyon Runner | Arcade / Lava Canyon Runner | Space/Up jump, Down duck, mouse/touch tap | [Play](./../games/game-0625.html) |
+| 0626 | Wordfall Anagram | Puzzle / Falling Word Puzzle | Mouse/touch catch letters, Keys spell words | [Play](./../games/game-0626.html) |
+| 0627 | Ant Colony Architect | Strategy / Ant Colony Simulation | Mouse/touch place rally flag, WASD move flag | [Play](./../games/game-0627.html) |
+| 0628 | Clockwork Catapult | Precision / Catapult Trajectory | Mouse/touch aim and launch, Arrow Keys adjust angle/power | [Play](./../games/game-0628.html) |
+| 0629 | Storm Chaser Drone | Arcade / Storm Drone Flying | Arrow Keys/WASD fly, mouse/touch steer | [Play](./../games/game-0629.html) |
+| 0630 | Marble Magnet Maze | Precision / Magnetic Maze Navigation | Mouse/touch switch magnets, Arrow Keys steer | [Play](./../games/game-0630.html) |

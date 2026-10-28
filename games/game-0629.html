@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Storm Chaser Drone</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b1526;color:#eaf6ff;font-family:Arial,Helvetica,sans-serif;overflow:hidden;touch-action:none}
+  #wrap{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 20%,#1b3a5c,#0b1526 70%)}
+  canvas{display:block;width:96vw;height:92vh;max-width:900px;max-height:640px;background:linear-gradient(#162e4d,#0e2038);border:3px solid #58c7ff;border-radius:14px;box-shadow:0 0 28px rgba(88,199,255,.35)}
+  #hud{position:absolute;top:calc(4vh + 8px);left:50%;transform:translateX(-50%);width:min(860px,92vw);display:flex;gap:8px;justify-content:space-between;font-weight:bold;font-size:14px;text-shadow:1px 1px 2px #000;pointer-events:none}
+  #hud span{background:rgba(0,0,0,.55);padding:6px 10px;border-radius:20px;border:1px solid #58c7ff}
+  #batteryBar{display:inline-block;width:90px;height:12px;background:#233;vertical-align:middle;border-radius:8px;overflow:hidden}
+  #batteryFill{display:block;height:100%;width:100%;background:linear-gradient(90deg,#ffe066,#4ade80)}
+  .screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(4,12,24,.82);padding:20px;z-index:5}
+  .hidden{display:none!important}
+  h1{font-size:44px;color:#7dd3fc;letter-spacing:1px;margin-bottom:6px}
+  h2{font-size:34px;color:#facc15;margin-bottom:10px}
+  p{max-width:560px;line-height:1.55;margin:6px 0}
+  .tag{display:inline-block;background:#f59e0b;color:#111;padding:4px 12px;border-radius:20px;font-weight:bold;margin:8px 0}
+  button{background:#facc15;color:#111;border:0;padding:14px 26px;border-radius:999px;font-size:18px;font-weight:bold;cursor:pointer;margin-top:14px;box-shadow:0 4px 0 #a16207}
+  button:active{transform:translateY(3px);box-shadow:none}
+  button.secondary{background:#38bdf8;color:#fff;box-shadow:0 4px 0 #075985}
+  .how{background:rgba(255,255,255,.08);border:1px solid #38bdf8;border-radius:12px;padding:12px 16px;margin-top:14px;text-align:left}
+  .how b{color:#7dd3fc}
+  .controls{font-size:13px;color:#cbd5e1}
+  #msg{color:#fde68a;min-height:20px;font-weight:bold}
+  @media(max-width:600px){h1{font-size:32px}canvas{height:88vh}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span>⭐ Score: <b id="score">0</b></span>
+    <span>🛰️ Orbs: <b id="orbs">0</b>/25</span>
+    <span>❤️ Lives: <b id="lives">3</b></span>
+    <span>🔋 <span id="batteryBar"><span id="batteryFill"></span></span> <b id="batText">100%</b></span>
+    <span id="status">🌩️ STORM ACTIVE</span>
+  </div>
+  <canvas id="game" width="900" height="640"></canvas>
+
+  <div id="titleScreen" class="screen">
+    <div class="tag">ARCADE / STORM DRONE FLYING</div>
+    <h1>🌩️ STORM CHASER DRONE</h1>
+    <p>Pilot your drone into the heart of the storm! Collect <b>25 weather data orbs</b> before your battery dies or the lightning gets you.</p>
+    <button id="startBtn">▶ START MISSION</button>
+    <div class="how">
+      <b>How to Play</b><br>
+      • <b>Move:</b> Arrow keys / WASD, mouse, or touch-drag.<br>
+      • <b>Collect:</b> Glowing cyan data orbs (+100 points).<br>
+      • <b>Dodge:</b> Yellow lightning bolts — one hit costs a life!<br>
+      • <b>Wind gusts:</b> Blue arrows push your drone — fight them!<br>
+      • <b>Battery:</b> Drains over time. Fly over ⚡ charging beacons to recharge.<br>
+      • <b>Win:</b> Collect 25 orbs. <b>Lose:</b> Lose 3 lives or run out of battery.
+    </div>
+    <p class="controls">Keyboard + Mouse + Touch supported • Sound starts after you press Start</p>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">MISSION COMPLETE!</h2>
+    <p id="endText"></p>
+    <p id="finalScore"></p>
+    <button id="restartBtn">🔄 RESTART INSTANTLY</button>
+    <button id="menuBtn" class="secondary">🏠 Back to Title</button>
+  </div>
+</div>
+<script>
+(function(){
+  var canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+  var W=900,H=640;
+  var scoreEl=document.getElementById('score'), orbsEl=document.getElementById('orbs'), livesEl=document.getElementById('lives');
+  var batFill=document.getElementById('batteryFill'), batText=document.getElementById('batText'), statusEl=document.getElementById('status');
+  var titleScreen=document.getElementById('titleScreen'), endScreen=document.getElementById('endScreen');
+  var endTitle=document.getElementById('endTitle'), endText=document.getElementById('endText'), finalScore=document.getElementById('finalScore');
+  var running=false, over=false, raf=0, audioCtx=null, muted=false;
+  var keys={}, mouse={x:450,y:320,down:false}, touch={x:450,y:320,active:false};
+  var player, orbs, bolts, gusts, beacons, particles, rain, clouds, frame, spawnTimer, gustTimer, boltTimer, flash, shake;
+
+  function beep(freq,dur,type,vol){
+    if(!audioCtx) return;
+    try{
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type||'sine'; o.frequency.value=freq;
+      g.gain.setValueAtTime(vol||0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function initAudio(){
+    if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+    if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+  }
+  function rnd(a,b){ return a+Math.random()*(b-a); }
+  function reset(){
+    player={x:450,y:520,vx:0,vy:0,r:22,inv:0};
+    orbs=[]; bolts=[]; gusts=[]; beacons=[]; particles=[]; rain=[]; clouds=[];
+    frame=0; spawnTimer=0; gustTimer=0; boltTimer=0; flash=0; shake=0;
+    score=0; collected=0; lives=3; battery=100;
+    for(var i=0;i<8;i++) orbs.push(newOrb());
+    for(var j=0;j<3;j++) beacons.push({x:rnd(80,820),y:rnd(80,500),r:26,pulse:Math.random()*6});
+    for(var k=0;k<110;k++) rain.push({x:rnd(0,W),y:rnd(0,H),s:rnd(8,18),l:rnd(8,22)});
+    for(var c=0;c<6;c++) clouds.push({x:rnd(0,W),y:rnd(0,140),w:rnd(90,190),s:rnd(0.2,0.7)});
+    updateHUD();
+  }
+  var score=0,collected=0,lives=3,battery=100;
+  function newOrb(){
+    return {x:rnd(50,850),y:rnd(70,560),r:13,phase:Math.random()*6.28,alive:true};
+  }
+  function updateHUD(){
+    scoreEl.textContent=score; orbsEl.textContent=collected; livesEl.textContent=lives;
+    batFill.style.width=Math.max(0,battery)+'%';
+    batText.textContent=Math.round(Math.max(0,battery))+'%';
+    batFill.style.background=battery>40?'linear-gradient(90deg,#ffe066,#4ade80)':battery>20?'#facc15':'#ef4444';
+    statusEl.textContent = battery<25 ? '⚠️ LOW BATTERY!' : (player&&player.inv>0?'🛡️ SHIELDED':'🌩️ STORM ACTIVE');
+  }
+  function burst(x,y,color,n){
+    for(var i=0;i<n;i++) particles.push({x:x,y:y,vx:rnd(-3,3),vy:rnd(-3,3),life:30,color:color});
+  }
+  function hit(){
+    if(player.inv>0) return;
+    lives--; player.inv=90; shake=18; flash=14; burst(player.x,player.y,'#facc15',28);
+    beep(140,0.35,'sawtooth',0.18);
+    if(lives<=0) endGame(false);
+    updateHUD();
+  }
+  function endGame(win){
+    running=false; over=true; cancelAnimationFrame(raf);
+    endScreen.classList.remove('hidden');
+    if(win){ endTitle.textContent='🏆 MISSION COMPLETE!'; endText.textContent='You braved the storm and collected all 25 weather data orbs. Outstanding flying, Storm Chaser!'; beep(660,0.2,'square',0.15); setTimeout(function(){beep(880,0.25,'square',0.15);},180); setTimeout(function(){beep(1100,0.35,'square',0.15);},360); }
+    else { endTitle.textContent='💥 GAME OVER'; endText.textContent= battery<=0 ? 'Your battery ran out in the storm. Recharge at beacons next time!' : 'Lightning brought your drone down. Try again, pilot!'; beep(90,0.5,'sawtooth',0.2); }
+    finalScore.textContent='Final Score: '+score+' • Orbs: '+collected+'/25 • Lives left: '+Math.max(0,lives);
+  }
+  function start(){
+    initAudio(); reset(); running=true; over=false;
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    beep(520,0.15,'square',0.14);
+    cancelAnimationFrame(raf); loop();
+  }
+  function loop(){
+    if(!running) return;
+    frame++; update(); draw();
+    raf=requestAnimationFrame(loop);
+  }
+  function update(){
+    // Input: keyboard
+    var ax=0, ay=0;
+    if(keys['arrowleft']||keys['a']) ax-=1;
+    if(keys['arrowright']||keys['d']) ax+=1;
+    if(keys['arrowup']||keys['w']) ay-=1;
+    if(keys['arrowdown']||keys['s']) ay+=1;
+    if(ax||ay){ var len=Math.sqrt(ax*ax+ay*ay); player.vx+=ax/len*0.55; player.vy+=ay/len*0.55; }
+    // Mouse / touch steering toward pointer when held
+    var tx=null, ty=null;
+    if(mouse.down){ tx=mouse.x; ty=mouse.y; }
+    if(touch.active){ tx=touch.x; ty=touch.y; }
+    if(tx!==null){
+      var dx=tx-player.x, dy=ty-player.y, d=Math.sqrt(dx*dx+dy*dy);
+      if(d>8){ player.vx+=dx/d*0.45; player.vy+=dy/d*0.45; }
+    }
+    player.vx*=0.92; player.vy*=0.92;
+    // Wind gusts push drone
+    for(var gi=0;gi<gusts.length;gi++){ var g=gusts[gi]; g.x+=g.vx; g.life--; if(Math.abs(player.x-g.x)<70&&Math.abs(player.y-g.y)<55){ player.vx+=g.push*0.18; } }
+    gusts=gusts.filter(function(g){return g.life>0&&g.x>-80&&g.x<W+80;});
+    player.x+=player.vx; player.y+=player.vy;
+    if(player.x<28) player.x=28; if(player.x>W-28) player.x=W-28;
+    if(player.y<58) player.y=58; if(player.y>H-28) player.y=H-28;
+    if(player.inv>0) player.inv--;
+    battery-=0.045; // steady drain
+    if(battery<=0){ battery=0; updateHUD(); endGame(false); return; }
+    // Orbs
+    for(var oi=0;oi<orbs.length;oi++){
+      var o=orbs[oi]; o.phase+=0.08;
+      var odx=player.x-o.x, ody=player.y-o.y;
+      if(Math.sqrt(odx*odx+ody*ody)<player.r+o.r){
+        orbs.splice(oi,1); oi--; collected++; score+=100;
+        burst(o.x,o.y,'#22d3ee',18); beep(880,0.12,'sine',0.16); beep(1320,0.1,'sine',0.1);
+        orbs.push(newOrb());
+        if(collected>=25){ updateHUD(); endGame(true); return; }
+      }
+    }
+    // Beacons recharge
+    for(var bi=0;bi<beacons.length;bi++){
+      var b=beacons[bi]; b.pulse+=0.06;
+      var bdx=player.x-b.x, bdy=player.y-b.y;
+      if(Math.sqrt(bdx*bdx+bdy*bdy)<player.r+b.r){
+        battery=Math.min(100,battery+28); score+=25; burst(b.x,b.y,'#4ade80',16); beep(520,0.15,'triangle',0.16);
+        b.x=rnd(80,820); b.y=rnd(80,500);
+      }
+    }
+    // Lightning bolts
+    boltTimer--; if(boltTimer<=0){ boltTimer=rnd(55,110); bolts.push({x:rnd(40,860),y:-20,vy:rnd(5,8),w:rnd(6,11),warn:28}); }
+    for(var li=0;li<bolts.length;li++){
+      var bl=bolts[li];
+      if(bl.warn>0){ bl.warn--; bl.x=player.x+((bl.x-player.x)*0.97); }
+      else bl.y+=bl.vy;
+      if(bl.warn<=0 && Math.abs(player.x-bl.x)<26 && Math.abs(player.y-bl.y)<34){ bolts.splice(li,1); li--; hit(); if(over) return; }
+    }
+    bolts=bolts.filter(function(bl){return bl.y<H+40;});
+    // Gust spawner
+    gustTimer--; if(gustTimer<=0){ gustTimer=rnd(90,170); var dir=Math.random()<0.5?-1:1; gusts.push({x:dir<0?W+40:-40,y:rnd(100,540),vx:dir*rnd(2.5,4.5),push:dir,life:260}); }
+    // Rain + clouds drift
+    for(var ri=0;ri<rain.length;ri++){ var r=rain[ri]; r.y+=r.s; r.x-=1.2; if(r.y>H){r.y=-10;r.x=rnd(0,W);} }
+    for(var ci=0;ci<clouds.length;ci++){ var cl=clouds[ci]; cl.x+=cl.s; if(cl.x>W+100) cl.x=-200; }
+    for(var pi=0;pi<particles.length;pi++){ var p=particles[pi]; p.x+=p.vx; p.y+=p.vy; p.life--; }
+    particles=particles.filter(function(p){return p.life>0;});
+    if(flash>0) flash--; if(shake>0) shake--;
+    if(frame%600===0) beep(220,0.2,'sawtooth',0.05); // distant thunder rumble
+    updateHUD();
+  }
+  function draw(){
+    ctx.save();
+    if(shake>0) ctx.translate(rnd(-shake,shake)*0.4, rnd(-shake,shake)*0.4);
+    ctx.clearRect(-20,-20,W+40,H+40);
+    // Sky + clouds
+    ctx.fillStyle='#122a45'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(30,58,95,0.9)';
+    for(var ci=0;ci<clouds.length;ci++){ var cl=clouds[ci]; ctx.beginPath(); ctx.ellipse(cl.x,cl.y,cl.w,26,0,0,Math.PI*2); ctx.ellipse(cl.x+40,cl.y+10,cl.w*0.6,20,0,0,Math.PI*2); ctx.fill(); }
+    // Rain streaks
+    ctx.strokeStyle='rgba(147,197,253,0.55)'; ctx.lineWidth=1.5; ctx.beginPath();
+    for(var ri=0;ri<rain.length;ri++){ var r=rain[ri]; ctx.moveTo(r.x,r.y); ctx.lineTo(r.x-3,r.y+r.l); }
+    ctx.stroke();
+    // Gust arrows
+    for(var gi=0;gi<gusts.length;gi++){ var g=gusts[gi]; ctx.fillStyle='rgba(56,189,248,0.75)'; ctx.font='bold 28px Arial'; ctx.textAlign='center'; ctx.fillText(g.push<0?'◀':'▶',g.x,g.y); ctx.fillStyle='rgba(56,189,248,0.18)'; ctx.fillRect(Math.min(g.x-50,g.x+50),g.y-34,100,68); }
+    // Beacons
+    for(var bi=0;bi<beacons.length;bi++){ var b=beacons[bi]; var pr=26+Math.sin(b.pulse)*5; ctx.fillStyle='rgba(74,222,128,0.25)'; ctx.beginPath(); ctx.arc(b.x,b.y,pr+10,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#22c55e'; ctx.beginPath(); ctx.arc(b.x,b.y,pr,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.font='bold 22px Arial'; ctx.textAlign='center'; ctx.fillText('⚡',b.x,b.y+8); }
+    // Orbs
+    for(var oi=0;oi<orbs.length;oi++){ var o=orbs[oi]; var bob=Math.sin(o.phase)*4; ctx.fillStyle='rgba(34,211,238,0.3)'; ctx.beginPath(); ctx.arc(o.x,o.y+bob,22,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#22d3ee'; ctx.beginPath(); ctx.arc(o.x,o.y+bob,o.r,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.font='bold 13px Arial'; ctx.textAlign='center'; ctx.fillText('◉',o.x,o.y+bob+5); }
+    // Lightning bolts
+    for(var li=0;li<bolts.length;li++){ var bl=bolts[li]; if(bl.warn>0){ ctx.fillStyle='rgba(250,204,21,0.25)'; ctx.fillRect(bl.x-14,0,28,H); ctx.fillStyle='#facc15'; ctx.font='bold 22px Arial'; ctx.textAlign='center'; ctx.fillText('⚡',bl.x,40); } else { ctx.strokeStyle='#facc15'; ctx.lineWidth=bl.w; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(bl.x,bl.y-30); ctx.lineTo(bl.x+8,bl.y); ctx.lineTo(bl.x-6,bl.y+18); ctx.lineTo(bl.x+4,bl.y+38); ctx.stroke(); ctx.strokeStyle='#fef08a'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(bl.x,bl.y-30); ctx.lineTo(bl.x+8,bl.y); ctx.lineTo(bl.x-6,bl.y+18); ctx.stroke(); } }
+    // Particles
+    for(var pi=0;pi<particles.length;pi++){ var p=particles[pi]; ctx.fillStyle=p.color; ctx.globalAlpha=Math.max(0,p.life/30); ctx.fillRect(p.x,p.y,5,5); ctx.globalAlpha=1; }
+    // Drone
+    if(!(player.inv>0 && Math.floor(frame/6)%2===0)){
+      ctx.fillStyle='#334155'; ctx.beginPath(); ctx.ellipse(player.x,player.y,30,18,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#38bdf8'; ctx.beginPath(); ctx.arc(player.x,player.y,14,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#f8fafc'; ctx.beginPath(); ctx.arc(player.x,player.y,6,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#7dd3fc'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(player.x-28,player.y-12); ctx.lineTo(player.x+28,player.y-12); ctx.moveTo(player.x-28,player.y+12); ctx.lineTo(player.x+28,player.y+12); ctx.stroke();
+      ctx.fillStyle='rgba(125,211,252,0.7)'; ctx.beginPath(); ctx.ellipse(player.x-30,player.y-12,14,3,0,0,Math.PI*2); ctx.ellipse(player.x+30,player.y-12,14,3,0,0,Math.PI*2); ctx.ellipse(player.x-30,player.y+12,14,3,0,0,Math.PI*2); ctx.ellipse(player.x+30,player.y+12,14,3,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#facc15'; ctx.font='bold 11px Arial'; ctx.textAlign='center'; ctx.fillText('DRONE',player.x,player.y+30);
+    }
+    if(flash>0){ ctx.fillStyle='rgba(254,240,138,'+(flash/40)+')'; ctx.fillRect(0,0,W,H); }
+    ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.font='bold 13px Arial'; ctx.textAlign='left';
+    ctx.fillText('Collect 25 orbs  •  Recharge at green ⚡ beacons  •  Dodge lightning!',12,H-12);
+    ctx.restore();
+  }
+  function canvasPos(e){
+    var rect=canvas.getBoundingClientRect();
+    var cx=(e.clientX!==undefined?e.clientX:(e.touches&&e.touches[0]?e.touches[0].clientX:450));
+    var cy=(e.clientY!==undefined?e.clientY:(e.touches&&e.touches[0]?e.touches[0].clientY:320));
+    return {x:(cx-rect.left)/rect.width*W, y:(cy-rect.top)/rect.height*H};
+  }
+  document.addEventListener('keydown',function(e){ keys[e.key.toLowerCase()]=true; if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(e.key.toLowerCase())>=0) e.preventDefault(); if(e.key==='Enter' && !running && !over) start(); });
+  document.addEventListener('keyup',function(e){ keys[e.key.toLowerCase()]=false; });
+  canvas.addEventListener('mousemove',function(e){ var p=canvasPos(e); mouse.x=p.x; mouse.y=p.y; });
+  canvas.addEventListener('mousedown',function(e){ var p=canvasPos(e); mouse.x=p.x; mouse.y=p.y; mouse.down=true; });
+  document.addEventListener('mouseup',function(){ mouse.down=false; });
+  canvas.addEventListener('touchstart',function(e){ e.preventDefault(); var p=canvasPos(e); touch.x=p.x; touch.y=p.y; touch.active=true; },{passive:false});
+  canvas.addEventListener('touchmove',function(e){ e.preventDefault(); var p=canvasPos(e); touch.x=p.x; touch.y=p.y; touch.active=true; },{passive:false});
+  canvas.addEventListener('touchend',function(e){ e.preventDefault(); touch.active=false; },{passive:false});
+  document.getElementById('startBtn').addEventListener('click',start);
+  document.getElementById('restartBtn').addEventListener('click',start);
+  document.getElementById('menuBtn').addEventListener('click',function(){ endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); running=false; over=false; reset(); drawTitleBackdrop(); });
+  function drawTitleBackdrop(){ reset(); ctx.fillStyle='#122a45'; ctx.fillRect(0,0,W,H); ctx.fillStyle='#7dd3fc'; ctx.font='bold 24px Arial'; ctx.textAlign='center'; ctx.fillText('Press START to fly into the storm',W/2,H/2); }
+  reset(); drawTitleBackdrop();
+})();
+</script>
+</body>
+</html>
