@@ -82,6 +82,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0469 | Metronome Miner | Rhythm / Beat-Driven Digging | Space swing pickaxe on beat, mouse/touch tap canvas, Arrow Keys move | [Play](./../games/game-0469.html) |
 | 0470 | Nebula Navigator | Action / Starfield Asteroid Weaving | WASD/Arrow Keys steer, Space boost, mouse/touch tap shield | [Play](./../games/game-0470.html) |
 
+| 0471 | Quarry Quake | Action / Falling-Rock Dodger | Arrow Keys/WASD move, Space jump, mouse/touch drag move | [Play](./../games/game-0471.html) |
+| 0472 | Riddle Reef | Puzzle / Clue-Chain Deduction | Mouse/touch click answer tiles, Arrow Keys select, Enter/Space confirm | [Play](./../games/game-0472.html) |
+| 0473 | Solar Shepherd | Strategy / Orbital Power Management | Mouse/touch click panels and stations, Arrow Keys select, Space toggle link | [Play](./../games/game-0473.html) |
+| 0474 | Tempo Tailor | Rhythm / Beat Stitching | Keys A/S/D/F stitch on beat, mouse/touch tap lanes | [Play](./../games/game-0474.html) |
+| 0475 | Wisp Warden | Arcade / Ghost-Light Herding | Arrow Keys/WASD move, mouse/touch drag move, Space ring bell | [Play](./../games/game-0475.html) |
+| 0476 | Cipher Canyon | Puzzle / Code-Breaking Trail | Mouse/touch click symbols to assign letters, Arrow Keys select, Enter confirm | [Play](./../games/game-0476.html) |
+| 0477 | Tidal Trader | Strategy / Harbor Cargo Trading | Mouse/touch click harbors and goods, Arrow Keys select, Enter trade, Space advance tide | [Play](./../games/game-0477.html) |
+| 0478 | Pulse Pilot | Rhythm / Heartbeat Lane Runner | Arrow Keys switch lanes, Space dash on downbeat, mouse/touch tap lanes | [Play](./../games/game-0478.html) |
+| 0479 | Boulder Bouncer | Action / Ricochet Physics | Mouse/touch drag aim and release, Arrow Keys adjust angle, Space launch | [Play](./../games/game-0479.html) |
+| 0480 | Mycelium Mayor | Strategy / Fungal City Builder | Mouse/touch click grid tiles, Arrow Keys select, Space place, Enter grow turn | [Play](./../games/game-0480.html) |
+
 ## Batch notes
 
 - Batch 041: 10 games, produced in one cycle (0401–0410). Volume 005 opened at game 0401.
@@ -91,3 +102,4 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 045: 10 games, produced in one cycle (0441–0450).
 - Batch 046: 10 games, produced in one cycle (0451–0460).
 - Batch 047: 10 games, produced in one cycle (0461–0470).
+- Batch 048: 10 games, produced in one cycle (0471–0480).

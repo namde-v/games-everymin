@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Boulder Bouncer — Game 0479</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #141824; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #f2f0e6; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 10px; gap: 8px; }
+  h1 { font-size: clamp(22px, 5vw, 38px); letter-spacing: 1px; text-shadow: 0 3px 0 #000; }
+  h1 span { color: #ffb020; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; font-weight: 700; font-size: 15px; }
+  .pill { background: #222a3d; border: 2px solid #3d4a68; border-radius: 999px; padding: 6px 12px; }
+  .pill b { color: #ffd166; }
+  #stage { position: relative; width: min(96vw, 760px); aspect-ratio: 4 / 3; max-height: 68vh; }
+  canvas { width: 100%; height: 100%; display: block; background: linear-gradient(180deg, #2b3a55 0%, #1c273d 55%, #171e2e 100%); border: 3px solid #f2f0e6; border-radius: 14px; box-shadow: 0 12px 30px rgba(0,0,0,.55); touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; background: rgba(10,14,26,.88); border-radius: 14px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: clamp(26px, 6vw, 44px); }
+  .overlay p { max-width: 520px; line-height: 1.5; color: #d8dceb; font-size: 15px; }
+  .howto { background: #222a3d; border: 1px solid #3d4a68; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; max-width: 520px; }
+  .howto strong { color: #ffd166; }
+  button { background: #ffb020; color: #1a1200; border: none; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: 900; cursor: pointer; box-shadow: 0 5px 0 #8a5a00; }
+  button:active { transform: translateY(3px); box-shadow: 0 2px 0 #8a5a00; }
+  button.secondary { background: #e8e6dc; box-shadow: 0 5px 0 #8a8d94; }
+  #hint { font-size: 13px; color: #aab3cc; text-align: center; max-width: 720px; line-height: 1.4; }
+  #msg { min-height: 20px; font-weight: 800; color: #ffd166; text-align: center; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🪨 BOULDER <span>BOUNCER</span></h1>
+  <div id="hud">
+    <div class="pill">Score: <b id="score">0</b></div>
+    <div class="pill">Shots left: <b id="shots">12</b></div>
+    <div class="pill">Targets: <b id="targets">0 / 0</b></div>
+    <div class="pill">Status: <b id="status">Ready</b></div>
+    <div class="pill">Best: <b id="best">—</b></div>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="760" height="570"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>🪨 Boulder Bouncer</h2>
+      <p>Launch a bouncing boulder, ricochet it off angled walls, and smash every crystal target in as few shots as you can!</p>
+      <div class="howto">
+        <strong>How to Play</strong><br>
+        • <strong>Mouse / Touch:</strong> drag from the launcher to aim, release to launch.<br>
+        • <strong>Arrow Keys:</strong> Left / Right adjust angle, Up / Down adjust power.<br>
+        • <strong>Space:</strong> launch the boulder. <strong>R:</strong> restart instantly.<br>
+        • Ricochets off walls and angled bumpers count — use them to reach hidden targets.<br>
+        • You have 12 shots. Smash all targets to win. Fewer shots = bigger bonus!
+      </div>
+      <button id="startBtn" type="button">▶ Start Game</button>
+      <p>Tip: a long, slow bounce often clears a corner better than a fast straight shot.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn" type="button">↻ Play Again</button>
+      <button id="menuBtn" type="button" class="secondary">Title Screen</button>
+    </div>
+  </div>
+  <div id="msg">Drag to aim — release to smash!</div>
+  <div id="hint">Keyboard: ← → angle &nbsp;•&nbsp; ↑ ↓ power &nbsp;•&nbsp; Space launch &nbsp;•&nbsp; R restart &nbsp;•&nbsp; Mouse / touch drag works too.</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var shotsEl = document.getElementById('shots');
+  var targetsEl = document.getElementById('targets');
+  var statusEl = document.getElementById('status');
+  var bestEl = document.getElementById('best');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, slide), audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    ensureAudio();
+    if (kind === 'launch') tone(180, 0.25, 'triangle', 0.22, 420);
+    else if (kind === 'bounce') tone(320, 0.12, 'square', 0.10, 180);
+    else if (kind === 'smash') { tone(700, 0.18, 'sawtooth', 0.20, 120); tone(1100, 0.10, 'sine', 0.12, 500); }
+    else if (kind === 'win') { tone(523, 0.18, 'sine', 0.18); setTimeout(function(){ tone(659, 0.18, 'sine', 0.18); }, 140); setTimeout(function(){ tone(784, 0.30, 'sine', 0.20); }, 280); }
+    else if (kind === 'lose') { tone(300, 0.35, 'sawtooth', 0.15, 90); }
+    else if (kind === 'click') tone(600, 0.06, 'sine', 0.10);
+  }
+
+  var state = 'title'; // title | aiming | flying | over
+  var score = 0, shots = 12, best = null;
+  var aimAngle = -Math.PI / 2.6, aimPower = 0.62;
+  var dragging = false, dragX = 0, dragY = 0;
+  var launcher = { x: W / 2, y: H - 48 };
+  var boulder = null;
+  var targets = [], bumpers = [], particles = [], rings = [];
+  var bounces = 0, smashedThisShot = 0;
+
+  function buildLevel() {
+    targets = [];
+    // A spread of crystals, some tucked behind angled bumpers so ricochets matter.
+    var layout = [
+      [90, 90], [210, 70], [340, 100], [470, 70], [590, 100], [680, 170],
+      [130, 190], [270, 190], [420, 200], [560, 230], [650, 290],
+      [95, 300], [230, 300], [380, 310], [520, 330], [150, 390], [300, 410]
+    ];
+    for (var i = 0; i < layout.length; i++) {
+      targets.push({ x: layout[i][0], y: layout[i][1], r: 20, alive: true, wob: Math.random() * 6.28, kind: i % 3 });
+    }
+    bumpers = [
+      { x1: 150, y1: 250, x2: 260, y2: 200 },
+      { x1: 500, y1: 260, x2: 610, y2: 200 },
+      { x1: 330, y1: 360, x2: 450, y2: 320 },
+      { x1: 80, y1: 450, x2: 180, y2: 410 },
+      { x1: 580, y1: 430, x2: 690, y2: 390 }
+    ];
+    particles = []; rings = []; bounces = 0; smashedThisShot = 0;
+  }
+
+  function updateHUD() {
+    var alive = targets.filter(function (t) { return t.alive; }).length;
+    scoreEl.textContent = score;
+    shotsEl.textContent = shots;
+    targetsEl.textContent = (targets.length - alive) + ' / ' + targets.length;
+    bestEl.textContent = best === null ? '—' : best;
+    if (state === 'title') statusEl.textContent = 'Title';
+    else if (state === 'aiming') statusEl.textContent = 'Aim!';
+    else if (state === 'flying') statusEl.textContent = 'Bouncing…';
+    else statusEl.textContent = 'Game Over';
+  }
+
+  function resetGame() {
+    score = 0; shots = 12;
+    buildLevel();
+    state = 'aiming';
+    boulder = null;
+    aimAngle = -Math.PI / 2.6; aimPower = 0.62;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    statusEl.textContent = 'Aim!';
+    msgEl.textContent = 'Drag to aim — release to smash!';
+    updateHUD();
+  }
+
+  function showEnd(win) {
+    state = 'over';
+    var bonus = win ? shots * 100 : 0;
+    if (win) score += bonus;
+    if (best === null || score > best) best = score;
+    endTitle.textContent = win ? '🏆 You Win!' : '💥 Out of Shots!';
+    endText.textContent = win
+      ? 'All crystals smashed! Score ' + score + ' (includes ' + bonus + ' shot bonus). Shots remaining: ' + shots + '.'
+      : 'Some crystals survived. You smashed ' + (targets.length - targets.filter(function (t) { return t.alive; }).length) + ' of ' + targets.length + '. Score: ' + score + '. Try again!';
+    endScreen.classList.remove('hidden');
+    updateHUD();
+    sfx(win ? 'win' : 'lose');
+  }
+
+  function launch() {
+    if (state !== 'aiming') return;
+    if (shots <= 0) return;
+    ensureAudio();
+    shots--; smashedThisShot = 0; bounces = 0;
+    var speed = 5 + aimPower * 8;
+    boulder = {
+      x: launcher.x, y: launcher.y, r: 16,
+      vx: Math.cos(aimAngle) * speed, vy: Math.sin(aimAngle) * speed,
+      rot: 0, alive: true
+    };
+    state = 'flying';
+    msgEl.textContent = 'Bounce it! Ricochets reach hidden targets.';
+    sfx('launch');
+    updateHUD();
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 18; i++) {
+      var a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 4;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, color: color });
+    }
+    rings.push({ x: x, y: y, r: 6, life: 1 });
+  }
+
+  function reflectOffSegment(b, seg) {
+    // Closest point on segment, reflect velocity about segment normal.
+    var dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
+    var len2 = dx * dx + dy * dy;
+    var t = Math.max(0, Math.min(1, ((b.x - seg.x1) * dx + (b.y - seg.y1) * dy) / len2));
+    var cx = seg.x1 + dx * t, cy = seg.y1 + dy * t;
+    var ddx = b.x - cx, ddy = b.y - cy;
+    var d = Math.sqrt(ddx * ddx + ddy * ddy);
+    if (d > b.r + 4) return false;
+    if (d === 0) { ddx = -dy; ddy = dx; d = Math.sqrt(ddx * ddx + ddy * ddy); }
+    var nx = ddx / d, ny = ddy / d;
+    var dot = b.vx * nx + b.vy * ny;
+    if (dot < 0) {
+      b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny;
+      b.x = cx + nx * (b.r + 5); b.y = cy + ny * (b.r + 5);
+      return true;
+    }
+    return false;
+  }
+
+  function update() {
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life -= 0.03;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    for (var j = rings.length - 1; j >= 0; j--) {
+      rings[j].r += 3; rings[j].life -= 0.05;
+      if (rings[j].life <= 0) rings.splice(j, 1);
+    }
+    targets.forEach(function (t) { t.wob += 0.05; });
+
+    if (state === 'flying' && boulder) {
+      boulder.x += boulder.vx; boulder.y += boulder.vy;
+      boulder.vy += 0.12; // gentle gravity keeps shots arcing and lively
+      boulder.rot += (boulder.vx * 0.02);
+      // Walls
+      var hitWall = false;
+      if (boulder.x < boulder.r + 6) { boulder.x = boulder.r + 6; boulder.vx = Math.abs(boulder.vx); hitWall = true; }
+      if (boulder.x > W - boulder.r - 6) { boulder.x = W - boulder.r - 6; boulder.vx = -Math.abs(boulder.vx); hitWall = true; }
+      if (boulder.y < boulder.r + 6) { boulder.y = boulder.r + 6; boulder.vy = Math.abs(boulder.vy); hitWall = true; }
+      if (hitWall) { bounces++; sfx('bounce'); burst(boulder.x, boulder.y, '#ffd166'); }
+      // Angled bumpers
+      bumpers.forEach(function (seg) {
+        if (reflectOffSegment(boulder, seg)) { bounces++; sfx('bounce'); burst(boulder.x, boulder.y, '#7dd3fc'); }
+      });
+      // Targets
+      targets.forEach(function (t) {
+        if (!t.alive) return;
+        var dx = boulder.x - t.x, dy = boulder.y - t.y;
+        if (Math.sqrt(dx * dx + dy * dy) < boulder.r + t.r) {
+          t.alive = false; smashedThisShot++;
+          var pts = 100 + bounces * 25 + (smashedThisShot > 1 ? 50 * (smashedThisShot - 1) : 0);
+          score += pts;
+          burst(t.x, t.y, t.kind === 0 ? '#f472b6' : t.kind === 1 ? '#34d399' : '#a78bfa');
+          sfx('smash');
+          msgEl.textContent = 'SMASH! +' + pts + (bounces ? ' (' + bounces + ' bounces)' : '');
+        }
+      });
+      // End of shot: boulder settles at the bottom or slows to a stop.
+      var speed = Math.sqrt(boulder.vx * boulder.vx + boulder.vy * boulder.vy);
+      if (boulder.y > H - boulder.r - 4 && Math.abs(boulder.vy) < 1.2) {
+        boulder = null;
+        endShot();
+      } else if (boulder.y > H + 60) {
+        boulder = null;
+        endShot();
+      } else if (speed < 0.6 && boulder.y > H - 120) {
+        boulder = null;
+        endShot();
+      }
+    }
+    updateHUD();
+  }
+
+  function endShot() {
+    var alive = targets.filter(function (t) { return t.alive; }).length;
+    if (alive === 0) { showEnd(true); return; }
+    if (shots <= 0) { showEnd(false); return; }
+    state = 'aiming';
+    msgEl.textContent = smashedThisShot ? 'Nice! ' + smashedThisShot + ' smashed that shot. Aim again.' : 'No luck — try a ricochet off a gold bumper.';
+  }
+
+  function drawLauncher() {
+    ctx.save();
+    ctx.translate(launcher.x, launcher.y);
+    ctx.fillStyle = '#ffb020';
+    ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#7c4a00';
+    ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.strokeStyle = '#5b3500'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = '#1a1200'; ctx.font = 'bold 20px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('◉', 0, 1);
+    ctx.restore();
+  }
+
+  function drawAim() {
+    if (state !== 'aiming') return;
+    var len = 40 + aimPower * 110;
+    var ex = launcher.x + Math.cos(aimAngle) * len;
+    var ey = launcher.y + Math.sin(aimAngle) * len;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,209,102,0.95)'; ctx.lineWidth = 4; ctx.setLineDash([10, 8]);
+    ctx.beginPath(); ctx.moveTo(launcher.x, launcher.y); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(ex, ey, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('Power ' + Math.round(aimPower * 100) + '%', launcher.x, launcher.y - 38);
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Subtle dotted playfield texture
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (var gx = 30; gx < W; gx += 60) for (var gy = 30; gy < H; gy += 60) { ctx.beginPath(); ctx.arc(gx, gy, 2, 0, Math.PI * 2); ctx.fill(); }
+    // Bumpers
+    bumpers.forEach(function (s) {
+      ctx.save();
+      ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.strokeStyle = '#fff7cc'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+      ctx.restore();
+    });
+    // Targets
+    targets.forEach(function (t) {
+      if (!t.alive) return;
+      var bob = Math.sin(t.wob) * 2;
+      var col = t.kind === 0 ? '#f472b6' : t.kind === 1 ? '#34d399' : '#a78bfa';
+      ctx.save();
+      ctx.translate(t.x, t.y + bob);
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      for (var k = 0; k < 6; k++) {
+        var a = (Math.PI / 3) * k;
+        var px = Math.cos(a) * t.r, py = Math.sin(a) * t.r;
+        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath(); ctx.arc(-5, -6, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    });
+    // Particles and rings
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    rings.forEach(function (r) {
+      ctx.globalAlpha = Math.max(0, r.life);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+    drawAim();
+    drawLauncher();
+    if (boulder) {
+      ctx.save();
+      ctx.translate(boulder.x, boulder.y); ctx.rotate(boulder.rot);
+      ctx.fillStyle = '#8d7b68';
+      ctx.beginPath(); ctx.arc(0, 0, boulder.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#4a3f33'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.strokeStyle = '#c9b8a3'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(10, 0); ctx.moveTo(0, -10); ctx.lineTo(0, 10); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = evt.clientX !== undefined ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0);
+    var cy = evt.clientY !== undefined ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  function onDown(evt) {
+    ensureAudio();
+    if (state !== 'aiming') return;
+    evt.preventDefault();
+    dragging = true;
+    var p = canvasPos(evt); dragX = p.x; dragY = p.y;
+    updateAimFromPoint(p);
+  }
+  function onMove(evt) {
+    if (!dragging || state !== 'aiming') return;
+    evt.preventDefault();
+    var p = canvasPos(evt); dragX = p.x; dragY = p.y;
+    updateAimFromPoint(p);
+  }
+  function onUp(evt) {
+    if (!dragging) return;
+    dragging = false;
+    if (state === 'aiming') { ensureAudio(); launch(); }
+  }
+  function updateAimFromPoint(p) {
+    var dx = p.x - launcher.x, dy = p.y - launcher.y;
+    if (Math.sqrt(dx * dx + dy * dy) < 10) return;
+    // Drag direction is opposite the launch direction (slingshot feel): dragging down aims up.
+    // Simpler and predictable: aim directly toward the pointer when it is above the launcher.
+    aimAngle = Math.atan2(dy, dx);
+    if (aimAngle > -0.15) aimAngle = -0.15;
+    if (aimAngle < -Math.PI + 0.15) aimAngle = -Math.PI + 0.15;
+    var dist = Math.min(260, Math.sqrt(dx * dx + dy * dy));
+    aimPower = 0.25 + (dist / 260) * 0.75;
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('mouseleave', function () { dragging = false; });
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp);
+  canvas.addEventListener('touchcancel', function () { dragging = false; });
+
+  document.addEventListener('keydown', function (evt) {
+    ensureAudio();
+    if (evt.key === 'ArrowLeft') { aimAngle = Math.max(-Math.PI + 0.15, aimAngle - 0.06); evt.preventDefault(); }
+    else if (evt.key === 'ArrowRight') { aimAngle = Math.min(-0.15, aimAngle + 0.06); evt.preventDefault(); }
+    else if (evt.key === 'ArrowUp') { aimPower = Math.min(1, aimPower + 0.05); evt.preventDefault(); }
+    else if (evt.key === 'ArrowDown') { aimPower = Math.max(0.2, aimPower - 0.05); evt.preventDefault(); }
+    else if (evt.code === 'Space' || evt.key === ' ') { if (state === 'aiming') launch(); evt.preventDefault(); }
+    else if (evt.key === 'r' || evt.key === 'R') { if (state !== 'title') resetGame(); }
+    else if (evt.key === 'Enter') { if (state === 'title') startGame(); else if (state === 'over') resetGame(); }
+  });
+
+  function startGame() { ensureAudio(); sfx('click'); resetGame(); }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', function () { ensureAudio(); sfx('click'); resetGame(); });
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    ensureAudio(); sfx('click');
+    state = 'title'; boulder = null;
+    titleScreen.classList.remove('hidden');
+    endScreen.classList.add('hidden');
+    buildLevel(); updateHUD();
+  });
+
+  buildLevel();
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

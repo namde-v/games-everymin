@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tempo Tailor — Rhythm / Beat Stitching</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #1b1420; color: #fff7ea; font-family: Georgia, 'Times New Roman', serif; overflow: hidden; touch-action: manipulation; }
+  #wrap { width: 100vw; height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; }
+  h1 { font-size: clamp(28px, 6vw, 52px); letter-spacing: 2px; color: #ffd166; text-shadow: 0 2px 0 #b85c38; }
+  .sub { color: #f4a261; margin: 4px 0 12px; font-style: italic; }
+  #hud { width: min(900px, 96vw); display: flex; justify-content: space-between; gap: 8px; font-size: 18px; font-weight: bold; background: #2d2233; border: 2px solid #ffd166; border-radius: 12px; padding: 8px 14px; }
+  #hud span { white-space: nowrap; }
+  #canvas { width: min(900px, 96vw); height: min(52vh, 440px); background: linear-gradient(#3d2b45, #241a2e); border: 3px solid #ffd166; border-radius: 14px; margin-top: 10px; display: block; }
+  #lanes { width: min(900px, 96vw); display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+  .key { min-height: 74px; border: 3px solid #ffd166; border-radius: 14px; background: #4a3550; color: #fff; font-size: 26px; font-weight: bold; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .key small { font-size: 13px; color: #ffd166; }
+  .key.hit { background: #ffd166; color: #241a2e; transform: scale(0.96); }
+  .key:active { background: #ffd166; color: #241a2e; }
+  #msg { min-height: 28px; margin-top: 10px; font-size: 20px; font-weight: bold; color: #ffd166; text-align: center; }
+  .screen { position: fixed; inset: 0; background: rgba(20,12,26,.96); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; z-index: 5; }
+  .screen.hidden { display: none; }
+  .screen p { max-width: 560px; line-height: 1.6; margin: 10px 0; font-size: 17px; }
+  .screen h2 { font-size: 34px; color: #ffd166; }
+  button.big { margin-top: 16px; padding: 14px 30px; font-size: 20px; font-weight: bold; border: 0; border-radius: 12px; background: #ffd166; color: #241a2e; cursor: pointer; }
+  button.big:hover { filter: brightness(1.1); }
+  .howto { background: #2d2233; border: 1px solid #ffd166; border-radius: 12px; padding: 14px 18px; text-align: left; }
+  .howto b { color: #ffd166; }
+  #combo { color: #8ecae6; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>✂️ TEMPO TAILOR ✂️</h1>
+  <div class="sub">Stitch the seam exactly on the beat — or watch it unravel!</div>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Stitches: <span id="stitched">0</span>/40</span>
+    <span>Lives: <span id="lives">❤️❤️❤️</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+    <span id="combo">Combo x1</span>
+  </div>
+  <canvas id="canvas" width="900" height="440"></canvas>
+  <div id="lanes">
+    <button class="key" data-lane="0" type="button">A<small>Red Thread</small></button>
+    <button class="key" data-lane="1" type="button">S<small>Gold Thread</small></button>
+    <button class="key" data-lane="2" type="button">D<small>Teal Thread</small></button>
+    <button class="key" data-lane="3" type="button">F<small>Purple Thread</small></button>
+  </div>
+  <div id="msg">Press Start, then stitch on the beat!</div>
+</div>
+
+<div id="titleScreen" class="screen">
+  <h2>✂️ Tempo Tailor</h2>
+  <p>A rhythm tailoring challenge! Stitch markers scroll down four thread lanes toward the needle line. Press the matching key or tap the button at the perfect moment to sew a beautiful stitch.</p>
+  <div class="howto">
+    <b>How to Play:</b><br>
+    • Press <b>Start</b> to begin the beat.<br>
+    • When a stitch marker reaches the glowing needle line, press <b>A / S / D / F</b> or tap the matching on-screen button.<br>
+    • <b>Perfect</b> (+100), <b>Good</b> (+60), <b>Early/Late</b> (+25). A miss unravels the seam and costs a life.<br>
+    • Complete <b>40 stitches</b> to finish the garment and win. Lose all 3 lives and the seam unravels — game over.<br>
+    • Watch the beat pulse: markers arrive on the rhythm, so trust your ears as well as your eyes.
+  </div>
+  <button class="big" id="startBtn" type="button">▶ Start Stitching</button>
+</div>
+
+<div id="endScreen" class="screen hidden">
+  <h2 id="endTitle">Game Over</h2>
+  <p id="endText"></p>
+  <p id="endStats"></p>
+  <button class="big" id="restartBtn" type="button">↻ Restart Instantly</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('canvas');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var stitchedEl = document.getElementById('stitched');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var comboEl = document.getElementById('combo');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+  var keys = Array.prototype.slice.call(document.querySelectorAll('.key'));
+
+  var W = 900, H = 440;
+  var TARGET_Y = 360;
+  var LANE_X = [112, 337, 562, 787];
+  var LANE_COLORS = ['#e63946', '#ffd166', '#2ec4b6', '#9b5de5'];
+  var LANE_NAMES = ['Red', 'Gold', 'Teal', 'Purple'];
+  var GOAL = 40;
+
+  var state = 'title';
+  var score = 0, stitched = 0, lives = 3, combo = 0, bestCombo = 0, perfects = 0;
+  var notes = [];
+  var spawnTimer = 0, elapsed = 0, lastTime = 0, rafId = 0;
+  var audioCtx = null, beatTimer = 0, beatOn = false;
+  var flash = 0, flashColor = '#ffd166';
+  var needlePulse = 0;
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime + (when || 0);
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.18, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function playHit(kind) {
+    if (kind === 'perfect') { tone(880, 0.18, 'sine', 0.22); tone(1320, 0.12, 'sine', 0.12, 0.02); }
+    else if (kind === 'good') { tone(660, 0.15, 'triangle', 0.2); }
+    else if (kind === 'ok') { tone(440, 0.12, 'triangle', 0.16); }
+    else { tone(160, 0.25, 'sawtooth', 0.18); tone(110, 0.3, 'square', 0.1, 0.05); }
+  }
+  function playBeat() { tone(180, 0.12, 'sine', 0.2); tone(90, 0.1, 'sine', 0.22); }
+
+  function resetGame() {
+    score = 0; stitched = 0; lives = 3; combo = 0; bestCombo = 0; perfects = 0;
+    notes = []; spawnTimer = 0.4; elapsed = 0; beatTimer = 0; flash = 0;
+    updateHud('Sewing...');
+    msgEl.textContent = 'Listen for the beat — stitch when markers hit the needle line!';
+  }
+
+  function updateHud(status) {
+    scoreEl.textContent = score;
+    stitchedEl.textContent = stitched;
+    livesEl.textContent = lives > 0 ? '❤️'.repeat(lives) : '💔';
+    if (status) statusEl.textContent = status;
+    comboEl.textContent = 'Combo x' + (combo > 0 ? combo : 1);
+  }
+
+  function spawnNote() {
+    var lane = Math.floor(Math.random() * 4);
+    // Avoid three identical lanes in a row for variety.
+    if (notes.length >= 2) {
+      var recent = notes.slice(-2);
+      if (recent[0].lane === lane && recent[1].lane === lane) lane = (lane + 1 + Math.floor(Math.random() * 3)) % 4;
+    }
+    notes.push({ lane: lane, y: -30, hit: false, missed: false });
+  }
+
+  function startGame() {
+    initAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    lastTime = performance.now();
+    cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(loop);
+    playBeat();
+  }
+
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    cancelAnimationFrame(rafId);
+    updateHud(win ? 'Finished!' : 'Unravelled!');
+    endTitle.textContent = win ? '🎉 Garment Complete — You Win!' : '💔 Seam Unravelled — Game Over';
+    endText.textContent = win
+      ? 'Beautiful work! You stitched the whole garment perfectly on the beat.'
+      : 'The seam came apart. The tailor shop believes in you — try again!';
+    endStats.textContent = 'Final Score: ' + score + '  •  Stitches: ' + stitched + '/' + GOAL + '  •  Perfect hits: ' + perfects + '  •  Best combo: x' + bestCombo;
+    endScreen.classList.remove('hidden');
+    if (win) { tone(523, 0.2, 'sine', 0.2); tone(659, 0.2, 'sine', 0.2, 0.15); tone(784, 0.35, 'sine', 0.22, 0.3); }
+  }
+
+  function judge(lane) {
+    if (state !== 'playing') return;
+    var best = null, bestDist = 9999;
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (n.lane === lane && !n.hit && !n.missed) {
+        var d = Math.abs(n.y - TARGET_Y);
+        if (d < bestDist) { bestDist = d; best = n; }
+      }
+    }
+    if (!best || bestDist > 70) {
+      // Wrong timing: small penalty, no life lost, but combo breaks.
+      combo = 0;
+      msgEl.textContent = 'Off-beat! Wait for the marker to reach the needle line.';
+      playHit('miss');
+      flash = 0.25; flashColor = '#e63946';
+      updateHud();
+      return;
+    }
+    best.hit = true;
+    var kind, pts, label;
+    if (bestDist <= 18) { kind = 'perfect'; pts = 100; label = 'PERFECT STITCH!'; perfects++; }
+    else if (bestDist <= 38) { kind = 'good'; pts = 60; label = 'Good stitch!'; }
+    else { kind = 'ok'; pts = 25; label = 'Stitched (early/late)'; }
+    combo++;
+    if (combo > bestCombo) bestCombo = combo;
+    score += pts + Math.min(combo * 5, 50);
+    stitched++;
+    msgEl.textContent = label + '  •  ' + LANE_NAMES[lane] + ' thread sewn.';
+    flash = 0.3; flashColor = LANE_COLORS[lane];
+    playHit(kind);
+    var btn = keys[lane];
+    btn.classList.add('hit');
+    setTimeout(function () { btn.classList.remove('hit'); }, 160);
+    updateHud();
+    if (stitched >= GOAL) { endGame(true); }
+  }
+
+  function pressLane(lane) {
+    initAudio();
+    judge(lane);
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+    elapsed += dt;
+    needlePulse += dt;
+
+    // Beat pulse every 0.6 seconds, matching the spawn rhythm feel.
+    beatTimer += dt;
+    if (beatTimer >= 0.6) { beatTimer -= 0.6; beatOn = true; playBeat(); }
+    else if (beatTimer > 0.15) { beatOn = false; }
+
+    // Spawn roughly one marker every 0.9 seconds, speeding up slightly.
+    spawnTimer -= dt;
+    if (spawnTimer <= 0 && stitched + notes.filter(function (n) { return !n.hit && !n.missed; }).length < GOAL) {
+      spawnNote();
+      spawnTimer = Math.max(0.62, 0.95 - elapsed * 0.004);
+    }
+
+    var speed = 210 + Math.min(elapsed * 1.2, 90);
+    for (var i = notes.length - 1; i >= 0; i--) {
+      var n = notes[i];
+      if (!n.hit && !n.missed) n.y += speed * dt;
+      if (!n.hit && !n.missed && n.y > TARGET_Y + 70) {
+        n.missed = true;
+        lives--;
+        combo = 0;
+        msgEl.textContent = 'Missed! The seam unravels — a stitch slipped past.';
+        flash = 0.35; flashColor = '#e63946';
+        playHit('miss');
+        updateHud('Unravelling!');
+        if (lives <= 0) { endGame(false); return; }
+      }
+      if (n.hit || n.y > H + 60) notes.splice(i, 1);
+    }
+    if (flash > 0) flash -= dt;
+
+    draw();
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Fabric background stripes.
+    ctx.fillStyle = '#3d2b45';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for (var x = 0; x < W; x += 22) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    // Lanes.
+    for (var l = 0; l < 4; l++) {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(LANE_X[l] - 60, 0, 120, H);
+      ctx.fillStyle = LANE_COLORS[l];
+      ctx.globalAlpha = 0.25;
+      ctx.fillRect(LANE_X[l] - 2, 0, 4, H);
+      ctx.globalAlpha = 1;
+    }
+    // Sewn seam line: completed stitches as a dashed thread across the top.
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 8]);
+    ctx.beginPath();
+    ctx.moveTo(20, 30);
+    ctx.lineTo(20 + (stitched / GOAL) * (W - 40), 30);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ffd166';
+    ctx.font = 'bold 15px Georgia, serif';
+    ctx.fillText('SEAM PROGRESS', 20, 18);
+    // Needle line.
+    var pulse = beatOn ? 6 : 2;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, TARGET_Y - 2 - pulse / 2, W, 4 + pulse);
+    ctx.fillStyle = '#ffd166';
+    ctx.font = 'bold 16px Georgia, serif';
+    ctx.fillText('◄ NEEDLE LINE ►', 20, TARGET_Y - 14);
+    // Notes.
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (n.missed) continue;
+      var cx = LANE_X[n.lane];
+      ctx.fillStyle = LANE_COLORS[n.lane];
+      ctx.beginPath();
+      ctx.arc(cx, n.y, 26, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 24px Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('✂', cx, n.y + 8);
+      ctx.textAlign = 'left';
+    }
+    // Flash overlay.
+    if (flash > 0) {
+      ctx.globalAlpha = Math.min(flash * 1.5, 0.35);
+      ctx.fillStyle = flashColor;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+    // Progress text.
+    ctx.fillStyle = '#fff7ea';
+    ctx.font = 'bold 17px Georgia, serif';
+    ctx.fillText('Stitch ' + (stitched + 1) + ' of ' + GOAL + '  •  Lives: ' + lives, 20, H - 16);
+  }
+
+  // Controls: keyboard, mouse, touch.
+  document.addEventListener('keydown', function (e) {
+    var map = { a: 0, s: 1, d: 2, f: 3 };
+    var k = e.key.toLowerCase();
+    if (map.hasOwnProperty(k)) { e.preventDefault(); pressLane(map[k]); }
+    if ((e.key === 'Enter' || e.key === ' ') && state !== 'playing') { e.preventDefault(); startGame(); }
+  });
+  keys.forEach(function (btn, idx) {
+    btn.addEventListener('click', function () { pressLane(idx); });
+    btn.addEventListener('touchstart', function (e) { e.preventDefault(); pressLane(idx); }, { passive: false });
+  });
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+  canvas.addEventListener('click', function () { if (state === 'title') startGame(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (state === 'title') startGame(); }, { passive: false });
+  document.addEventListener('mousedown', function () { initAudio(); });
+
+  draw();
+  updateHud('Ready');
+})();
+</script>
+</body>
+</html>

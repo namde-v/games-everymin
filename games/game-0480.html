@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mycelium Mayor — Fungal City Builder</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1a12; color: #e8f5e9; font-family: system-ui, -apple-system, Segoe UI, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; color: #a5d6a7; text-align: center; margin-bottom: 4px; }
+  p.sub { color: #b0bec5; font-size: 14px; text-align: center; margin-bottom: 10px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; width: 100%; max-width: 720px; }
+  .stat { background: #1b2e22; border: 1px solid #33691e; border-radius: 8px; padding: 6px 12px; font-size: 14px; font-weight: 600; }
+  .stat span { color: #ffeb3b; }
+  #controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; }
+  button { background: #2e7d32; color: #fff; border: none; border-radius: 8px; padding: 10px 16px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  button:hover, button:focus { background: #43a047; outline: 2px solid #ffeb3b; }
+  button.active { background: #f57f17; color: #111; }
+  button.secondary { background: #37474f; }
+  #wrap { position: relative; width: 100%; max-width: 720px; }
+  canvas { display: block; width: 100%; height: auto; background: #16241a; border: 3px solid #33691e; border-radius: 10px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(6, 20, 10, 0.94); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #c5e1a5; }
+  .overlay p, .overlay li { font-size: 15px; line-height: 1.55; color: #e0e0e0; }
+  .overlay ul { text-align: left; max-width: 520px; }
+  #msg { min-height: 22px; font-size: 14px; color: #ffe082; text-align: center; margin-top: 8px; }
+  #legend { font-size: 13px; color: #b0bec5; text-align: center; margin-top: 6px; max-width: 720px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🍄 Mycelium Mayor</h1>
+<p class="sub">Grow a fungal city from a single spore. Connect hubs, feed your people, and reach 120 population.</p>
+
+<div id="hud" aria-label="Game status">
+  <div class="stat">Score: <span id="score">0</span></div>
+  <div class="stat">Nutrients: <span id="nutrients">40</span></div>
+  <div class="stat">Population: <span id="pop">0</span> / 120</div>
+  <div class="stat">Health: <span id="lives">❤❤❤</span></div>
+  <div class="stat">Turn: <span id="turn">1</span> / 30</div>
+  <div class="stat">Status: <span id="status">Build!</span></div>
+</div>
+
+<div id="controls">
+  <button id="hubBtn" class="active" type="button">🍄 Place Hub (10 nutrients)</button>
+  <button id="pathBtn" type="button">〰 Place Path (2 nutrients)</button>
+  <button id="growBtn" type="button">🌱 Grow Turn (Enter)</button>
+  <button id="restartBtn" class="secondary" type="button">Restart</button>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="720" height="540" aria-label="Fungal city grid"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🍄 Mycelium Mayor</h2>
+    <p>Strategy / Fungal City Builder</p>
+    <div>
+      <strong>How to Play</strong>
+      <ul>
+        <li><b>Goal:</b> Reach 120 population before Turn 30 ends. Lose all 3 Health and the city collapses.</li>
+        <li><b>Hubs</b> cost 10 nutrients and house spores. A hub only grows if it is connected by paths to the glowing Mother Spore in the centre.</li>
+        <li><b>Paths</b> cost 2 nutrients and carry nutrients through the mycelium network. Build paths outward from the Mother Spore first.</li>
+        <li><b>Each Grow Turn:</b> every connected hub gains population but consumes nutrients. Unconnected hubs gain nothing and still cost upkeep if crowded. Random blight may strike overgrown districts.</li>
+        <li><b>Balance:</b> Too many hubs without enough nutrients drains Health. Too few hubs and you will never reach 120 in time.</li>
+      </ul>
+    </div>
+    <p><b>Controls:</b> Mouse / touch — tap a tile to place. Arrow Keys — move cursor. Space — place selected tile. Enter — Grow Turn. Buttons above also work.</p>
+    <button id="startBtn" type="button">▶ Start Growing</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="playAgainBtn" type="button">↻ Restart Instantly</button>
+  </div>
+</div>
+
+<p id="msg">Welcome, Mayor. Start by building a path from the Mother Spore.</p>
+<p id="legend">🟢 Mother Spore &nbsp; 🍄 Spore Hub &nbsp; 〰 Mycelium Path &nbsp; ▦ Empty Soil &nbsp; ▣ Selected Tile &nbsp; Tip: hubs next to two or more paths grow faster.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 12, ROWS = 9, CELL = 60;
+  var grid, mode, cursor, nutrients, population, score, health, turn, started, over;
+  var audioCtx = null;
+
+  function beep(freq, dur, type) {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is optional */ }
+  }
+  function soundFor(kind) {
+    if (kind === 'place') beep(520, 0.15, 'triangle');
+    else if (kind === 'grow') beep(330, 0.25, 'sine');
+    else if (kind === 'bad') beep(140, 0.3, 'sawtooth');
+    else if (kind === 'win') { beep(523, 0.2, 'sine'); setTimeout(function(){ beep(659, 0.2, 'sine'); }, 150); setTimeout(function(){ beep(784, 0.35, 'sine'); }, 300); }
+    else if (kind === 'lose') { beep(220, 0.3, 'sawtooth'); setTimeout(function(){ beep(160, 0.4, 'sawtooth'); }, 200); }
+  }
+
+  function newGame() {
+    grid = [];
+    for (var y = 0; y < ROWS; y++) {
+      var row = [];
+      for (var x = 0; x < COLS; x++) row.push({ type: 'empty', pop: 0 });
+      grid.push(row);
+    }
+    grid[4][5] = { type: 'mother', pop: 20 };
+    grid[4][6] = { type: 'path', pop: 0 };
+    mode = 'hub'; cursor = { x: 5, y: 3 };
+    nutrients = 40; population = 20; score = 20; health = 3; turn = 1;
+    started = false; over = false;
+    document.getElementById('titleScreen').classList.remove('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    setMode('hub');
+    setStatus('Build!');
+    setMessage('Welcome, Mayor. Start by building a path from the Mother Spore.');
+    draw(); updateHud();
+  }
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('hubBtn').classList.toggle('active', m === 'hub');
+    document.getElementById('pathBtn').classList.toggle('active', m === 'path');
+  }
+  function setStatus(s) { document.getElementById('status').textContent = s; }
+  function setMessage(s) { document.getElementById('msg').textContent = s; }
+  function updateHud() {
+    document.getElementById('score').textContent = score;
+    document.getElementById('nutrients').textContent = nutrients;
+    document.getElementById('pop').textContent = population;
+    document.getElementById('turn').textContent = turn;
+    document.getElementById('lives').textContent = health > 0 ? '❤'.repeat(health) : '💀';
+  }
+
+  function isConnected(x, y) {
+    // Flood fill from the Mother Spore through paths and hubs.
+    var seen = {}, stack = [[5, 4]], found = false;
+    while (stack.length) {
+      var c = stack.pop(), cx = c[0], cy = c[1], key = cx + ',' + cy;
+      if (seen[key]) continue; seen[key] = true;
+      if (cx === x && cy === y) found = true;
+      var dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+      for (var i = 0; i < dirs.length; i++) {
+        var nx = cx + dirs[i][0], ny = cy + dirs[i][1];
+        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+        var t = grid[ny][nx].type;
+        if (t === 'path' || t === 'hub' || t === 'mother') stack.push([nx, ny]);
+      }
+    }
+    return found;
+  }
+  function countPathNeighbours(x, y) {
+    var n = 0, dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (var i = 0; i < dirs.length; i++) {
+      var nx = x + dirs[i][0], ny = y + dirs[i][1];
+      if (nx >= 0 && ny >= 0 && nx < COLS && ny < ROWS && grid[ny][nx].type === 'path') n++;
+    }
+    return n;
+  }
+  function hubs() {
+    var list = [];
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++)
+      if (grid[y][x].type === 'hub') list.push({ x: x, y: y, cell: grid[y][x] });
+    return list;
+  }
+
+  function placeAt(x, y) {
+    if (!started || over) { setMessage('Press Start first, then place tiles.'); return; }
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return;
+    var cell = grid[y][x];
+    if (cell.type !== 'empty') { setMessage('That tile is already used. Pick empty soil.'); soundFor('bad'); return; }
+    if (mode === 'hub') {
+      if (nutrients < 10) { setMessage('Not enough nutrients for a hub (needs 10). Grow a turn or build cheaper paths.'); soundFor('bad'); return; }
+      nutrients -= 10; cell.type = 'hub'; cell.pop = 2;
+      setMessage('Spore hub planted! Connect it with paths to make it grow.');
+    } else {
+      if (nutrients < 2) { setMessage('Not enough nutrients for a path (needs 2).'); soundFor('bad'); return; }
+      nutrients -= 2; cell.type = 'path';
+      setMessage('Mycelium path laid. Connect hubs back to the Mother Spore.');
+    }
+    soundFor('place'); score = population + hubs().length * 10; draw(); updateHud();
+  }
+
+  function growTurn() {
+    if (!started || over) { setMessage('Press Start first.'); return; }
+    var list = hubs(), connected = 0, grown = 0, cost = 0;
+    list.forEach(function (h) {
+      cost += 2;
+      if (isConnected(h.x, h.y)) {
+        connected++;
+        var bonus = countPathNeighbours(h.x, h.y) >= 2 ? 7 : 5;
+        h.cell.pop += bonus; grown += bonus;
+      }
+    });
+    // Mother Spore slowly feeds the network.
+    nutrients += 6 + connected * 1;
+    nutrients -= cost;
+    population = 20 + list.reduce(function (s, h) { return s + h.cell.pop; }, 0);
+    score = population + list.length * 10;
+    var blight = false;
+    if (list.length >= 6 && Math.random() < 0.35) {
+      blight = true;
+      var victim = list[Math.floor(Math.random() * list.length)];
+      victim.cell.pop = Math.max(0, victim.cell.pop - 6);
+      population = 20 + list.reduce(function (s, h) { return s + h.cell.pop; }, 0);
+    }
+    turn++;
+    if (nutrients < 0) {
+      health--; nutrients = 0;
+      setMessage('Nutrient collapse! The city loses 1 Health. Build fewer hubs or grow connected ones.');
+      soundFor('bad');
+    } else if (blight) {
+      setMessage('Blight struck an overgrown district (-6 population). Keep districts connected and varied.');
+    } else {
+      setMessage(connected + ' connected hub(s) grew +' + grown + ' population. Nutrients replenished by the network.');
+    }
+    soundFor('grow');
+    if (population >= 120) return endGame(true);
+    if (health <= 0) return endGame(false, 'Your city starved. Health reached zero.');
+    if (turn > 30) return endGame(false, 'Time ran out after 30 turns with ' + population + ' population.');
+    setStatus(connected + ' hubs connected');
+    draw(); updateHud();
+  }
+
+  function endGame(win, reason) {
+    over = true;
+    document.getElementById('endTitle').textContent = win ? '🏆 You Win, Mayor!' : '💀 Game Over';
+    document.getElementById('endText').textContent = win
+      ? 'Your fungal city thrives with ' + population + ' citizens spreading across the forest floor!'
+      : (reason || 'Your fungal city collapsed.');
+    document.getElementById('endScore').textContent = 'Final Score: ' + score + '  •  Population: ' + population + '  •  Turns used: ' + (turn - 1);
+    document.getElementById('endScreen').classList.remove('hidden');
+    setStatus(win ? 'Victory!' : 'Collapsed');
+    soundFor(win ? 'win' : 'lose');
+    draw(); updateHud();
+  }
+
+  function startGame() {
+    started = true; over = false;
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    beep(440, 0.15, 'triangle');
+    setStatus('Growing'); setMessage('Place hubs and paths, then press Grow Turn (Enter).');
+    draw(); updateHud();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        var cell = grid[y][x], px = x * CELL, py = y * CELL;
+        ctx.fillStyle = cell.type === 'path' ? '#2e4a2f' : (cell.type === 'mother' ? '#4a148c' : (cell.type === 'hub' ? '#33691e' : '#1c2b1e'));
+        ctx.fillRect(px + 2, py + 2, CELL - 4, CELL - 4);
+        ctx.strokeStyle = '#3e5a40'; ctx.strokeRect(px + 2, py + 2, CELL - 4, CELL - 4);
+        ctx.fillStyle = '#e8f5e9'; ctx.font = '26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        var label = cell.type === 'mother' ? '🟢' : (cell.type === 'hub' ? '🍄' : (cell.type === 'path' ? '〰' : '·'));
+        ctx.fillText(label, px + CELL / 2, py + CELL / 2 - (cell.type === 'hub' ? 8 : 0));
+        if (cell.type === 'hub') {
+          ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#ffeb3b';
+          ctx.fillText(cell.pop, px + CELL / 2, py + CELL - 14);
+        }
+        if (cell.type === 'mother') {
+          ctx.font = 'bold 11px sans-serif'; ctx.fillStyle = '#ffffff';
+          ctx.fillText('MOTHER', px + CELL / 2, py + CELL - 12);
+        }
+      }
+    }
+    if (started && !over) {
+      ctx.strokeStyle = '#ffeb3b'; ctx.lineWidth = 3;
+      ctx.strokeRect(cursor.x * CELL + 2, cursor.y * CELL + 2, CELL - 4, CELL - 4);
+      ctx.lineWidth = 1;
+    }
+  }
+
+  function tileFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var clientX = e.clientX, clientY = e.clientY;
+    if (e.touches && e.touches[0]) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+    var x = Math.floor((clientX - rect.left) / rect.width * COLS);
+    var y = Math.floor((clientY - rect.top) / rect.height * ROWS);
+    return { x: x, y: y };
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('playAgainBtn').addEventListener('click', function () { newGame(); startGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function () { newGame(); startGame(); });
+  document.getElementById('hubBtn').addEventListener('click', function () { setMode('hub'); beep(600, 0.08, 'sine'); });
+  document.getElementById('pathBtn').addEventListener('click', function () { setMode('path'); beep(600, 0.08, 'sine'); });
+  document.getElementById('growBtn').addEventListener('click', growTurn);
+  canvas.addEventListener('click', function (e) { var t = tileFromEvent(e); cursor = t; placeAt(t.x, t.y); });
+  canvas.addEventListener('mousedown', function (e) { var t = tileFromEvent(e); cursor = t; draw(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); var t = tileFromEvent(e); cursor = t; placeAt(t.x, t.y); }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') { cursor.x = Math.max(0, cursor.x - 1); draw(); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { cursor.x = Math.min(COLS - 1, cursor.x + 1); draw(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { cursor.y = Math.max(0, cursor.y - 1); draw(); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { cursor.y = Math.min(ROWS - 1, cursor.y + 1); draw(); e.preventDefault(); }
+    else if (e.key === ' ') { placeAt(cursor.x, cursor.y); e.preventDefault(); }
+    else if (e.key === 'Enter') { if (!started) startGame(); else growTurn(); e.preventDefault(); }
+  });
+
+  function loop() { requestAnimationFrame(loop); }
+  newGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

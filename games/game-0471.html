@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Quarry Quake — Falling-Rock Dodger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a120b; color: #fff7e6; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 32px; letter-spacing: 2px; color: #ffcc33; text-shadow: 2px 2px 0 #7a3b00; margin: 6px 0 2px; text-align: center; }
+  .tagline { color: #d8c9a8; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { display: block; width: 100%; height: auto; background: #2b1d12; border: 4px solid #8a5a22; border-radius: 10px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: #3d2712; border: 2px solid #8a5a22; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-weight: bold; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  .bar { height: 10px; background: #221407; border-radius: 6px; overflow: hidden; margin-top: 6px; }
+  #collapseBar { height: 100%; width: 0%; background: linear-gradient(90deg, #ffcc33, #ff5533); transition: width 0.2s; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(20, 10, 2, 0.88); border-radius: 10px; padding: 20px; }
+  .overlay h2 { font-size: 34px; color: #ffcc33; margin-bottom: 8px; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #f3e6c8; margin: 6px 0; }
+  .howto { background: #2f1d0d; border: 1px solid #8a5a22; border-radius: 8px; padding: 12px 16px; margin: 12px 0; text-align: left; font-size: 14px; line-height: 1.6; }
+  .howto b { color: #ffcc33; }
+  button { background: #ffcc33; color: #2b1200; border: none; border-radius: 8px; padding: 13px 28px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 10px; box-shadow: 0 4px 0 #a86a00; }
+  button:hover { background: #ffe066; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #a86a00; }
+  .small { font-size: 13px; color: #cbb98f; margin-top: 8px; }
+  .hidden { display: none !important; }
+  #controlsHint { font-size: 13px; color: #d8c9a8; margin-top: 8px; text-align: center; line-height: 1.5; }
+  .gem { color: #66eaff; } .rock { color: #ffb0a0; }
+</style>
+</head>
+<body>
+<h1>⛏️ QUARRY QUAKE ⛏️</h1>
+<p class="tagline">The quarry is shaking. Dodge the rocks, grab the gems, outrun the collapse!</p>
+<div id="wrap">
+  <div id="hud">
+    <span>⭐ Score: <span id="score">0</span></span>
+    <span>💎 Gems: <span id="gems">0</span> / 30</span>
+    <span>❤️ Lives: <span id="lives">3</span></span>
+    <span>⏱️ Time: <span id="time">0</span>s</span>
+    <span id="status">Status: Ready</span>
+  </div>
+  <div class="bar" title="Collapse progress"><div id="collapseBar"></div></div>
+  <canvas id="game" width="860" height="500"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>QUARRY QUAKE</h2>
+    <p>The quarry floor is collapsing from left to right! Stay ahead of the crumbling edge, dodge falling boulders, and collect <span class="gem">30 gems</span> to win.</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      🕹️ <b>Move:</b> Arrow Keys / WASD, or drag with mouse / touch<br>
+      🦘 <b>Jump:</b> Space, Up Arrow, W, or tap the player<br>
+      💎 <b>Collect gems</b> for 50 points each — collect 30 to WIN<br>
+      🪨 <b>Avoid falling rocks</b> — a hit costs 1 life. You have 3 lives.<br>
+      ⚠️ <b>Don't fall behind!</b> The floor collapses left to right. Falling into a pit costs 1 life and respawns you on solid ground.<br>
+      🏆 <b>Win:</b> 30 gems. <b>Lose:</b> 0 lives left.
+    </div>
+    <button id="startBtn" type="button">▶ START GAME</button>
+    <p class="small">Sound starts only after you press Start. Fully offline — no downloads needed.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn" type="button">↻ RESTART INSTANTLY</button>
+    <p class="small">Press R, Enter, or tap Restart to play again.</p>
+  </div>
+</div>
+<p id="controlsHint">Arrow Keys / WASD to move &nbsp;•&nbsp; Space to jump &nbsp;•&nbsp; Mouse / touch drag to move &nbsp;•&nbsp; P pauses &nbsp;•&nbsp; R restarts</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var GROUND_Y = 430;
+  var scoreEl = document.getElementById('score');
+  var gemsEl = document.getElementById('gems');
+  var livesEl = document.getElementById('lives');
+  var timeEl = document.getElementById('time');
+  var statusEl = document.getElementById('status');
+  var collapseBar = document.getElementById('collapseBar');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  var state = 'title'; // title, playing, paused, over
+  var score = 0, gems = 0, lives = 3, elapsed = 0, lastTime = 0;
+  var collapseX = -80; // left edge of collapsed zone, moves right
+  var collapseSpeed = 22; // px per second, ramps up
+  var shake = 0, flash = 0;
+  var keys = {};
+  var pointerActive = false, pointerX = null;
+  var rocks = [], pickups = [], particles = [], warnings = [];
+  var spawnRockTimer = 0, spawnGemTimer = 0, quakeTimer = 0;
+
+  var player = { x: 200, y: GROUND_Y - 34, w: 30, h: 34, vx: 0, vy: 0, onGround: true, facing: 1, invuln: 0 };
+
+  // ---- Procedural Web Audio, created only after user interaction ----
+  var audioCtx = null, masterGain = null;
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx || state !== 'playing') return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfxJump() { tone(300, 0.18, 'square', 0.4, 640); }
+  function sfxGem() { tone(880, 0.12, 'sine', 0.5, 1320); setTimeout(function(){ tone(1320, 0.15, 'sine', 0.4, 1760); }, 70); }
+  function sfxHit() { tone(160, 0.35, 'sawtooth', 0.6, 50); }
+  function sfxRumble() { tone(55, 0.4, 'sawtooth', 0.35, 40); }
+  function sfxWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.25, 'triangle', 0.5); }, i * 130); }); }
+
+  function resetGame() {
+    score = 0; gems = 0; lives = 3; elapsed = 0; collapseX = -80; collapseSpeed = 22;
+    rocks = []; pickups = []; particles = []; warnings = []; shake = 0; flash = 0;
+    player.x = 220; player.y = GROUND_Y - 34; player.vx = 0; player.vy = 0; player.onGround = true; player.invuln = 0;
+    spawnRockTimer = 0.5; spawnGemTimer = 0.3;
+    updateHUD('Playing — outrun the collapse!');
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score; gemsEl.textContent = gems; livesEl.textContent = lives;
+    timeEl.textContent = Math.floor(elapsed);
+    if (status) statusEl.textContent = 'Status: ' + status;
+    var pct = Math.max(0, Math.min(100, (collapseX + 80) / (W + 80) * 100));
+    collapseBar.style.width = pct + '%';
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    tone(440, 0.15, 'triangle', 0.5, 660);
+    requestAnimationFrame(loop);
+  }
+  function endGame(win) {
+    state = 'over';
+    endTitle.textContent = win ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    endText.textContent = win
+      ? 'You escaped the quarry with all 30 gems! The mountain trembles in respect.'
+      : 'The quarry claimed another miner. The rocks keep falling…';
+    endStats.textContent = 'Final score: ' + score + '  •  Gems: ' + gems + ' / 30  •  Time survived: ' + Math.floor(elapsed) + 's';
+    updateHUD(win ? 'You Win!' : 'Game Over');
+    if (win) sfxWin(); else sfxHit();
+    endScreen.classList.remove('hidden');
+  }
+  function loseLife(reason) {
+    if (player.invuln > 0) return;
+    lives -= 1; player.invuln = 1.6; flash = 0.35; shake = 14; sfxHit();
+    burst(player.x + 15, player.y + 10, '#ff5533', 18);
+    if (lives <= 0) { updateHUD('Game Over'); endGame(false); return; }
+    // Respawn on the nearest solid ground ahead of the collapse
+    player.x = Math.max(collapseX + 90, player.x);
+    if (player.x > W - 50) player.x = W - 50;
+    player.y = GROUND_Y - 34; player.vx = 0; player.vy = 0; player.onGround = true;
+    updateHUD(reason || 'Ouch! Life lost');
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 260, vy: -Math.random() * 220 - 40, life: 0.5 + Math.random() * 0.4, color: color, size: 2 + Math.random() * 4 });
+    }
+  }
+  function spawnRock() {
+    var ahead = collapseX + 120 + Math.random() * Math.max(200, W - collapseX - 180);
+    var x = Math.min(W - 30, Math.max(40, ahead));
+    var big = Math.random() < 0.25;
+    rocks.push({ x: x, y: -30, size: big ? 34 + Math.random() * 10 : 20 + Math.random() * 10, vy: 180 + Math.random() * 160 + elapsed * 1.2, rot: Math.random() * 3, vrot: (Math.random() - 0.5) * 4, warn: 0.55 });
+    warnings.push({ x: x, life: 0.55 });
+  }
+  function spawnGem() {
+    var x = collapseX + 160 + Math.random() * Math.max(200, W - collapseX - 200);
+    x = Math.min(W - 30, Math.max(50, x));
+    var y = 120 + Math.random() * 240;
+    pickups.push({ x: x, y: y, bob: Math.random() * 6, kind: Math.random() < 0.12 ? 'gold' : 'gem' });
+  }
+  function update(dt) {
+    elapsed += dt;
+    collapseSpeed = 22 + elapsed * 0.55 + gems * 0.4;
+    collapseX += collapseSpeed * dt;
+    if (collapseX > W + 40) { endGame(false); return; }
+    quakeTimer -= dt;
+    if (quakeTimer <= 0) { quakeTimer = 1.4 + Math.random() * 1.6; shake = Math.max(shake, 4); if (Math.random() < 0.7) sfxRumble(); }
+    if (shake > 0) shake -= dt * 30; if (shake < 0) shake = 0;
+    if (flash > 0) flash -= dt;
+    if (player.invuln > 0) player.invuln -= dt;
+
+    // Movement: keyboard
+    var move = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) move -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) move += 1;
+    if (pointerActive && pointerX !== null) {
+      var cx = player.x + player.w / 2;
+      if (Math.abs(pointerX - cx) > 8) move = pointerX > cx ? 1 : -1;
+      else move = 0;
+    }
+    var speed = 280;
+    player.vx = move * speed;
+    if (move !== 0) player.facing = move;
+    player.x += player.vx * dt;
+    if (player.x < 0) player.x = 0;
+    if (player.x > W - player.w) player.x = W - player.w;
+
+    // Jump + gravity
+    var wantJump = keys[' '] || keys['Space'] || keys['ArrowUp'] || keys['w'] || keys['W'];
+    if (wantJump && player.onGround) { player.vy = -520; player.onGround = false; sfxJump(); keys[' '] = false; }
+    player.vy += 1500 * dt;
+    player.y += player.vy * dt;
+    if (player.y >= GROUND_Y - player.h) {
+      player.y = GROUND_Y - player.h;
+      if (!player.onGround && player.vy > 0) { burst(player.x + 15, GROUND_Y, '#c9a06a', 6); }
+      player.vy = 0; player.onGround = true;
+    }
+    // Collapsed floor: standing / walking into the pit
+    if (player.onGround && player.x + player.w < collapseX + 20) { loseLife('Fell into the pit!'); return; }
+    if (player.y > H + 60) { loseLife('Fell into the pit!'); return; }
+    // If player is over collapsed ground while airborne and lands there, also a pit fall
+    if (player.onGround && player.x < collapseX) { loseLife('Fell into the pit!'); return; }
+
+    // Spawning
+    spawnRockTimer -= dt;
+    if (spawnRockTimer <= 0) { spawnRock(); spawnRockTimer = Math.max(0.35, 0.95 - elapsed * 0.004); if (Math.random() < 0.3) spawnRock(); }
+    spawnGemTimer -= dt;
+    if (spawnGemTimer <= 0) { spawnGem(); spawnGemTimer = 0.9 + Math.random() * 0.9; }
+
+    // Rocks
+    for (var i = rocks.length - 1; i >= 0; i--) {
+      var r = rocks[i];
+      if (r.warn > 0) { r.warn -= dt; continue; }
+      r.y += r.vy * dt; r.rot += r.vrot * dt;
+      if (r.y > GROUND_Y - r.size * 0.4) {
+        burst(r.x, GROUND_Y, '#8a6a4a', 10);
+        if (Math.random() < 0.25) sfxRumble();
+        rocks.splice(i, 1); continue;
+      }
+      // Hit test vs player
+      if (player.invuln <= 0 && r.x < player.x + player.w && r.x + r.size > player.x && r.y < player.y + player.h && r.y + r.size > player.y) {
+        rocks.splice(i, 1); loseLife('Hit by a rock!'); if (state !== 'playing') return; continue;
+      }
+    }
+    for (var w = warnings.length - 1; w >= 0; w--) { warnings[w].life -= dt; if (warnings[w].life <= 0) warnings.splice(w, 1); }
+
+    // Gems
+    for (var j = pickups.length - 1; j >= 0; j--) {
+      var g = pickups[j]; g.bob += dt * 3;
+      var gy = g.y + Math.sin(g.bob) * 6;
+      if (g.x < collapseX) { pickups.splice(j, 1); continue; } // gem swallowed by collapse
+      if (Math.abs(g.x - (player.x + 15)) < 32 && Math.abs(gy - (player.y + 17)) < 36) {
+        pickups.splice(j, 1); gems += 1; score += (g.kind === 'gold' ? 150 : 50); sfxGem();
+        burst(g.x, gy, g.kind === 'gold' ? '#ffd700' : '#66eaff', 14);
+        if (gems >= 30) { updateHUD('You Win!'); endGame(true); return; }
+      }
+    }
+    // Particles
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p]; pt.life -= dt; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 500 * dt;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    // Survival trickle
+    score += dt * 2;
+    updateHUD();
+  }
+  function drawBackground() {
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#3a2410'); grad.addColorStop(0.7, '#2b1d12'); grad.addColorStop(1, '#1a120b');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // Quarry wall strata
+    ctx.fillStyle = '#4a3220'; ctx.fillRect(0, 60, W, 8);
+    ctx.fillStyle = '#5a3d24'; ctx.fillRect(0, 150, W, 6);
+    ctx.fillStyle = '#3d2712'; ctx.fillRect(0, 240, W, 5);
+    ctx.fillStyle = '#6b4a2a';
+    for (var i = 0; i < 8; i++) { ctx.fillRect(40 + i * 110, 90 + (i % 3) * 50, 50, 26); }
+    // Warning markers
+    warnings.forEach(function (wn) {
+      ctx.fillStyle = 'rgba(255,60,40,0.75)';
+      ctx.beginPath(); ctx.moveTo(wn.x, 8); ctx.lineTo(wn.x + 14, 30); ctx.lineTo(wn.x - 14, 30); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText('!', wn.x, 26);
+    });
+  }
+  function drawGround() {
+    // Collapsed zone: dark pit
+    if (collapseX > -80) {
+      ctx.fillStyle = '#0d0601'; ctx.fillRect(0, GROUND_Y, Math.max(0, collapseX), H - GROUND_Y);
+      ctx.fillStyle = '#ff5533';
+      for (var x = 0; x < collapseX; x += 26) { ctx.fillRect(x, GROUND_Y - 4, 14, 4); }
+    }
+    // Solid ground
+    var gx = Math.max(0, collapseX);
+    ctx.fillStyle = '#7a5228'; ctx.fillRect(gx, GROUND_Y, W - gx, H - GROUND_Y);
+    ctx.fillStyle = '#9a6a34'; ctx.fillRect(gx, GROUND_Y, W - gx, 10);
+    ctx.fillStyle = '#5a3d1c';
+    for (var sx = Math.floor(gx / 60) * 60; sx < W; sx += 60) { ctx.fillRect(sx + 12, GROUND_Y + 26, 28, 12); ctx.fillRect(sx + 30, GROUND_Y + 52, 22, 10); }
+    // Collapse edge glow
+    if (collapseX > -20 && collapseX < W) {
+      ctx.fillStyle = 'rgba(255,85,51,0.9)'; ctx.fillRect(collapseX - 3, GROUND_Y - 30, 6, H - GROUND_Y + 30);
+      ctx.fillStyle = '#ffcc33'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText('COLLAPSE', collapseX + 8, GROUND_Y - 38);
+    }
+  }
+  function drawPlayer() {
+    var blink = player.invuln > 0 && Math.floor(performance.now() / 120) % 2 === 0;
+    if (blink) ctx.globalAlpha = 0.45;
+    var px = player.x, py = player.y;
+    ctx.fillStyle = '#ffcc33'; ctx.fillRect(px + 4, py - 2, 22, 8); // helmet
+    ctx.fillStyle = '#ffd94d'; ctx.beginPath(); ctx.arc(px + 15, py + 2, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2f6fd6'; ctx.fillRect(px + 2, py + 6, 26, 18); // jacket
+    ctx.fillStyle = '#f2c79a'; ctx.fillRect(px + 5, py + 6, 20, 8); // face
+    ctx.fillStyle = '#222'; ctx.fillRect(px + 4, py + 24, 9, 10); ctx.fillRect(px + 17, py + 24, 9, 10); // boots
+    ctx.fillStyle = '#c9a06a'; ctx.fillRect(px + (player.facing > 0 ? 26 : -4), py + 10, 8, 4); // pick arm
+    ctx.globalAlpha = 1;
+  }
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    drawBackground();
+    // Gems
+    pickups.forEach(function (g) {
+      var gy = g.y + Math.sin(g.bob) * 6;
+      ctx.save(); ctx.translate(g.x, gy); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = g.kind === 'gold' ? '#ffd700' : '#66eaff';
+      ctx.fillRect(-9, -9, 18, 18); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(-4, -4, 8, 8);
+      ctx.restore();
+    });
+    // Rocks
+    rocks.forEach(function (r) {
+      if (r.warn > 0) return;
+      ctx.save(); ctx.translate(r.x + r.size / 2, r.y + r.size / 2); ctx.rotate(r.rot);
+      ctx.fillStyle = '#6e5a48'; ctx.fillRect(-r.size / 2, -r.size / 2, r.size, r.size);
+      ctx.fillStyle = '#8a7260'; ctx.fillRect(-r.size / 3, -r.size / 3, r.size / 2, r.size / 2);
+      ctx.restore();
+    });
+    drawGround();
+    drawPlayer();
+    particles.forEach(function (pt) {
+      ctx.globalAlpha = Math.max(0, pt.life * 2); ctx.fillStyle = pt.color;
+      ctx.fillRect(pt.x, pt.y, pt.size, pt.size); ctx.globalAlpha = 1;
+    });
+    if (flash > 0) { ctx.fillStyle = 'rgba(255,60,40,' + (flash * 0.5) + ')'; ctx.fillRect(0, 0, W, H); }
+    ctx.restore();
+    // Progress text
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Collapse is coming — keep moving right!', 12, 22);
+    ctx.textAlign = 'right'; ctx.fillText('Goal: 30 gems', W - 12, 22);
+  }
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(0.033, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    update(dt);
+    if (state === 'playing') { draw(); requestAnimationFrame(loop); }
+    else { draw(); }
+  }
+
+  // ---- Controls ----
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function (e) {
+    var k = e.key;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].indexOf(k) !== -1) e.preventDefault();
+    keys[k] = true; keys[e.key] = true;
+    if (k === ' ') keys[' '] = true;
+    if (state === 'title' && (k === 'Enter' || k === ' ')) startGame();
+    else if (state === 'over' && (k === 'r' || k === 'R' || k === 'Enter')) startGame();
+    else if (k === 'p' || k === 'P') {
+      if (state === 'playing') { state = 'paused'; updateHUD('Paused'); }
+      else if (state === 'paused') { state = 'playing'; lastTime = performance.now(); updateHUD('Playing'); requestAnimationFrame(loop); }
+    }
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; if (e.key === ' ') keys[' '] = false; });
+  canvas.addEventListener('mousedown', function (e) {
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    pointerActive = true; pointerX = (e.clientX - rect.left) / rect.width * W;
+    if (state === 'playing') { var cx = player.x + player.w / 2; if (Math.abs(pointerX - cx) < 40 && player.onGround) { player.vy = -520; player.onGround = false; sfxJump(); } }
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    if (!pointerActive) return;
+    var rect = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - rect.left) / rect.width * W;
+  });
+  document.addEventListener('mouseup', function () { pointerActive = false; pointerX = null; });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault(); initAudio();
+    var rect = canvas.getBoundingClientRect(); var t = e.touches[0];
+    pointerActive = true; pointerX = (t.clientX - rect.left) / rect.width * W;
+    if (state === 'playing') { var cx = player.x + player.w / 2; if (Math.abs(pointerX - cx) < 50 && player.onGround) { player.vy = -520; player.onGround = false; sfxJump(); } }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect(); var t = e.touches[0];
+    pointerX = (t.clientX - rect.left) / rect.width * W;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); pointerActive = false; pointerX = null; }, { passive: false });
+
+  // Paused overlay note via status only; initial draw for title backdrop
+  draw();
+})();
+</script>
+</body>
+</html>

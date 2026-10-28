@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pulse Pilot - Rhythm Heartbeat Lane Runner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0618; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow-x: hidden; }
+  h1 { margin: 12px 0 4px; font-size: 30px; letter-spacing: 2px; color: #ff4d6d; text-shadow: 0 0 18px #ff4d6d; }
+  p.sub { color: #ffb3c1; margin-bottom: 10px; font-size: 14px; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: 640px; background: #12081f; border: 3px solid #ff4d6d; border-radius: 14px; box-shadow: 0 0 30px rgba(255,77,109,.45); }
+  #hud { display: flex; justify-content: space-between; padding: 8px 4px; font-weight: bold; font-size: 16px; }
+  #hud span { color: #ffe066; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,6,24,.92); border-radius: 14px; padding: 24px; gap: 12px; }
+  .hidden { display: none !important; }
+  .screen h2 { font-size: 34px; color: #ff4d6d; }
+  .screen h3 { color: #ffe066; margin-top: 8px; }
+  .screen p, .screen li { font-size: 15px; line-height: 1.55; color: #e8e8f0; }
+  .screen ul { text-align: left; max-width: 360px; }
+  button { background: #ff4d6d; color: #fff; border: none; padding: 14px 32px; font-size: 19px; font-weight: bold; border-radius: 30px; cursor: pointer; box-shadow: 0 4px 0 #a4133c; }
+  button:hover { background: #ff758f; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #beatBar { height: 10px; background: #2a1845; border-radius: 5px; overflow: hidden; width: 100%; max-width: 360px; }
+  #beatFill { height: 100%; width: 0%; background: #ff4d6d; }
+  .controls { display: flex; gap: 10px; margin: 12px 0; flex-wrap: wrap; justify-content: center; }
+  .controls button { padding: 10px 18px; font-size: 15px; background: #5f0f40; }
+  #msg { min-height: 22px; color: #ffe066; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>&#10084; PULSE PILOT</h1>
+<p class="sub">Ride the heartbeat. Dodge on the beat. Dash on the downbeat.</p>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">&#10084;&#10084;&#10084;</span></div>
+    <div>Status: <span id="status">READY</span></div>
+  </div>
+  <canvas id="game" width="480" height="640"></canvas>
+
+  <div id="titleScreen" class="screen">
+    <h2>&#10084; PULSE PILOT</h2>
+    <p>You are the pulse, flying down a living artery. Obstacles appear in sync with the heartbeat. Move with the rhythm or crash out of sync.</p>
+    <h3>How to Play</h3>
+    <ul>
+      <li><b>Move:</b> Arrow Left / Right, A / D, click left or right side, or tap left / right half of the screen to switch lanes.</li>
+      <li><b>Dash:</b> Press Space, click the DASH button, or tap the centre button when the beat ring flashes. A dash on the downbeat smashes through an obstacle for +100.</li>
+      <li><b>Mistimed dash:</b> Dashing off the beat costs a life. Crashing into an obstacle costs a life too.</li>
+      <li><b>Collect:</b> Golden hearts restore rhythm and give +50. Survive to 5000 points to WIN.</li>
+      <li><b>Audio:</b> Procedural heartbeat sound starts only after you press Start.</li>
+    </ul>
+    <div id="beatBar"><div id="beatFill"></div></div>
+    <button id="startBtn">START</button>
+    <p>Tip: watch the pulsing ring at the bottom. Dash only when it is full and bright.</p>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText"></p>
+    <p>Final Score: <b id="finalScore">0</b></p>
+    <button id="restartBtn">RESTART</button>
+    <p>Press R or tap Restart to fly again instantly.</p>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="leftBtn">&#8592; LEFT</button>
+  <button id="dashBtn">DASH &#9889;</button>
+  <button id="rightBtn">RIGHT &#8594;</button>
+</div>
+<div id="msg">Stay on the beat!</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+  var beatFill = document.getElementById('beatFill');
+
+  var W = 480, H = 640;
+  var lanes = [110, 240, 370];
+  var player = { lane: 1, x: 240, y: 540, dash: 0, inv: 0 };
+  var obstacles = [], hearts = [], particles = [];
+  var score = 0, lives = 3, running = false, over = false;
+  var beatInterval = 500; // 120 BPM heartbeat
+  var lastBeat = 0, beatPhase = 0, beatCount = 0, downbeat = false;
+  var spawnTimer = 0, distance = 0, shake = 0, pulseScale = 1;
+  var audioCtx = null, muted = false;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx || muted) return;
+    var t = audioCtx.currentTime + (when || 0);
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function heartbeat() {
+    tone(70, 0.16, 'sine', 0.35, 0);
+    tone(55, 0.22, 'sine', 0.25, 0.18);
+    pulseScale = 1.35;
+  }
+  function dashSound() { tone(600, 0.12, 'square', 0.12, 0); tone(900, 0.15, 'square', 0.10, 0.05); }
+  function crashSound() { tone(120, 0.3, 'sawtooth', 0.25, 0); tone(60, 0.3, 'sawtooth', 0.2, 0.05); }
+  function pickupSound() { tone(880, 0.12, 'sine', 0.18, 0); tone(1320, 0.18, 'sine', 0.15, 0.08); }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, lives));
+    statusEl.textContent = status || (running ? 'FLYING' : 'READY');
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function reset() {
+    player.lane = 1; player.x = 240; player.dash = 0; player.inv = 0;
+    obstacles = []; hearts = []; particles = [];
+    score = 0; lives = 3; running = true; over = false;
+    beatCount = 0; spawnTimer = 0; distance = 0; shake = 0;
+    lastBeat = performance.now();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('FLYING'); setMsg('Feel the beat - move on the pulse!');
+  }
+
+  function move(dir) {
+    if (!running) return;
+    var nl = player.lane + dir;
+    if (nl < 0 || nl > 2) { setMsg('No lane there!'); return; }
+    player.lane = nl;
+    tone(440 + nl * 80, 0.08, 'triangle', 0.10, 0);
+    spawnBurst(player.x, player.y, '#ff758f');
+  }
+  function spawnBurst(x, y, color) {
+    for (var i = 0; i < 10; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 24, color: color });
+    }
+  }
+
+  function tryDash() {
+    if (!running) return;
+    // Downbeat window: within 140ms of a beat, and only every 4th beat is a true downbeat
+    var now = performance.now();
+    var sinceBeat = now - lastBeat;
+    var onBeat = sinceBeat < 150 || sinceBeat > beatInterval - 150;
+    var isDownbeat = (beatCount % 4 === 0);
+    if (onBeat && isDownbeat) {
+      player.dash = 18;
+      score += 25;
+      dashSound();
+      setMsg('PERFECT DASH! +25 and you smash the next obstacle!');
+      spawnBurst(player.x, player.y - 20, '#ffe066');
+    } else {
+      lives -= 1;
+      player.inv = 60;
+      crashSound(); shake = 10;
+      setMsg(onBeat ? 'Off the downbeat! Wait for beat 1 of 4.' : 'Mistimed dash! Dash only on the flashing downbeat.');
+      if (lives <= 0) { endGame(false); }
+      updateHUD();
+    }
+  }
+
+  function spawnRow() {
+    // Spawn on the beat: one or two lanes blocked, never all three
+    var blocked = Math.floor(Math.random() * 3);
+    var second = Math.random() < 0.35 ? (blocked + 1 + Math.floor(Math.random() * 2)) % 3 : -1;
+    for (var l = 0; l < 3; l++) {
+      if (l === blocked || l === second) {
+        obstacles.push({ lane: l, x: lanes[l], y: -40, kind: Math.random() < 0.5 ? 'clot' : 'spike', rot: Math.random() * 3 });
+      }
+    }
+    if (Math.random() < 0.55) {
+      var free = [0, 1, 2].filter(function (l) { return l !== blocked && l !== second; });
+      var hl = free.length ? free[Math.floor(Math.random() * free.length)] : 1;
+      hearts.push({ lane: hl, x: lanes[hl], y: -40 });
+    }
+  }
+
+  function endGame(won) {
+    running = false; over = true;
+    endTitle.textContent = won ? 'YOU WIN!' : 'GAME OVER';
+    endText.textContent = won
+      ? 'You rode the heartbeat all the way to 5000 points. The pulse is strong with you!'
+      : 'The rhythm broke. Score ' + score + ' - try again and trust the downbeat.';
+    finalScore.textContent = score;
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'WINNER!' : 'GAME OVER');
+    if (won) { tone(523, 0.2, 'sine', 0.2, 0); tone(659, 0.2, 'sine', 0.2, 0.15); tone(784, 0.35, 'sine', 0.2, 0.3); }
+  }
+
+  function update(now) {
+    if (!running) return;
+    var dt = 16;
+    // Beat clock
+    if (now - lastBeat >= beatInterval) {
+      lastBeat = now; beatCount++;
+      heartbeat();
+      downbeat = (beatCount % 4 === 0);
+      spawnTimer++;
+      if (spawnTimer % 2 === 0) { spawnRow(); }
+      score += 5; distance += 1;
+    }
+    beatPhase = (now - lastBeat) / beatInterval;
+    pulseScale += (1 - pulseScale) * 0.12;
+    // Smooth lane movement
+    var targetX = lanes[player.lane];
+    player.x += (targetX - player.x) * 0.35;
+    if (player.dash > 0) player.dash--;
+    if (player.inv > 0) player.inv--;
+    if (shake > 0) shake--;
+
+    var speed = 3.2 + Math.min(3, distance * 0.02);
+    obstacles.forEach(function (o) { o.y += speed; o.rot += 0.02; });
+    hearts.forEach(function (h) { h.y += speed; });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+
+    // Collisions
+    obstacles = obstacles.filter(function (o) {
+      if (o.y > H + 50) return false;
+      var hit = Math.abs(o.y - player.y) < 42 && Math.abs(o.x - player.x) < 46;
+      if (hit && player.inv === 0) {
+        if (player.dash > 0) {
+          score += 100; setMsg('SMASHED through! +100'); dashSound();
+          spawnBurst(o.x, o.y, '#ffe066');
+          return false;
+        }
+        lives--; player.inv = 70; crashSound(); shake = 12;
+        spawnBurst(player.x, player.y, '#ff4d6d');
+        setMsg('Crash! ' + lives + ' lives left. Move on the next beat.');
+        if (lives <= 0) { endGame(false); }
+        updateHUD();
+        return false;
+      }
+      return true;
+    });
+    hearts = hearts.filter(function (h) {
+      if (h.y > H + 50) return false;
+      if (Math.abs(h.y - player.y) < 40 && Math.abs(h.x - player.x) < 44) {
+        score += 50; pickupSound(); setMsg('Heart collected! +50');
+        spawnBurst(h.x, h.y, '#ff4d6d');
+        return false;
+      }
+      return true;
+    });
+    if (score >= 5000) { endGame(true); }
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) { ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); }
+    ctx.clearRect(-20, -20, W + 40, H + 40);
+    // Artery background with lane guides
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#1a0b2e'); grad.addColorStop(1, '#2a0a2a');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,77,109,0.25)'; ctx.lineWidth = 2;
+    ctx.setLineDash([18, 16]);
+    for (var i = 0; i < 4; i++) {
+      var lx = 40 + i * 133;
+      ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, H); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // Scrolling pulse waves
+    ctx.strokeStyle = 'rgba(255,117,143,0.35)'; ctx.lineWidth = 3;
+    for (var w = 0; w < 3; w++) {
+      var wy = ((performance.now() / 8 + w * 220) % (H + 100)) - 50;
+      ctx.beginPath(); ctx.moveTo(40, wy);
+      for (var x = 40; x <= 440; x += 20) { ctx.lineTo(x, wy + Math.sin(x / 30 + w) * 8); }
+      ctx.stroke();
+    }
+    // Hearts
+    hearts.forEach(function (h) {
+      ctx.fillStyle = '#ffd700';
+      ctx.font = '30px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('\u2764', h.x, h.y + 10);
+    });
+    // Obstacles
+    obstacles.forEach(function (o) {
+      ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.rot);
+      if (o.kind === 'clot') {
+        ctx.fillStyle = '#7f1d2d';
+        ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#a4133c';
+        ctx.beginPath(); ctx.arc(-8, -6, 12, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = '#5f0f40';
+        ctx.beginPath();
+        for (var s = 0; s < 8; s++) {
+          var a = s * Math.PI / 4;
+          ctx.lineTo(Math.cos(a) * 30, Math.sin(a) * 30);
+          ctx.lineTo(Math.cos(a + Math.PI / 8) * 14, Math.sin(a + Math.PI / 8) * 14);
+        }
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    });
+    // Particles
+    particles.forEach(function (p) {
+      ctx.globalAlpha = p.life / 24;
+      ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 5, 5);
+    });
+    ctx.globalAlpha = 1;
+    // Player ship with pulse glow
+    ctx.save(); ctx.translate(player.x, player.y);
+    if (player.inv > 0 && Math.floor(player.inv / 6) % 2 === 0) { ctx.globalAlpha = 0.4; }
+    ctx.fillStyle = player.dash > 0 ? '#ffe066' : '#ff4d6d';
+    ctx.shadowColor = '#ff4d6d'; ctx.shadowBlur = 22 * pulseScale;
+    ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(22, 20); ctx.lineTo(0, 8); ctx.lineTo(-22, 20); ctx.closePath(); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(0, -4, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // Beat ring at bottom
+    var ringR = 26 + beatPhase * 22;
+    ctx.strokeStyle = downbeat ? '#ffe066' : '#ff4d6d';
+    ctx.lineWidth = downbeat ? 6 : 3;
+    ctx.globalAlpha = 1 - beatPhase * 0.55;
+    ctx.beginPath(); ctx.arc(240, 600, ringR, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(downbeat ? 'DOWNBEAT - DASH NOW!' : 'BEAT ' + ((beatCount % 4) + 1) + ' OF 4', 240, 604);
+    ctx.restore();
+    // Beat bar sync
+    beatFill.style.width = Math.round(beatPhase * 100) + '%';
+  }
+
+  function loop(now) {
+    update(now);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, touch
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { move(-1); }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { move(1); }
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); initAudio(); tryDash(); }
+    if (e.key === 'r' || e.key === 'R') { if (over) { initAudio(); reset(); } }
+    if (e.key === 'Enter') { if (!running && !over) { initAudio(); reset(); } }
+  });
+  document.getElementById('startBtn').addEventListener('click', function () { initAudio(); heartbeat(); reset(); });
+  document.getElementById('restartBtn').addEventListener('click', function () { initAudio(); reset(); });
+  document.getElementById('leftBtn').addEventListener('click', function () { initAudio(); move(-1); });
+  document.getElementById('rightBtn').addEventListener('click', function () { initAudio(); move(1); });
+  document.getElementById('dashBtn').addEventListener('click', function () { initAudio(); tryDash(); });
+  canvas.addEventListener('click', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    initAudio();
+    if (x < rect.width * 0.33) move(-1);
+    else if (x > rect.width * 0.66) move(1);
+    else tryDash();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    var x = t.clientX - rect.left;
+    initAudio();
+    if (x < rect.width * 0.33) move(-1);
+    else if (x > rect.width * 0.66) move(1);
+    else tryDash();
+  }, { passive: false });
+  document.addEventListener('touchstart', function () { initAudio(); }, { passive: true });
+
+  updateHUD('READY');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
