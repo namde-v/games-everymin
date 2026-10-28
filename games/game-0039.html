@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Vine Vault — Grapple Swing</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0d2b1a; font-family:Arial, Helvetica, sans-serif; overflow:hidden; color:#fff; }
+  #wrap { position:relative; width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; background:#0d2b1a; }
+  canvas { display:block; background:linear-gradient(#7ec850,#2f7a2e); max-width:100vw; max-height:100vh; border:3px solid #1a4d1a; border-radius:10px; }
+  #hud { position:absolute; top:12px; left:50%; transform:translateX(-50%); display:flex; gap:18px; background:rgba(0,0,0,0.55); padding:8px 18px; border-radius:20px; font-size:16px; font-weight:bold; z-index:5; white-space:nowrap; }
+  #hud span { color:#ffe066; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:rgba(0,20,5,0.72); z-index:10; padding:20px; }
+  .overlay.hidden { display:none; }
+  h1 { font-size:52px; color:#ffe066; text-shadow:3px 3px 0 #1a4d1a; margin-bottom:6px; letter-spacing:2px; }
+  h2 { font-size:44px; color:#ffe066; margin-bottom:10px; }
+  p { font-size:17px; line-height:1.55; max-width:560px; margin:6px 0; }
+  .tag { color:#a8e063; font-weight:bold; }
+  button { margin-top:18px; padding:14px 36px; font-size:20px; font-weight:bold; background:#ffe066; color:#1a4d1a; border:none; border-radius:30px; cursor:pointer; box-shadow:0 4px 0 #b8860b; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b8860b; }
+  .keys { background:rgba(255,255,255,0.12); border-radius:12px; padding:12px 18px; margin-top:14px; font-size:15px; }
+  #msg { position:absolute; bottom:18px; left:50%; transform:translateX(-50%); font-size:16px; background:rgba(0,0,0,0.5); padding:6px 14px; border-radius:14px; z-index:5; }
+  @media (max-width:600px){ h1{font-size:36px;} h2{font-size:30px;} #hud{font-size:13px; gap:10px;} p{font-size:15px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">3</span></div>
+    <div>Distance: <span id="dist">0</span> / 1000m</div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <div id="titleScreen" class="overlay">
+    <h1>🌿 VINE VAULT 🌿</h1>
+    <p class="tag">Arcade / Grapple Swing — Swing across the jungle chasm!</p>
+    <p><strong>How to Play:</strong> Hold SPACE, CLICK, or TOUCH &amp; HOLD to grab the nearest vine and swing. Release at the top of your swing to fly forward with momentum. Use LEFT / RIGHT arrows (or A / D) while swinging to pump for extra speed. Grab fruits for bonus points. Reach the far platform at 1000m to WIN. Falling into the chasm costs a life — 3 falls and it is Game Over!</p>
+    <div class="keys">Controls: SPACE / Mouse Hold / Touch Hold = Grab &amp; Release &nbsp;|&nbsp; ← → / A D = Pump &nbsp;|&nbsp; R = Restart</div>
+    <button id="startBtn">▶ START GAME</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ RESTART</button>
+  </div>
+  <div id="msg">Hold to grab a vine, release to fly!</div>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var msgEl = document.getElementById('msg');
+
+  var state = 'title'; // title, playing, win, over
+  var score = 0, lives = 3, camX = 0;
+  var player, attached, ropeLen, checkpointX, fruits, anchors;
+  var keys = {};
+  var audioCtx = null;
+
+  function beep(freq, dur, type){
+    if(!audioCtx) return;
+    try{
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    }catch(e){}
+  }
+  function initAudio(){
+    try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ audioCtx = null; }
+  }
+
+  function buildWorld(){
+    anchors = [];
+    var x = 320, i = 0;
+    while(x < 9900){
+      anchors.push({ x: x, y: 90 + ((i * 37) % 70) });
+      x += 190 + ((i * 53) % 50);
+      i++;
+    }
+    fruits = [];
+    for(var j = 0; j < anchors.length; j++){
+      if(j % 2 === 0){
+        fruits.push({ x: anchors[j].x + 90, y: 260 + ((j * 29) % 120), taken: false });
+      }
+    }
+  }
+  function resetGame(){
+    score = 0; lives = 3; camX = 0;
+    player = { x: 150, y: 440, vx: 0, vy: 0, r: 16, onGround: true };
+    attached = null; ropeLen = 0; checkpointX = 150;
+    buildWorld();
+    updateHUD('Swinging!');
+  }
+  function updateHUD(status){
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    distEl.textContent = Math.min(1000, Math.floor(Math.max(0, player ? player.x : 0) / 10));
+    if(status) statusEl.textContent = status;
+  }
+  function onGroundPlatform(px){
+    return (px < 320 || px >= 9800);
+  }
+  function respawn(){
+    player.x = checkpointX; player.y = 440; player.vx = 0; player.vy = 0;
+    attached = null; player.onGround = (checkpointX < 320 || checkpointX >= 9800);
+    if(checkpointX >= 9800) player.y = 440;
+    camX = Math.max(0, player.x - 220);
+    updateHUD('Try again!');
+  }
+  function grabVine(){
+    if(attached || state !== 'playing') return;
+    var best = null, bestD = 470;
+    for(var i = 0; i < anchors.length; i++){
+      var dx = anchors[i].x - player.x, dy = anchors[i].y - player.y;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if(d < bestD){ bestD = d; best = anchors[i]; }
+    }
+    if(best){
+      attached = best; ropeLen = bestD;
+      beep(500, 0.12, 'triangle');
+      statusEl.textContent = 'Swinging!';
+      msgEl.textContent = 'Release at the top of the swing!';
+    }
+  }
+  function releaseVine(){
+    if(!attached) return;
+    attached = null;
+    // Small forward boost in direction of travel
+    if(player.vx >= 0) player.vx += 1.2;
+    beep(700, 0.1, 'sine');
+    msgEl.textContent = 'Flying! Grab the next vine!';
+  }
+  function jumpOrGrab(){ grabVine(); if(player.onGround){ player.vy = -13; player.onGround = false; } }
+  function endGame(win){
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? '🏆 YOU WIN! 🏆' : '💥 GAME OVER 💥';
+    endText.textContent = win
+      ? 'You crossed the 1000m chasm! Final score: ' + score + ' with ' + lives + ' lives left.'
+      : 'You fell into the chasm 3 times. Final score: ' + score + '. Distance: ' + Math.floor(player.x/10) + 'm.';
+    endScreen.classList.remove('hidden');
+    beep(win ? 880 : 180, 0.5, win ? 'square' : 'sawtooth');
+    updateHUD(win ? 'WINNER!' : 'Game Over');
+  }
+  function startGame(){
+    initAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    msgEl.textContent = 'Hold to grab a vine, release to fly!';
+    updateHUD('Swinging!');
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if(e.key === ' ' || e.key === 'ArrowUp'){ e.preventDefault(); if(state === 'playing') jumpOrGrab(); }
+    if(e.key === 'r' || e.key === 'R'){ if(state === 'win' || state === 'over') startGame(); }
+    if(e.key === 'Enter' && state === 'title') startGame();
+  });
+  document.addEventListener('keyup', function(e){
+    keys[e.key] = false;
+    if(e.key === ' ' || e.key === 'ArrowUp'){ if(state === 'playing') releaseVine(); }
+  });
+  canvas.addEventListener('mousedown', function(e){ e.preventDefault(); if(state === 'playing') jumpOrGrab(); });
+  document.addEventListener('mouseup', function(){ if(state === 'playing') releaseVine(); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); if(state === 'playing') jumpOrGrab(); }, { passive:false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); if(state === 'playing') releaseVine(); }, { passive:false });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); }, { passive:false });
+
+  function update(){
+    if(state !== 'playing') return;
+    var gravity = 0.45;
+    if(attached){
+      // Pump with arrows / A D
+      var pump = 0;
+      if(keys['ArrowLeft'] || keys['a'] || keys['A']) pump = -0.18;
+      if(keys['ArrowRight'] || keys['d'] || keys['D']) pump = 0.18;
+      player.vy += gravity;
+      player.vx += pump;
+      player.x += player.vx; player.y += player.vy;
+      // Constrain to rope length (pendulum)
+      var dx = player.x - attached.x, dy = player.y - attached.y;
+      var d = Math.sqrt(dx*dx + dy*dy) || 1;
+      if(d > ropeLen){
+        player.x = attached.x + dx / d * ropeLen;
+        player.y = attached.y + dy / d * ropeLen;
+        // Remove radial velocity component
+        var ux = dx / d, uy = dy / d;
+        var radial = player.vx * ux + player.vy * uy;
+        if(radial > 0){ player.vx -= radial * ux; player.vy -= radial * uy; }
+      }
+    } else {
+      player.vy += gravity;
+      player.x += player.vx; player.y += player.vy;
+    }
+    player.vx *= 0.995;
+    // Ground platforms: start (x<320) and finish (x>=9800), ground at y=470
+    if(onGroundPlatform(player.x) && player.y >= 470){
+      player.y = 470; player.vy = 0; player.vx *= 0.85; player.onGround = true;
+      if(player.x >= 9800){ endGame(true); return; }
+    } else if(onGroundPlatform(player.x)) {
+      player.onGround = false;
+    } else {
+      player.onGround = false;
+    }
+    if(player.x < 0){ player.x = 0; player.vx = Math.max(0, player.vx); }
+    // Checkpoint: furthest anchor passed
+    if(player.x > checkpointX + 200) checkpointX = player.x;
+    // Fruits
+    for(var i = 0; i < fruits.length; i++){
+      var f = fruits[i];
+      if(!f.taken){
+        var fdx = f.x - player.x, fdy = f.y - player.y;
+        if(Math.sqrt(fdx*fdx + fdy*fdy) < 42){ f.taken = true; score += 50; beep(1000, 0.15, 'sine'); }
+      }
+    }
+    // Fall into chasm
+    if(player.y > 640){
+      lives--;
+      beep(160, 0.4, 'sawtooth');
+      if(lives <= 0){ updateHUD('Game Over'); endGame(false); return; }
+      updateHUD('Fell! Lives left: ' + lives);
+      msgEl.textContent = 'Ouch! You fell. ' + lives + ' lives left.';
+      respawn();
+    }
+    // Distance score trickle
+    score = Math.max(score, Math.floor(player.x / 10));
+    camX = Math.max(0, player.x - 220);
+    updateHUD();
+  }
+
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    // Sky
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#8ed081'); grad.addColorStop(0.6, '#4caf50'); grad.addColorStop(1, '#1b5e20');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.translate(-camX, 0);
+    // Distant trees
+    ctx.fillStyle = '#2e7d32';
+    for(var tx = 0; tx < 10600; tx += 260){
+      ctx.beginPath(); ctx.arc(tx + 80, 130, 70, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(tx + 160, 110, 55, 0, Math.PI * 2); ctx.fill();
+    }
+    // Chasm
+    ctx.fillStyle = '#3e2723'; ctx.fillRect(320, 500, 9480, 80);
+    ctx.fillStyle = '#5d4037'; ctx.fillRect(320, 500, 9480, 12);
+    // Platforms
+    ctx.fillStyle = '#8d6e63'; ctx.fillRect(-200, 490, 520, 70);
+    ctx.fillStyle = '#4caf50'; ctx.fillRect(-200, 490, 520, 16);
+    ctx.fillStyle = '#8d6e63'; ctx.fillRect(9800, 490, 900, 70);
+    ctx.fillStyle = '#4caf50'; ctx.fillRect(9800, 490, 900, 16);
+    // Goal flag
+    ctx.fillStyle = '#795548'; ctx.fillRect(10150, 330, 8, 160);
+    ctx.fillStyle = '#ffeb3b'; ctx.beginPath(); ctx.moveTo(10158, 330); ctx.lineTo(10240, 355); ctx.lineTo(10158, 380); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.fillText('FINISH 1000m', 10020, 310);
+    // Vines + anchors (only near camera for speed, plus all are cheap)
+    for(var i = 0; i < anchors.length; i++){
+      var a = anchors[i];
+      if(a.x < camX - 100 || a.x > camX + W + 100) continue;
+      ctx.strokeStyle = '#2e7d32'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(a.x, 0); ctx.lineTo(a.x, a.y); ctx.stroke();
+      ctx.fillStyle = '#33691e'; ctx.beginPath(); ctx.arc(a.x, a.y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#a5d6a7'; ctx.beginPath(); ctx.arc(a.x, a.y, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    // Fruits
+    for(var j = 0; j < fruits.length; j++){
+      var fr = fruits[j];
+      if(fr.taken || fr.x < camX - 60 || fr.x > camX + W + 60) continue;
+      ctx.fillStyle = '#ff7043'; ctx.beginPath(); ctx.arc(fr.x, fr.y, 13, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#66bb6a'; ctx.fillRect(fr.x - 2, fr.y - 20, 4, 8);
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(fr.x - 4, fr.y - 4, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    // Rope when attached
+    if(attached){
+      ctx.strokeStyle = '#795548'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(attached.x, attached.y); ctx.lineTo(player.x, player.y); ctx.stroke();
+    }
+    // Player (monkey-ish circle)
+    ctx.fillStyle = '#6d4c41'; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffccbc'; ctx.beginPath(); ctx.arc(player.x, player.y + 3, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(player.x + 5, player.y - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff5722'; ctx.beginPath(); ctx.arc(player.x, player.y - 15, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // Distance progress bar
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(20, H - 26, W - 40, 12);
+    ctx.fillStyle = '#ffe066'; ctx.fillRect(20, H - 26, (W - 40) * Math.min(1, player.x / 10000), 12);
+  }
+
+  function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  resetGame();
+  state = 'title';
+  loop();
+})();
+</script>
+</body>
+</html>

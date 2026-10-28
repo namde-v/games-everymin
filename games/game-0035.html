@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Meteor Miner — Game 0035</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #05070f; color: #e8ecf8; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 2px; margin: 8px 0 2px; color: #ffd34d; text-shadow: 0 0 14px rgba(255,211,77,.6); text-align: center; }
+  .sub { color: #9fb0d8; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(800px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; background: radial-gradient(circle at 50% 30%, #0d1730 0%, #05070f 70%); border: 2px solid #2a3a66; border-radius: 10px; touch-action: none; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; width: min(800px, 96vw); margin: 8px 0; font-size: 15px; font-weight: bold; }
+  #hud span { background: #111a33; border: 1px solid #2a3a66; padding: 6px 10px; border-radius: 20px; }
+  #hullBar { display: inline-block; width: 90px; height: 12px; background: #222; border-radius: 6px; vertical-align: middle; overflow: hidden; margin-left: 6px; }
+  #hullFill { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #3ddc84, #ffd34d); }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(3,5,12,.88); border-radius: 10px; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd34d; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #c7d2ee; font-size: 15px; }
+  .legend { font-size: 14px; line-height: 1.6; color: #c7d2ee; }
+  .gold { color: #ffd34d; font-weight: bold; } .red { color: #ff5a5a; font-weight: bold; } .cyan { color: #6ee7ff; font-weight: bold; }
+  button { cursor: pointer; border: none; border-radius: 10px; padding: 13px 28px; font-size: 18px; font-weight: bold; background: #ffd34d; color: #1a1200; box-shadow: 0 4px 0 #b8931f; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8931f; }
+  button.secondary { background: #6ee7ff; box-shadow: 0 4px 0 #2a8fa8; color: #03222b; }
+  .controls { width: min(800px, 96vw); color: #9fb0d8; font-size: 13px; line-height: 1.6; margin-top: 6px; text-align: center; }
+  .big { font-size: 22px; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>☄️ METEOR MINER</h1>
+<p class="sub">Game #0035 &bull; Arcade / Asteroid Mining &bull; Drill the gold, dodge the red</p>
+
+<div id="hud">
+  <span>💰 Credits: <b id="credits">0</b> / 500</span>
+  <span>🛡️ Hull: <b id="hullText">100%</b><span id="hullBar"><span id="hullFill"></span></span></span>
+  <span>⛏️ Mined: <b id="mined">0</b></span>
+  <span>⏱️ Time: <b id="time">120</b>s</span>
+  <span id="status">Status: Docked</span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="800" height="600"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>METEOR MINER</h2>
+    <p class="big">Pilot. Drill. Get rich. Don't blow up.</p>
+    <p><span class="gold">● Gold asteroids</span> are valuable ore. <span class="red">● Red pulsing asteroids</span> are explosive — never mine them, and don't ram them.</p>
+    <div class="legend">
+      <b>How to Play</b><br>
+      <span class="cyan">Rotate:</span> ← → or A / D &nbsp;•&nbsp; <span class="cyan">Thrust:</span> ↑ or W<br>
+      <span class="cyan">Mining Beam:</span> Hold SPACE, hold mouse button, or hold touch<br>
+      Aim the beam at a gold asteroid and hold it until it breaks apart.<br>
+      <b>WIN:</b> Collect 500 credits &nbsp;•&nbsp; <b>LOSE:</b> Hull hits 0% or the 120s timer runs out.
+    </div>
+    <button id="startBtn">▶ START MINING</button>
+    <p>Tip: tap an asteroid's edge with the beam, then back off — explosive blasts hurt up close.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">MISSION COMPLETE</h2>
+    <p id="endText" class="big"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">↻ RESTART</button>
+    <button id="menuBtn" class="secondary">Main Menu</button>
+  </div>
+</div>
+
+<p class="controls">Keyboard: Arrows / WASD + Space &nbsp;•&nbsp; Mouse: move to aim, hold click to mine &nbsp;•&nbsp; Touch: drag to aim &amp; thrust, hold to mine. Works fully offline — no downloads, no ads.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 800, H = 600;
+  var creditsEl = document.getElementById('credits');
+  var hullText = document.getElementById('hullText');
+  var hullFill = document.getElementById('hullFill');
+  var minedEl = document.getElementById('mined');
+  var timeEl = document.getElementById('time');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  var keys = {};
+  var mouseDown = false, mouseX = W / 2, mouseY = 0;
+  var touchActive = false, touchX = W / 2, touchY = 0;
+  var running = false, over = false;
+  var audioCtx = null, audioOn = false;
+
+  var ship, asteroids, particles, stars, minedCount, timeLeft, lastTime, beamTarget;
+
+  function initAudio() {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      audioOn = true;
+    } catch (e) { audioOn = false; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function noiseBurst(dur) {
+    if (!audioOn || !audioCtx) return;
+    try {
+      var len = Math.floor(audioCtx.sampleRate * (dur || 0.3));
+      var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      var src = audioCtx.createBufferSource(); src.buffer = buf;
+      var g = audioCtx.createGain(); g.gain.value = 0.18;
+      src.connect(g); g.connect(audioCtx.destination); src.start();
+    } catch (e) {}
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function makeAsteroid(valuable) {
+    var edge = Math.floor(Math.random() * 4), x, y;
+    if (edge === 0) { x = rand(0, W); y = -30; }
+    else if (edge === 1) { x = W + 30; y = rand(0, H); }
+    else if (edge === 2) { x = rand(0, W); y = H + 30; }
+    else { x = -30; y = rand(0, H); }
+    return {
+      x: x, y: y, r: rand(18, 38),
+      vx: rand(-28, 28), vy: rand(-22, 28),
+      rot: rand(0, Math.PI * 2), vr: rand(-0.8, 0.8),
+      valuable: valuable,
+      value: valuable ? Math.floor(rand(40, 85)) : 0,
+      mine: 0, flash: rand(0, Math.PI * 2),
+      bumps: [rand(0.75, 1.15), rand(0.75, 1.15), rand(0.75, 1.15), rand(0.75, 1.15), rand(0.75, 1.15), rand(0.75, 1.15)]
+    };
+  }
+
+  function resetGame() {
+    ship = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, hull: 100 };
+    asteroids = [];
+    for (var i = 0; i < 14; i++) asteroids.push(makeAsteroid(i % 4 !== 3));
+    // Keep the start area clear so the player is not instantly hit.
+    asteroids = asteroids.filter(function (a) { return dist(a, ship) > 130; });
+    while (asteroids.length < 12) asteroids.push(makeAsteroid(true));
+    particles = []; minedCount = 0; timeLeft = 120; beamTarget = null;
+    stars = [];
+    for (var s = 0; s < 90; s++) stars.push({ x: rand(0, W), y: rand(0, H), r: rand(0.6, 2.0), tw: rand(0, 6) });
+    updateHUD('Mining...');
+    lastTime = performance.now();
+  }
+
+  function updateHUD(status) {
+    creditsEl.textContent = Math.floor(ship ? ship.credits || 0 : 0);
+    if (ship) {
+      hullText.textContent = Math.max(0, Math.ceil(ship.hull)) + '%';
+      hullFill.style.width = Math.max(0, ship.hull) + '%';
+      hullFill.style.background = ship.hull > 50 ? '#3ddc84' : (ship.hull > 25 ? '#ffd34d' : '#ff5a5a');
+    }
+    minedEl.textContent = minedCount;
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+    if (status) statusEl.textContent = 'Status: ' + status;
+  }
+
+  function explode(x, y, color, n) {
+    for (var i = 0; i < (n || 22); i++) {
+      var a = rand(0, Math.PI * 2), sp = rand(40, 220);
+      particles.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.4, 0.9), max: 0.9, color: color, r: rand(1.5, 4) });
+    }
+  }
+
+  function damageShip(amount, msg) {
+    ship.hull -= amount;
+    explode(ship.x, ship.y, '#ff5a5a', 14);
+    noiseBurst(0.25); beep(110, 0.3, 'sawtooth', 0.12);
+    statusEl.textContent = 'Status: ' + msg;
+    ship.vx *= -0.4; ship.vy *= -0.4;
+    if (ship.hull <= 0) { ship.hull = 0; endGame(false, 'Hull destroyed!'); }
+  }
+
+  function endGame(won, reason) {
+    if (over) return;
+    over = true; running = false;
+    endTitle.textContent = won ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    endText.textContent = won ? 'You struck it rich — 500 credits banked!' : reason;
+    endStats.textContent = 'Credits: ' + Math.floor(ship.credits || 0) + '  •  Asteroids mined: ' + minedCount + '  •  Hull left: ' + Math.max(0, Math.ceil(ship.hull)) + '%';
+    if (won) { beep(523, 0.2, 'square', 0.1); setTimeout(function () { beep(659, 0.2, 'square', 0.1); }, 180); setTimeout(function () { beep(784, 0.35, 'square', 0.1); }, 360); }
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'Rich!' : 'Wrecked');
+  }
+
+  function beamActive() {
+    return !!(keys[' '] || keys['Spacebar'] || mouseDown || touchActive);
+  }
+
+  function update(dt) {
+    // Steering: keyboard rotates, mouse/touch aim.
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) ship.angle -= 3.4 * dt;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) ship.angle += 3.4 * dt;
+    if (mouseDown || touchActive) {
+      var tx = touchActive ? touchX : mouseX, ty = touchActive ? touchY : mouseY;
+      ship.angle = Math.atan2(ty - ship.y, tx - ship.x);
+    }
+    var thrusting = !!(keys['ArrowUp'] || keys['w'] || keys['W'] || mouseDown || touchActive);
+    if (thrusting) {
+      ship.vx += Math.cos(ship.angle) * 260 * dt;
+      ship.vy += Math.sin(ship.angle) * 260 * dt;
+      if (Math.random() < 0.6) particles.push({ x: ship.x - Math.cos(ship.angle) * 16, y: ship.y - Math.sin(ship.angle) * 16, vx: -Math.cos(ship.angle) * 60 + rand(-20, 20), vy: -Math.sin(ship.angle) * 60 + rand(-20, 20), life: 0.3, max: 0.3, color: '#6ee7ff', r: 2 });
+    }
+    ship.vx *= (1 - 0.6 * dt); ship.vy *= (1 - 0.6 * dt);
+    ship.x += ship.vx * dt; ship.y += ship.vy * dt;
+    if (ship.x < 12) { ship.x = 12; ship.vx = Math.abs(ship.vx) * 0.5; }
+    if (ship.x > W - 12) { ship.x = W - 12; ship.vx = -Math.abs(ship.vx) * 0.5; }
+    if (ship.y < 12) { ship.y = 12; ship.vy = Math.abs(ship.vy) * 0.5; }
+    if (ship.y > H - 12) { ship.y = H - 12; ship.vy = -Math.abs(ship.vy) * 0.5; }
+
+    timeLeft -= dt;
+    if (timeLeft <= 0) { timeLeft = 0; endGame(false, 'Time expired — the claim closed!'); return; }
+
+    beamTarget = null;
+    var beamOn = beamActive();
+    for (var i = asteroids.length - 1; i >= 0; i--) {
+      var a = asteroids[i];
+      a.x += a.vx * dt; a.y += a.vy * dt; a.rot += a.vr * dt; a.flash += dt * 4;
+      if (a.x < -60) a.x = W + 50; if (a.x > W + 60) a.x = -50;
+      if (a.y < -60) a.y = H + 50; if (a.y > H + 60) a.y = -50;
+
+      // Ship collision.
+      if (dist(a, ship) < a.r + 14) {
+        if (a.valuable) damageShip(10, 'Collision with asteroid!');
+        else damageShip(22, 'Hit an explosive asteroid!');
+        asteroids.splice(i, 1);
+        asteroids.push(makeAsteroid(Math.random() < 0.7));
+        if (over) return;
+        continue;
+      }
+
+      // Mining beam: 170px cone in front of the ship.
+      if (beamOn) {
+        var d = dist(a, ship);
+        var ang = Math.atan2(a.y - ship.y, a.x - ship.x);
+        var diff = Math.abs(((ang - ship.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+        if (d < 175 + a.r && diff < 0.42) {
+          beamTarget = a;
+          a.mine += dt;
+          if (Math.random() < 0.5) particles.push({ x: a.x + rand(-a.r, a.r) * 0.5, y: a.y + rand(-a.r, a.r) * 0.5, vx: rand(-30, 30), vy: rand(-30, 30), life: 0.4, max: 0.4, color: a.valuable ? '#ffd34d' : '#ff5a5a', r: 2 });
+          if (a.mine > 0.7) {
+            if (a.valuable) {
+              ship.credits = (ship.credits || 0) + a.value;
+              minedCount++;
+              explode(a.x, a.y, '#ffd34d', 20);
+              beep(880, 0.15, 'triangle', 0.12); beep(1174, 0.2, 'triangle', 0.1);
+              statusEl.textContent = 'Status: Mined +' + a.value + ' credits!';
+              asteroids.splice(i, 1);
+              asteroids.push(makeAsteroid(Math.random() < 0.72));
+              if (ship.credits >= 500) { ship.credits = 500; endGame(true); return; }
+            } else {
+              explode(a.x, a.y, '#ff5a5a', 30);
+              asteroids.splice(i, 1);
+              asteroids.push(makeAsteroid(Math.random() < 0.72));
+              damageShip(25, 'You mined an explosive!');
+              if (over) return;
+            }
+          }
+        } else { a.mine = Math.max(0, a.mine - dt * 2); }
+      } else { a.mine = 0; }
+    }
+
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    for (var s = 0; s < stars.length; s++) {
+      var st = stars[s];
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(st.tw + performance.now() / 900));
+      ctx.fillStyle = '#aebfee';
+      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Mining beam.
+    if (beamActive() && !over) {
+      var bx = ship.x + Math.cos(ship.angle) * 175, by = ship.y + Math.sin(ship.angle) * 175;
+      var grad = ctx.createLinearGradient(ship.x, ship.y, bx, by);
+      grad.addColorStop(0, 'rgba(110,231,255,0.85)'); grad.addColorStop(1, 'rgba(110,231,255,0.05)');
+      ctx.strokeStyle = grad; ctx.lineWidth = beamTarget ? 7 : 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(ship.x + Math.cos(ship.angle) * 16, ship.y + Math.sin(ship.angle) * 16); ctx.lineTo(bx, by); ctx.stroke();
+      if (beamTarget) { ctx.strokeStyle = 'rgba(255,211,77,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(beamTarget.x, beamTarget.y, beamTarget.r + 5, 0, Math.PI * 2); ctx.stroke(); }
+    }
+
+    // Asteroids.
+    for (var i = 0; i < asteroids.length; i++) {
+      var a = asteroids[i];
+      ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.rot);
+      ctx.beginPath();
+      for (var k = 0; k < 6; k++) {
+        var ang = k / 6 * Math.PI * 2, rr = a.r * a.bumps[k];
+        if (k === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr); else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+      }
+      ctx.closePath();
+      if (a.valuable) { ctx.fillStyle = '#7a5a12'; ctx.fill(); ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 2.5; ctx.stroke(); ctx.fillStyle = '#ffd34d'; }
+      else {
+        var pulse = 0.6 + 0.4 * Math.sin(a.flash);
+        ctx.fillStyle = '#4a1010'; ctx.fill(); ctx.strokeStyle = 'rgba(255,90,90,' + pulse.toFixed(2) + ')'; ctx.lineWidth = 3; ctx.stroke(); ctx.fillStyle = '#ff5a5a';
+      }
+      ctx.beginPath(); ctx.arc(0, 0, a.r * 0.28, 0, Math.PI * 2); ctx.fill();
+      if (!a.valuable) { ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', 0, 1); }
+      ctx.restore();
+      if (a.mine > 0) { ctx.fillStyle = '#222'; ctx.fillRect(a.x - 22, a.y - a.r - 14, 44, 7); ctx.fillStyle = '#ffd34d'; ctx.fillRect(a.x - 22, a.y - a.r - 14, 44 * Math.min(1, a.mine / 0.7), 7); }
+    }
+
+    // Particles.
+    for (var p = 0; p < particles.length; p++) {
+      var pt = particles[p];
+      ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Ship.
+    ctx.save(); ctx.translate(ship.x, ship.y); ctx.rotate(ship.angle);
+    ctx.fillStyle = '#dfe8ff'; ctx.strokeStyle = '#6ee7ff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-12, -12); ctx.lineTo(-6, 0); ctx.lineTo(-12, 12); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(2, 0, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // Progress to win.
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('GOAL: 500 credits', 14, H - 14);
+    ctx.fillStyle = '#ffd34d';
+    ctx.fillRect(150, H - 24, 200 * Math.min(1, (ship.credits || 0) / 500), 10);
+    ctx.strokeStyle = '#555'; ctx.strokeRect(150, H - 24, 200, 10);
+  }
+
+  function loop(now) {
+    if (!running) return;
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    if (running) draw();
+    if (running) requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    beep(440, 0.15, 'square', 0.1);
+    resetGame();
+    ship.credits = 0;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    over = false; running = true;
+    updateHUD('Mining...');
+    requestAnimationFrame(loop);
+  }
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    running = false; over = false;
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    resetGame(); draw();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+    if ((e.key === 'Enter') && !running && !over) startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  canvas.addEventListener('mousedown', function (e) { mouseDown = true; var p = canvasPos(e); mouseX = p.x; mouseY = p.y; });
+  document.addEventListener('mouseup', function () { mouseDown = false; });
+  canvas.addEventListener('mousemove', function (e) { var p = canvasPos(e); mouseX = p.x; mouseY = p.y; });
+  canvas.addEventListener('click', function (e) { var p = canvasPos(e); mouseX = p.x; mouseY = p.y; });
+
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); touchActive = true; var p = canvasPos(e); touchX = p.x; touchY = p.y; }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); var p = canvasPos(e); touchX = p.x; touchY = p.y; }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); touchActive = false; }, { passive: false });
+  canvas.addEventListener('touchcancel', function () { touchActive = false; });
+
+  resetGame();
+  ship.credits = 0;
+  draw();
+})();
+</script>
+</body>
+</html>

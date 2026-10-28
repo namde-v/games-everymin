@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Rail Baron - Train Routing</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #141a22; color: #eef2f5; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 12px; min-height: 100vh; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin: 6px 0 4px; text-align: center; }
+  h1 span { color: #f1c40f; }
+  #hud { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; width: 100%; max-width: 900px; margin: 8px 0; font-weight: bold; font-size: 15px; }
+  #hud div { background: #1f2a38; border: 1px solid #3a4a5e; border-radius: 8px; padding: 7px 12px; }
+  #hud .lives { color: #ff6b6b; }
+  #hud .score { color: #f1c40f; }
+  #msg { min-height: 22px; font-size: 14px; color: #ffd166; text-align: center; margin-bottom: 6px; }
+  #wrap { position: relative; width: 100%; max-width: 900px; }
+  canvas { width: 100%; height: auto; display: block; background: #22301f; border: 3px solid #3a4a5e; border-radius: 12px; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(10, 15, 22, 0.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #f1c40f; }
+  .overlay p, .overlay li { font-size: 15px; line-height: 1.55; color: #dbe4ec; }
+  .overlay ul { text-align: left; max-width: 560px; margin: 0 auto; padding-left: 20px; }
+  .overlay .big { font-size: 19px; font-weight: bold; }
+  button { background: #f1c40f; color: #141a22; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; }
+  button:active { transform: scale(0.97); }
+  button.secondary { background: #3498db; color: #fff; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; font-size: 13px; }
+  .legend span { padding: 5px 9px; border-radius: 20px; background: #1f2a38; border: 1px solid #3a4a5e; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+  #switchbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  #switchbar button { padding: 9px 14px; font-size: 14px; background: #2c3e50; color: #fff; border: 1px solid #5a7186; }
+  @media (max-width: 560px) { h1 { font-size: 22px; } .overlay h2 { font-size: 28px; } }
+</style>
+</head>
+<body>
+<h1>RAIL <span>BARON</span></h1>
+<div id="hud">
+  <div class="score">Score: <span id="score">0</span></div>
+  <div>Deliveries: <span id="deliv">0</span> / 12</div>
+  <div class="lives">Lives: <span id="lives">♥♥♥</span></div>
+  <div>On track: <span id="ontrack">0</span></div>
+  <div>Streak: <span id="streak">0</span></div>
+</div>
+<div id="msg">Set the junctions before each train arrives!</div>
+<div id="wrap">
+  <canvas id="game" width="900" height="540"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>RAIL BARON</h2>
+    <p class="big">Strategy / Train Routing</p>
+    <ul>
+      <li><b>How to play:</b> Trains roll in from the left, each painted to match one coloured station on the right.</li>
+      <li><b>Switch junctions J1, J2 and J3</b> before a train reaches them: tap / click a diamond, or press keys <b>1, 2, 3</b>.</li>
+      <li>J1 up goes to Red, J1 straight then J2 up goes to Green, J3 down goes to Blue, and all straight goes to Yellow.</li>
+      <li>Correct delivery: +100 points. Wrong station or a train collision: lose a life.</li>
+      <li><b>Win:</b> deliver 12 trains correctly. <b>Game Over:</b> 3 mistakes.</li>
+      <li>Faster trains can catch slower ones — route them apart to avoid a crash!</li>
+    </ul>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Keyboard: 1 / 2 / 3 switch junctions &nbsp;•&nbsp; Mouse: click a junction &nbsp;•&nbsp; Touch: tap a junction</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p class="big" id="endText"></p>
+    <p id="endDetail"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<div id="switchbar">
+  <button data-j="0">J1 Switch (Key 1)</button>
+  <button data-j="1">J2 Switch (Key 2)</button>
+  <button data-j="2">J3 Switch (Key 3)</button>
+</div>
+<div class="legend">
+  <span><i class="dot" style="background:#e74c3c"></i>Red Station</span>
+  <span><i class="dot" style="background:#2ecc71"></i>Green Station</span>
+  <span><i class="dot" style="background:#3498db"></i>Blue Station</span>
+  <span><i class="dot" style="background:#f1c40f"></i>Yellow Station</span>
+  <span>◆ = Junction — click / tap to switch</span>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var delivEl = document.getElementById('deliv');
+  var livesEl = document.getElementById('lives');
+  var ontrackEl = document.getElementById('ontrack');
+  var streakEl = document.getElementById('streak');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endDetail = document.getElementById('endDetail');
+
+  var COLORS = [
+    { name: 'red', hex: '#e74c3c', y: 80 },
+    { name: 'green', hex: '#2ecc71', y: 200 },
+    { name: 'blue', hex: '#3498db', y: 340 },
+    { name: 'yellow', hex: '#f1c40f', y: 460 }
+  ];
+  var JUNCTIONS = [
+    { x: 300, y: 270, label: 'J1', up: false, upText: 'UP to Red', straightText: 'STRAIGHT' },
+    { x: 540, y: 270, label: 'J2', up: false, upText: 'UP to Green', straightText: 'STRAIGHT' },
+    { x: 720, y: 270, label: 'J3', down: false, upText: 'DOWN to Blue', straightText: 'STRAIGHT' }
+  ];
+
+  var state = 'title';
+  var score = 0, deliveries = 0, lives = 3, streak = 0;
+  var trains = [], particles = [];
+  var spawnTimer = 0, spawnInterval = 2.6, trainId = 0;
+  var audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, delay) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime + (delay || 0);
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'square';
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function sfx(name) {
+    if (name === 'click') tone(660, 0.07, 'square', 0.08);
+    else if (name === 'good') { tone(523, 0.12, 'sine', 0.14); tone(784, 0.18, 'sine', 0.14, 0.12); }
+    else if (name === 'bad') { tone(160, 0.25, 'sawtooth', 0.14); tone(110, 0.3, 'sawtooth', 0.14, 0.15); }
+    else if (name === 'crash') { tone(90, 0.4, 'sawtooth', 0.18); tone(60, 0.4, 'square', 0.12, 0.1); }
+    else if (name === 'win') { [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 'triangle', 0.15, i * 0.16); }); }
+    else if (name === 'lose') { [400, 300, 200, 120].forEach(function (f, i) { tone(f, 0.25, 'triangle', 0.13, i * 0.18); }); }
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    delivEl.textContent = deliveries;
+    livesEl.textContent = lives > 0 ? '♥'.repeat(lives) : '—';
+    ontrackEl.textContent = trains.length;
+    streakEl.textContent = streak;
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function toggleJunction(i) {
+    var j = JUNCTIONS[i];
+    if (i === 2) j.down = !j.down; else j.up = !j.up;
+    sfx('click');
+    var dir = (i === 2) ? (j.down ? 'DOWN to Blue' : 'STRAIGHT to Yellow') : (j.up ? j.upText : 'STRAIGHT');
+    setMsg(j.label + ' now: ' + dir);
+  }
+  function junctionLabel(i) {
+    var j = JUNCTIONS[i];
+    if (i === 2) return j.down ? '▼ Blue' : '▶ Straight';
+    return j.up ? '▲ Up' : '▶ Straight';
+  }
+
+  function spawnTrain() {
+    var c = COLORS[Math.floor(Math.random() * COLORS.length)];
+    var speed = 55 + Math.random() * 28;
+    trains.push({
+      id: ++trainId, color: c.name, hex: c.hex,
+      x: -30, y: 270, speed: speed,
+      waypoints: [{ x: 300, y: 270 }],
+      wp: 0, route: null, angle: 0
+    });
+  }
+
+  function routeFromJunction(train) {
+    // Called when a train reaches a junction waypoint; decides its next legs.
+    if (train.x === 300 || Math.abs(train.x - 300) < 2) {
+      if (JUNCTIONS[0].up) { train.route = 'red'; return [{ x: 300, y: 80 }, { x: 800, y: 80 }]; }
+      return [{ x: 540, y: 270 }];
+    }
+    if (Math.abs(train.x - 540) < 2) {
+      if (JUNCTIONS[1].up) { train.route = 'green'; return [{ x: 540, y: 200 }, { x: 800, y: 200 }]; }
+      return [{ x: 720, y: 270 }];
+    }
+    if (Math.abs(train.x - 720) < 2) {
+      if (JUNCTIONS[2].down) { train.route = 'blue'; return [{ x: 720, y: 340 }, { x: 800, y: 340 }]; }
+      train.route = 'yellow';
+      return [{ x: 830, y: 270 }, { x: 800, y: 460 }];
+    }
+    return [];
+  }
+
+  function burst(x, y, hex, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 220, vy: (Math.random() - 0.5) * 220, life: 0.7, hex: hex });
+    }
+  }
+
+  function loseLife(reason) {
+    lives--; streak = 0; sfx('bad');
+    setMsg(reason + ' — Lives left: ' + lives);
+    if (lives <= 0) endGame(false);
+    updateHUD();
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endTitle.textContent = '🏆 YOU WIN, RAIL BARON!';
+      endText.textContent = 'All 12 trains delivered to the right stations.';
+      sfx('win');
+    } else {
+      endTitle.textContent = '💥 GAME OVER';
+      endText.textContent = 'The railway ran out of second chances.';
+      sfx('lose');
+    }
+    endDetail.textContent = 'Final score: ' + score + ' • Deliveries: ' + deliveries + ' / 12';
+    updateHUD();
+  }
+
+  function resetGame() {
+    score = 0; deliveries = 0; lives = 3; streak = 0;
+    trains = []; particles = [];
+    spawnTimer = 0.6; spawnInterval = 2.6;
+    JUNCTIONS[0].up = false; JUNCTIONS[1].up = false; JUNCTIONS[2].down = false;
+    updateHUD();
+    setMsg('Set the junctions before each train arrives!');
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    sfx('click');
+    setMsg('First train incoming — watch its colour!');
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    spawnTimer -= dt;
+    if (spawnTimer <= 0 && trains.length < 5) {
+      spawnTrain();
+      spawnInterval = Math.max(1.9, 2.6 - deliveries * 0.05);
+      spawnTimer = spawnInterval;
+    }
+    // Move trains
+    for (var i = trains.length - 1; i >= 0; i--) {
+      var t = trains[i];
+      var target = t.waypoints[t.wp];
+      if (!target) { trains.splice(i, 1); continue; }
+      var dx = target.x - t.x, dy = target.y - t.y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      t.angle = Math.atan2(dy, dx);
+      var step = t.speed * dt;
+      if (dist <= step) {
+        t.x = target.x; t.y = target.y;
+        t.wp++;
+        if (t.wp >= t.waypoints.length) {
+          // Reached a junction or a station?
+          if (t.route === null) {
+            var next = routeFromJunction(t);
+            t.waypoints = next; t.wp = 0;
+            if (!next.length) { trains.splice(i, 1); }
+          } else {
+            // Delivered to a station
+            if (t.color === t.route) {
+              deliveries++; streak++;
+              var gain = 100 + (streak - 1) * 10;
+              score += gain;
+              burst(t.x, t.y, t.hex, 22);
+              sfx('good');
+              setMsg('✓ ' + t.color.toUpperCase() + ' train delivered! +' + gain + ' (streak ' + streak + ')');
+              if (deliveries >= 12) { trains.splice(i, 1); updateHUD(); endGame(true); return; }
+            } else {
+              burst(t.x, t.y, '#ffffff', 18);
+              var routeName = t.route;
+              var colorName = t.color;
+              trains.splice(i, 1);
+              loseLife('✗ ' + colorName + ' train went to the ' + routeName + ' station');
+              if (state !== 'playing') return;
+              continue;
+            }
+            trains.splice(i, 1);
+          }
+        }
+      } else {
+        t.x += dx / dist * step;
+        t.y += dy / dist * step;
+      }
+    }
+    // Collisions: two trains too close
+    for (var a = 0; a < trains.length; a++) {
+      for (var b = a + 1; b < trains.length; b++) {
+        var ddx = trains[a].x - trains[b].x, ddy = trains[a].y - trains[b].y;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < 38) {
+          var cx = (trains[a].x + trains[b].x) / 2, cy = (trains[a].y + trains[b].y) / 2;
+          burst(cx, cy, '#ff6b6b', 30); sfx('crash');
+          trains.splice(b, 1); trains.splice(a, 1);
+          loseLife('💥 Collision on the line!');
+          updateHUD();
+          return;
+        }
+      }
+    }
+    // Particles
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx * dt;
+      particles[p].y += particles[p].vy * dt;
+      particles[p].life -= dt;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    updateHUD();
+  }
+
+  function drawTrack(x1, y1, x2, y2) {
+    ctx.strokeStyle = '#5a6b7a'; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.strokeStyle = '#8a9aa8'; ctx.lineWidth = 2; ctx.setLineDash([10, 10]);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Ground texture dots
+    ctx.fillStyle = '#2a3a28';
+    for (var gx = 0; gx < canvas.width; gx += 60) {
+      for (var gy = 0; gy < canvas.height; gy += 60) {
+        ctx.fillRect(gx + 14, gy + 14, 3, 3);
+      }
+    }
+    // Tracks
+    drawTrack(0, 270, 300, 270);
+    drawTrack(300, 270, 300, 80); drawTrack(300, 80, 800, 80);
+    drawTrack(300, 270, 540, 270);
+    drawTrack(540, 270, 540, 200); drawTrack(540, 200, 800, 200);
+    drawTrack(540, 270, 720, 270);
+    drawTrack(720, 270, 720, 340); drawTrack(720, 340, 800, 340);
+    drawTrack(720, 270, 830, 270); drawTrack(830, 270, 800, 460);
+    // Entry label
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('◀ TRAINS IN', 8, 255);
+    // Stations
+    COLORS.forEach(function (c) {
+      ctx.fillStyle = c.hex;
+      ctx.fillRect(800, c.y - 26, 92, 52);
+      ctx.fillStyle = '#141a22'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(c.name.toUpperCase(), 846, c.y + 5);
+      ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
+      ctx.fillText('STATION', 846, c.y + 20);
+    });
+    // Junctions
+    JUNCTIONS.forEach(function (j, i) {
+      ctx.save(); ctx.translate(j.x, j.y); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = '#f1c40f'; ctx.fillRect(-16, -16, 32, 32);
+      ctx.strokeStyle = '#141a22'; ctx.lineWidth = 3; ctx.strokeRect(-16, -16, 32, 32);
+      ctx.restore();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(j.label, j.x, j.y - 28);
+      ctx.font = 'bold 12px Arial'; ctx.fillStyle = '#ffd166';
+      ctx.fillText(junctionLabel(i), j.x, j.y + 42);
+    });
+    // Trains
+    trains.forEach(function (t) {
+      ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.angle);
+      ctx.fillStyle = '#222'; ctx.fillRect(-30, -11, 60, 22);
+      ctx.fillStyle = t.hex; ctx.fillRect(-30, -11, 24, 22);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(t.color.toUpperCase(), 8, 4);
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(-26, 0, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // Destination hint above train
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('→ ' + t.color.toUpperCase(), t.x, t.y - 20);
+    });
+    // Particles
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.fillStyle = p.hex; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function canvasPoint(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - r.left) * canvas.width / r.width, y: (cy - r.top) * canvas.height / r.height };
+  }
+  function handleTap(e) {
+    if (state !== 'playing') return;
+    var p = canvasPoint(e);
+    for (var i = 0; i < JUNCTIONS.length; i++) {
+      var dx = p.x - JUNCTIONS[i].x, dy = p.y - JUNCTIONS[i].y;
+      if (Math.sqrt(dx * dx + dy * dy) < 34) { toggleJunction(i); return; }
+    }
+  }
+  canvas.addEventListener('click', handleTap);
+  canvas.addEventListener('mousedown', function (e) { if (state === 'playing') ensureAudio(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); handleTap(e); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.querySelectorAll('#switchbar button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (state !== 'playing') return;
+      toggleJunction(parseInt(btn.getAttribute('data-j'), 10));
+    });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === '1' && state === 'playing') toggleJunction(0);
+    else if (e.key === '2' && state === 'playing') toggleJunction(1);
+    else if (e.key === '3' && state === 'playing') toggleJunction(2);
+    else if ((e.key === 'Enter' || e.key === ' ') && state === 'title') startGame();
+    else if ((e.key === 'Enter' || e.key === 'r' || e.key === 'R') && (state === 'won' || state === 'over')) startGame();
+  });
+
+  updateHUD();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Shadow Shot — Precision Ricochet Archery</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e1a; font-family: "Segoe UI", system-ui, sans-serif; color: #eef2ff; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 10px; gap: 8px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: min(920px, 96vw); }
+  .chip { background: #1b2140; border: 1px solid #3b4a8a; border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 700; }
+  .chip b { color: #ffd166; }
+  #gameCanvas { width: min(920px, 96vw); height: min(560px, 62vh); background: #10142e; border: 3px solid #ffd166; border-radius: 14px; touch-action: none; cursor: crosshair; display: block; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5,8,20,0.88); z-index: 5; }
+  .panel { max-width: 620px; width: 92%; background: #171c3d; border: 2px solid #ffd166; border-radius: 18px; padding: 24px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+  .panel h1 { font-size: 42px; color: #ffd166; letter-spacing: 1px; margin-bottom: 6px; }
+  .panel h2 { font-size: 32px; color: #ffd166; margin-bottom: 10px; }
+  .panel p { line-height: 1.6; margin: 8px 0; color: #dbe2ff; font-size: 15px; }
+  .panel .sub { color: #9fb0ff; font-size: 14px; }
+  .kbd { display: inline-block; background: #2a3165; border: 1px solid #5b6bd6; border-bottom-width: 3px; border-radius: 6px; padding: 1px 8px; font-weight: 700; }
+  button { margin-top: 14px; background: #ffd166; color: #131633; border: none; border-radius: 999px; padding: 14px 30px; font-size: 18px; font-weight: 900; cursor: pointer; }
+  button:hover { background: #ffe08a; transform: scale(1.03); }
+  button:active { transform: scale(0.98); }
+  #stage { position: relative; }
+  .hidden { display: none !important; }
+  .small { font-size: 13px; color: #aab6ff; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud" aria-label="Game status">
+    <div class="chip">Score: <b id="score">0</b></div>
+    <div class="chip">Level: <b id="level">1 / 5</b></div>
+    <div class="chip">Arrows: <b id="arrows">8</b></div>
+    <div class="chip">Targets left: <b id="targetsLeft">3</b></div>
+    <div class="chip">Status: <b id="status">Aim &amp; shoot</b></div>
+  </div>
+  <div id="stage">
+    <canvas id="gameCanvas" width="920" height="560"></canvas>
+    <div id="titleScreen" class="overlay">
+      <div class="panel">
+        <h1>🏹 SHADOW SHOT</h1>
+        <p><strong>Precision / Ricochet Archery</strong></p>
+        <p>Shadow targets hide behind stone blocks. You cannot shoot straight at them — bounce your arrows off walls and golden mirrors to strike from impossible angles!</p>
+        <p><strong>How to Play:</strong> Move the mouse or drag on touch to aim the glowing trajectory. Click, tap FIRE, or press <span class="kbd">Space</span> to shoot. Arrows bounce off walls and mirrors and fade after 3 bounces. Clear every target to advance. Clear all 5 levels to WIN.</p>
+        <p class="sub">Controls: Mouse aim + click to shoot &nbsp;|&nbsp; Touch drag + release &nbsp;|&nbsp; <span class="kbd">←</span> <span class="kbd">→</span> aim &nbsp;|&nbsp; <span class="kbd">Space</span> shoot &nbsp;|&nbsp; <span class="kbd">R</span> restart &nbsp;|&nbsp; <span class="kbd">N</span> next hint</p>
+        <p class="small">Limited arrows per level. Running out of arrows with targets left = Game Over. Bouncing a shot earns bonus points!</p>
+        <button id="startBtn" type="button">▶ START GAME</button>
+      </div>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <div class="panel">
+        <h2 id="endTitle">You Win!</h2>
+        <p id="endText">Amazing shooting!</p>
+        <p>Final Score: <strong id="finalScore">0</strong> &nbsp;|&nbsp; Levels cleared: <strong id="finalLevels">0 / 5</strong></p>
+        <p class="small">Press R or tap Restart to play again instantly.</p>
+        <button id="restartBtn" type="button">↻ RESTART</button>
+      </div>
+    </div>
+  </div>
+  <p class="small">Tip: Aim at a wall or mirror first — the dotted preview shows the first bounce. Golden mirrors reflect perfectly; stone walls bounce once with a slight scatter.</p>
+</div>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("gameCanvas");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById("score");
+  var levelEl = document.getElementById("level");
+  var arrowsEl = document.getElementById("arrows");
+  var targetsEl = document.getElementById("targetsLeft");
+  var statusEl = document.getElementById("status");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+  var finalScore = document.getElementById("finalScore");
+  var finalLevels = document.getElementById("finalLevels");
+
+  var state = "title"; // title | playing | won | over
+  var score = 0, level = 1, arrowsLeft = 8, levelsCleared = 0;
+  var bow = { x: 90, y: 470 };
+  var aimAngle = -0.55, aimPower = 1;
+  var mouse = { x: 400, y: 250, active: false };
+  var arrow = null, particles = [], sparks = [], hintIndex = 0;
+  var targets = [], walls = [], mirrors = [], levelArrows = [8, 8, 9, 9, 10];
+  var hints = [
+    "Try bouncing off the top wall to drop onto the high target.",
+    "Golden mirrors never scatter — use them for precise corner shots.",
+    "A 2-bounce shot is worth +50 bonus. A 3-bounce shot is worth +100!",
+    "Aim low and let the floor bounce carry the arrow under the block.",
+    "Watch the dotted preview: it shows your first bounce direction."
+  ];
+
+  // ---- Procedural Web Audio (created only after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (!audioCtx) return;
+    if (name === "shoot") tone(320, 0.18, "triangle", 0.22, 90);
+    else if (name === "bounce") tone(620, 0.10, "square", 0.12, 420);
+    else if (name === "hit") { tone(880, 0.25, "sine", 0.25, 440); tone(1320, 0.30, "sine", 0.15, 660); }
+    else if (name === "win") { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.35, "sine", 0.2); }, i * 130); }); }
+    else if (name === "over") { tone(220, 0.5, "sawtooth", 0.15, 110); }
+    else if (name === "level") { tone(660, 0.2, "sine", 0.2); setTimeout(function () { tone(880, 0.3, "sine", 0.2); }, 120); }
+  }
+
+  function buildLevel(n) {
+    targets = []; walls = []; mirrors = [];
+    arrowsLeft = levelArrows[n - 1];
+    if (n === 1) {
+      targets = [{ x: 680, y: 150, r: 26, alive: true }, { x: 760, y: 360, r: 26, alive: true }, { x: 560, y: 110, r: 24, alive: true }];
+      walls = [{ x: 430, y: 90, w: 34, h: 340 }];
+      mirrors = [{ x: 300, y: 430, w: 90, h: 14, angle: -0.5 }];
+    } else if (n === 2) {
+      targets = [{ x: 800, y: 130, r: 26, alive: true }, { x: 720, y: 420, r: 26, alive: true }, { x: 560, y: 230, r: 24, alive: true }];
+      walls = [{ x: 450, y: 0, w: 34, h: 300 }, { x: 620, y: 300, w: 34, h: 260 }];
+      mirrors = [{ x: 240, y: 150, w: 100, h: 14, angle: 0.6 }];
+    } else if (n === 3) {
+      targets = [{ x: 830, y: 200, r: 26, alive: true }, { x: 660, y: 460, r: 24, alive: true }, { x: 540, y: 120, r: 24, alive: true }, { x: 780, y: 320, r: 22, alive: true }];
+      walls = [{ x: 420, y: 180, w: 34, h: 360 }, { x: 620, y: 0, w: 34, h: 260 }];
+      mirrors = [{ x: 300, y: 420, w: 110, h: 14, angle: -0.45 }, { x: 500, y: 480, w: 90, h: 14, angle: 0.5 }];
+    } else if (n === 4) {
+      targets = [{ x: 840, y: 140, r: 25, alive: true }, { x: 700, y: 470, r: 24, alive: true }, { x: 560, y: 180, r: 24, alive: true }, { x: 810, y: 380, r: 22, alive: true }];
+      walls = [{ x: 400, y: 0, w: 34, h: 260 }, { x: 580, y: 300, w: 34, h: 260 }, { x: 740, y: 60, w: 30, h: 180 }];
+      mirrors = [{ x: 250, y: 180, w: 100, h: 14, angle: 0.55 }];
+    } else {
+      targets = [{ x: 850, y: 120, r: 25, alive: true }, { x: 650, y: 460, r: 24, alive: true }, { x: 540, y: 200, r: 24, alive: true }, { x: 800, y: 330, r: 22, alive: true }, { x: 700, y: 90, r: 22, alive: true }];
+      walls = [{ x: 380, y: 120, w: 34, h: 380 }, { x: 580, y: 0, w: 34, h: 280 }, { x: 760, y: 300, w: 30, h: 200 }];
+      mirrors = [{ x: 260, y: 430, w: 110, h: 14, angle: -0.5 }, { x: 480, y: 150, w: 90, h: 14, angle: 0.5 }];
+    }
+    arrow = null; particles = []; sparks = [];
+    updateHUD("Level " + n + " — bounce to hit every shadow target!");
+  }
+  function aliveCount() { return targets.filter(function (t) { return t.alive; }).length; }
+  function updateHUD(msg) {
+    scoreEl.textContent = score;
+    levelEl.textContent = level + " / 5";
+    arrowsEl.textContent = arrowsLeft;
+    targetsEl.textContent = aliveCount();
+    if (msg) statusEl.textContent = msg;
+  }
+  function rectHit(ax, ay, r) {
+    for (var i = 0; i < walls.length; i++) {
+      var w = walls[i];
+      if (ax > w.x - r && ax < w.x + w.w + r && ay > w.y - r && ay < w.y + w.h + r) return { kind: "wall", obj: w };
+    }
+    for (var j = 0; j < mirrors.length; j++) {
+      var m = mirrors[j];
+      if (ax > m.x - 8 && ax < m.x + m.w + 8 && ay > m.y - 24 && ay < m.y + 24) return { kind: "mirror", obj: m };
+    }
+    return null;
+  }
+  function shoot() {
+    if (state !== "playing" || arrow || arrowsLeft <= 0) return;
+    ensureAudio();
+    arrowsLeft--;
+    var speed = 11 + aimPower * 3;
+    arrow = { x: bow.x + 24, y: bow.y - 10, vx: Math.cos(aimAngle) * speed, vy: Math.sin(aimAngle) * speed, bounces: 0, trail: [] };
+    sfx("shoot"); updateHUD("Arrow flying…");
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 28 + Math.random() * 20, color: color });
+    }
+  }
+  function updateArrow() {
+    if (!arrow) return;
+    arrow.x += arrow.vx; arrow.y += arrow.vy; arrow.vy += 0.12;
+    arrow.trail.push({ x: arrow.x, y: arrow.y }); if (arrow.trail.length > 40) arrow.trail.shift();
+    var hit = rectHit(arrow.x, arrow.y, 6);
+    if (hit) {
+      arrow.bounces++; sfx("bounce"); burst(arrow.x, arrow.y, "#ffd166", 8);
+      if (hit.kind === "mirror") { arrow.vy = -Math.abs(arrow.vy) * 0.95; arrow.vx = arrow.vx * 0.98 + (Math.random() - 0.5) * 0.2; }
+      else {
+        // Reflect off nearest wall face with a little scatter (stone is imperfect)
+        var w = hit.obj, cx = Math.max(w.x, Math.min(arrow.x, w.x + w.w)), cy = Math.max(w.y, Math.min(arrow.y, w.y + w.h));
+        if (Math.abs(arrow.x - cx) > Math.abs(arrow.y - cy)) { arrow.vx = -arrow.vx * 0.92; arrow.x += arrow.vx > 0 ? 8 : -8; }
+        else { arrow.vy = -arrow.vy * 0.92; arrow.y += arrow.vy > 0 ? 8 : -8; }
+        arrow.vx += (Math.random() - 0.5) * 0.6; arrow.vy += (Math.random() - 0.5) * 0.4;
+      }
+      if (arrow.bounces > 3) { arrow = null; checkEndOfShot(); return; }
+    }
+    if (arrow.x < 4) { arrow.vx = Math.abs(arrow.vx) * 0.92; arrow.bounces++; sfx("bounce"); }
+    if (arrow.x > W - 4) { arrow.vx = -Math.abs(arrow.vx) * 0.92; arrow.bounces++; sfx("bounce"); }
+    if (arrow.y < 4) { arrow.vy = Math.abs(arrow.vy) * 0.92; arrow.bounces++; sfx("bounce"); }
+    if (arrow.y > H - 4) { arrow.vy = -Math.abs(arrow.vy) * 0.92; arrow.bounces++; sfx("bounce"); }
+    if (arrow && arrow.bounces > 3) { arrow = null; checkEndOfShot(); return; }
+    if (arrow) {
+      for (var i = 0; i < targets.length; i++) {
+        var t = targets[i];
+        if (!t.alive) continue;
+        var dx = arrow.x - t.x, dy = arrow.y - t.y;
+        if (dx * dx + dy * dy < (t.r + 8) * (t.r + 8)) {
+          t.alive = false;
+          var bonus = arrow.bounces === 0 ? 100 : arrow.bounces === 1 ? 150 : arrow.bounces === 2 ? 200 : 250;
+          score += bonus; burst(t.x, t.y, "#7CFFB2", 22); sfx("hit");
+          updateHUD("Hit! +" + bonus + (arrow.bounces ? " (" + arrow.bounces + " bounce bonus)" : ""));
+          arrow = null;
+          if (aliveCount() === 0) {
+            levelsCleared++;
+            if (level >= 5) { endGame(true); } else { level++; sfx("level"); setTimeout(function () { buildLevel(level); }, 900); }
+          } else { checkEndOfShot(); }
+          return;
+        }
+      }
+      if (Math.abs(arrow.vx) < 0.4 && Math.abs(arrow.vy) < 0.4) { arrow = null; checkEndOfShot(); }
+    }
+  }
+  function checkEndOfShot() {
+    if (aliveCount() > 0 && arrowsLeft <= 0 && !arrow) { endGame(false); }
+    else updateHUD("Aim & shoot — " + hints[hintIndex % hints.length]);
+  }
+  function endGame(won) {
+    state = won ? "won" : "over";
+    endTitle.textContent = won ? "🏆 YOU WIN!" : "💀 GAME OVER";
+    endText.textContent = won ? "You cleared all 5 shadow galleries with ricochet mastery!" : "Out of arrows with " + aliveCount() + " shadow target(s) still standing on level " + level + ".";
+    finalScore.textContent = score; finalLevels.textContent = levelsCleared + " / 5";
+    endScreen.classList.remove("hidden");
+    sfx(won ? "win" : "over");
+    updateHUD(won ? "Victory!" : "Game Over");
+  }
+  function startGame() {
+    ensureAudio(); score = 0; level = 1; levelsCleared = 0;
+    titleScreen.classList.add("hidden"); endScreen.classList.add("hidden");
+    state = "playing"; buildLevel(1); sfx("level");
+  }
+  function restart() { startGame(); }
+  function aimFromClient(clientX, clientY) {
+    var r = canvas.getBoundingClientRect();
+    var x = (clientX - r.left) * (W / r.width), y = (clientY - r.top) * (H / r.height);
+    mouse.x = x; mouse.y = y;
+    aimAngle = Math.atan2(y - (bow.y - 10), x - bow.x);
+    if (aimAngle > 1.2) aimAngle = 1.2; if (aimAngle < -1.5) aimAngle = -1.5;
+  }
+  function drawPreview() {
+    if (state !== "playing" || arrow) return;
+    var x = bow.x + 24, y = bow.y - 10, vx = Math.cos(aimAngle) * 12, vy = Math.sin(aimAngle) * 12;
+    ctx.save(); ctx.strokeStyle = "rgba(255,209,102,0.85)"; ctx.setLineDash([6, 8]); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y);
+    for (var i = 0; i < 46; i++) {
+      x += vx; y += vy; vy += 0.12;
+      if (x < 4 || x > W - 4 || y < 4 || y > H - 4) break;
+      if (rectHit(x, y, 4)) { ctx.lineTo(x, y); break; }
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke(); ctx.restore();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Night gallery backdrop
+    var g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#141a3d"); g.addColorStop(1, "#0b0e1a");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    for (var s = 0; s < 30; s++) { ctx.fillRect((s * 97) % W, (s * 53) % 180, 2, 2); }
+    // Walls and mirrors
+    walls.forEach(function (w) { ctx.fillStyle = "#5b647f"; ctx.fillRect(w.x, w.y, w.w, w.h); ctx.fillStyle = "#39405f"; ctx.fillRect(w.x, w.y, w.w, 8); });
+    mirrors.forEach(function (m) {
+      ctx.save(); ctx.translate(m.x + m.w / 2, m.y); ctx.rotate(m.angle);
+      ctx.fillStyle = "#ffd166"; ctx.fillRect(-m.w / 2, -7, m.w, 14); ctx.fillStyle = "#fff3c4"; ctx.fillRect(-m.w / 2, -7, m.w, 5);
+      ctx.restore();
+      ctx.fillStyle = "#ffd166"; ctx.font = "bold 13px sans-serif"; ctx.fillText("MIRROR", m.x, m.y - 16);
+    });
+    // Targets: shadow rings
+    targets.forEach(function (t) {
+      if (!t.alive) return;
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.r + 7, 0, Math.PI * 2); ctx.fillStyle = "rgba(124,255,178,0.18)"; ctx.fill();
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.fillStyle = "#232946"; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = "#7CFFB2"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.r * 0.55, 0, Math.PI * 2); ctx.fillStyle = "#7CFFB2"; ctx.fill();
+      ctx.beginPath(); ctx.arc(t.x, t.y, t.r * 0.25, 0, Math.PI * 2); ctx.fillStyle = "#0b0e1a"; ctx.fill();
+    });
+    // Bow + archer
+    ctx.save(); ctx.translate(bow.x, bow.y);
+    ctx.fillStyle = "#8b5a2b"; ctx.fillRect(-8, -42, 16, 52);
+    ctx.beginPath(); ctx.arc(-8, -10, 10, 0, Math.PI * 2); ctx.fillStyle = "#f2c79b"; ctx.fill();
+    ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(18, -10, 34, -1.1, 1.1); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 1.5; ctx.beginPath();
+    ctx.moveTo(18 + Math.cos(-1.1) * 34, -10 + Math.sin(-1.1) * 34); ctx.lineTo(18 + Math.cos(aimAngle) * 30, -10 + Math.sin(aimAngle) * 30); ctx.lineTo(18 + Math.cos(1.1) * 34, -10 + Math.sin(1.1) * 34); ctx.stroke();
+    ctx.restore();
+    drawPreview();
+    if (arrow) {
+      ctx.strokeStyle = "rgba(255,209,102,0.35)"; ctx.lineWidth = 2; ctx.beginPath();
+      arrow.trail.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }); ctx.stroke();
+      var a = Math.atan2(arrow.vy, arrow.vx);
+      ctx.save(); ctx.translate(arrow.x, arrow.y); ctx.rotate(a);
+      ctx.fillStyle = "#e8ecff"; ctx.fillRect(-14, -2, 26, 4);
+      ctx.fillStyle = "#ffd166"; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(4, -6); ctx.lineTo(4, 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#ff5d73"; ctx.fillRect(-18, -5, 6, 10); ctx.restore();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 13px sans-serif"; ctx.fillText("Bounces: " + arrow.bounces + " / 3", arrow.x + 16, arrow.y - 12);
+    }
+    particles.forEach(function (p) { ctx.globalAlpha = Math.max(0, p.life / 40); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 5, 5); });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#eef2ff"; ctx.font = "bold 16px sans-serif";
+    ctx.fillText("Level " + level + "  •  " + hints[hintIndex % hints.length], 20, 30);
+  }
+  function loop() {
+    if (state === "playing") updateArrow();
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    draw();
+    requestAnimationFrame(loop);
+  }
+  // ---- Input: mouse, touch, keyboard ----
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", restart);
+  canvas.addEventListener("mousemove", function (e) { aimFromClient(e.clientX, e.clientY); });
+  canvas.addEventListener("mousedown", function (e) { aimFromClient(e.clientX, e.clientY); shoot(); });
+  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); var t = e.touches[0]; aimFromClient(t.clientX, t.clientY); }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); var t = e.touches[0]; aimFromClient(t.clientX, t.clientY); }, { passive: false });
+  canvas.addEventListener("touchend", function (e) { e.preventDefault(); shoot(); }, { passive: false });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowLeft") { aimAngle -= 0.08; }
+    else if (e.key === "ArrowRight") { aimAngle += 0.08; }
+    else if (e.key === " ") { e.preventDefault(); if (state === "playing") shoot(); else if (state === "title") startGame(); }
+    else if (e.key === "r" || e.key === "R") { if (state !== "title") restart(); }
+    else if (e.key === "n" || e.key === "N") { hintIndex++; updateHUD("Hint: " + hints[hintIndex % hints.length]); }
+    else if (e.key === "Enter") { if (state === "title") startGame(); else if (state === "won" || state === "over") restart(); }
+  });
+  buildLevel(1);
+  updateHUD("Press START to begin");
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

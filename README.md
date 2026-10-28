@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 30
-- **Latest game:** 0030 — Rune Duel
+- **Total games:** 40
+- **Latest game:** 0040 — War Council
 - **Current volume:** 001 (Games 0001 to 0100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -13,7 +13,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 | Volume | Games | Catalog |
 |--------|-------|---------|
-| 001 | 0001–0030 (30 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
+| 001 | 0001–0040 (40 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -27,20 +27,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 003
+## Latest batch — Batch 004
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0021 | Orbit Flip | Arcade / Gravity Flip Runner | [Play](./games/game-0021.html) |
-| 0022 | Word Weaver | Puzzle / Word Logic | [Play](./games/game-0022.html) |
-| 0023 | Skyport Control | Strategy / Air Traffic Routing | [Play](./games/game-0023.html) |
-| 0024 | Beat Bounce | Rhythm / Bounce Timing | [Play](./games/game-0024.html) |
-| 0025 | Prism Breaker | Arcade / Color Breakout | [Play](./games/game-0025.html) |
-| 0026 | Boulder Balance | Puzzle / Physics Stacking | [Play](./games/game-0026.html) |
-| 0027 | Lighthouse Keeper | Simulation / Beacon Management | [Play](./games/game-0027.html) |
-| 0028 | Orbit Golf | Precision / Gravity Mini-Golf | [Play](./games/game-0028.html) |
-| 0029 | Ghost Glider | Arcade / Stealth Glide | [Play](./games/game-0029.html) |
-| 0030 | Rune Duel | Strategy / Card Duel | [Play](./games/game-0030.html) |
+| 0031 | Avalanche Ascent | Arcade / Vertical Climber | [Play](./games/game-0031.html) |
+| 0032 | Cipher Lock | Puzzle / Code Breaking | [Play](./games/game-0032.html) |
+| 0033 | Rail Baron | Strategy / Train Routing | [Play](./games/game-0033.html) |
+| 0034 | Tempo Tower | Rhythm / Beat Stacking | [Play](./games/game-0034.html) |
+| 0035 | Meteor Miner | Arcade / Asteroid Mining | [Play](./games/game-0035.html) |
+| 0036 | Tile Turner | Puzzle / Flip Tiles | [Play](./games/game-0036.html) |
+| 0037 | Bakery Rush | Simulation / Bakery Management | [Play](./games/game-0037.html) |
+| 0038 | Shadow Shot | Precision / Ricochet Archery | [Play](./games/game-0038.html) |
+| 0039 | Vine Vault | Arcade / Grapple Swing | [Play](./games/game-0039.html) |
+| 0040 | War Council | Strategy / Turn-Based Tactics | [Play](./games/game-0040.html) |
 
 ## Quality standard
 

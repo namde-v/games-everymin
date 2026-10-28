@@ -1,4 +1,4 @@
-# Game Catalog: Volume 001 (Games 0001 to 0030)
+# Game Catalog: Volume 001 (Games 0001 to 0040)
 
 Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets, or assets — all CSS and JavaScript are inline, audio is procedural Web Audio, graphics are Canvas 2D / DOM.
 
@@ -34,11 +34,22 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0028 | Orbit Golf | Precision / Gravity Mini-Golf | Mouse/touch drag aim and release, Arrow Keys aim, Space charge | [Play](./../games/game-0028.html) |
 | 0029 | Ghost Glider | Arcade / Stealth Glide | Arrow Keys / WASD glide, Shift/Space dash, mouse/touch drag | [Play](./../games/game-0029.html) |
 | 0030 | Rune Duel | Strategy / Card Duel | Click/tap cards, 1-5 select, Enter play, E end turn | [Play](./../games/game-0030.html) |
+| 0031 | Avalanche Ascent | Arcade / Vertical Climber | Arrow Keys / WASD, Space jump, mouse/touch tap | [Play](./../games/game-0031.html) |
+| 0032 | Cipher Lock | Puzzle / Code Breaking | Click/tap symbols, Arrow Keys, Enter submit | [Play](./../games/game-0032.html) |
+| 0033 | Rail Baron | Strategy / Train Routing | Click/tap junctions, Arrow Keys, 1/2/3 switch | [Play](./../games/game-0033.html) |
+| 0034 | Tempo Tower | Rhythm / Beat Stacking | Space / J / K lock on beat, mouse click, touch tap | [Play](./../games/game-0034.html) |
+| 0035 | Meteor Miner | Arcade / Asteroid Mining | Arrow Keys / WASD thrust, Space mine, mouse/touch steer | [Play](./../games/game-0035.html) |
+| 0036 | Tile Turner | Puzzle / Flip Tiles | Click/tap tiles, Arrow Keys, Enter flip, H hint | [Play](./../games/game-0036.html) |
+| 0037 | Bakery Rush | Simulation / Bakery Management | Mouse clicks/taps, 1-4 bake, Q/W/E/R serve | [Play](./../games/game-0037.html) |
+| 0038 | Shadow Shot | Precision / Ricochet Archery | Mouse/touch drag aim and release, Arrow Keys, Space shoot | [Play](./../games/game-0038.html) |
+| 0039 | Vine Vault | Arcade / Grapple Swing | Space grab/release, mouse click, touch tap | [Play](./../games/game-0039.html) |
+| 0040 | War Council | Strategy / Turn-Based Tactics | Click/tap units, Arrow Keys, Enter select, E end turn | [Play](./../games/game-0040.html) |
 
 ## Batch notes
 
 - Batch 001: 10 games, produced in one cycle.
 - Batch 002: 10 games, produced in one cycle.
 - Batch 003: 10 games, produced in one cycle.
+- Batch 004: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 - Next volume starts at game 0101 in `catalogs/readme-002.md`, after this volume reaches 100 entries.
