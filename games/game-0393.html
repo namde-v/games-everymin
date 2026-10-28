@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cobalt Courier</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0b1020; color: #e8ecff;
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px; touch-action: none;
+  }
+  h1 { color: #38bdf8; letter-spacing: 2px; margin: 6px 0 2px; text-align: center; }
+  .tagline { color: #94a3b8; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #hud {
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    margin-bottom: 10px; font-size: 15px; font-weight: bold;
+  }
+  #hud span { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 6px 12px; }
+  #hud .good { color: #4ade80; } #hud .warn { color: #facc15; } #hud .bad { color: #f87171; }
+  #wrap { position: relative; width: 660px; max-width: 96vw; }
+  canvas {
+    width: 100%; height: auto; display: block; background: #111827;
+    border: 3px solid #38bdf8; border-radius: 12px; cursor: pointer;
+  }
+  .screen {
+    position: absolute; inset: 0; background: rgba(5, 10, 25, 0.94);
+    border-radius: 12px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 20px;
+  }
+  .hidden { display: none !important; }
+  .screen h2 { color: #38bdf8; font-size: 30px; margin-bottom: 10px; }
+  .screen p { color: #cbd5e1; line-height: 1.55; max-width: 520px; margin: 6px 0; font-size: 15px; }
+  .screen ul { text-align: left; color: #cbd5e1; line-height: 1.6; margin: 10px 0; font-size: 14px; }
+  button {
+    background: #0284c7; color: #fff; border: none; border-radius: 10px;
+    padding: 13px 30px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 14px;
+  }
+  button:hover { background: #0369a1; }
+  button.small { padding: 8px 16px; font-size: 14px; margin-top: 0; }
+  #controls { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  #status { margin-top: 10px; font-size: 15px; color: #facc15; min-height: 22px; text-align: center; }
+  #dpad { display: none; margin-top: 12px; gap: 6px; }
+  #dpad button { padding: 14px 20px; font-size: 20px; margin: 0; }
+  @media (max-width: 700px) { #dpad { display: grid; grid-template-columns: repeat(3, auto); } }
+</style>
+</head>
+<body>
+<h1>&#128230; COBALT COURIER</h1>
+<p class="tagline">Puzzle / Delivery Route Optimization &mdash; plan smart, drive smarter.</p>
+
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Lives: <b id="lives" class="good">3</b></span>
+  <span>Steps: <b id="steps">0</b> / <b id="budget">58</b></span>
+  <span>Deliveries: <b id="done">0</b> / <b id="total">6</b></span>
+  <span>Status: <b id="state">Ready</b></span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="660" height="480"></canvas>
+
+  <div id="titleScreen" class="screen">
+    <h2>COBALT COURIER</h2>
+    <p>You are the cobalt van driver for the whole downtown grid. Six parcels are waiting &mdash; deliver them all before your step budget runs out!</p>
+    <div style="text-align:left; max-width:540px;">
+      <h3 style="color:#38bdf8; margin:10px 0 4px;">How to Play</h3>
+      <ul>
+        <li><b>Move</b> with Arrow keys / WASD, click an adjacent street square, tap it on touch screens, or use the on-screen arrows.</li>
+        <li><b>Deliver</b> by driving onto a parcel square (letters A&ndash;F). Each delivery scores points.</li>
+        <li><b>One-way streets</b> (blue arrows) only let you exit in the arrow direction. Driving against one costs a life &mdash; 3 violations and your licence is suspended!</li>
+        <li><b>Traffic blocks</b> (red barriers) cannot be driven through at all. Plan around them.</li>
+        <li><b>Win</b> by delivering all 6 parcels within 58 steps. <b>Lose</b> by running out of steps or lives.</li>
+        <li>Press <b>H</b> or the Hint button to highlight the nearest undelivered parcel.</li>
+      </ul>
+    </div>
+    <button id="startBtn">Start Delivery Run</button>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button class="small" id="hintBtn">Hint (H)</button>
+  <button class="small" id="restartBtn2">Restart (R)</button>
+  <button class="small" id="muteBtn">Sound: On</button>
+</div>
+<div id="dpad">
+  <span></span><button data-dir="up">&#8593;</button><span></span>
+  <button data-dir="left">&#8592;</button><button data-dir="down">&#8595;</button><button data-dir="right">&#8594;</button>
+</div>
+<div id="status">Welcome, courier! Press Start to begin your route.</div>
+
+<script>
+"use strict";
+var canvas = document.getElementById("game");
+var ctx = canvas.getContext("2d");
+var COLS = 11, ROWS = 8, CELL = 60;
+var STEP_BUDGET = 58;
+var DIRS = { up: [0,-1], down: [0,1], left: [-1,0], right: [1,0] };
+
+// Map legend: "#" = traffic block, "." = open road.
+// One-way exits: ">" east only, "<" west only, "^" north only, "v" south only.
+// Depot "D", parcels "A".."F".
+var MAP = [
+  "D . . > > . # . A . .",
+  ". # . . . . . # . . .",
+  ". . # . B . . . . # .",
+  "> > . . # . . v . . .",
+  ". . . # . . . v . # .",
+  ". # . . . C . . . . .",
+  ". . . . # . # . . D2 .".replace("D2","E"),
+  ". . # . . . . F . # ."
+];
+// Parse map into grid
+var grid = [], depot = {x:0,y:0}, parcels = [];
+(function parseMap(){
+  for (var y = 0; y < ROWS; y++) {
+    var row = MAP[y].split(" ");
+    var grow = [];
+    for (var x = 0; x < COLS; x++) {
+      var c = row[x];
+      if (c === "D") depot = {x:x, y:y};
+      if (c >= "A" && c <= "F") parcels.push({x:x, y:y, label:c, done:false});
+      grow.push(c);
+    }
+    grid.push(grow);
+  }
+})();
+
+var state = "title"; // title | playing | win | lose
+var player = {x: depot.x, y: depot.y};
+var steps = 0, score = 0, lives = 3, hint = null, statusMsg = "";
+var soundOn = true, audioCtx = null;
+
+function $(id){ return document.getElementById(id); }
+
+function initAudio(){
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+function beep(freq, dur, type){
+  if (!soundOn || !audioCtx) return;
+  try {
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || "square"; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+function sfx(kind){
+  if (kind === "move") beep(300, 0.08, "square");
+  else if (kind === "deliver") { beep(523, 0.12, "sine"); setTimeout(function(){ beep(784, 0.18, "sine"); }, 90); }
+  else if (kind === "bad") beep(140, 0.25, "sawtooth");
+  else if (kind === "win") { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f,0.22,"triangle"); }, i*130); }); }
+  else if (kind === "lose") { [400,300,200,150].forEach(function(f,i){ setTimeout(function(){ beep(f,0.22,"sawtooth"); }, i*130); }); }
+}
+
+function isBlock(x, y){
+  if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return true;
+  return grid[y][x] === "#";
+}
+function oneWayDir(cell){
+  if (cell === ">") return "right";
+  if (cell === "<") return "left";
+  if (cell === "^") return "up";
+  if (cell === "v") return "down";
+  return null;
+}
+function setStatus(msg, cls){
+  statusMsg = msg;
+  var el = $("status"); el.textContent = msg;
+  el.style.color = cls === "bad" ? "#f87171" : cls === "good" ? "#4ade80" : "#facc15";
+}
+function updateHUD(){
+  $("score").textContent = score;
+  var lv = $("lives"); lv.textContent = lives;
+  lv.className = lives > 1 ? "good" : "bad";
+  $("steps").textContent = steps;
+  $("budget").textContent = STEP_BUDGET;
+  var d = parcels.filter(function(p){ return p.done; }).length;
+  $("done").textContent = d; $("total").textContent = parcels.length;
+  $("state").textContent = state === "playing" ? "Delivering" : state === "win" ? "Route Complete!" : state === "lose" ? "Game Over" : "Ready";
+}
+
+function tryMove(dir){
+  if (state !== "playing") return;
+  var d = DIRS[dir]; if (!d) return;
+  var nx = player.x + d[0], ny = player.y + d[1];
+  // One-way restriction: the cell you LEAVE may restrict your exit direction.
+  var cur = grid[player.y][player.x];
+  var ow = oneWayDir(cur);
+  if (ow && ow !== dir) {
+    lives--; sfx("bad");
+    setStatus("One-way violation! You may only leave that street heading " + ow + ". Lives left: " + lives, "bad");
+    if (lives <= 0) endGame(false, "Licence suspended after 3 one-way violations.");
+    updateHUD(); return;
+  }
+  if (isBlock(nx, ny)) {
+    sfx("bad");
+    setStatus("Traffic block ahead! That street is closed - re-plan your route.", "bad");
+    return;
+  }
+  player.x = nx; player.y = ny; steps++;
+  sfx("move");
+  // Delivery?
+  for (var i = 0; i < parcels.length; i++) {
+    var p = parcels[i];
+    if (!p.done && p.x === nx && p.y === ny) {
+      p.done = true;
+      var bonus = 100 + Math.max(0, (STEP_BUDGET - steps)) * 5;
+      score += bonus;
+      sfx("deliver");
+      setStatus("Parcel " + p.label + " delivered! +" + bonus + " points.", "good");
+    }
+  }
+  hint = null;
+  var delivered = parcels.filter(function(p){ return p.done; }).length;
+  if (delivered === parcels.length) {
+    score += Math.max(0, (STEP_BUDGET - steps)) * 10;
+    endGame(true, "All " + parcels.length + " parcels delivered in " + steps + " steps!");
+  } else if (steps >= STEP_BUDGET) {
+    endGame(false, "Step budget exhausted with " + delivered + " of " + parcels.length + " parcels delivered.");
+  } else {
+    setStatus("Steps left: " + (STEP_BUDGET - steps) + " - " + delivered + " of " + parcels.length + " parcels delivered.");
+  }
+  updateHUD();
+}
+
+function showHint(){
+  if (state !== "playing") return;
+  var best = null, bestD = 1e9;
+  parcels.forEach(function(p){
+    if (p.done) return;
+    var d = Math.abs(p.x - player.x) + Math.abs(p.y - player.y);
+    if (d < bestD) { bestD = d; best = p; }
+  });
+  if (best) { hint = best; setStatus("Nearest parcel: " + best.label + " - head toward the highlighted square!"); beep(660, 0.1, "sine"); }
+}
+
+function startGame(){
+  initAudio();
+  state = "playing";
+  player = {x: depot.x, y: depot.y};
+  steps = 0; score = 0; lives = 3; hint = null;
+  parcels.forEach(function(p){ p.done = false; });
+  $("titleScreen").classList.add("hidden");
+  $("endScreen").classList.add("hidden");
+  setStatus("Route started! Deliver all 6 parcels within " + STEP_BUDGET + " steps.");
+  updateHUD();
+}
+function endGame(won, msg){
+  state = won ? "win" : "lose";
+  $("endTitle").textContent = won ? "YOU WIN!" : "GAME OVER";
+  $("endText").textContent = msg;
+  $("endScore").textContent = "Final score: " + score + " | Steps: " + steps + " / " + STEP_BUDGET + " | Lives left: " + lives;
+  $("endScreen").classList.remove("hidden");
+  if (won) sfx("win"); else sfx("lose");
+  updateHUD();
+}
+
+function draw(){
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (var y = 0; y < ROWS; y++) {
+    for (var x = 0; x < COLS; x++) {
+      var px = x * CELL, py = y * CELL, c = grid[y][x];
+      // Road tile
+      ctx.fillStyle = (x + y) % 2 === 0 ? "#1f2937" : "#1a2433";
+      ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+      if (c === "#") {
+        ctx.fillStyle = "#7f1d1d";
+        ctx.fillRect(px + 4, py + 4, CELL - 8, CELL - 8);
+        ctx.fillStyle = "#f87171";
+        ctx.font = "bold 26px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("\u26D4", px + CELL/2, py + CELL/2);
+      } else if (oneWayDir(c)) {
+        ctx.fillStyle = "#0c4a6e";
+        ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+        ctx.fillStyle = "#38bdf8";
+        ctx.font = "bold 30px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        var arrow = c === ">" ? "\u2192" : c === "<" ? "\u2190" : c === "^" ? "\u2191" : "\u2193";
+        ctx.fillText(arrow, px + CELL/2, py + CELL/2);
+      } else if (c === "D") {
+        ctx.fillStyle = "#14532d";
+        ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+        ctx.fillStyle = "#4ade80"; ctx.font = "bold 13px Arial"; ctx.textAlign = "center";
+        ctx.fillText("DEPOT", px + CELL/2, py + CELL/2);
+      }
+    }
+  }
+  // Hint highlight
+  if (hint && state === "playing") {
+    ctx.strokeStyle = "#facc15"; ctx.lineWidth = 4;
+    ctx.strokeRect(hint.x * CELL + 3, hint.y * CELL + 3, CELL - 6, CELL - 6);
+  }
+  // Parcels
+  parcels.forEach(function(p){
+    if (p.done) return;
+    var px = p.x * CELL, py = p.y * CELL;
+    ctx.fillStyle = "#f59e0b";
+    ctx.fillRect(px + 12, py + 14, CELL - 24, CELL - 28);
+    ctx.fillStyle = "#78350f"; ctx.font = "bold 22px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(p.label, px + CELL/2, py + CELL/2);
+    ctx.fillStyle = "#fbbf24";
+    ctx.fillRect(px + 12, py + 14, CELL - 24, 6);
+  });
+  // Courier van
+  var vx = player.x * CELL, vy = player.y * CELL;
+  ctx.fillStyle = "#0284c7";
+  ctx.fillRect(vx + 8, vy + 12, CELL - 16, CELL - 24);
+  ctx.fillStyle = "#e0f2fe"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("VAN", vx + CELL/2, vy + CELL/2 + 2);
+  ctx.fillStyle = "#0b1020";
+  ctx.beginPath(); ctx.arc(vx + 18, vy + CELL - 10, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(vx + CELL - 18, vy + CELL - 10, 7, 0, Math.PI * 2); ctx.fill();
+  requestAnimationFrame(draw);
+}
+
+function cellFromEvent(e){
+  var r = canvas.getBoundingClientRect();
+  var cx = (e.clientX - r.left) * (canvas.width / r.width);
+  var cy = (e.clientY - r.top) * (canvas.height / r.height);
+  return { x: Math.floor(cx / CELL), y: Math.floor(cy / CELL) };
+}
+function pointerMove(e){
+  if (state !== "playing") return;
+  var cell = cellFromEvent(e);
+  var dx = cell.x - player.x, dy = cell.y - player.y;
+  if (Math.abs(dx) + Math.abs(dy) !== 1) {
+    setStatus("Tap an adjacent street square to move there.");
+    return;
+  }
+  var dir = dx === 1 ? "right" : dx === -1 ? "left" : dy === 1 ? "down" : "up";
+  tryMove(dir);
+}
+
+// Keyboard
+document.addEventListener("keydown", function(e){
+  if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") { e.preventDefault(); tryMove("up"); }
+  else if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") { e.preventDefault(); tryMove("down"); }
+  else if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") { e.preventDefault(); tryMove("left"); }
+  else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") { e.preventDefault(); tryMove("right"); }
+  else if (e.key === "h" || e.key === "H") showHint();
+  else if (e.key === "r" || e.key === "R") { if (state !== "title") startGame(); }
+  else if (e.key === "Enter" && state !== "playing") startGame();
+});
+// Mouse
+canvas.addEventListener("mousedown", function(e){ initAudio(); pointerMove(e); });
+canvas.addEventListener("click", function(e){ initAudio(); });
+// Touch (tap adjacent cell; swipe also moves)
+var touchStart = null;
+canvas.addEventListener("touchstart", function(e){
+  initAudio();
+  if (e.touches.length) touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener("touchend", function(e){
+  if (!touchStart) return;
+  var t = e.changedTouches[0];
+  var dx = t.clientX - touchStart.x, dy = t.clientY - touchStart.y;
+  if (Math.abs(dx) > 24 || Math.abs(dy) > 24) {
+    var dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+    tryMove(dir);
+  } else {
+    pointerMove(t);
+  }
+  touchStart = null;
+  e.preventDefault();
+}, { passive: false });
+
+// Buttons
+$("startBtn").addEventListener("click", startGame);
+$("restartBtn").addEventListener("click", startGame);
+$("restartBtn2").addEventListener("click", startGame);
+$("hintBtn").addEventListener("click", function(){ initAudio(); showHint(); });
+$("muteBtn").addEventListener("click", function(){
+  soundOn = !soundOn;
+  this.textContent = "Sound: " + (soundOn ? "On" : "Off");
+});
+document.querySelectorAll("#dpad button").forEach(function(b){
+  b.addEventListener("click", function(){ initAudio(); tryMove(b.getAttribute("data-dir")); });
+});
+
+updateHUD();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

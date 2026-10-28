@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Granite Gardener</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: Georgia, 'Times New Roman', serif; background: #1d2b1a; color: #f2ead8; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 12px; }
+  h1 { margin: 8px 0 2px; font-size: 30px; color: #cfe8a8; text-shadow: 2px 2px 0 #000; letter-spacing: 1px; }
+  .tagline { color: #a8c686; margin: 0 0 10px; font-style: italic; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 8px 0; font-size: 16px; }
+  #hud span { background: #2f4429; border: 2px solid #6b8f4e; border-radius: 10px; padding: 5px 12px; }
+  #hud b { color: #ffe08a; }
+  #wrap { position: relative; }
+  canvas { background: #3d5a2e; border: 4px solid #5d4630; border-radius: 12px; display: block; touch-action: none; max-width: 94vw; }
+  .overlay { position: absolute; inset: 0; background: rgba(15,25,12,0.93); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; z-index: 5; }
+  .overlay h2 { color: #cfe8a8; font-size: 28px; margin: 6px 0; }
+  .overlay p { max-width: 420px; line-height: 1.5; margin: 6px 0; }
+  .howto { background: #243b1e; border: 1px solid #6b8f4e; border-radius: 10px; padding: 10px 16px; text-align: left; max-width: 440px; }
+  .howto li { margin: 4px 0; }
+  button { cursor: pointer; font-family: inherit; font-size: 18px; font-weight: bold; background: #7cb85c; color: #15230f; border: 3px solid #d8f0b0; border-radius: 12px; padding: 10px 22px; margin: 6px; }
+  button:active { transform: scale(0.96); }
+  button.secondary { background: #e8d8a8; }
+  #controls { display: flex; flex-direction: column; align-items: center; margin-top: 10px; }
+  .drow { display: flex; gap: 6px; }
+  .dpad { width: 56px; height: 56px; font-size: 24px; padding: 0; }
+  #status { min-height: 24px; margin-top: 8px; font-weight: bold; color: #ffe08a; text-align: center; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<h1>&#127793; Granite Gardener &#127793;</h1>
+<p class="tagline">Push every granite boulder onto a mossy garden plot.</p>
+
+<div id="hud">
+  <span>Level: <b id="hudLevel">1 / 5</b></span>
+  <span>Score: <b id="hudScore">0</b></span>
+  <span>Lives: <b id="hudLives">&#10084;&#10084;&#10084;</b></span>
+  <span>Pushes: <b id="hudPushes">0 / 30</b></span>
+  <span>Status: <b id="hudStatus">Ready</b></span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="364" height="364"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Granite Gardener</h2>
+    <p>A quiet Sokoban-style garden puzzle. Shove heavy granite boulders onto the mossy plots — but boulders can only be pushed, never pulled, and every level has a push limit.</p>
+    <div class="howto">
+      <strong>How to Play</strong>
+      <ul>
+        <li><strong>Move:</strong> Arrow keys or WASD, the on-screen arrows, swipe, or tap a neighbouring tile.</li>
+        <li><strong>Push:</strong> Walk into a boulder to push it one square. It stops at walls and other boulders.</li>
+        <li><strong>Goal:</strong> Get every boulder onto a mossy plot to finish the garden.</li>
+        <li><strong>Push limit:</strong> Running out of pushes costs a life and restarts the level.</li>
+        <li><strong>Stuck?</strong> Press R or the Reset button. A boulder wedged in a corner can never move again.</li>
+        <li>Complete all 5 garden layouts to win. You have 3 lives.</li>
+      </ul>
+    </div>
+    <button id="startBtn">Start Gardening</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Play Again</button>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<div id="controls">
+  <div class="drow"><button class="dpad" data-dir="0,-1" aria-label="Up">&#8593;</button></div>
+  <div class="drow">
+    <button class="dpad" data-dir="-1,0" aria-label="Left">&#8592;</button>
+    <button class="dpad" data-dir="0,1" aria-label="Down">&#8595;</button>
+    <button class="dpad" data-dir="1,0" aria-label="Right">&#8594;</button>
+  </div>
+  <div class="drow">
+    <button id="resetBtn" class="secondary">Reset Level (R)</button>
+    <button id="muteBtn" class="secondary">Sound: On</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var TILE = 52;
+
+  // Level maps: # wall, . floor, G goal plot, B boulder, P player
+  var LEVELS = [
+    { name: 'Herb Corner', limit: 30, map: [
+      '#######',
+      '#.....#',
+      '#.G.B.#',
+      '#..P..#',
+      '#.B.G.#',
+      '#.....#',
+      '#######'
+    ]},
+    { name: 'Sunny Meadow', limit: 40, map: [
+      '#########',
+      '#.......#',
+      '#.G.B...#',
+      '#...P...#',
+      '#..B..G.#',
+      '#.......#',
+      '#########'
+    ]},
+    { name: 'Three Plot Row', limit: 60, map: [
+      '#########',
+      '#.......#',
+      '#.G.B.G.#',
+      '#..P....#',
+      '#.B...B.#',
+      '#..G....#',
+      '#.......#',
+      '#########'
+    ]},
+    { name: 'Stone Wall Garden', limit: 80, map: [
+      '##########',
+      '#........#',
+      '#.G.#.B..#',
+      '#...#..P.#',
+      '#.B.#..G.#',
+      '#.B..G...#',
+      '#........#',
+      '##########'
+    ]},
+    { name: 'Grand Estate', limit: 100, map: [
+      '##########',
+      '#........#',
+      '#.G.B..G.#',
+      '#..P.....#',
+      '#.B....B.#',
+      '#...G....#',
+      '#.B....G.#',
+      '#........#',
+      '##########'
+    ]}
+  ];
+
+  var levelIndex = 0, walls = [], goals = {}, boulders = [], player = {x:0, y:0};
+  var pushes = 0, score = 0, lives = 3, started = false, over = false;
+  var placedCount = 0, animTime = 0, soundOn = true, audioCtx = null;
+  var statusEl = document.getElementById('status');
+
+  function key(x, y) { return x + ',' + y; }
+  function isWall(x, y) {
+    if (x < 0 || y < 0 || y >= walls.length || x >= walls[0].length) return true;
+    return walls[y][x];
+  }
+  function boulderAt(x, y) {
+    for (var i = 0; i < boulders.length; i++) {
+      if (boulders[i].x === x && boulders[i].y === y) return i;
+    }
+    return -1;
+  }
+  function isSolid(x, y) { return isWall(x, y) || boulderAt(x, y) >= 0; }
+
+  function loadLevel(idx) {
+    var lvl = LEVELS[idx];
+    walls = []; goals = {}; boulders = []; pushes = 0; placedCount = 0;
+    lvl.map.forEach(function (row, y) {
+      var wrow = [];
+      for (var x = 0; x < row.length; x++) {
+        var c = row.charAt(x);
+        wrow.push(c === '#');
+        if (c === 'G') goals[key(x, y)] = true;
+        if (c === 'B') boulders.push({x: x, y: y});
+        if (c === 'P') player = {x: x, y: y};
+      }
+      walls.push(wrow);
+    });
+    canvas.width = walls[0].length * TILE;
+    canvas.height = walls.length * TILE;
+    updateHUD();
+    setStatus('Garden: ' + lvl.name + ' — push boulders onto the mossy plots!');
+  }
+
+  function countPlaced() {
+    var n = 0;
+    boulders.forEach(function (b) { if (goals[key(b.x, b.y)]) n++; });
+    return n;
+  }
+
+  function isDeadlocked(b) {
+    if (goals[key(b.x, b.y)]) return false;
+    var up = isSolid(b.x, b.y - 1), down = isSolid(b.x, b.y + 1);
+    var left = isSolid(b.x - 1, b.y), right = isSolid(b.x + 1, b.y);
+    return (up && left) || (up && right) || (down && left) || (down && right);
+  }
+
+  function anyDeadlock() {
+    for (var i = 0; i < boulders.length; i++) if (isDeadlocked(boulders[i])) return true;
+    return false;
+  }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (kind === 'step') tone(220, 0.08, 'triangle', 0.06);
+    if (kind === 'push') { tone(90, 0.16, 'square', 0.12); tone(140, 0.1, 'triangle', 0.08); }
+    if (kind === 'place') { tone(520, 0.12, 'sine', 0.12); setTimeout(function(){ tone(780, 0.18, 'sine', 0.12); }, 90); }
+    if (kind === 'bump') tone(70, 0.08, 'square', 0.07);
+    if (kind === 'win') [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function(){ tone(f, 0.25, 'sine', 0.12); }, i * 120); });
+    if (kind === 'lose') [330, 262, 196].forEach(function (f, i) { setTimeout(function(){ tone(f, 0.22, 'sawtooth', 0.08); }, i * 140); });
+  }
+
+  function updateHUD() {
+    document.getElementById('hudLevel').textContent = (levelIndex + 1) + ' / ' + LEVELS.length;
+    document.getElementById('hudScore').textContent = score;
+    document.getElementById('hudLives').textContent = '\u2764'.repeat(Math.max(0, lives));
+    document.getElementById('hudPushes').textContent = pushes + ' / ' + LEVELS[levelIndex].limit;
+    document.getElementById('hudStatus').textContent = over ? 'Finished' : (started ? LEVELS[levelIndex].name : 'Ready');
+  }
+  function setStatus(msg) { statusEl.textContent = msg; }
+
+  function loseLife(reason) {
+    lives--;
+    sfx('lose');
+    updateHUD();
+    if (lives <= 0) { endGame(false, reason); }
+    else { setStatus(reason + ' You lose a life. Restarting this garden...'); setTimeout(function () { loadLevel(levelIndex); }, 900); }
+  }
+
+  function tryMove(dx, dy) {
+    if (!started || over) return;
+    var nx = player.x + dx, ny = player.y + dy;
+    if (isWall(nx, ny)) { sfx('bump'); return; }
+    var bi = boulderAt(nx, ny);
+    if (bi >= 0) {
+      var bx = nx + dx, by = ny + dy;
+      if (isSolid(bx, by)) { sfx('bump'); setStatus('That boulder cannot move there.'); return; }
+      var wasPlaced = !!goals[key(nx, ny)];
+      boulders[bi].x = bx; boulders[bi].y = by;
+      player.x = nx; player.y = ny;
+      pushes++; score += 25;
+      sfx('push');
+      if (!wasPlaced && goals[key(bx, by)]) { score += 200; sfx('place'); setStatus('A boulder settles onto a mossy plot!'); }
+      if (pushes > LEVELS[levelIndex].limit) { loseLife('Push limit reached!'); return; }
+    } else {
+      player.x = nx; player.y = ny;
+      sfx('step');
+    }
+    placedCount = countPlaced();
+    updateHUD();
+    if (placedCount === boulders.length) {
+      score += 500 + Math.max(0, LEVELS[levelIndex].limit - pushes) * 5;
+      sfx('win');
+      if (levelIndex + 1 >= LEVELS.length) {
+        endGame(true, 'All 5 gardens complete!');
+      } else {
+        setStatus('Garden complete! Moving to the next layout...');
+        levelIndex++;
+        setTimeout(function () { loadLevel(levelIndex); }, 1000);
+      }
+      updateHUD();
+    } else if (anyDeadlock()) {
+      setStatus('Deadlock! A boulder is wedged in a corner — press Reset Level.');
+    }
+  }
+
+  function endGame(won, msg) {
+    over = true;
+    document.getElementById('endTitle').textContent = won ? 'You Win! \u2728' : 'Game Over';
+    document.getElementById('endText').textContent = (won ? 'Every garden is planted and every boulder rests on moss. ' : msg + ' ') + 'Final score: ' + score + '. Gardens completed: ' + (won ? 5 : levelIndex) + ' of 5.';
+    document.getElementById('endScreen').classList.remove('hidden');
+    updateHUD();
+  }
+
+  function startGame() {
+    initAudio();
+    levelIndex = 0; score = 0; lives = 3; started = true; over = false;
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    loadLevel(0);
+    sfx('win');
+  }
+  function resetLevel() {
+    if (!started || over) return;
+    initAudio();
+    loadLevel(levelIndex);
+    setStatus('Level reset. Pushes restored.');
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('resetBtn').addEventListener('click', resetLevel);
+  document.getElementById('muteBtn').addEventListener('click', function (e) {
+    soundOn = !soundOn;
+    e.target.textContent = 'Sound: ' + (soundOn ? 'On' : 'Off');
+    if (soundOn) initAudio();
+  });
+  document.querySelectorAll('.dpad').forEach(function (btn) {
+    function go(ev) {
+      ev.preventDefault();
+      initAudio();
+      var parts = btn.getAttribute('data-dir').split(',');
+      tryMove(parseInt(parts[0], 10), parseInt(parts[1], 10));
+    }
+    btn.addEventListener('click', go);
+    btn.addEventListener('touchstart', go, {passive: false});
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !started) { startGame(); return; }
+    if (e.key === 'Enter' && over) { startGame(); return; }
+    if (e.key === 'r' || e.key === 'R') { resetLevel(); return; }
+    var dx = 0, dy = 0;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') dy = -1;
+    else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') dy = 1;
+    else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') dx = -1;
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') dx = 1;
+    else return;
+    e.preventDefault();
+    initAudio();
+    tryMove(dx, dy);
+  });
+
+  function canvasCell(ev) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = Math.floor((ev.clientX - rect.left) / rect.width * walls[0].length);
+    var cy = Math.floor((ev.clientY - rect.top) / rect.height * walls.length);
+    var dx = cx - player.x, dy = cy - player.y;
+    if (Math.abs(dx) + Math.abs(dy) === 1) tryMove(dx, dy);
+    else if (Math.abs(dx) > Math.abs(dy)) tryMove(dx > 0 ? 1 : -1, 0);
+    else if (dy !== 0) tryMove(0, dy > 0 ? 1 : -1);
+  }
+  canvas.addEventListener('click', function (ev) { initAudio(); canvasCell(ev); });
+  var touchX = null, touchY = null;
+  canvas.addEventListener('touchstart', function (ev) {
+    initAudio();
+    var t = ev.touches[0];
+    touchX = t.clientX; touchY = t.clientY;
+  }, {passive: true});
+  canvas.addEventListener('touchend', function (ev) {
+    if (touchX === null) return;
+    var t = ev.changedTouches[0];
+    var dx = t.clientX - touchX, dy = t.clientY - touchY;
+    touchX = null; touchY = null;
+    if (Math.abs(dx) < 12 && Math.abs(dy) < 12) { canvasCell(t); return; }
+    ev.preventDefault();
+    if (Math.abs(dx) > Math.abs(dy)) tryMove(dx > 0 ? 1 : -1, 0);
+    else tryMove(0, dy > 0 ? 1 : -1);
+  }, {passive: false});
+  canvas.addEventListener('mousedown', function (ev) { initAudio(); });
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    var pulse = 0.5 + 0.5 * Math.sin(animTime / 400);
+    for (var y = 0; y < walls.length; y++) {
+      for (var x = 0; x < walls[0].length; x++) {
+        var px = x * TILE, py = y * TILE;
+        if (walls[y][x]) {
+          ctx.fillStyle = '#5d4630'; ctx.fillRect(px, py, TILE, TILE);
+          ctx.fillStyle = '#7a5f42'; ctx.fillRect(px + 4, py + 4, TILE - 8, TILE - 8);
+          ctx.fillStyle = '#4a3826'; ctx.fillRect(px + 10, py + 14, 12, 8); ctx.fillRect(px + 30, py + 30, 12, 8);
+        } else {
+          ctx.fillStyle = ((x + y) % 2 === 0) ? '#4a6b34' : '#435f2f';
+          ctx.fillRect(px, py, TILE, TILE);
+        }
+        if (goals[key(x, y)]) {
+          ctx.fillStyle = 'rgba(120, 220, 110, ' + (0.55 + 0.35 * pulse) + ')';
+          ctx.beginPath(); ctx.arc(px + TILE / 2, py + TILE / 2, 20, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#2e7d32';
+          ctx.beginPath(); ctx.arc(px + TILE / 2 - 8, py + TILE / 2 - 6, 5, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(px + TILE / 2 + 9, py + TILE / 2 + 7, 5, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#ffe08a';
+          ctx.beginPath(); ctx.arc(px + TILE / 2 + 4, py + TILE / 2 - 9, 3, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+    boulders.forEach(function (b) {
+      var px = b.x * TILE, py = b.y * TILE;
+      ctx.fillStyle = goals[key(b.x, b.y)] ? '#8f9aa5' : '#7d8791';
+      ctx.beginPath(); ctx.arc(px + TILE / 2, py + TILE / 2, 21, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#4c545e'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = '#5c656f';
+      ctx.beginPath(); ctx.arc(px + 18, py + 18, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px + 34, py + 30, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px + 26, py + 38, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    var px = player.x * TILE, py = player.y * TILE;
+    ctx.fillStyle = '#8b5a2b';
+    ctx.beginPath(); ctx.arc(px + TILE / 2, py + TILE / 2 + 4, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#f2c89b';
+    ctx.beginPath(); ctx.arc(px + TILE / 2, py + TILE / 2 - 6, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#3e7d32';
+    ctx.beginPath(); ctx.arc(px + TILE / 2, py + TILE / 2 - 12, 13, 0, Math.PI); ctx.fill();
+    ctx.fillRect(px + TILE / 2 - 13, py + TILE / 2 - 13, 26, 4);
+  }
+
+  function loop(ts) {
+    animTime = ts;
+    draw();
+    requestAnimationFrame(loop);
+  }
+  loadLevel(0);
+  started = false;
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

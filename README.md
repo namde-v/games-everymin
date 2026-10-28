@@ -4,9 +4,9 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 390
-- **Latest game:** 0390 — Marble Machinist
-- **Current volume:** 004 (Games 0301 to 0400)
+- **Total games:** 400
+- **Latest game:** 0400 — Jubilee Jester
+- **Current volume:** 005 (Games 0401 to 0500)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
 ## Volume index
@@ -16,7 +16,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
-| 004 | 0301–0400 (90 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
+| 004 | 0301–0400 (100, complete) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
+| 005 | 0401–0500 (0 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -30,20 +31,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 039
+## Latest batch — Batch 040
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0381 | Juniper Juggler | Arcade / Ball Juggling Catch | [Play](./games/game-0381.html) |
-| 0382 | Obsidian Oracle | Puzzle / Rune Prediction Logic | [Play](./games/game-0382.html) |
-| 0383 | Willow Warden | Strategy / Forest Tower Defense | [Play](./games/game-0383.html) |
-| 0384 | Tempo Trawler | Rhythm / Beat Fishing | [Play](./games/game-0384.html) |
-| 0385 | Boulder Bard | Arcade / Downhill Boulder Roll | [Play](./games/game-0385.html) |
-| 0386 | Moss Merchant | Strategy / Market Trading | [Play](./games/game-0386.html) |
-| 0387 | Solar Sorter | Puzzle / Spectrum Sorting | [Play](./games/game-0387.html) |
-| 0388 | Hollow Harvester | Arcade / Cave Harvesting | [Play](./games/game-0388.html) |
-| 0389 | Zephyr Zookeeper | Strategy / Wind Aviary Management | [Play](./games/game-0389.html) |
-| 0390 | Marble Machinist | Puzzle / Marble Machine Routing | [Play](./games/game-0390.html) |
+| 0391 | Polaris Bowmaster | Arcade / Archery Timing | [Play](./games/game-0391.html) |
+| 0392 | Brine Brigadier | Strategy / Naval Blockade Tactics | [Play](./games/game-0392.html) |
+| 0393 | Cobalt Courier | Puzzle / Delivery Route Optimization | [Play](./games/game-0393.html) |
+| 0394 | Dune Diplomat | Strategy / Negotiation Choices | [Play](./games/game-0394.html) |
+| 0395 | Ember Acrobat | Rhythm / Beat Leap Timing | [Play](./games/game-0395.html) |
+| 0396 | Fjord Forager | Arcade / Foraging Identification | [Play](./games/game-0396.html) |
+| 0397 | Granite Gardener | Puzzle / Stone Pushing | [Play](./games/game-0397.html) |
+| 0398 | Harbor Harpist | Rhythm / Melody Matching | [Play](./games/game-0398.html) |
+| 0399 | Ivory Inventor | Puzzle / Contraption Wiring | [Play](./games/game-0399.html) |
+| 0400 | Jubilee Jester | Arcade / Balloon Pop Precision | [Play](./games/game-0400.html) |
 
 
 

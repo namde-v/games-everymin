@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ember Acrobat</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #1a0f0a;
+    color: #fff3e0;
+    font-family: Georgia, 'Times New Roman', serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px;
+    -webkit-user-select: none; user-select: none; touch-action: manipulation;
+  }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #ffb347; text-shadow: 0 0 18px rgba(255,140,0,.7); margin: 6px 0 2px; }
+  .sub { font-size: 13px; color: #ffcc99; margin-bottom: 10px; }
+  #wrap { position: relative; width: min(96vw, 760px); }
+  canvas {
+    display: block; width: 100%; height: auto; aspect-ratio: 760 / 460;
+    background: linear-gradient(#2b1420, #120a12);
+    border: 3px solid #ff8c42; border-radius: 14px;
+    box-shadow: 0 0 30px rgba(255,120,0,.35);
+  }
+  #hud {
+    display: flex; justify-content: space-between; align-items: center;
+    width: min(96vw, 760px); margin: 0 0 8px;
+    font-size: 17px; font-weight: bold;
+  }
+  #hud span { background: #3a1f14; border: 1px solid #ff8c42; border-radius: 8px; padding: 5px 12px; }
+  #hud .lives { color: #ff6b6b; }
+  #hud .combo { color: #ffd93d; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(10, 4, 8, 0.82); border-radius: 14px; padding: 20px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffb347; margin-bottom: 8px; }
+  .overlay p { max-width: 520px; font-size: 15px; line-height: 1.55; color: #ffe8d0; margin: 4px 0; }
+  .howto { text-align: left; background: rgba(255,140,66,.12); border: 1px solid #ff8c42;
+    border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 14px; line-height: 1.6; }
+  .howto b { color: #ffd93d; }
+  button {
+    margin-top: 14px; font-size: 20px; font-weight: bold; cursor: pointer;
+    color: #2b1200; background: linear-gradient(#ffd93d, #ff8c42);
+    border: none; border-radius: 12px; padding: 12px 34px;
+    box-shadow: 0 4px 0 #b3541e; transition: transform .08s;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b3541e; }
+  #jumpBtn {
+    width: min(96vw, 760px); margin-top: 10px; padding: 16px; font-size: 22px;
+  }
+  .hint { font-size: 13px; color: #ffbfa0; margin-top: 8px; }
+  #beatbar { width: min(96vw, 760px); height: 12px; background: #2a1a14; border-radius: 6px; margin-top: 8px; overflow: hidden; }
+  #beatfill { height: 100%; width: 0%; background: linear-gradient(90deg, #ff8c42, #ffd93d); }
+  #msg { font-size: 20px; font-weight: bold; color: #ffd93d; min-height: 26px; margin-top: 6px; text-shadow: 0 0 10px rgba(255,200,0,.6); }
+</style>
+</head>
+<body>
+<h1>&#x1F525; EMBER ACROBAT &#x1F525;</h1>
+<div class="sub">Rhythm / Beat Leap Timing &mdash; leap the burning platforms in time with the beat!</div>
+
+<div id="hud">
+  <span id="score">Score: 0</span>
+  <span id="combo" class="combo">Combo: x0</span>
+  <span id="platform">Platform: 1 / 12</span>
+  <span id="lives" class="lives">&#10084; &#10084; &#10084;</span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="460"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Ember Acrobat</h2>
+    <p>The big top is on fire &mdash; literally! Leap from platform to platform above the flames, landing exactly on the beat. Perfect timing builds your combo; sloppy jumps wobble your balance.</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      &#8226; Press <b>SPACE</b>, click <b>LEAP!</b>, or <b>tap the screen</b> to jump.<br>
+      &#8226; Jump when the beat pulse hits the gold zone for a <b>PERFECT</b> leap (+100, combo up).<br>
+      &#8226; Early or late jumps still land, but cost balance and break your combo.<br>
+      &#8226; A badly mistimed jump makes you <b>fall</b> &mdash; 3 falls ends the run.<br>
+      &#8226; Reach the golden <b>Finale Platform (12)</b> to win the show!
+    </div>
+    <button id="startBtn">Start the Show</button>
+    <div class="hint">Sound starts after you press Start. Headphones recommended.</div>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+
+<div id="beatbar"><div id="beatfill"></div></div>
+<div id="msg"></div>
+<button id="jumpBtn">LEAP!</button>
+<div class="hint">Keyboard: Space / Up Arrow &nbsp;|&nbsp; Mouse: click LEAP! &nbsp;|&nbsp; Touch: tap anywhere on the canvas or LEAP!</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var platformEl = document.getElementById('platform');
+  var livesEl = document.getElementById('lives');
+  var msgEl = document.getElementById('msg');
+  var beatfill = document.getElementById('beatfill');
+
+  var TOTAL_PLATFORMS = 12;
+  var BPM = 112;
+  var BEAT_MS = 60000 / BPM; // ~536 ms per beat
+  var PERFECT_MS = 90;       // perfect window either side of the beat
+  var OK_MS = 200;           // acceptable window; beyond this = fall
+
+  var state = 'title'; // title | playing | falling | over
+  var score = 0, combo = 0, lives = 3, current = 0; // current platform index 0..11
+  var balance = 100;
+  var startTime = 0, lastBeat = 0, beatPhase = 0;
+  var acrobat = { x: 0, y: 0, vx: 0, vy: 0, jumping: false, wobble: 0, fallY: 0 };
+  var particles = [];
+  var msgTimer = 0;
+  var audioCtx = null, beatTimer = null;
+
+  // Platforms: rising staircase of burning platforms across the stage.
+  var platforms = [];
+  function buildPlatforms() {
+    platforms = [];
+    var x = 60, y = 400;
+    for (var i = 0; i < TOTAL_PLATFORMS; i++) {
+      platforms.push({ x: x, y: y, w: i === TOTAL_PLATFORMS - 1 ? 130 : 96, h: 16, gold: i === TOTAL_PLATFORMS - 1 });
+      x += 58 + (i % 3) * 8;
+      y -= 26 + (i % 4) * 4;
+      if (x > 620) x = 620;
+      if (y < 90) y = 110;
+    }
+  }
+  buildPlatforms();
+
+  function resetRun() {
+    score = 0; combo = 0; lives = 3; current = 0; balance = 100;
+    acrobat.jumping = false; acrobat.wobble = 0; acrobat.fallY = 0;
+    particles = [];
+    placeAcrobat();
+    updateHUD();
+    msgEl.textContent = '';
+  }
+
+  function placeAcrobat() {
+    var p = platforms[current];
+    acrobat.x = p.x + p.w / 2;
+    acrobat.y = p.y - 26;
+    acrobat.vx = 0; acrobat.vy = 0;
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = 'Score: ' + score;
+    comboEl.textContent = 'Combo: x' + combo;
+    platformEl.textContent = 'Platform: ' + (current + 1) + ' / ' + TOTAL_PLATFORMS;
+    var hearts = '';
+    for (var i = 0; i < lives; i++) hearts += '\u2764 ';
+    livesEl.innerHTML = hearts.trim() || 'No lives left';
+  }
+
+  function showMsg(text, color) {
+    msgEl.textContent = text;
+    msgEl.style.color = color || '#ffd93d';
+    msgTimer = 90;
+  }
+
+  // ---------- Procedural Web Audio (created only after user interaction) ----------
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = when || audioCtx.currentTime;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.18, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function beatSound() {
+    tone(160, 0.12, 'sine', 0.35);
+    tone(320, 0.08, 'triangle', 0.12, audioCtx ? audioCtx.currentTime + 0.01 : 0);
+  }
+  function perfectSound() { tone(660, 0.15, 'sine', 0.22); tone(880, 0.2, 'sine', 0.22, audioCtx ? audioCtx.currentTime + 0.08 : 0); }
+  function okSound() { tone(440, 0.12, 'triangle', 0.18); }
+  function fallSound() { tone(220, 0.4, 'sawtooth', 0.2); tone(110, 0.5, 'sawtooth', 0.2, audioCtx ? audioCtx.currentTime + 0.1 : 0); }
+  function winSound() {
+    if (!audioCtx) return;
+    [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.3, 'sine', 0.22, audioCtx.currentTime + i * 0.15); });
+  }
+  function startBeatLoop() {
+    stopBeatLoop();
+    beatTimer = setInterval(function () {
+      if (state === 'playing') beatSound();
+    }, BEAT_MS);
+  }
+  function stopBeatLoop() { if (beatTimer) { clearInterval(beatTimer); beatTimer = null; } }
+
+  // ---------- Jump / timing ----------
+  function timeToNearestBeat(now) {
+    var elapsed = now - startTime;
+    var phase = elapsed % BEAT_MS;
+    var dist = Math.min(phase, BEAT_MS - phase);
+    return dist;
+  }
+
+  function doJump() {
+    if (state !== 'playing') return;
+    if (acrobat.jumping) return;
+    var now = performance.now();
+    var dist = timeToNearestBeat(now);
+    var next = platforms[current + 1];
+    if (!next) return;
+
+    if (dist <= PERFECT_MS) {
+      combo++;
+      score += 100 + combo * 10;
+      balance = Math.min(100, balance + 15);
+      showMsg('PERFECT! +' + (100 + combo * 10), '#ffd93d');
+      perfectSound();
+      burst(acrobat.x, acrobat.y, '#ffd93d', 14);
+      leapTo(next, 0);
+    } else if (dist <= OK_MS) {
+      combo = 0;
+      score += 40;
+      balance -= 25;
+      acrobat.wobble = 12;
+      showMsg(dist < BEAT_MS / 2 ? 'A bit early... +40' : 'A bit late... +40', '#ffb347');
+      okSound();
+      burst(acrobat.x, acrobat.y, '#ff8c42', 8);
+      leapTo(next, 1);
+    } else {
+      // Badly mistimed: lose balance and fall.
+      combo = 0;
+      lives--;
+      acrobat.jumping = true;
+      acrobat.fallY = acrobat.y;
+      state = 'falling';
+      fallSound();
+      showMsg('MISTIMED! You slip off the platform!', '#ff6b6b');
+      burst(acrobat.x, acrobat.y, '#ff4444', 18);
+      updateHUD();
+      setTimeout(function () {
+        if (lives <= 0) { endGame(false); }
+        else { current = Math.max(0, current - 1); placeAcrobat(); state = 'playing'; acrobat.jumping = false; showMsg('Back on your feet! ' + lives + ' lives left', '#ffb347'); }
+      }, 900);
+    }
+    updateHUD();
+  }
+
+  function leapTo(next, wobbleLevel) {
+    acrobat.jumping = true;
+    acrobat.wobble = wobbleLevel * 10;
+    var tx = next.x + next.w / 2;
+    var ty = next.y - 26;
+    var sx = acrobat.x, sy = acrobat.y;
+    var steps = 22, step = 0;
+    var anim = setInterval(function () {
+      step++;
+      var t = step / steps;
+      acrobat.x = sx + (tx - sx) * t;
+      acrobat.y = sy + (ty - sy) * t - Math.sin(t * Math.PI) * 70;
+      if (step >= steps) {
+        clearInterval(anim);
+        current++;
+        placeAcrobat();
+        acrobat.jumping = false;
+        if (current === TOTAL_PLATFORMS - 1) { endGame(true); }
+        else { updateHUD(); }
+      }
+    }, 16);
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 4, vy: -Math.random() * 3 - 1, life: 30 + Math.random() * 20, color: color });
+    }
+  }
+
+  function endGame(won) {
+    state = 'over';
+    stopBeatLoop();
+    if (won) {
+      winSound();
+      endTitle.textContent = 'STANDING OVATION!';
+      endText.textContent = 'You reached the Finale Platform! The crowd goes wild as the ember acrobat takes a bow above the flames.';
+      endScore.textContent = 'Final Score: ' + score + '  |  Lives left: ' + lives;
+    } else {
+      endTitle.textContent = 'THE SHOW MUST... STOP';
+      endText.textContent = 'Three falls and the curtain drops. The embers flicker out, but the big top believes in you. Try again!';
+      endScore.textContent = 'Final Score: ' + score + '  |  Reached Platform: ' + (current + 1) + ' / ' + TOTAL_PLATFORMS;
+    }
+    endScreen.classList.remove('hidden');
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetRun();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    startTime = performance.now();
+    startBeatLoop();
+    showMsg('Listen for the beat... LEAP on the pulse!', '#ffd93d');
+  }
+
+  // ---------- Drawing ----------
+  function drawBackground() {
+    var g = ctx.createLinearGradient(0, 0, 0, 460);
+    g.addColorStop(0, '#33152a'); g.addColorStop(0.6, '#1c0f1e'); g.addColorStop(1, '#120a12');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 760, 460);
+    // Tent stripes
+    ctx.fillStyle = 'rgba(255,140,66,0.10)';
+    for (var i = 0; i < 8; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 110, 0); ctx.lineTo(i * 110 + 40, 0); ctx.lineTo(380, 200); ctx.closePath(); ctx.fill();
+    }
+    // Flames at the bottom
+    for (var f = 0; f < 12; f++) {
+      var fx = f * 66 + 10, fh = 30 + ((f * 37) % 30);
+      var fg = ctx.createLinearGradient(0, 460, 0, 460 - fh);
+      fg.addColorStop(0, '#ff5722'); fg.addColorStop(1, '#ffd93d');
+      ctx.fillStyle = fg;
+      ctx.beginPath();
+      ctx.moveTo(fx, 460); ctx.quadraticCurveTo(fx + 14, 460 - fh, fx + 28, 460);
+      ctx.quadraticCurveTo(fx + 14, 460 - fh * 0.4, fx, 460);
+      ctx.fill();
+    }
+  }
+
+  function drawPlatforms() {
+    platforms.forEach(function (p, i) {
+      var active = i === current;
+      ctx.fillStyle = p.gold ? '#ffd93d' : (active ? '#ff8c42' : '#7a4a2b');
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(p.x, p.y, p.w, 4);
+      if (p.gold) {
+        ctx.fillStyle = '#fff3c4';
+        ctx.font = 'bold 13px Georgia';
+        ctx.fillText('FINALE', p.x + 34, p.y - 8);
+      }
+      if (active) {
+        ctx.strokeStyle = '#ffd93d'; ctx.lineWidth = 2;
+        ctx.strokeRect(p.x - 3, p.y - 3, p.w + 6, p.h + 6);
+      }
+    });
+  }
+
+  function drawAcrobat() {
+    var wob = acrobat.wobble > 0 ? Math.sin(performance.now() / 40) * acrobat.wobble * 0.4 : 0;
+    var x = acrobat.x + wob;
+    var y = acrobat.y;
+    if (state === 'falling') y = acrobat.fallY + 40;
+    // Body
+    ctx.strokeStyle = '#ffe8d0'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 22); ctx.stroke();
+    // Arms (trapeze pose)
+    ctx.beginPath(); ctx.moveTo(x, y + 8); ctx.lineTo(x - 16, y - 4); ctx.moveTo(x, y + 8); ctx.lineTo(x + 16, y - 4); ctx.stroke();
+    // Legs
+    ctx.beginPath(); ctx.moveTo(x, y + 22); ctx.lineTo(x - 10, y + 38); ctx.moveTo(x, y + 22); ctx.lineTo(x + 10, y + 38); ctx.stroke();
+    // Head
+    ctx.fillStyle = '#ffcc99';
+    ctx.beginPath(); ctx.arc(x, y - 8, 9, 0, Math.PI * 2); ctx.fill();
+    // Ember hair
+    ctx.fillStyle = '#ff5722';
+    ctx.beginPath(); ctx.arc(x, y - 14, 6, Math.PI, Math.PI * 2); ctx.fill();
+    // Spark trail
+    ctx.fillStyle = 'rgba(255,200,60,0.7)';
+    ctx.beginPath(); ctx.arc(x + (Math.random() - 0.5) * 8, y - 18, 2.5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawBeatIndicator() {
+    if (state !== 'playing') return;
+    var now = performance.now();
+    var elapsed = now - startTime;
+    var phase = (elapsed % BEAT_MS) / BEAT_MS; // 0..1
+    var dist = Math.min(phase, 1 - phase) * BEAT_MS;
+    var inPerfect = dist <= PERFECT_MS;
+    var inOk = dist <= OK_MS;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(280, 12, 200, 34);
+    ctx.strokeStyle = inPerfect ? '#ffd93d' : (inOk ? '#ff8c42' : '#666');
+    ctx.lineWidth = 2; ctx.strokeRect(280, 12, 200, 34);
+    // Pulse dot sweeping to the gold zone
+    var dotX = 280 + phase * 200;
+    ctx.fillStyle = inPerfect ? '#ffd93d' : '#ff8c42';
+    ctx.beginPath(); ctx.arc(dotX, 29, 9, 0, Math.PI * 2); ctx.fill();
+    // Gold zone at centre
+    ctx.fillStyle = 'rgba(255,217,61,0.35)';
+    ctx.fillRect(370, 12, 20, 34);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px Georgia';
+    ctx.fillText(inPerfect ? 'PERFECT ZONE!' : (inOk ? 'Close...' : 'Wait for the beat...'), 300, 62);
+  }
+
+  function drawParticles() {
+    particles = particles.filter(function (p) { return p.life > 0; });
+    particles.forEach(function (p) {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--;
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, p.life / 40);
+      ctx.fillRect(p.x, p.y, 4, 4);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function drawBalance() {
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(12, 12, 130, 20);
+    ctx.fillStyle = balance > 50 ? '#4caf50' : (balance > 25 ? '#ff9800' : '#f44336');
+    ctx.fillRect(14, 14, 126 * (balance / 100), 16);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Georgia';
+    ctx.fillText('Balance', 16, 26);
+  }
+
+  function loop() {
+    drawBackground();
+    drawPlatforms();
+    drawParticles();
+    drawAcrobat();
+    drawBeatIndicator();
+    drawBalance();
+    if (acrobat.wobble > 0) acrobat.wobble -= 0.4;
+    if (msgTimer > 0) { msgTimer--; if (msgTimer === 0) msgEl.textContent = ''; }
+    if (state === 'playing') {
+      var elapsed = performance.now() - startTime;
+      beatfill.style.width = (((elapsed % BEAT_MS) / BEAT_MS) * 100) + '%';
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Controls: keyboard, mouse, touch ----------
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('jumpBtn').addEventListener('click', function () { ensureAudio(); doJump(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      e.preventDefault();
+      if (state === 'title') startGame();
+      else if (state === 'over') startGame();
+      else doJump();
+    }
+    if (e.code === 'Enter' && state === 'title') startGame();
+  });
+  canvas.addEventListener('mousedown', function () { ensureAudio(); doJump(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); doJump(); }, { passive: false });
+  document.getElementById('jumpBtn').addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); doJump(); }, { passive: false });
+
+  resetRun();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

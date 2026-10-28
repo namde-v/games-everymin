@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Fjord Forager</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1f2a; color: #eaf6f0; font-family: Georgia, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 28px; letter-spacing: 1px; margin: 6px 0 2px; color: #ffe9a8; text-shadow: 0 2px 0 #123; }
+  .sub { color: #9fd8c0; font-size: 14px; margin-bottom: 8px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 860px; margin-bottom: 8px; }
+  .pill { background: #14394a; border: 2px solid #2f7d8a; border-radius: 20px; padding: 6px 14px; font-weight: bold; font-size: 15px; }
+  .pill.warn { border-color: #e05252; color: #ffb3b3; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { width: 100%; height: auto; display: block; background: #7ec8c9; border: 4px solid #234; border-radius: 14px; touch-action: none; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(8, 28, 40, 0.88); border-radius: 14px; padding: 20px; gap: 12px; }
+  .screen.hidden { display: none; }
+  .screen h2 { font-size: 34px; color: #ffe9a8; }
+  .screen p { max-width: 560px; line-height: 1.55; font-size: 16px; }
+  .howto { background: #123847; border: 1px solid #2f7d8a; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 15px; line-height: 1.6; max-width: 600px; }
+  .howto b { color: #ffe9a8; }
+  button { background: #f2b441; color: #1a2a12; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffd166; }
+  button.secondary { background: #2f7d8a; color: #fff; }
+  #guide { width: 100%; max-width: 860px; background: #123847; border: 1px solid #2f7d8a; border-radius: 10px; padding: 10px 14px; font-size: 14px; line-height: 1.6; margin-top: 8px; }
+  #guide b { color: #ffe9a8; }
+  #msg { min-height: 22px; font-weight: bold; color: #ffe9a8; text-align: center; margin-top: 6px; }
+  #inspect { width: 100%; max-width: 860px; text-align: center; font-size: 15px; min-height: 24px; color: #d8fff0; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>Fjord Forager</h1>
+<div class="sub">A fjord-shore foraging identification game &mdash; look before you pick!</div>
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span> / 300</div>
+  <div class="pill">Lives: <span id="lives">&#10084;&#10084;&#10084;</span></div>
+  <div class="pill">Harvested: <span id="count">0</span></div>
+  <div class="pill" id="statusPill">Status: Ready</div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+  <div id="titleScreen" class="screen">
+    <h2>Fjord Forager</h2>
+    <p>Wander the misty fjord shore and fill your basket with safe mushrooms and berries. Beware the poisonous look-alikes!</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      &bull; Move with <b>WASD / Arrow keys</b>, or drag / tap on touch screens. Click a spot to walk toward it.<br>
+      &bull; Walk up to a mushroom or berry. A clue card appears showing its cap shape, colour and spots.<br>
+      &bull; Press <b>SPACE or E</b>, or <b>click / tap the item</b> itself, to harvest it &mdash; only when you are close.<br>
+      &bull; <b>SAFE:</b> round cap with solid colour; deep-blue round berry clusters.<br>
+      &bull; <b>POISON:</b> pointed cap, OR white spots, OR bright-red single berries. Never pick those!<br>
+      &bull; Safe mushroom = <b>+20</b>, safe berries = <b>+10</b>, poison = <b>lose 1 life</b>.<br>
+      &bull; Reach <b>300 points</b> to win. Lose all 3 lives and the foray ends.
+    </div>
+    <button id="startBtn">Start Foraging</button>
+    <p style="font-size:13px;color:#9fd8c0">Sound starts only after you press Start. Fully offline &mdash; no downloads needed.</p>
+  </div>
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">Restart Instantly</button>
+  </div>
+</div>
+<div id="inspect">Walk up to a find to inspect its clues.</div>
+<div id="msg"></div>
+<div id="guide"><b>Field Guide &mdash; Identify Before You Pick:</b> Safe mushroom: round cap, solid warm colour, no spots. Poison mushroom: pointed cap OR white spots. Safe berries: deep blue, round, in a cluster. Poison berries: bright red, single berries. When in doubt, leave it and find another!</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var countEl = document.getElementById('count');
+  var statusEl = document.getElementById('statusPill');
+  var msgEl = document.getElementById('msg');
+  var inspectEl = document.getElementById('inspect');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, lives = 3, harvested = 0;
+  var player = { x: 430, y: 400, r: 18, speed: 3.4, tx: null, ty: null };
+  var keys = {};
+  var items = [];
+  var particles = [];
+  var audioCtx = null;
+  var flash = 0, flashColor = '';
+
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    if (kind === 'pick') { beep(660, 0.12, 'sine', 0.15); setTimeout(function(){ beep(880, 0.15, 'sine', 0.15); }, 90); }
+    if (kind === 'hurt') { beep(160, 0.3, 'sawtooth', 0.15); setTimeout(function(){ beep(110, 0.3, 'sawtooth', 0.12); }, 120); }
+    if (kind === 'win') { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.16); }, i * 160); }); }
+    if (kind === 'lose') { [392, 330, 262, 196].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.28, 'triangle', 0.14); }, i * 170); }); }
+    if (kind === 'step') { beep(220, 0.05, 'sine', 0.04); }
+  }
+  function initAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function makeItem() {
+    // Decide kind and safety first, then derive consistent visual traits.
+    var isMushroom = Math.random() < 0.55;
+    var safe = Math.random() < 0.55;
+    var it = { x: rand(50, W - 50), y: rand(270, H - 50), kind: isMushroom ? 'mushroom' : 'berry', safe: safe, bob: rand(0, 6.28), id: Date.now() + Math.random() };
+    if (isMushroom) {
+      if (safe) { it.cap = 'round'; it.spots = false; it.color = ['#c0392b', '#d35400', '#b9770e'][Math.floor(Math.random() * 3)]; it.trait = 'Round cap, solid warm colour, no spots'; }
+      else {
+        if (Math.random() < 0.5) { it.cap = 'pointed'; it.spots = Math.random() < 0.5; it.trait = 'Pointed cap' + (it.spots ? ', white spots' : ''); }
+        else { it.cap = 'round'; it.spots = true; it.trait = 'Round cap, but white spots'; }
+        it.color = '#8e6bb8';
+      }
+    } else {
+      if (safe) { it.color = '#2e4a9e'; it.cluster = true; it.trait = 'Deep blue, round, clustered berries'; }
+      else { it.color = '#e83232'; it.cluster = false; it.trait = 'Bright red, single berries'; }
+    }
+    return it;
+  }
+  function spawnItems(n) { for (var i = 0; i < n; i++) items.push(makeItem()); }
+  function refill() { while (items.length < 9) items.push(makeItem()); }
+
+  function reset() {
+    score = 0; lives = 3; harvested = 0;
+    player.x = 430; player.y = 400; player.tx = null; player.ty = null;
+    items = []; spawnItems(10); particles = [];
+    updateHUD('Foraging along the shore...');
+    msgEl.textContent = '';
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, lives));
+    countEl.textContent = harvested;
+    if (status) statusEl.textContent = 'Status: ' + status;
+  }
+  function nearestItem() {
+    var best = null, bestD = 1e9;
+    items.forEach(function (it) {
+      var d = Math.hypot(it.x - player.x, it.y - player.y);
+      if (d < bestD) { bestD = d; best = it; }
+    });
+    return { item: best, dist: bestD };
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) particles.push({ x: x, y: y, vx: rand(-2.5, 2.5), vy: rand(-3, -0.5), life: 30, color: color });
+  }
+  function harvest(it) {
+    items = items.filter(function (o) { return o !== it; });
+    if (it.safe) {
+      var pts = it.kind === 'mushroom' ? 20 : 10;
+      score += pts; harvested++;
+      msgEl.textContent = 'Safe harvest! +' + pts + ' points. ' + (it.kind === 'mushroom' ? 'A fine mushroom for the basket.' : 'Sweet fjord berries!');
+      burst(it.x, it.y, '#ffe9a8'); sfx('pick');
+      updateHUD('Safe harvest!');
+    } else {
+      lives--;
+      msgEl.textContent = 'Poison! That look-alike was toxic. You lose a life. Check cap shape and spots next time.';
+      burst(it.x, it.y, '#7b2d8b'); sfx('hurt');
+      flash = 14; flashColor = 'rgba(200,40,40,0.35)';
+      updateHUD('Poisoned! Lives left: ' + lives);
+    }
+    refill();
+    if (score >= 300) return endGame(true);
+    if (lives <= 0) return endGame(false);
+    updateHUD();
+  }
+  function tryHarvestAt(x, y) {
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (Math.hypot(it.x - x, it.y - y) < 46 && Math.hypot(it.x - player.x, it.y - player.y) < 78) {
+        harvest(it); return true;
+      }
+    }
+    return false;
+  }
+  function tryHarvestNear() {
+    var n = nearestItem();
+    if (n.item && n.dist < 78) harvest(n.item);
+    else msgEl.textContent = 'Too far away! Walk closer to a find, then harvest it.';
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? 'You Win! Basket Full!' : 'Game Over';
+    endText.textContent = won ? 'You reached 300 points by telling safe finds from poisonous look-alikes. A master fjord forager!' : 'Your foray ends here. Study the field guide and try again — the shore is full of safe finds.';
+    endScore.textContent = 'Final score: ' + score + ' | Safe harvests: ' + harvested + ' | Lives left: ' + Math.max(0, lives);
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'Victory!' : 'Foray ended');
+    if (won) sfx('win'); else sfx('lose');
+  }
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    sfx('pick');
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (state === 'playing' && (e.key === ' ' || e.key.toLowerCase() === 'e')) { e.preventDefault(); tryHarvestNear(); }
+    if (state === 'title' && e.key === 'Enter') startGame();
+    if ((state === 'won' || state === 'over') && e.key === 'Enter') startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX);
+    var cy = (e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  canvas.addEventListener('click', function (e) {
+    if (state !== 'playing') return;
+    initAudio();
+    var p = canvasPos(e);
+    if (!tryHarvestAt(p.x, p.y)) { player.tx = p.x; player.ty = p.y; }
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    if (state !== 'playing') return;
+    var p = canvasPos(e);
+    var n = nearestItem();
+    if (n.item && Math.hypot(n.item.x - p.x, n.item.y - p.y) < 46) canvas.style.cursor = 'pointer'; else canvas.style.cursor = 'default';
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    if (state !== 'playing') return;
+    e.preventDefault();
+    initAudio();
+    var p = canvasPos(e);
+    if (!tryHarvestAt(p.x, p.y)) { player.tx = p.x; player.ty = p.y; }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    if (state !== 'playing') return;
+    e.preventDefault();
+    var p = canvasPos(e);
+    player.tx = p.x; player.ty = p.y;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) {
+    if (state !== 'playing') return;
+    e.preventDefault();
+  }, { passive: false });
+
+  function update() {
+    if (state !== 'playing') return;
+    var dx = 0, dy = 0;
+    if (keys['w'] || keys['arrowup']) dy -= 1;
+    if (keys['s'] || keys['arrowdown']) dy += 1;
+    if (keys['a'] || keys['arrowleft']) dx -= 1;
+    if (keys['d'] || keys['arrowright']) dx += 1;
+    if (dx || dy) {
+      var len = Math.hypot(dx, dy);
+      player.x += dx / len * player.speed;
+      player.y += dy / len * player.speed;
+      player.tx = null; player.ty = null;
+    } else if (player.tx !== null) {
+      var mdx = player.tx - player.x, mdy = player.ty - player.y;
+      var dist = Math.hypot(mdx, mdy);
+      if (dist < 6) { player.tx = null; player.ty = null; }
+      else { player.x += mdx / dist * player.speed; player.y += mdy / dist * player.speed; }
+    }
+    player.x = Math.max(24, Math.min(W - 24, player.x));
+    player.y = Math.max(250, Math.min(H - 24, player.y));
+    items.forEach(function (it) { it.bob += 0.05; });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    if (flash > 0) flash--;
+    var n = nearestItem();
+    if (n.item && n.dist < 110) {
+      inspectEl.textContent = 'Nearby: ' + (n.item.kind === 'mushroom' ? 'Mushroom' : 'Berries') + ' — Clues: ' + n.item.trait + (n.dist < 78 ? ' — Press SPACE / E or tap it to harvest.' : ' — Walk closer to harvest.');
+    } else {
+      inspectEl.textContent = 'Walk up to a find to inspect its clues.';
+    }
+  }
+
+  function drawScenery() {
+    var sky = ctx.createLinearGradient(0, 0, 0, 260);
+    sky.addColorStop(0, '#aee3e8'); sky.addColorStop(1, '#d9f2e4');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, 260);
+    ctx.fillStyle = '#5b7d8f';
+    ctx.beginPath(); ctx.moveTo(0, 240); ctx.lineTo(140, 60); ctx.lineTo(280, 200); ctx.lineTo(430, 40); ctx.lineTo(580, 210); ctx.lineTo(720, 80); ctx.lineTo(860, 230); ctx.lineTo(860, 260); ctx.lineTo(0, 260); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.ellipse(140, 62, 42, 16, 0, 0, 6.29); ctx.ellipse(430, 42, 46, 16, 0, 0, 6.29); ctx.ellipse(720, 82, 40, 14, 0, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#3d7ea6'; ctx.fillRect(0, 240, W, 40);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    for (var i = 0; i < 8; i++) ctx.fillRect(30 + i * 110, 252 + (i % 3) * 8, 60, 3);
+    ctx.fillStyle = '#c9b283'; ctx.fillRect(0, 280, W, H - 280);
+    ctx.fillStyle = '#8a9a5b';
+    for (var j = 0; j < 40; j++) { var gx = (j * 97) % W, gy = 290 + (j * 53) % 210; ctx.beginPath(); ctx.arc(gx, gy, 7, 0, 6.29); ctx.fill(); }
+  }
+  function drawItem(it) {
+    var bobY = Math.sin(it.bob) * 2;
+    ctx.save(); ctx.translate(it.x, it.y + bobY);
+    if (it.kind === 'mushroom') {
+      ctx.fillStyle = '#e8e0c8'; ctx.fillRect(-4, 0, 8, 16);
+      ctx.fillStyle = it.color;
+      ctx.beginPath();
+      if (it.cap === 'pointed') { ctx.moveTo(-22, 4); ctx.quadraticCurveTo(0, -30, 22, 4); ctx.closePath(); }
+      else { ctx.moveTo(-24, 4); ctx.quadraticCurveTo(0, -26, 24, 4); ctx.closePath(); }
+      ctx.fill();
+      if (it.spots) { ctx.fillStyle = '#ffffff'; [[-12, -8], [2, -14], [12, -6]].forEach(function (s) { ctx.beginPath(); ctx.arc(s[0], s[1], 3.5, 0, 6.29); ctx.fill(); }); }
+    } else {
+      ctx.strokeStyle = '#3d6b35'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, 12); ctx.quadraticCurveTo(0, -4, 0, -12); ctx.stroke();
+      ctx.fillStyle = it.color;
+      if (it.cluster) { [[-10, -8], [10, -8], [0, -14], [-5, 2], [5, 2]].forEach(function (b) { ctx.beginPath(); ctx.arc(b[0], b[1], 7, 0, 6.29); ctx.fill(); }); }
+      else { [[-8, -6], [8, -6], [0, 2]].forEach(function (b) { ctx.beginPath(); ctx.arc(b[0], b[1], 8, 0, 6.29); ctx.fill(); }); }
+    }
+    ctx.restore();
+  }
+  function draw() {
+    drawScenery();
+    var n = nearestItem();
+    items.forEach(function (it) {
+      if (state === 'playing' && n.item === it && n.dist < 110) {
+        ctx.strokeStyle = '#ffe9a8'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(it.x, it.y, 34, 0, 6.29); ctx.stroke();
+      }
+      drawItem(it);
+    });
+    ctx.fillStyle = '#20303a';
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(player.x, player.y - 4, 11, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#20303a';
+    ctx.beginPath(); ctx.arc(player.x - 4, player.y - 5, 2, 0, 6.29); ctx.arc(player.x + 4, player.y - 5, 2, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#f2b441'; ctx.font = 'bold 13px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('FORAGER', player.x, player.y + 34);
+    particles.forEach(function (p) { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life / 30); ctx.fillRect(p.x, p.y, 5, 5); ctx.globalAlpha = 1; });
+    if (flash > 0) { ctx.fillStyle = flashColor; ctx.fillRect(0, 0, W, H); }
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(10, H - 30, 330, 20);
+    ctx.fillStyle = '#fff'; ctx.font = '13px Georgia'; ctx.textAlign = 'left';
+    ctx.fillText('Goal: 300 points  |  Basket: ' + harvested + ' safe finds', 16, H - 16);
+  }
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  reset();
+  // Show title over a live background scene.
+  spawnItems(0);
+  loop();
+})();
+</script>
+</body>
+</html>

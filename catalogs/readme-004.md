@@ -94,6 +94,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0388 | Hollow Harvester | Arcade / Cave Harvesting | Arrow Keys / WASD move, mouse steer, touch drag, R restart | [Play](./../games/game-0388.html) |
 | 0389 | Zephyr Zookeeper | Strategy / Wind Aviary Management | Mouse/touch click assign, Keys 1-3 choose actions, R restart | [Play](./../games/game-0389.html) |
 | 0390 | Marble Machinist | Puzzle / Marble Machine Routing | Mouse/touch click rotate pieces, Arrow Keys select, Space rotate, R restart | [Play](./../games/game-0390.html) |
+| 0391 | Polaris Bowmaster | Arcade / Archery Timing | Mouse/touch drag to aim, release to shoot, Arrow Keys aim, Space shoot | [Play](./../games/game-0391.html) |
+| 0392 | Brine Brigadier | Strategy / Naval Blockade Tactics | Mouse/touch click select and move ships, Arrow Keys move cursor, Enter/Space confirm, E end turn | [Play](./../games/game-0392.html) |
+| 0393 | Cobalt Courier | Puzzle / Delivery Route Optimization | Arrow Keys / WASD drive, mouse click move, touch tap/swipe, H hint, R restart | [Play](./../games/game-0393.html) |
+| 0394 | Dune Diplomat | Strategy / Negotiation Choices | Mouse/touch click choose card, Keys 1/2/3 choose action, Enter start/restart | [Play](./../games/game-0394.html) |
+| 0395 | Ember Acrobat | Rhythm / Beat Leap Timing | Space/Up jump on the beat, mouse click LEAP, touch tap LEAP | [Play](./../games/game-0395.html) |
+| 0396 | Fjord Forager | Arcade / Foraging Identification | Arrow Keys / WASD move, Space/E harvest, mouse click move/harvest, touch drag/tap | [Play](./../games/game-0396.html) |
+| 0397 | Granite Gardener | Puzzle / Stone Pushing | Arrow Keys / WASD push, mouse click D-pad, touch swipe, R reset | [Play](./../games/game-0397.html) |
+| 0398 | Harbor Harpist | Rhythm / Melody Matching | Mouse/touch tap harp strings, Keys 1-6 play notes, R replay, Enter start | [Play](./../games/game-0398.html) |
+| 0399 | Ivory Inventor | Puzzle / Contraption Wiring | Mouse/touch click rotate tiles, Arrow Keys select, Space rotate, R restart | [Play](./../games/game-0399.html) |
+| 0400 | Jubilee Jester | Arcade / Balloon Pop Precision | Mouse/touch tap balloons, Arrow Keys move wand, Space/Enter pop | [Play](./../games/game-0400.html) |
 
 ## Batch notes
 
@@ -115,3 +125,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 038: 10 games, produced in one cycle (0371–0380). Six initially proposed titles duplicated earlier games and were replaced before production (Ember Escort, Tide Turner, Glacier Glider, Orbit Oracle, Cipher Canyon, Kelp Keeper — replaced with Lantern Lifter, Comet Cartographer, Frost Ferry, Saffron Sleuth, Reef Ranger).
 
 - Batch 039: 10 games, produced in one cycle (0381–0390).
+
+- Batch 040: 10 games, produced in one cycle (0391–0400). One initially proposed title duplicated an earlier game and was renamed before production (Aurora Archer→Polaris Bowmaster). Volume 004 complete at 100 games.

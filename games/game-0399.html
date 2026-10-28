@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ivory Inventor</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #171512; color: #f5ead2; font-family: Georgia, 'Times New Roman', serif; text-align: center; overflow-x: hidden; }
+  h1 { margin: 10px 0 2px; font-size: 34px; letter-spacing: 2px; color: #f2d492; text-shadow: 0 2px 0 #000; }
+  .sub { color: #c9b48a; font-style: italic; margin-bottom: 8px; }
+  #hud { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 8px auto; max-width: 700px; }
+  .pill { background: #2c241a; border: 2px solid #8a6d3b; border-radius: 20px; padding: 6px 14px; font-weight: bold; }
+  #status { min-height: 26px; margin: 6px; font-size: 17px; color: #ffe9a8; }
+  #wrap { position: relative; width: 700px; max-width: 96vw; margin: 0 auto; }
+  canvas { width: 100%; height: auto; background: #211d18; border: 3px solid #8a6d3b; border-radius: 12px; display: block; cursor: pointer; touch-action: none; }
+  .btnrow { margin: 10px 0 16px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  button { background: #e8b84b; color: #241a08; border: 3px solid #8a6d3b; border-radius: 10px; padding: 11px 20px; font-size: 17px; font-weight: bold; cursor: pointer; font-family: inherit; }
+  button:hover { background: #ffd873; }
+  button.secondary { background: #3a3226; color: #f5ead2; }
+  .overlay { position: absolute; inset: 0; background: rgba(20,16,10,0.94); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; color: #f2d492; margin: 6px 0; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 17px; }
+  .howto { background: #2c241a; border: 1px solid #8a6d3b; border-radius: 10px; padding: 12px 18px; text-align: left; max-width: 540px; }
+  .howto li { margin: 5px 0; }
+  .legend { font-size: 14px; color: #c9b48a; margin-top: 8px; line-height: 1.5; }
+  #cursorNote { font-size: 13px; color: #a89878; }
+</style>
+</head>
+<body>
+<h1>Ivory Inventor</h1>
+<div class="sub">Puzzle / Contraption Wiring &mdash; wire every machine, dodge the short-circuit</div>
+<div id="hud">
+  <span class="pill">Score: <span id="score">0</span></span>
+  <span class="pill">Lives: <span id="lives">&#10084;&#10084;&#10084;</span></span>
+  <span class="pill">Contraption: <span id="level">1</span> / 6</span>
+  <span class="pill">Machines lit: <span id="lit">0</span> / <span id="machTotal">0</span></span>
+</div>
+<div id="status">Press Start, then rotate the ivory tiles to complete the circuit.</div>
+<div id="wrap">
+  <canvas id="game" width="700" height="500"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>Ivory Inventor</h2>
+    <p>You are the workshop inventor. Power cells, gears and brass wires lie scattered on the bench. Rotate the tiles so power flows to <b>every machine</b> &mdash; but never overload a fragile junction node!</p>
+    <div class="howto">
+      <b>How to Play</b>
+      <ul>
+        <li><b>Rotate:</b> Click, tap, or select a tile with arrow keys and press Space. Straight wires and gears flip; elbows turn 90&deg;.</li>
+        <li><b>Test:</b> Press <b>Energize</b> (or Enter) to send power through the circuit.</li>
+        <li><b>Win a contraption:</b> every machine glows and no junction node has more than 2 live connections.</li>
+        <li><b>Danger:</b> a junction node with 3 or 4 live connections short-circuits and costs 1 life. You have 3 lives.</li>
+        <li><b>Goal:</b> complete all 6 contraptions to win the game.</li>
+      </ul>
+    </div>
+    <div class="btnrow"><button id="startBtn">Start</button><button class="secondary" id="howBtn">How to Play</button></div>
+    <p class="legend">Keyboard: Arrows move, Space rotates, Enter energizes, R restarts. Mouse and touch work too. Fully offline.</p>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <div class="btnrow"><button id="restartBtn">Restart</button></div>
+  </div>
+</div>
+<div class="btnrow">
+  <button id="energizeBtn">Energize Circuit</button>
+  <button class="secondary" id="resetBtn">Reset Contraption</button>
+</div>
+<p id="cursorNote">Tip: tiles that can rotate have a small curved arrow. Junction nodes are diamonds &mdash; keep them to two connections only.</p>
+<script>
+(function(){
+"use strict";
+var canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+var COLS=7,ROWS=5,CELL=100,OFFX=0,OFFY=0;
+var score=0,lives=3,levelIdx=0,started=false,over=false,flash=0,flashMsg='';
+var sel={r:2,c:0},lastTest=null,tick=0;
+var scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),
+    levelEl=document.getElementById('level'),litEl=document.getElementById('lit'),
+    machEl=document.getElementById('machTotal'),statusEl=document.getElementById('status');
+var titleScreen=document.getElementById('titleScreen'),endScreen=document.getElementById('endScreen');
+// Directions: 0=N 1=E 2=S 3=W ; offsets
+var DR=[-1,0,1,0],DC=[0,1,0,-1];
+function opp(d){return (d+2)%4;}
+// Level rows: tokens separated by spaces.
+// P# power facing #, M# machine facing #, W# straight, G# gear, E# elbow, T# tee, N node, . empty
+var LEVELS=[
+[". . . M2 . . .",". . E0 W0 . . .","P1 W1 N T2 . . .",". . E1 W0 . . .",". . . M0 . . ."],
+[". . E1 W1 E2 . .",". E0 W0 . W0 . .","P1 N E3 . T0 M3 .",". E1 . . W0 . .",". . . . M0 . ."],
+[". . . . M2 . .",". . . . W0 . .",". . . . T0 W1 M3",". . E0 . W0 . .","P1 G1 N W1 E3 . ."],
+[". . . . E1 W1 P3",". . . . W0 E0 .",". . . . T0 N M3",". . . . W0 E1 .",". . . . M0 . ."],
+[". . E1 W1 E2 . .",". . G0 . W0 E0 .","P1 W1 E3 . T0 N M3",". . . . W0 E2 .",". . . . M0 . ."],
+[". . . . . . .",". . . E0 . . .",". . E1 N E2 . .",". . G0 E1 T0 W1 M3","P1 W1 E3 . M0 . ."]
+];
+function parseLevel(rows){
+  var g=[];
+  for(var r=0;r<ROWS;r++){
+    var toks=rows[r].split(' '),row=[];
+    for(var c=0;c<COLS;c++){
+      var t=toks[c],cell=null;
+      if(t!=='.'){
+        var type=t.charAt(0),num=parseInt(t.charAt(1),10);
+        var rotatable=(type==='W'||type==='G'||type==='E');
+        var sol=isNaN(num)?0:num;
+        var rot=sol;
+        if(rotatable){ rot=(type==='E')?(sol+1)%4:(sol+1)%2; }
+        cell={type:type,sol:sol,rot:rot,rotatable:rotatable};
+      }
+      row.push(cell);
+    }
+    g.push(row);
+  }
+  return g;
+}
+var grid=parseLevel(LEVELS[0]);
+function portsOf(cell){
+  if(!cell)return[];
+  var r=cell.rot;
+  if(cell.type==='P'||cell.type==='M')return[cell.sol];
+  if(cell.type==='W'||cell.type==='G')return r===0?[0,2]:[1,3];
+  if(cell.type==='E')return[(0+r)%4,(1+r)%4];
+  if(cell.type==='T')return[(0+r)%4,(1+r)%4,(2+r)%4];
+  if(cell.type==='N')return[0,1,2,3];
+  return[];
+}
+function mutual(grid,r,c){
+  var cell=grid[r][c];if(!cell)return[];
+  var out=[];
+  portsOf(cell).forEach(function(d){
+    var nr=r+DR[d],nc=c+DC[d];
+    if(nr<0||nr>=ROWS||nc<0||nc>=COLS)return;
+    var nb=grid[nr][nc];if(!nb)return;
+    if(portsOf(nb).indexOf(opp(d))>=0)out.push(d);
+  });
+  return out;
+}
+function evaluate(){
+  var visited={},machines=0,lit=0,overloaded=[];
+  var q=[];
+  for(var r=0;r<ROWS;r++)for(var c=0;c<COLS;c++){
+    var cell=grid[r][c];if(!cell)continue;
+    if(cell.type==='N'&&mutual(grid,r,c).length>2)overloaded.push([r,c]);
+    if(cell.type==='P'){visited[r+','+c]=true;q.push([r,c]);}
+    if(cell.type==='M')machines++;
+  }
+  while(q.length){
+    var cur=q.shift(),cr=cur[0],cc=cur[1];
+    mutual(grid,cr,cc).forEach(function(d){
+      var nr=cr+DR[d],nc=cc+DC[d],k=nr+','+nc;
+      if(!visited[k]){visited[k]=true;q.push([nr,nc]);}
+    });
+  }
+  for(var r2=0;r2<ROWS;r2++)for(var c2=0;c2<COLS;c2++){
+    var cell2=grid[r2][c2];
+    if(cell2&&cell2.type==='M'&&visited[r2+','+c2])lit++;
+  }
+  return{lit:lit,machines:machines,overloaded:overloaded,visited:visited};
+}
+// ---- Audio (procedural, after user gesture only) ----
+var AC=null;
+function audio(){ if(!AC){ try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(AC&&AC.state==='suspended')AC.resume(); return AC; }
+function beep(freq,dur,type,vol){
+  var ac=audio();if(!ac)return;
+  var o=ac.createOscillator(),g=ac.createGain();
+  o.type=type||'sine';o.frequency.value=freq;
+  g.gain.setValueAtTime(vol||0.12,ac.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+dur);
+  o.connect(g);g.connect(ac.destination;o.start();o.stop(ac.currentTime+dur);
+}
+function buzz(){ beep(90,0.35,'sawtooth',0.18); setTimeout(function(){beep(70,0.3,'sawtooth',0.15);},80); }
+function chord(){ [523,659,784].forEach(function(f,i){setTimeout(function(){beep(f,0.4,'triangle',0.14);},i*90);}); }
+// ---- Game flow ----
+function updateHUD(){
+  var ev=evaluate();
+  scoreEl.textContent=score;
+  livesEl.textContent='\u2764'.repeat(Math.max(0,lives));
+  levelEl.textContent=levelIdx+1;
+  litEl.textContent=ev.lit; machEl.textContent=ev.machines;
+}
+function setStatus(t){ statusEl.textContent=t; }
+function loadLevel(i){
+  levelIdx=i;grid=parseLevel(LEVELS[i]);lastTest=null;sel={r:2,c:0};
+  setStatus('Contraption '+(i+1)+' of 6: rotate the tiles, then press Energize.');
+  updateHUD();
+}
+function energize(){
+  if(!started||over)return;
+  var ev=evaluate();
+  if(ev.overloaded.length>0){
+    lives--;flash=28;flashMsg='SHORT-CIRCUIT! A junction node overloaded.';
+    buzz();setStatus(flashMsg+' Lives left: '+lives+'. Rotate a neighbour away from the diamond node.');
+    lastTest={ok:false,visited:ev.visited};
+    if(lives<=0){ gameOver(false); }
+    updateHUD();return;
+  }
+  lastTest={ok:ev.lit===ev.machines,visited:ev.visited};
+  if(ev.lit===ev.machines){
+    score+=150;chord();
+    if(levelIdx>=LEVELS.length-1){ score+=lives*50; gameOver(true); }
+    else{ setStatus('Contraption complete! +150 points. Loading the next invention...'); updateHUD();
+      setTimeout(function(){ if(!over)loadLevel(levelIdx+1); },1100); }
+  } else {
+    beep(220,0.2,'square',0.1);
+    setStatus('Not all machines lit yet ('+ev.lit+' of '+ev.machines+'). Keep rotating &mdash; no life lost.');
+  }
+  updateHUD();
+}
+function gameOver(win){
+  over=true;
+  document.getElementById('endTitle').textContent=win?'You Win!':'Game Over';
+  document.getElementById('endText').textContent=win
+    ?('All 6 contraptions lit! Final score: '+score+'. You are a true Ivory Inventor.')
+    :('The workshop went dark. You reached contraption '+(levelIdx+1)+' with a score of '+score+'. Try again!');
+  endScreen.classList.remove('hidden');
+  if(win)chord(); else buzz();
+}
+function restart(){
+  score=0;lives=3;over=false;started=true;
+  endScreen.classList.add('hidden');titleScreen.classList.add('hidden');
+  loadLevel(0);setStatus('Fresh bench! Rotate the tiles, then press Energize.');
+}
+function rotateAt(r,c){
+  if(!started||over)return;
+  var cell=grid[r][c];if(!cell||!cell.rotatable)return;
+  if(cell.type==='E')cell.rot=(cell.rot+1)%4; else cell.rot=(cell.rot+1)%2;
+  beep(440+cell.rot*60,0.08,'triangle',0.1);lastTest=null;updateHUD();
+}
+// ---- Drawing ----
+function drawCell(r,c){
+  var x=c*CELL,y=r*CELL,cx=x+CELL/2,cy=y+CELL/2,cell=grid[r][c];
+  ctx.fillStyle=(r+c)%2?'#26211a':'#2a251d';
+  ctx.fillRect(x+2,y+2,CELL-4,CELL-4);
+  if(sel.r===r&&sel.c===c&&started&&!over){
+    ctx.strokeStyle='#f2d492';ctx.lineWidth=3;ctx.strokeRect(x+4,y+4,CELL-8,CELL-8);
+  }
+  if(!cell)return;
+  var ev=lastTest,lit=ev&&ev.visited[r+','+c];
+  var col=lit?'#ffe066':'#8a7a5c';
+  ctx.strokeStyle=col;ctx.lineWidth=lit?9:6;ctx.lineCap='round';
+  portsOf(cell).forEach(function(d){
+    ctx.beginPath();ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+DC[d]*44,cy+DR[d]*44);ctx.stroke();
+  });
+  // body
+  if(cell.type==='P'){
+    ctx.fillStyle=lit?'#ffd873':'#b08d3e';ctx.fillRect(cx-26,cy-26,52,52);
+    ctx.fillStyle='#241a08';ctx.font='bold 28px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('\u26A1',cx,cy+1);
+  } else if(cell.type==='M'){
+    var glow=lit?1:0.35;
+    ctx.fillStyle=lit?'#fff3b0':'#4a3f28';ctx.beginPath();ctx.arc(cx,cy,26,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=lit?'#ffb703':'#8a7a5c';ctx.beginPath();ctx.arc(cx,cy,16+4*glow,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#241a08';ctx.font='bold 20px Georgia';ctx.fillText(lit?'\u2605':'?',cx,cy);
+  } else if(cell.type==='N'){
+    ctx.fillStyle='#c0392b';ctx.save();ctx.translate(cx,cy);ctx.rotate(Math.PI/4);ctx.fillRect(-22,-22,44,44);ctx.restore();
+    ctx.fillStyle='#fff';ctx.font='bold 20px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('!',cx,cy);
+  } else if(cell.type==='G'){
+    ctx.fillStyle='#c9b48a';ctx.save();ctx.translate(cx,cy);ctx.rotate(tick*0.01*(cell.rot?1:-1));
+    for(var i=0;i<8;i++){ctx.rotate(Math.PI/4);ctx.fillRect(-6,-30,12,14);}
+    ctx.restore();ctx.fillStyle='#241a08';ctx.beginPath();ctx.arc(cx,cy,10,0,Math.PI*2);ctx.fill();
+  } else if(cell.type==='E'||cell.type==='W'||cell.type==='T'){
+    ctx.fillStyle='#6b5a38';ctx.beginPath();ctx.arc(cx,cy,10,0,Math.PI*2);ctx.fill();
+    if(cell.rotatable){ctx.fillStyle='#f2d492';ctx.font='bold 16px Georgia';ctx.textAlign='center';ctx.fillText('\u21BB',cx+30,cy-26);}
+  }
+}
+function loop(){
+  tick++;
+  ctx.clearRect(0,0,700,500);
+  for(var r=0;r<ROWS;r++)for(var c=0;c<COLS;c++)drawCell(r,c);
+  if(flash>0){
+    flash--;ctx.fillStyle='rgba(200,40,20,'+(flash/90)+')';ctx.fillRect(0,0,700,500);
+    if(flashMsg){ctx.fillStyle='#fff';ctx.font='bold 26px Georgia';ctx.textAlign='center';ctx.fillText(flashMsg,350,250);}
+  }
+  requestAnimationFrame(loop);
+}
+// ---- Input: mouse, touch, keyboard ----
+function cellFromEvent(e){
+  var rect=canvas.getBoundingClientRect();
+  var px=(e.clientX-rect.left)*(700/rect.width),py=(e.clientY-rect.top)*(500/rect.height);
+  return{r:Math.floor(py/CELL),c:Math.floor(px/CELL)};
+}
+canvas.addEventListener('click',function(e){
+  if(!started||over)return;
+  var p=cellFromEvent(e);if(p.r<0||p.r>=ROWS||p.c<0||p.c>=COLS)return;
+  sel=p;rotateAt(p.r,p.c);
+});
+canvas.addEventListener('touchstart',function(e){
+  e.preventDefault();
+  if(!started||over)return;
+  var t=e.changedTouches[0];
+  var p=cellFromEvent(t);if(p.r<0||p.r>=ROWS||p.c<0||p.c>=COLS)return;
+  sel=p;rotateAt(p.r,p.c);
+},{passive:false});
+canvas.addEventListener('mousemove',function(e){
+  var p=cellFromEvent(e);if(p.r>=0&&p.r<ROWS&&p.c>=0&&p.c<COLS)sel=p;
+});
+document.addEventListener('keydown',function(e){
+  if(!started||over){
+    if(e.key==='Enter'&&over===false&&titleScreen.classList.contains('hidden')===false){/* ignore on title */}
+    return;
+  }
+  if(e.key==='ArrowUp')sel.r=Math.max(0,sel.r-1);
+  else if(e.key==='ArrowDown')sel.r=Math.min(ROWS-1,sel.r+1);
+  else if(e.key==='ArrowLeft')sel.c=Math.max(0,sel.c-1);
+  else if(e.key==='ArrowRight')sel.c=Math.min(COLS-1,sel.c+1);
+  else if(e.key===' '){e.preventDefault();rotateAt(sel.r,sel.c);}
+  else if(e.key==='Enter'){e.preventDefault();energize();}
+  else if(e.key==='r'||e.key==='R'){loadLevel(levelIdx);}
+});
+document.getElementById('startBtn').addEventListener('click',function(){audio();beep(523,0.15,'triangle',0.14);started=true;titleScreen.classList.add('hidden');loadLevel(0);});
+document.getElementById('howBtn').addEventListener('click',function(){alert('How to Play: Click or tap a tile to rotate it. Press Energize to test. Light every machine without overloading a red diamond node (max 2 connections). Complete 6 contraptions to win. You have 3 lives.');});
+document.getElementById('energizeBtn').addEventListener('click',energize);
+document.getElementById('resetBtn').addEventListener('click',function(){if(started&&!over)loadLevel(levelIdx);});
+document.getElementById('restartBtn').addEventListener('click',restart);
+updateHUD();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
