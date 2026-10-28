@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Timber Tycoon</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a2f1a; color: #f5f0dc; font-family: Verdana, Geneva, sans-serif; display: flex; justify-content: center; min-height: 100vh; padding: 10px; }
+  #wrap { width: 100%; max-width: 720px; }
+  h1 { text-align: center; font-size: 34px; color: #ffd94d; text-shadow: 2px 2px 0 #3a5a1e; margin: 8px 0 4px; }
+  p.sub { text-align: center; color: #b8d98a; margin-bottom: 10px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; }
+  .pill { background: #2c4a24; border: 2px solid #5a8a3a; border-radius: 20px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill.warn { border-color: #e74c3c; color: #ffb3ab; }
+  #canvasBox { position: relative; background: #4a7c2f; border: 4px solid #2c4a24; border-radius: 12px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: pointer; }
+  #overlay { position: absolute; inset: 0; background: rgba(10, 25, 10, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
+  #overlay.hidden { display: none; }
+  #overlay h2 { font-size: 30px; color: #ffd94d; margin-bottom: 10px; }
+  #overlay p { max-width: 520px; line-height: 1.55; margin-bottom: 10px; font-size: 15px; }
+  #overlay ul { text-align: left; max-width: 520px; line-height: 1.6; margin-bottom: 14px; font-size: 14px; }
+  button { background: #ffd94d; color: #1a2f1a; border: none; border-radius: 10px; padding: 12px 26px; font-size: 18px; font-weight: bold; cursor: pointer; margin: 4px; }
+  button:hover { background: #ffe97a; }
+  button.small { padding: 8px 14px; font-size: 14px; }
+  #actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; }
+  #actions button { background: #5a8a3a; color: #fff; }
+  #actions button:hover { background: #6fa34a; }
+  #actions button.active { background: #ffd94d; color: #1a2f1a; }
+  #log { background: #223d1e; border-radius: 10px; padding: 10px; margin-top: 10px; min-height: 46px; font-size: 14px; line-height: 1.5; }
+  #keys { text-align: center; font-size: 12px; color: #b8d98a; margin-top: 8px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🌲 Timber Tycoon 🌲</h1>
+  <p class="sub">Grow a forest, harvest wisely, and never cut down your future.</p>
+  <div id="hud">
+    <div class="pill">🪙 Coins: <span id="coins">50</span> / 500</div>
+    <div class="pill">🌳 Trees: <span id="trees">12</span></div>
+    <div class="pill">🍂 Season: <span id="season">Spring</span></div>
+    <div class="pill">⏱ Time: <span id="time">240</span>s</div>
+    <div class="pill" id="eventPill">☀️ Calm skies</div>
+  </div>
+  <div id="canvasBox">
+    <canvas id="game" width="720" height="480"></canvas>
+    <div id="overlay">
+      <h2 id="ovTitle">Timber Tycoon</h2>
+      <p id="ovText">You inherited a small forest plot. Grow it, harvest it, and replant it — sustainably.</p>
+      <ul>
+        <li><b>Goal:</b> Earn <b>500 coins</b> before the 240-second timer runs out.</li>
+        <li><b>Plant</b> a sapling for 5 coins (select Plant, then tap a dirt plot).</li>
+        <li><b>Harvest</b> a mature tree (tall, dark green) for 25 coins — but replant after!</li>
+        <li><b>Watch out:</b> storms snap trees and wildfires can spread to neighbours.</li>
+        <li><b>Lose if:</b> time runs out below 500 coins, or your living trees fall below 3.</li>
+        <li><b>Seasons change</b> every 60 seconds: trees grow fastest in Spring and Summer.</li>
+      </ul>
+      <button id="startBtn">▶ Start Game</button>
+      <p style="font-size:13px;color:#b8d98a;">Mouse / touch: tap plots and buttons. Keyboard: arrows move cursor, P plant, H harvest, Space act, R restart.</p>
+    </div>
+  </div>
+  <div id="actions">
+    <button id="plantBtn" class="small">🌱 Plant (5🪙) [P]</button>
+    <button id="harvestBtn" class="small">🪓 Harvest [H]</button>
+    <button id="waterBtn" class="small">💧 Boost Growth (3🪙) [W]</button>
+    <button id="soundBtn" class="small">🔊 Sound: On</button>
+  </div>
+  <div id="log">Welcome, forester! Press Start, then plant saplings on empty dirt plots.</div>
+  <div id="keys">Selected plot is outlined in gold. Mature trees glow. Fire plots burn orange — harvest around them fast or let them burn out.</div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 8, ROWS = 6, CW = 720 / COLS, CH = 480 / ROWS;
+  var TARGET = 500, START_COINS = 50, TIME_LIMIT = 240;
+  var coins, trees, timeLeft, seasonIdx, seasonTime, elapsed, running, over, won, mode, selected, eventMsg, eventTimer, fireTimer;
+  var seasons = ['Spring', 'Summer', 'Autumn', 'Winter'];
+  var growthRate = [1.0, 0.9, 0.55, 0.3];
+  var grid = [];
+  var audioCtx = null, soundOn = true;
+  var lastTick = 0, acc = 0;
+
+  function el(id) { return document.getElementById(id); }
+  function log(msg) { el('log').textContent = msg; }
+  function rnd(n) { return Math.floor(Math.random() * n); }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+
+  function newGrid() {
+    grid = [];
+    for (var i = 0; i < COLS * ROWS; i++) grid.push({ stage: 0, growth: 0, burning: 0 });
+    // Start with 12 scattered young/mature trees.
+    var placed = 0;
+    while (placed < 12) {
+      var idx = rnd(grid.length);
+      if (grid[idx].stage === 0) { grid[idx].stage = (placed < 4 ? 3 : 2); grid[idx].growth = 0; placed++; }
+    }
+  }
+
+  function reset() {
+    coins = START_COINS; timeLeft = TIME_LIMIT; seasonIdx = 0; seasonTime = 0;
+    elapsed = 0; running = true; over = false; won = false; mode = 'plant';
+    selected = 0; eventMsg = 'Calm skies'; eventTimer = 0; fireTimer = 0;
+    newGrid(); updateHud(); updateButtons();
+    el('overlay').classList.add('hidden');
+    log('Forest ready! Plant saplings on dirt, harvest only mature trees.');
+  }
+
+  function countTrees() {
+    var n = 0;
+    for (var i = 0; i < grid.length; i++) if (grid[i].stage > 0 && grid[i].burning <= 0) n++;
+    return n;
+  }
+
+  function updateHud() {
+    trees = countTrees();
+    el('coins').textContent = coins;
+    el('trees').textContent = trees;
+    el('season').textContent = seasons[seasonIdx];
+    el('time').textContent = Math.max(0, Math.ceil(timeLeft));
+    var pill = el('eventPill');
+    pill.textContent = eventMsg;
+    pill.classList.toggle('warn', trees < 6 || timeLeft < 30);
+  }
+
+  function updateButtons() {
+    el('plantBtn').classList.toggle('active', mode === 'plant');
+    el('harvestBtn').classList.toggle('active', mode === 'harvest');
+    el('waterBtn').classList.toggle('active', mode === 'water');
+  }
+
+  function endGame(win, msg) {
+    running = false; over = true; won = win;
+    el('ovTitle').textContent = win ? '🏆 You Win, Tycoon!' : '💀 Game Over';
+    el('ovText').textContent = msg + ' Final coins: ' + coins + '. Trees standing: ' + countTrees() + '.';
+    var ov = el('overlay');
+    ov.classList.remove('hidden');
+    var btn = el('startBtn');
+    btn.textContent = '↻ Restart (R)';
+    beep(win ? 880 : 160, 0.5, win ? 'triangle' : 'sawtooth');
+  }
+
+  function checkEnd() {
+    if (over) return;
+    if (coins >= TARGET) { endGame(true, 'You reached 500 coins with a living forest. Sustainable and rich!'); return; }
+    if (countTrees() < 3) { endGame(false, 'Your forest is depleted — fewer than 3 living trees remain.'); return; }
+    if (timeLeft <= 0) {
+      if (coins >= TARGET) endGame(true, 'Just in time!');
+      else endGame(false, 'Time ran out before you reached 500 coins.');
+    }
+  }
+
+  function neighbours(i) {
+    var out = [], x = i % COLS, y = Math.floor(i / COLS);
+    if (x > 0) out.push(i - 1);
+    if (x < COLS - 1) out.push(i + 1);
+    if (y > 0) out.push(i - COLS);
+    if (y < ROWS - 1) out.push(i + COLS);
+    return out;
+  }
+
+  function randomEvent() {
+    var roll = Math.random();
+    if (roll < 0.12) {
+      // Storm: snap 1-3 random trees.
+      var hit = 0;
+      for (var k = 0; k < 3; k++) {
+        var idx = rnd(grid.length);
+        if (grid[idx].stage > 0 && grid[idx].burning <= 0) { grid[idx].stage = 0; grid[idx].growth = 0; hit++; }
+      }
+      eventMsg = '⛈️ Storm snapped ' + hit + ' tree(s)! Replant quickly.';
+      beep(120, 0.4, 'sawtooth');
+    } else if (roll < 0.22) {
+      // Fire: ignite a random tree.
+      var alive = [];
+      for (var j = 0; j < grid.length; j++) if (grid[j].stage > 0) alive.push(j);
+      if (alive.length) {
+        grid[alive[rnd(alive.length)]].burning = 6;
+        eventMsg = '🔥 Wildfire! It spreads to neighbours — act fast.';
+        beep(200, 0.4, 'sawtooth');
+      } else { eventMsg = '☀️ Calm skies'; }
+    } else if (roll < 0.32) {
+      // Bumper harvest prices for a while.
+      eventMsg = '📈 Timber prices surge! Harvests pay double for 20s.';
+      eventTimer = 20;
+      beep(660, 0.2, 'triangle');
+    } else {
+      eventMsg = '☀️ Calm skies';
+    }
+    log(eventMsg);
+  }
+
+  function actOn(i) {
+    if (!running || over) return;
+    var cell = grid[i];
+    if (cell.burning > 0) { log('That plot is on fire — it will burn out on its own.'); return; }
+    if (mode === 'plant') {
+      if (cell.stage !== 0) { log('That plot already has a tree. Pick an empty dirt plot to plant.'); return; }
+      if (coins < 5) { log('Not enough coins to plant (need 5). Harvest a mature tree first.'); beep(140, 0.2, 'square'); return; }
+      coins -= 5; cell.stage = 1; cell.growth = 0;
+      log('Sapling planted! Water and seasons will help it grow.');
+      beep(520, 0.15, 'sine');
+    } else if (mode === 'harvest') {
+      if (cell.stage !== 3) { log('Only mature trees (tall, dark green) can be harvested.'); return; }
+      var pay = (eventTimer > 0) ? 50 : 25;
+      coins += pay; cell.stage = 0; cell.growth = 0;
+      log('Harvested for ' + pay + ' coins! Replant this plot to stay sustainable.');
+      beep(760, 0.2, 'triangle');
+    } else if (mode === 'water') {
+      if (cell.stage === 0 || cell.stage === 3) { log('Boost only growing saplings and young trees.'); return; }
+      if (coins < 3) { log('Not enough coins to boost (need 3).'); return; }
+      coins -= 3; cell.growth += 35;
+      log('Growth boosted! That tree is closer to maturity.');
+      beep(440, 0.15, 'sine');
+    }
+    updateHud(); checkEnd();
+  }
+
+  function drawTree(x, y, stage, burning) {
+    var cx = x + CW / 2, base = y + CH - 12;
+    ctx.fillStyle = '#6b4423';
+    ctx.fillRect(cx - 4, base - 22, 8, 22);
+    if (stage === 1) {
+      ctx.fillStyle = '#7ec850';
+      ctx.beginPath(); ctx.arc(cx, base - 26, 12, 0, Math.PI * 2); ctx.fill();
+    } else if (stage === 2) {
+      ctx.fillStyle = '#4da62a';
+      ctx.beginPath(); ctx.arc(cx, base - 34, 20, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#67c23a';
+      ctx.beginPath(); ctx.arc(cx - 6, base - 42, 10, 0, Math.PI * 2); ctx.fill();
+    } else if (stage === 3) {
+      ctx.fillStyle = '#1f6b1f';
+      ctx.beginPath(); ctx.arc(cx, base - 44, 28, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#2f8a2f';
+      ctx.beginPath(); ctx.arc(cx - 8, base - 56, 14, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffd94d';
+      ctx.font = 'bold 13px Verdana';
+      ctx.textAlign = 'center';
+      ctx.fillText('★', cx, base - 74);
+    }
+    if (burning > 0) {
+      ctx.fillStyle = 'rgba(255,110,20,0.85)';
+      ctx.beginPath(); ctx.arc(cx, base - 30, 20 + (burning % 3) * 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffdd44';
+      ctx.beginPath(); ctx.arc(cx, base - 24, 10, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var i = 0; i < grid.length; i++) {
+      var x = (i % COLS) * CW, y = Math.floor(i / COLS) * CH;
+      var cell = grid[i];
+      ctx.fillStyle = (Math.floor(i / COLS) + (i % COLS)) % 2 === 0 ? '#557f33' : '#4d7530';
+      ctx.fillRect(x, y, CW, CH);
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+      ctx.strokeRect(x + 0.5, y + 0.5, CW - 1, CH - 1);
+      if (cell.stage === 0) {
+        ctx.fillStyle = '#7a5230';
+        ctx.beginPath(); ctx.ellipse(x + CW / 2, y + CH / 2 + 8, 22, 9, 0, 0, Math.PI * 2); ctx.fill();
+      } else {
+        drawTree(x, y, cell.stage, cell.burning);
+      }
+      if (cell.stage > 0 && cell.stage < 3 && cell.burning <= 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillRect(x + 8, y + CH - 16, CW - 16, 6);
+        ctx.fillStyle = '#ffd94d';
+        ctx.fillRect(x + 8, y + CH - 16, (CW - 16) * Math.min(1, cell.growth / 100), 6);
+      }
+      if (i === selected) {
+        ctx.strokeStyle = '#ffd94d'; ctx.lineWidth = 4;
+        ctx.strokeRect(x + 2, y + 2, CW - 4, CH - 4);
+        ctx.lineWidth = 1;
+      }
+    }
+    if (!running && !over) {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  function tick(dt) {
+    if (!running || over) return;
+    timeLeft -= dt; seasonTime += dt; elapsed += dt;
+    if (seasonTime >= 60) {
+      seasonTime -= 60; seasonIdx = (seasonIdx + 1) % 4;
+      log('Season changed to ' + seasons[seasonIdx] + '. Growth rate is now ' + (seasonIdx < 2 ? 'high' : 'low') + '.');
+    }
+    if (eventTimer > 0) eventTimer -= dt;
+    // Growth.
+    for (var i = 0; i < grid.length; i++) {
+      var c = grid[i];
+      if (c.burning > 0) {
+        c.burning -= dt;
+        if (c.burning <= 0) { c.stage = 0; c.growth = 0; log('A burned plot is now empty dirt. Replant it.'); }
+        else if (Math.random() < dt * 0.25) {
+          var nb = neighbours(i);
+          var t = nb[rnd(nb.length)];
+          if (grid[t].stage > 0 && grid[t].burning <= 0) grid[t].burning = 5;
+        }
+      } else if (c.stage > 0 && c.stage < 3) {
+        c.growth += dt * growthRate[seasonIdx] * 7;
+        if (c.growth >= 100) { c.stage++; c.growth = 0; if (c.stage === 3) log('A tree is now mature and ready to harvest!'); }
+      }
+    }
+    // Random event roughly every 25 seconds.
+    fireTimer += dt;
+    if (fireTimer >= 25) { fireTimer = 0; randomEvent(); }
+    updateHud(); checkEnd();
+  }
+
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    if (!lastTick) lastTick = ts;
+    var dt = Math.min(0.1, (ts - lastTick) / 1000);
+    lastTick = ts;
+    acc += dt;
+    if (acc >= 0.25) { tick(acc); acc = 0; }
+    draw();
+  }
+
+  function plotFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    var px = (cx - rect.left) * (canvas.width / rect.width);
+    var py = (cy - rect.top) * (canvas.height / rect.height);
+    var col = Math.max(0, Math.min(COLS - 1, Math.floor(px / CW)));
+    var row = Math.max(0, Math.min(ROWS - 1, Math.floor(py / CH)));
+    return row * COLS + col;
+  }
+
+  function onPointer(e) {
+    e.preventDefault();
+    selected = plotFromEvent(e);
+    if (running && !over) actOn(selected);
+  }
+
+  canvas.addEventListener('click', onPointer);
+  canvas.addEventListener('touchstart', onPointer, { passive: false });
+  canvas.addEventListener('mousemove', function (e) { selected = plotFromEvent(e); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'r' || e.key === 'R') { if (over || !running) { initAudio(); reset(); } return; }
+    if (!running || over) return;
+    var x = selected % COLS, y = Math.floor(selected / COLS);
+    if (e.key === 'ArrowLeft') x = Math.max(0, x - 1);
+    else if (e.key === 'ArrowRight') x = Math.min(COLS - 1, x + 1);
+    else if (e.key === 'ArrowUp') y = Math.max(0, y - 1);
+    else if (e.key === 'ArrowDown') y = Math.min(ROWS - 1, y + 1);
+    else if (e.key === 'p' || e.key === 'P') { mode = 'plant'; updateButtons(); return; }
+    else if (e.key === 'h' || e.key === 'H') { mode = 'harvest'; updateButtons(); return; }
+    else if (e.key === 'w' || e.key === 'W') { mode = 'water'; updateButtons(); return; }
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); actOn(selected); return; }
+    else return;
+    selected = y * COLS + x;
+  });
+
+  el('startBtn').addEventListener('click', function () { initAudio(); beep(660, 0.2, 'triangle'); reset(); });
+  el('plantBtn').addEventListener('click', function () { mode = 'plant'; updateButtons(); });
+  el('harvestBtn').addEventListener('click', function () { mode = 'harvest'; updateButtons(); });
+  el('waterBtn').addEventListener('click', function () { mode = 'water'; updateButtons(); });
+  el('soundBtn').addEventListener('click', function () {
+    soundOn = !soundOn;
+    el('soundBtn').textContent = soundOn ? '🔊 Sound: On' : '🔇 Sound: Off';
+  });
+  el('plantBtn').addEventListener('touchstart', function () { mode = 'plant'; updateButtons(); }, { passive: true });
+  el('harvestBtn').addEventListener('touchstart', function () { mode = 'harvest'; updateButtons(); }, { passive: true });
+
+  newGrid(); updateHud(); updateButtons(); draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

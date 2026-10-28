@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Kaleido Keys — Puzzle / Color Sequence</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #0f0e1a;
+    color: #f4f1ff;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px; overflow-x: hidden;
+    background-image: radial-gradient(circle at 20% 15%, #2b1d5e 0, transparent 45%),
+                      radial-gradient(circle at 85% 80%, #3d1450 0, transparent 45%);
+  }
+  h1 { font-size: clamp(2rem, 7vw, 3.2rem); letter-spacing: 2px; text-align: center; margin: 8px 0 2px; }
+  h1 span { color: #ffd23f; }
+  .tagline { color: #b9b3e8; text-align: center; margin-bottom: 14px; font-size: 0.95rem; }
+  #hud {
+    width: min(560px, 96vw); display: flex; justify-content: space-between; gap: 8px;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; font-weight: 700;
+  }
+  #hud span { white-space: nowrap; }
+  #status { color: #ffd23f; }
+  #board {
+    width: min(560px, 96vw); background: rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 16px;
+  }
+  #canvasWrap { position: relative; width: 100%; aspect-ratio: 1 / 1; }
+  canvas { width: 100%; height: 100%; display: block; border-radius: 14px; background: #17152b; cursor: pointer; touch-action: none; }
+  #keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+  .key {
+    height: 74px; border: none; border-radius: 14px; color: #111; font-weight: 900;
+    font-size: 1rem; cursor: pointer; transition: transform .08s, filter .08s, box-shadow .15s;
+    box-shadow: 0 5px 0 rgba(0,0,0,0.35); user-select: none; touch-action: manipulation;
+  }
+  .key:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0,0,0,0.35); }
+  .key.lit { filter: brightness(1.55) saturate(1.2); transform: scale(1.06); box-shadow: 0 0 28px rgba(255,255,255,0.55), 0 5px 0 rgba(0,0,0,0.3); }
+  .key.dim { opacity: 0.45; }
+  #k0 { background: #ff4d6d; } #k1 { background: #ffb020; } #k2 { background: #2ec4b6; } #k3 { background: #7b61ff; }
+  #k4 { background: #ff7ad9; } #k5 { background: #7bd747; } #k6 { background: #35b6ff; } #k7 { background: #f7f7f7; }
+  .panel {
+    width: min(560px, 96vw); background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 20px; text-align: center;
+  }
+  .panel h2 { font-size: 1.6rem; margin-bottom: 10px; }
+  .panel p, .panel li { color: #d8d3f5; line-height: 1.55; font-size: 0.98rem; }
+  .panel ul { text-align: left; margin: 12px auto; max-width: 460px; padding-left: 20px; }
+  .panel li { margin-bottom: 6px; }
+  .big { font-size: 1.4rem; font-weight: 900; color: #ffd23f; margin: 10px 0; }
+  button.primary {
+    margin-top: 14px; padding: 13px 30px; font-size: 1.15rem; font-weight: 900; border: none;
+    border-radius: 999px; background: #ffd23f; color: #1a1430; cursor: pointer; box-shadow: 0 5px 0 #b8930a;
+  }
+  button.primary:active { transform: translateY(3px); box-shadow: 0 2px 0 #b8930a; }
+  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+  .controls button {
+    padding: 10px 18px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.1); color: #fff; font-weight: 700; cursor: pointer;
+  }
+  .wild-note { color: #ff7ad9; font-weight: 800; }
+  .hidden { display: none !important; }
+  #progress { height: 10px; background: rgba(255,255,255,0.12); border-radius: 99px; margin-top: 12px; overflow: hidden; }
+  #progressBar { height: 100%; width: 0%; background: linear-gradient(90deg, #ff4d6d, #ffb020, #2ec4b6, #7b61ff); transition: width .3s; }
+  .footer { color: #8f88b8; font-size: 0.8rem; margin-top: 14px; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>KALEIDO <span>KEYS</span></h1>
+  <p class="tagline">Watch the lights. Trust your memory. Skip the wild key.</p>
+
+  <div id="hud" role="status" aria-live="polite">
+    <span>Score: <b id="score">0</b></span>
+    <span>Round: <b id="round">0</b> / 12</span>
+    <span>Lives: <b id="lives">3</b></span>
+    <span id="status">Ready</span>
+  </div>
+
+  <div id="board">
+    <div id="canvasWrap"><canvas id="gameCanvas" width="520" height="520" aria-label="Sequence display"></canvas></div>
+    <div id="keys" aria-label="Color keys">
+      <button class="key" id="k0" data-key="0">RUBY<br><small>1 / Q</small></button>
+      <button class="key" id="k1" data-key="1">AMBER<br><small>2 / W</small></button>
+      <button class="key" id="k2" data-key="2">JADE<br><small>3 / E</small></button>
+      <button class="key" id="k3" data-key="3">VIOLET<br><small>4 / R</small></button>
+      <button class="key" id="k4" data-key="4">ROSE<br><small>5 / A</small></button>
+      <button class="key" id="k5" data-key="5">LIME<br><small>6 / S</small></button>
+      <button class="key" id="k6" data-key="6">SKY<br><small>7 / D</small></button>
+      <button class="key" id="k7" data-key="7">PEARL<br><small>8 / F</small></button>
+    </div>
+    <div id="progress" aria-hidden="true"><div id="progressBar"></div></div>
+  </div>
+
+  <div id="titlePanel" class="panel" style="margin-top:14px;">
+    <h2>How to Play</h2>
+    <ul>
+      <li><b>Watch:</b> the keys light up in order. Memorize the whole sequence.</li>
+      <li><b>Repeat:</b> tap or press the keys in exactly the same order.</li>
+      <li><b>Grow:</b> every round adds one more step. Finish Round 12 to WIN.</li>
+      <li><span class="wild-note">WILD TWIST:</span> every 4th round (4, 8, 12), one key glows as WILD during playback — you must <b>SKIP</b> it and repeat only the other steps. Tapping the wild key costs a life.</li>
+      <li>You have 3 lives. A wrong key costs a life and replays the round.</li>
+      <li>Keyboard: 1–8 or Q W E R A S D F. Mouse: click. Touch: tap. Enter / Space: start or restart.</li>
+    </ul>
+    <button class="primary" id="startBtn">▶ Start Game</button>
+  </div>
+
+  <div id="endPanel" class="panel hidden" style="margin-top:14px;">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p class="big" id="endScore"></p>
+    <button class="primary" id="restartBtn">↻ Play Again</button>
+    <div class="controls"><button id="howBtn">How to Play</button></div>
+  </div>
+
+  <div class="controls" id="midControls">
+    <button id="replayBtn" disabled>Replay Sequence</button>
+    <button id="hintBtn" disabled>Hint (last key)</button>
+  </div>
+  <p class="footer">Fully offline · No downloads · Sound starts only after you press Start.</p>
+
+<script>
+(function () {
+  'use strict';
+  var COLORS = ['#ff4d6d', '#ffb020', '#2ec4b6', '#7b61ff', '#ff7ad9', '#7bd747', '#35b6ff', '#f7f7f7'];
+  var NAMES = ['RUBY', 'AMBER', 'JADE', 'VIOLET', 'ROSE', 'LIME', 'SKY', 'PEARL'];
+  var FREQS = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25];
+  var TARGET_ROUND = 12, MAX_LIVES = 3;
+
+  var canvas = document.getElementById('gameCanvas');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var roundEl = document.getElementById('round');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var progressBar = document.getElementById('progressBar');
+  var titlePanel = document.getElementById('titlePanel');
+  var endPanel = document.getElementById('endPanel');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+  var replayBtn = document.getElementById('replayBtn');
+  var hintBtn = document.getElementById('hintBtn');
+  var keyEls = [];
+  for (var i = 0; i < 8; i++) keyEls.push(document.getElementById('k' + i));
+
+  var state = 'title'; // title | watching | input | won | over
+  var sequence = [], answer = [], playerIndex = 0, round = 0, score = 0, lives = MAX_LIVES;
+  var wildKey = -1, wildShown = false, playbackTimer = null, hintUsed = false;
+  var audioCtx = null, audioOn = true, pulse = 0, lastTime = 0;
+
+  function setStatus(t) { statusEl.textContent = t; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    roundEl.textContent = (state === 'title' ? 0 : round);
+    livesEl.textContent = lives;
+  }
+  function updateProgress() {
+    var total = answer.length || 1;
+    progressBar.style.width = (state === 'input' ? (playerIndex / total * 100) : 0) + '%';
+  }
+
+  // ---- Audio: created only after a user gesture ----
+  function ensureAudio() {
+    if (!audioCtx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type) {
+    if (!audioCtx || !audioOn) return;
+    try {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable; game continues silently */ }
+  }
+  function playKeySound(k, wild) {
+    if (wild) { tone(FREQS[k] * 0.5, 0.35, 'triangle'); tone(FREQS[k] * 1.5, 0.25, 'square'); }
+    else tone(FREQS[k], 0.32, 'sine');
+  }
+  function winJingle() { [523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) { setTimeout(function () { tone(f, 0.4, 'triangle'); }, i * 140); }); }
+  function loseSound() { [392, 311, 233].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, 'sawtooth'); }, i * 150); }); }
+
+  // ---- Canvas display: animated orbs + sequence dots ----
+  function draw(now) {
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    // background grid of soft dots
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (var x = 26; x < w; x += 52) for (var y = 26; y < h; y += 52) {
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    // center orb pulses while watching
+    var cx = w / 2, cy = h / 2 - 20;
+    var r = 74 + Math.sin(now / 450) * (state === 'watching' ? 12 : 5);
+    var grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, r + 40);
+    grad.addColorStop(0, '#ffd23f'); grad.addColorStop(0.6, '#7b61ff'); grad.addColorStop(1, 'rgba(123,97,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 40, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#17152b';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#f4f1ff'; ctx.textAlign = 'center';
+    ctx.font = 'bold 26px system-ui, sans-serif';
+    var label = state === 'title' ? 'KALEIDO' : state === 'watching' ? 'WATCH' : state === 'input' ? 'YOUR TURN' : state === 'won' ? 'YOU WIN!' : 'GAME OVER';
+    ctx.fillText(label, cx, cy - 4);
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.fillStyle = '#ffd23f';
+    var sub = state === 'input' ? (playerIndex + ' / ' + answer.length + ' keys') :
+              state === 'watching' ? ('Round ' + round) :
+              state === 'title' ? 'Press Start' : '';
+    ctx.fillText(sub, cx, cy + 26);
+    // wild warning
+    if (state === 'watching' && wildKey >= 0) {
+      ctx.font = 'bold 16px system-ui, sans-serif'; ctx.fillStyle = '#ff7ad9';
+      ctx.fillText('WILD ROUND: skip ' + NAMES[wildKey], cx, cy + 62);
+    }
+    // progress dots for the current sequence
+    var total = answer.length;
+    if (total > 0) {
+      var startX = cx - (total - 1) * 16;
+      for (var i = 0; i < total; i++) {
+        ctx.beginPath(); ctx.arc(startX + i * 32, h - 46, 9, 0, Math.PI * 2);
+        ctx.fillStyle = i < playerIndex ? COLORS[answer[i]] : 'rgba(255,255,255,0.18)';
+        ctx.fill();
+        if (wildKey >= 0 && answer[i] === wildKey && state === 'watching') {
+          ctx.strokeStyle = '#ff7ad9'; ctx.lineWidth = 2; ctx.stroke();
+        }
+      }
+    }
+  }
+  function loop(now) {
+    draw(now || 0);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // ---- Game flow ----
+  function lightKey(k, ms, isWild) {
+    var el = keyEls[k];
+    el.classList.add('lit');
+    if (isWild) el.style.outline = '4px dashed #ff7ad9';
+    setTimeout(function () {
+      el.classList.remove('lit');
+      el.style.outline = '';
+    }, ms || 420);
+  }
+  function setKeysEnabled(on) {
+    keyEls.forEach(function (el) { el.disabled = !on; el.classList.toggle('dim', !on); });
+    replayBtn.disabled = !on || state !== 'input';
+    hintBtn.disabled = !on || state !== 'input';
+  }
+  function startGame() {
+    ensureAudio();
+    sequence = []; answer = []; round = 0; score = 0; lives = MAX_LIVES; hintUsed = false;
+    titlePanel.classList.add('hidden');
+    endPanel.classList.add('hidden');
+    nextRound();
+  }
+  function nextRound() {
+    round++;
+    if (round > TARGET_ROUND) { winGame(); return; }
+    var isWildRound = (round % 4 === 0);
+    var next = Math.floor(Math.random() * 8);
+    sequence.push(next);
+    // Build the answer: wild rounds drop the single wild key occurrence
+    if (isWildRound) {
+      wildKey = Math.floor(Math.random() * 8);
+      wildShown = true;
+      answer = sequence.filter(function (k) { return k !== wildKey; });
+      if (answer.length === 0) { answer = [sequence[0]]; wildKey = -1; }
+    } else {
+      wildKey = -1; wildShown = false;
+      answer = sequence.slice();
+    }
+    playerIndex = 0; hintUsed = false;
+    updateHUD(); updateProgress();
+    setStatus(isWildRound ? 'WILD ROUND! Watch carefully' : 'Watch the sequence');
+    setKeysEnabled(false);
+    playSequence(0);
+  }
+  function playSequence(i) {
+    state = 'watching';
+    if (i >= sequence.length) {
+      state = 'input';
+      setStatus(wildKey >= 0 ? 'Repeat it — SKIP the wild key!' : 'Your turn — repeat it!');
+      setKeysEnabled(true);
+      updateProgress();
+      return;
+    }
+    var k = sequence[i];
+    var isWild = (k === wildKey);
+    lightKey(k, 480, isWild);
+    playKeySound(k, isWild);
+    pulse = k;
+    playbackTimer = setTimeout(function () { playSequence(i + 1); }, 640);
+  }
+  function pressKey(k) {
+    if (state !== 'input') return;
+    ensureAudio();
+    lightKey(k, 220, false);
+    playKeySound(k, false);
+    if (k === wildKey && wildKey >= 0) {
+      loseLife('You tapped the WILD key (' + NAMES[k] + '). Skip it next time!');
+      return;
+    }
+    if (k === answer[playerIndex]) {
+      playerIndex++;
+      score += 10;
+      updateHUD(); updateProgress();
+      if (playerIndex >= answer.length) {
+        score += round * 5; // round completion bonus
+        updateHUD();
+        setKeysEnabled(false);
+        setStatus('Round ' + round + ' complete! +bonus');
+        tone(880, 0.25, 'triangle');
+        setTimeout(nextRound, 1100);
+      }
+    } else {
+      loseLife('Wrong key! Expected ' + NAMES[answer[playerIndex]] + ', got ' + NAMES[k] + '.');
+    }
+  }
+  function loseLife(msg) {
+    lives--;
+    updateHUD();
+    loseSound();
+    setKeysEnabled(false);
+    if (lives <= 0) { gameOver(msg + ' No lives left.'); return; }
+    setStatus(msg + ' Lives left: ' + lives + ' — replaying round');
+    // Re-attempt the same round (sequence unchanged)
+    playerIndex = 0;
+    setTimeout(function () {
+      setStatus('Watch again — Round ' + round);
+      playSequence(0);
+    }, 1400);
+  }
+  function winGame() {
+    state = 'won';
+    score += 500;
+    updateHUD();
+    setKeysEnabled(false);
+    setStatus('YOU WIN!');
+    winJingle();
+    endTitle.textContent = 'You Win!';
+    endText.textContent = 'You mastered all ' + TARGET_ROUND + ' rounds, wild keys and all. A true Kaleido champion.';
+    endScore.textContent = 'Final Score: ' + score;
+    endPanel.classList.remove('hidden');
+  }
+  function gameOver(msg) {
+    state = 'over';
+    setKeysEnabled(false);
+    setStatus('Game Over');
+    loseSound();
+    endTitle.textContent = 'Game Over';
+    endText.textContent = msg + ' You reached Round ' + round + '.';
+    endScore.textContent = 'Final Score: ' + score;
+    endPanel.classList.remove('hidden');
+  }
+  function showHowTo() {
+    endPanel.classList.add('hidden');
+    titlePanel.classList.remove('hidden');
+    state = 'title';
+    setStatus('Ready');
+    updateHUD();
+  }
+  function replaySequence() {
+    if (state !== 'input') return;
+    setKeysEnabled(false);
+    setStatus('Watch again');
+    playerIndex = 0;
+    updateProgress();
+    playSequence(0);
+  }
+  function hint() {
+    if (state !== 'input' || hintUsed) return;
+    hintUsed = true;
+    var k = answer[playerIndex];
+    setStatus('Hint: next key is ' + NAMES[k]);
+    lightKey(k, 500, false);
+    score = Math.max(0, score - 5);
+    updateHUD();
+  }
+
+  // ---- Input: mouse, touch, keyboard ----
+  keyEls.forEach(function (el, idx) {
+    el.addEventListener('click', function () { pressKey(idx); });
+    el.addEventListener('touchstart', function (e) { e.preventDefault(); pressKey(idx); }, { passive: false });
+  });
+  canvas.addEventListener('click', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / rect.width;
+    var y = (e.clientY - rect.top) / rect.height;
+    // Tap the center orb to replay during input, or start from title
+    var dx = x - 0.5, dy = y - 0.46;
+    if (dx * dx + dy * dy < 0.045) {
+      if (state === 'input') replaySequence();
+      else if (state === 'title') startGame();
+    }
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state === 'title') startGame();
+    else if (state === 'input') replaySequence();
+  }, { passive: false });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('startBtn').addEventListener('touchstart', function (e) { e.preventDefault(); startGame(); }, { passive: false });
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('touchstart', function (e) { e.preventDefault(); startGame(); }, { passive: false });
+  document.getElementById('howBtn').addEventListener('click', showHowTo);
+  replayBtn.addEventListener('click', replaySequence);
+  hintBtn.addEventListener('click', hint);
+  document.addEventListener('keydown', function (e) {
+    var map = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6, '8': 7,
+                'q': 0, 'w': 1, 'e': 2, 'r': 3, 'a': 4, 's': 5, 'd': 6, 'f': 7 };
+    var key = e.key.toLowerCase();
+    if (key === 'enter' || key === ' ') {
+      e.preventDefault();
+      if (state === 'title' || state === 'won' || state === 'over') startGame();
+      return;
+    }
+    if (key === 'h' && state === 'input') { hint(); return; }
+    if (map.hasOwnProperty(key)) pressKey(map[key]);
+  });
+  document.addEventListener('keyup', function (e) { /* reserved for future hold-to-preview */ });
+  window.addEventListener('resize', function () { /* canvas scales via CSS; no state change */ });
+  updateHUD(); updateProgress(); setKeysEnabled(false);
+})();
+</script>
+</body>
+</html>

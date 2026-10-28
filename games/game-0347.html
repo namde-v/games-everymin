@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Dockside Dynamo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1e2d; font-family: Verdana, Geneva, sans-serif; color: #eaf6ff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 26px; letter-spacing: 2px; color: #ffd166; text-shadow: 2px 2px 0 #000; margin: 6px 0 2px; text-align: center; }
+  .sub { font-size: 13px; color: #9fd8ff; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 860px; margin-bottom: 8px; }
+  .pill { background: #14384f; border: 2px solid #2a6a8f; border-radius: 20px; padding: 5px 12px; font-size: 14px; font-weight: bold; }
+  .pill b { color: #ffd166; }
+  .pill.warn { border-color: #ff5d5d; color: #ffb3b3; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#1b6ca8, #0d3d5e); border: 3px solid #ffd166; border-radius: 10px; touch-action: none; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(4, 22, 36, 0.88); border-radius: 10px; padding: 20px; text-align: center; }
+  .screen.hidden { display: none; }
+  .screen h2 { font-size: 30px; color: #ffd166; }
+  .screen p { font-size: 15px; line-height: 1.55; max-width: 560px; color: #dceeff; }
+  .screen .small { font-size: 13px; color: #9fd8ff; }
+  button { background: #ffd166; color: #10222f; border: none; border-radius: 10px; padding: 13px 30px; font-size: 19px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #2a6a8f; color: #fff; box-shadow: 0 4px 0 #173f57; font-size: 15px; padding: 10px 20px; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; font-size: 13px; margin-top: 6px; }
+  .dot { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 4px; border: 1px solid #fff; }
+  #msg { min-height: 22px; font-size: 14px; font-weight: bold; color: #ffd166; text-align: center; margin-top: 6px; }
+  .keys { font-size: 12px; color: #9fd8ff; text-align: center; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>&#9875; DOCKSIDE DYNAMO</h1>
+<div class="sub">A port-logistics strategy game &mdash; run the cranes, clear the ships, beat the clock!</div>
+
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Ships cleared: <b id="cleared">0</b> / 12</div>
+  <div class="pill">Ships left: <b id="lives">3</b></div>
+  <div class="pill" id="timerPill">Time: <b id="clock">0:00</b></div>
+  <div class="pill">Cranes free: <b id="cranes">3</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+
+  <div id="titleScreen" class="screen">
+    <h2>&#9875; DOCKSIDE DYNAMO</h2>
+    <p><b>How to Play:</b> Cargo ships dock at the top of the harbor, each loaded with colored containers.
+    You command 3 cranes. Click (or tap) a ship to send a free crane to it. The crane unloads one
+    container at a time and stacks it in the matching color warehouse bay at the bottom &mdash; each
+    correct delivery scores points. Clear a ship before its departure timer runs out!</p>
+    <p><b>Strategy:</b> A ship with many containers takes longer, so start big ships early. A ship that
+    departs uncleared costs you a ship (life). Clear <b>12 ships</b> to win. Fast clears earn a speed
+    bonus; every missed departure loses points too. Click a crane to recall it to a different ship.</p>
+    <p class="small">Controls: Mouse click / touch tap a ship to assign a crane &middot; Keys 1&ndash;6 select a docked ship, Enter assigns a crane &middot; R restarts anytime &middot; P pauses.</p>
+    <button id="startBtn">START SHIFT</button>
+    <div class="legend">
+      <span><span class="dot" style="background:#ff5d5d"></span>Red Bay</span>
+      <span><span class="dot" style="background:#3ddc84"></span>Green Bay</span>
+      <span><span class="dot" style="background:#ffd166"></span>Gold Bay</span>
+      <span><span class="dot" style="background:#6aa8ff"></span>Blue Bay</span>
+    </div>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">SHIFT COMPLETE!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">PLAY AGAIN</button>
+    <p class="small">Or press R to restart instantly.</p>
+  </div>
+</div>
+
+<div id="msg"></div>
+<div class="keys">Click / tap a ship to assign a crane &middot; Keys 1&ndash;6 select, Enter assign &middot; R restart &middot; P pause</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var COLORS = ['#ff5d5d', '#3ddc84', '#ffd166', '#6aa8ff'];
+  var COLOR_NAMES = ['Red', 'Green', 'Gold', 'Blue'];
+
+  var state = 'title'; // title | playing | paused | over
+  var score = 0, cleared = 0, lives = 3, elapsed = 0;
+  var ships = [], cranes = [], particles = [];
+  var selected = 0, spawnTimer = 0, shipSeq = 0;
+  var msgTimer = 0;
+  var audioCtx = null;
+
+  function el(id) { return document.getElementById(id); }
+
+  function showMsg(text, ms) {
+    el('msg').textContent = text;
+    msgTimer = ms || 2200;
+  }
+
+  // ---------- Audio (created only after user interaction) ----------
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    if (kind === 'assign') beep(520, 0.12, 'triangle', 0.14);
+    if (kind === 'drop') beep(880, 0.10, 'square', 0.10);
+    if (kind === 'clear') { beep(660, 0.12, 'sine', 0.14); setTimeout(function(){ beep(880, 0.14, 'sine', 0.14); }, 110); setTimeout(function(){ beep(1100, 0.18, 'sine', 0.14); }, 220); }
+    if (kind === 'miss') { beep(220, 0.3, 'sawtooth', 0.12); setTimeout(function(){ beep(160, 0.3, 'sawtooth', 0.12); }, 150); }
+    if (kind === 'win') { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.15); }, i * 150); }); }
+  }
+
+  // ---------- Game setup ----------
+  function resetGame() {
+    score = 0; cleared = 0; lives = 3; elapsed = 0;
+    ships = []; particles = []; selected = 0; spawnTimer = 0; shipSeq = 0;
+    cranes = [];
+    for (var i = 0; i < 3; i++) {
+      cranes.push({ id: i, x: 120 + i * 310, y: 330, target: null, carrying: -1, phase: 'idle', progress: 0, homeX: 120 + i * 310 });
+    }
+    spawnShip(); spawnShip();
+    updateHUD();
+  }
+
+  function spawnShip() {
+    var slots = [0, 1, 2, 3, 4, 5];
+    var used = ships.map(function(s){ return s.slot; });
+    var free = slots.filter(function(s){ return used.indexOf(s) === -1; });
+    if (free.length === 0) return;
+    var slot = free[Math.floor(Math.random() * free.length)];
+    var count = 3 + Math.floor(Math.random() * 4); // 3-6 containers
+    var cargo = [];
+    for (var i = 0; i < count; i++) cargo.push(Math.floor(Math.random() * 4));
+    shipSeq++;
+    var totalTime = 45000 + count * 6000; // generous but pressuring
+    ships.push({
+      id: shipSeq, slot: slot, x: 40 + slot * 140, y: 60,
+      cargo: cargo, total: count, timeLeft: totalTime, totalTime: totalTime,
+      craneId: -1, departing: false
+    });
+    if (selected >= ships.length) selected = Math.max(0, ships.length - 1);
+  }
+
+  function assignCrane(ship) {
+    if (!ship || ship.departing) return;
+    var crane = null;
+    for (var i = 0; i < cranes.length; i++) {
+      if (cranes[i].phase === 'idle') { crane = cranes[i]; break; }
+    }
+    if (!crane) { showMsg('All cranes busy! Wait for a delivery or recall a crane.'); beep(180, 0.15, 'square', 0.1); return; }
+    if (ship.craneId !== -1) { showMsg('That ship already has a crane.'); return; }
+    crane.target = ship; crane.phase = 'toShip'; crane.progress = 0;
+    ship.craneId = crane.id;
+    sfx('assign');
+    showMsg('Crane ' + (crane.id + 1) + ' dispatched to Ship ' + ship.id + '!');
+    updateHUD();
+  }
+
+  function recallCrane(crane) {
+    if (crane.target) crane.target.craneId = -1;
+    crane.target = null; crane.carrying = -1; crane.phase = 'idle';
+    showMsg('Crane ' + (crane.id + 1) + ' recalled and ready.');
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 10; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 4, vy: -Math.random() * 3 - 1, life: 30 + Math.random() * 20, color: color });
+    }
+  }
+
+  function update(dt) {
+    elapsed += dt;
+    spawnTimer += dt;
+    if (spawnTimer > 9000 && ships.length < 6) { spawnTimer = 0; spawnShip(); }
+
+    // Ships: countdown, departure
+    for (var i = ships.length - 1; i >= 0; i--) {
+      var s = ships[i];
+      if (!s.departing) {
+        s.timeLeft -= dt;
+        if (s.timeLeft <= 0) {
+          s.departing = true;
+          if (s.craneId !== -1) { var c = cranes[s.craneId]; c.target = null; c.carrying = -1; c.phase = 'idle'; }
+          lives--; score = Math.max(0, score - 150);
+          sfx('miss');
+          showMsg('Ship ' + s.id + ' departed uncleared! -150 points, one ship lost.');
+          burst(s.x + 60, s.y + 30, '#ff5d5d');
+          ships.splice(i, 1);
+          updateHUD();
+          if (lives <= 0) return endGame(false);
+        }
+      }
+    }
+
+    // Cranes
+    cranes.forEach(function(cr) {
+      if (cr.phase === 'toShip' && cr.target) {
+        var tx = cr.target.x + 60;
+        cr.x += (tx - cr.x) * Math.min(1, dt / 220);
+        if (Math.abs(tx - cr.x) < 4) { cr.phase = 'loading'; cr.progress = 0; }
+      } else if (cr.phase === 'loading' && cr.target) {
+        cr.progress += dt;
+        if (cr.progress >= 700) {
+          var sh = cr.target;
+          if (sh.cargo.length > 0) {
+            cr.carrying = sh.cargo.shift();
+            cr.phase = 'toBay';
+          } else {
+            finishShip(sh, cr);
+          }
+        }
+      } else if (cr.phase === 'toBay') {
+        var bayX = 60 + cr.carrying * 210;
+        cr.x += (bayX - cr.x) * Math.min(1, dt / 220);
+        if (Math.abs(bayX - cr.x) < 5) {
+          score += 100;
+          burst(bayX + 55, 455, COLORS[cr.carrying]);
+          sfx('drop');
+          cr.carrying = -1;
+          if (cr.target && cr.target.cargo.length > 0) { cr.phase = 'toShip'; }
+          else if (cr.target) { finishShip(cr.target, cr); }
+          else { cr.phase = 'idle'; }
+          updateHUD();
+        }
+      } else if (cr.phase === 'idle') {
+        cr.x += (cr.homeX - cr.x) * Math.min(1, dt / 300);
+      }
+    });
+
+    // Particles
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.12; pt.life--;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+
+    if (msgTimer > 0) { msgTimer -= dt; if (msgTimer <= 0) el('msg').textContent = ''; }
+    updateHUD();
+  }
+
+  function finishShip(ship, crane) {
+    var idx = ships.indexOf(ship);
+    if (idx === -1) return;
+    var speedBonus = Math.round((ship.timeLeft / ship.totalTime) * 200);
+    score += 250 + speedBonus;
+    cleared++;
+    burst(ship.x + 60, ship.y + 30, '#ffd166');
+    sfx('clear');
+    showMsg('Ship ' + ship.id + ' cleared! +250 plus ' + speedBonus + ' speed bonus.');
+    ships.splice(idx, 1);
+    crane.target = null; crane.carrying = -1; crane.phase = 'idle';
+    updateHUD();
+    if (cleared >= 12) return endGame(true);
+    if (ships.length < 2) spawnShip();
+  }
+
+  function endGame(won) {
+    state = 'over';
+    el('endTitle').textContent = won ? 'SHIFT COMPLETE! YOU WIN!' : 'PORT CLOSED! GAME OVER';
+    el('endText').textContent = won
+      ? 'You cleared 12 ships with a final score of ' + score + ' in ' + fmtTime(elapsed) + '. The harbor salutes you, Dockmaster!'
+      : 'You ran out of ships with ' + cleared + ' cleared and a score of ' + score + '. Try a faster crane strategy!';
+    el('endScreen').classList.remove('hidden');
+    if (won) sfx('win'); else sfx('miss');
+  }
+
+  function fmtTime(ms) {
+    var s = Math.floor(ms / 1000);
+    return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+  }
+
+  function updateHUD() {
+    el('score').textContent = score;
+    el('cleared').textContent = cleared;
+    el('lives').textContent = lives;
+    el('clock').textContent = fmtTime(elapsed);
+    var free = cranes.filter(function(c){ return c.phase === 'idle'; }).length;
+    el('cranes').textContent = free;
+    var pill = el('timerPill');
+    var urgent = ships.some(function(s){ return s.timeLeft < 12000; });
+    pill.classList.toggle('warn', urgent);
+  }
+
+  // ---------- Drawing ----------
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sea
+    ctx.fillStyle = '#1b6ca8'; ctx.fillRect(0, 0, W, 250);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    for (var w = 0; w < 12; w++) {
+      var wx = (w * 90 + Math.floor(elapsed / 60) % 90) % (W + 40) - 20;
+      ctx.fillRect(wx, 200 + (w % 3) * 16, 42, 3);
+    }
+    // Dock strip
+    ctx.fillStyle = '#5b4632'; ctx.fillRect(0, 250, W, 26);
+    ctx.fillStyle = '#8a6d4b'; ctx.fillRect(0, 250, W, 5);
+    // Quay / warehouse area
+    ctx.fillStyle = '#2c3e50'; ctx.fillRect(0, 276, W, H - 276);
+
+    // Ships
+    ships.forEach(function(s, i) {
+      var urgent = s.timeLeft < 12000;
+      ctx.fillStyle = urgent && Math.floor(elapsed / 400) % 2 === 0 ? '#7a1f1f' : '#22384a';
+      roundRect(s.x, s.y, 124, 92, 8); ctx.fill();
+      ctx.strokeStyle = i === selected ? '#ffd166' : '#9fd8ff';
+      ctx.lineWidth = i === selected ? 4 : 2; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Verdana'; ctx.textAlign = 'left';
+      ctx.fillText('SHIP ' + s.id, s.x + 8, s.y + 20);
+      ctx.font = '12px Verdana'; ctx.fillStyle = '#9fd8ff';
+      ctx.fillText(Math.ceil(s.timeLeft / 1000) + 's left', s.x + 8, s.y + 86);
+      // timer bar
+      ctx.fillStyle = '#333'; ctx.fillRect(s.x + 8, s.y + 68, 108, 8);
+      ctx.fillStyle = urgent ? '#ff5d5d' : '#3ddc84';
+      ctx.fillRect(s.x + 8, s.y + 68, 108 * Math.max(0, s.timeLeft / s.totalTime), 8);
+      // cargo containers
+      s.cargo.forEach(function(col, ci) {
+        ctx.fillStyle = COLORS[col];
+        ctx.fillRect(s.x + 8 + (ci % 4) * 28, s.y + 26 + Math.floor(ci / 4) * 20, 24, 15);
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.strokeRect(s.x + 8 + (ci % 4) * 28, s.y + 26 + Math.floor(ci / 4) * 20, 24, 15);
+      });
+      if (s.craneId !== -1) {
+        ctx.fillStyle = '#ffd166'; ctx.font = 'bold 12px Verdana';
+        ctx.fillText('CRANE ' + (s.craneId + 1), s.x + 8, s.y + 58);
+      }
+      ctx.fillStyle = '#9fd8ff'; ctx.font = '11px Verdana';
+      ctx.fillText('Tap / key ' + (i + 1), s.x + 8, s.y + 46);
+    });
+
+    // Cranes
+    cranes.forEach(function(cr) {
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(cr.x, 330); ctx.lineTo(cr.x, 250); ctx.stroke();
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(cr.x - 24, 240, 48, 14);
+      ctx.fillStyle = '#10222f'; ctx.font = 'bold 11px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('C' + (cr.id + 1), cr.x, 251);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cr.x, 254); ctx.lineTo(cr.x, 300); ctx.stroke();
+      if (cr.carrying !== -1) {
+        ctx.fillStyle = COLORS[cr.carrying];
+        ctx.fillRect(cr.x - 14, 300, 28, 18);
+        ctx.strokeStyle = '#000'; ctx.strokeRect(cr.x - 14, 300, 28, 18);
+      }
+      ctx.fillStyle = cr.phase === 'idle' ? '#3ddc84' : '#ff8c42';
+      ctx.beginPath(); ctx.arc(cr.x, 330, 7, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // Warehouse bays
+    for (var b = 0; b < 4; b++) {
+      var bx = 40 + b * 210;
+      ctx.fillStyle = COLORS[b]; ctx.globalAlpha = 0.25;
+      ctx.fillRect(bx, 360, 150, 130); ctx.globalAlpha = 1;
+      ctx.strokeStyle = COLORS[b]; ctx.lineWidth = 3; ctx.strokeRect(bx, 360, 150, 130);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(COLOR_NAMES[b] + ' BAY', bx + 75, 382);
+      ctx.font = '12px Verdana'; ctx.fillStyle = '#dceeff';
+      ctx.fillText('100 pts each', bx + 75, 478);
+    }
+
+    // Particles
+    particles.forEach(function(pt) {
+      ctx.globalAlpha = Math.max(0, pt.life / 50);
+      ctx.fillStyle = pt.color; ctx.fillRect(pt.x, pt.y, 6, 6);
+      ctx.globalAlpha = 1;
+    });
+
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 36px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED', W / 2, H / 2);
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // ---------- Main loop ----------
+  var last = 0;
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    if (!last) last = ts;
+    var dt = Math.min(50, ts - last);
+    last = ts;
+    if (state === 'playing') update(dt);
+    draw();
+  }
+
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = 'playing';
+    el('titleScreen').classList.add('hidden');
+    el('endScreen').classList.add('hidden');
+    showMsg('Shift started! Assign cranes to the docked ships.');
+    sfx('assign');
+  }
+
+  function restart() {
+    initAudio();
+    startGame();
+  }
+
+  // ---------- Input: mouse, touch, keyboard ----------
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  function handlePoint(evt) {
+    if (state !== 'playing') return;
+    if (evt.preventDefault) evt.preventDefault();
+    var p = canvasPos(evt);
+    // Crane recall zone: tap a crane base
+    for (var i = 0; i < cranes.length; i++) {
+      var cr = cranes[i];
+      if (Math.abs(p.x - cr.x) < 30 && p.y >= 240 && p.y <= 340 && cr.phase !== 'idle') {
+        recallCrane(cr); updateHUD(); return;
+      }
+    }
+    // Ship hit
+    for (var j = 0; j < ships.length; j++) {
+      var s = ships[j];
+      if (p.x >= s.x && p.x <= s.x + 124 && p.y >= s.y && p.y <= s.y + 92) {
+        selected = j;
+        assignCrane(s);
+        return;
+      }
+    }
+  }
+
+  canvas.addEventListener('click', handlePoint, false);
+  canvas.addEventListener('touchstart', handlePoint, { passive: false });
+  canvas.addEventListener('mousemove', function (evt) {
+    if (state !== 'playing') return;
+    var p = canvasPos(evt);
+    for (var j = 0; j < ships.length; j++) {
+      var s = ships[j];
+      if (p.x >= s.x && p.x <= s.x + 124 && p.y >= s.y && p.y <= s.y + 92) { selected = j; break; }
+    }
+  }, false);
+
+  document.addEventListener('keydown', function (evt) {
+    var k = evt.key;
+    if (k === 'r' || k === 'R') {
+      if (state === 'playing' || state === 'over' || state === 'paused') { restart(); }
+      return;
+    }
+    if (k === 'p' || k === 'P') {
+      if (state === 'playing') state = 'paused';
+      else if (state === 'paused') state = 'playing';
+      return;
+    }
+    if (state !== 'playing') return;
+    if (k >= '1' && k <= '6') {
+      var idx = parseInt(k, 10) - 1;
+      if (idx < ships.length) { selected = idx; showMsg('Selected Ship ' + ships[idx].id + ' — press Enter to assign a crane.'); }
+    } else if (k === 'Enter' || k === ' ') {
+      if (ships[selected]) assignCrane(ships[selected]);
+    } else if (k === 'ArrowLeft') {
+      selected = Math.max(0, selected - 1);
+    } else if (k === 'ArrowRight') {
+      selected = Math.min(Math.max(0, ships.length - 1), selected + 1);
+    }
+  }, false);
+
+  el('startBtn').addEventListener('click', startGame, false);
+  el('startBtn').addEventListener('touchstart', function (e) { e.preventDefault(); startGame(); }, { passive: false });
+  el('restartBtn').addEventListener('click', restart, false);
+  el('restartBtn').addEventListener('touchstart', function (e) { e.preventDefault(); restart(); }, { passive: false });
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

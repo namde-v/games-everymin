@@ -44,6 +44,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0338 | Metronome Mines | Rhythm / Precision Mining | Space strike, mouse click, touch tap, R restart | [Play](./../games/game-0338.html) |
 | 0339 | Shadow Scribe | Arcade / Stealth Maze | Arrow Keys / WASD move, mouse click, touch tap, R restart | [Play](./../games/game-0339.html) |
 | 0340 | Star Cartographer | Puzzle / Constellation Drawing | Mouse/touch click connect stars, Arrow Keys navigate, R restart | [Play](./../games/game-0340.html) |
+| 0341 | Avalanche Aviator | Arcade / Mountain Flight | Arrow Keys / WASD fly, mouse move steer, touch drag steer, click boost, P pause, R restart | [Play](./../games/game-0341.html) |
+| 0342 | Kaleido Keys | Puzzle / Color Sequence | Keys 1-8 or QWERASDF repeat sequence, mouse click, touch tap, Enter/Space start/restart | [Play](./../games/game-0342.html) |
+| 0343 | Timber Tycoon | Strategy / Forestry Management | Mouse/touch tap plots and buttons, Arrow Keys move cursor, P plant, H harvest, Space act, R restart | [Play](./../games/game-0343.html) |
+| 0344 | Pulse Pogo | Rhythm / Beat Hopping | Space bounce on the beat, Arrow Keys move, mouse click, touch tap, R restart | [Play](./../games/game-0344.html) |
+| 0345 | Tidepool Trawler | Arcade / Deep-Sea Fishing | Arrow Keys / A/D move, Space drop hook, mouse move steer and click drop, touch drag and tap DROP, R restart | [Play](./../games/game-0345.html) |
+| 0346 | Enigma Engine | Puzzle / Code Machine | Mouse/touch tap dials and buttons, Arrow Keys select and rotate, S swap, C clue, Enter check, R restart | [Play](./../games/game-0346.html) |
+| 0347 | Dockside Dynamo | Strategy / Port Logistics | Mouse click / touch tap ship to assign crane, Keys 1-6 select ship, Enter assign, P pause, R restart | [Play](./../games/game-0347.html) |
+| 0348 | Samba Steps | Rhythm / Dance Timing | Arrow Keys or A/S/W/D hit lanes, mouse click pads, touch tap pads, R restart | [Play](./../games/game-0348.html) |
+| 0349 | Canyon Courier | Arcade / Delivery Dash | Arrow Keys / WASD steer, mouse move steer, touch drag steer, Space boost, P pause, R restart | [Play](./../games/game-0349.html) |
+| 0350 | Botanical Blueprint | Puzzle / Garden Layout | Arrow Keys move, Keys 1-5 pick plant, Enter/Space plant, mouse/touch tap plant then bed, R restart | [Play](./../games/game-0350.html) |
 
 ## Batch notes
 
@@ -55,3 +65,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 033: 10 games, produced in one cycle (0321–0330).
 
 - Batch 034: 10 games, produced in one cycle (0331–0340). Five worker titles duplicated earlier games and were renamed before cataloguing (Quarry Quake→Quarry Rumble, Hex Harvest→Hexfield Harvest, Drumline Dunes→Dune Drummers, Rune Relay→Glyph Relay, Ink Infiltrator→Shadow Scribe).
+
+- Batch 035: 10 games, produced in one cycle (0341–0350). Four initially proposed titles duplicated earlier games and were replaced before production (Mirror Maze→Kaleido Keys, Cipher Lock→Enigma Engine, Harbor Master→Dockside Dynamo, Beat Bounce→Pulse Pogo).

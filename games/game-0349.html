@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Canyon Courier</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a0f08; color: #ffe8c8; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 34px; letter-spacing: 2px; color: #ffb347; text-shadow: 2px 2px 0 #7a2e00; margin: 8px 0 4px; text-align: center; }
+  p.sub { color: #d8b48a; margin-bottom: 10px; text-align: center; font-size: 14px; }
+  #wrap { position: relative; width: 900px; max-width: 96vw; }
+  canvas { width: 100%; height: 540px; display: block; background: #e8a85c; border: 4px solid #5b2d0a; border-radius: 10px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0; font-weight: bold; font-size: 15px; flex-wrap: wrap; }
+  #hud span { background: #3a1e0c; padding: 7px 12px; border-radius: 8px; border: 1px solid #8a4a1a; }
+  #hud .warn { color: #ff5a3c; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(20, 8, 2, 0.88); border-radius: 10px; padding: 24px; gap: 12px; }
+  .screen.hidden { display: none; }
+  .screen h2 { font-size: 32px; color: #ffb347; }
+  .screen p { max-width: 620px; line-height: 1.55; font-size: 15px; color: #ffe8c8; }
+  .screen .small { font-size: 13px; color: #d8b48a; }
+  button { background: #ffb347; color: #2b1200; border: none; padding: 14px 28px; font-size: 18px; font-weight: bold; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 0 #8a4a1a; }
+  button:hover { background: #ffc46b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #deliveries { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+  .pill { background: #3a1e0c; border: 1px solid #ffb347; border-radius: 20px; padding: 4px 10px; font-size: 12px; }
+  .controls { margin-top: 8px; color: #d8b48a; font-size: 13px; text-align: center; line-height: 1.5; }
+  kbd { background: #fff; color: #222; padding: 1px 6px; border-radius: 4px; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>🏍️ CANYON COURIER</h1>
+<p class="sub">A hover-bike delivery dash through the red canyon — fast parcels, tight deadlines, sharp rocks.</p>
+<div id="wrap">
+  <canvas id="game" width="900" height="540"></canvas>
+  <div id="hud">
+    <span id="score">Score: 0</span>
+    <span id="lives">Lives: ❤️❤️❤️</span>
+    <span id="status">Status: Ready</span>
+    <span id="cargo">Cargo: Empty</span>
+    <span id="target">Deliveries: 0 / 8</span>
+  </div>
+  <div id="titleScreen" class="screen">
+    <h2>CANYON COURIER</h2>
+    <p><strong>How to Play:</strong> You are the canyon courier. Ride your hover-bike, grab glowing parcels, and drop them at the matching outpost before the parcel timer runs out. Deliver 8 parcels to win!</p>
+    <p>⚠️ Dodge rock spires — a crash costs a life. Sandstorm gusts push you sideways; fight them or ride with them. Expired parcels vanish and cost points.</p>
+    <p class="small">Controls: Arrow keys / WASD to steer &nbsp;•&nbsp; Mouse: move pointer to steer toward it &nbsp;•&nbsp; Touch: drag to steer &nbsp;•&nbsp; Space = boost (limited) &nbsp;•&nbsp; P = pause &nbsp;•&nbsp; R = restart</p>
+    <div id="deliveries"><span class="pill">📦 Pick up parcels</span><span class="pill">🏠 Deliver to outposts</span><span class="pill">⏱️ Beat the timer</span><span class="pill">💨 Beware gusts</span></div>
+    <button id="startBtn" type="button">▶ START DELIVERY RUN</button>
+    <p class="small">Tip: delivering fast earns a time bonus. Chain deliveries without crashing for a combo bonus.</p>
+  </div>
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">Run Complete</h2>
+    <p id="endText"></p>
+    <p id="endScore" class="small"></p>
+    <button id="restartBtn" type="button">↻ RESTART</button>
+    <p class="small">Press R or tap Restart to ride again.</p>
+  </div>
+</div>
+<div class="controls">Steer with <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> or <kbd>WASD</kbd> • Mouse steers • Touch drag steers • <kbd>Space</kbd> boost • <kbd>P</kbd> pause • <kbd>R</kbd> restart</div>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var cargoEl = document.getElementById('cargo');
+  var targetEl = document.getElementById('target');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+
+  var state = 'title'; // title, playing, paused, won, over
+  var score = 0, lives = 3, deliveries = 0, combo = 0, boost = 100;
+  var frame = 0, lastTime = 0, elapsed = 0;
+  var keys = {};
+  var mouse = { x: W/2, y: H/2, active: false };
+  var touch = { x: null, y: null, active: false };
+
+  var player = { x: 120, y: 270, vx: 0, vy: 0, r: 18, tilt: 0, inv: 0 };
+  var parcels = [], outposts = [], rocks = [], gusts = [], particles = [], stars = [];
+  var parcelTimer = 0, gustTimer = 0, spawnTimer = 0;
+  var currentParcel = null, carrying = null;
+  var colors = ['#ff4d6d', '#3ec6ff', '#ffe14d', '#7dff6a'];
+
+  // Audio: created only after Start click
+  var audioCtx = null, master = null, muted = false;
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      master = audioCtx.createGain();
+      master.gain.value = 0.18;
+      master.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(master); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (name === 'pickup') { beep(660, 0.12, 'sine', 0.6); setTimeout(function(){ beep(880, 0.14, 'sine', 0.6); }, 90); }
+    else if (name === 'deliver') { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.16, 'triangle', 0.6); }, i*90); }); }
+    else if (name === 'crash') { beep(120, 0.35, 'sawtooth', 0.7); setTimeout(function(){ beep(70, 0.3, 'sawtooth', 0.6); }, 80); }
+    else if (name === 'warn') { beep(300, 0.12, 'square', 0.4); }
+    else if (name === 'win') { [523,659,784,1046,1318].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.6); }, i*130); }); }
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx*dx + dy*dy); }
+
+  function makeOutposts() {
+    outposts = [];
+    var slots = [
+      { x: 780, y: 90 }, { x: 810, y: 270 }, { x: 770, y: 450 },
+      { x: 640, y: 140 }, { x: 660, y: 400 }
+    ];
+    for (var i = 0; i < slots.length; i++) {
+      outposts.push({ x: slots[i].x, y: slots[i].y, color: colors[i % colors.length], label: 'OUTPOST ' + (i+1), pulse: Math.random()*6 });
+    }
+  }
+  function makeRocks() {
+    rocks = [];
+    for (var i = 0; i < 14; i++) {
+      rocks.push({ x: rand(280, 680), y: rand(50, 490), r: rand(18, 38), drift: rand(-0.25, 0.25) });
+    }
+  }
+  function spawnParcel() {
+    var c = colors[Math.floor(Math.random()*colors.length)];
+    var dest = outposts[Math.floor(Math.random()*outposts.length)];
+    // match color to destination where possible for clearer play
+    var match = outposts.filter(function(o){ return o.color === c; });
+    if (match.length) dest = match[0];
+    currentParcel = { x: rand(240, 520), y: rand(60, 480), color: c, dest: dest, time: 22, max: 22, bob: 0 };
+    parcelTimer = 0;
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n||14); i++) {
+      particles.push({ x: x, y: y, vx: rand(-3,3), vy: rand(-3,3), life: rand(20,45), color: color });
+    }
+  }
+  function reset() {
+    score = 0; lives = 3; deliveries = 0; combo = 0; boost = 100; frame = 0; elapsed = 0;
+    player = { x: 120, y: 270, vx: 0, vy: 0, r: 18, tilt: 0, inv: 0 };
+    parcels = []; gusts = []; particles = [];
+    makeOutposts(); makeRocks(); spawnParcel();
+    carrying = null;
+    updateHUD('Riding! Grab the glowing parcel.');
+  }
+  function updateHUD(msg) {
+    scoreEl.textContent = 'Score: ' + score;
+    livesEl.textContent = 'Lives: ' + ('❤️'.repeat(Math.max(0,lives)) || '—');
+    if (msg) statusEl.textContent = 'Status: ' + msg;
+    cargoEl.textContent = carrying ? ('Cargo: Parcel → ' + carrying.dest.label) : 'Cargo: Empty';
+    targetEl.textContent = 'Deliveries: ' + deliveries + ' / 8';
+    statusEl.className = (carrying && carrying.time < 6) ? 'warn' : '';
+    if (carrying && carrying.time < 6) statusEl.textContent = 'Status: HURRY! Parcel expiring!';
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endTitle.textContent = '🏆 YOU WIN — CANYON LEGEND!';
+      endText.textContent = 'You completed all 8 deliveries through rock spires and sandstorms. The canyon outposts salute you, courier!';
+      sfx('win');
+    } else {
+      endTitle.textContent = '💥 GAME OVER';
+      endText.textContent = 'Your hover-bike is out of lives. The parcels will wait for the next brave courier.';
+    }
+    endScore.textContent = 'Final score: ' + score + ' • Deliveries: ' + deliveries + ' / 8 • Best combo: x' + (combo+1);
+    updateHUD(won ? 'Victory!' : 'Game Over');
+  }
+
+  function crash() {
+    if (player.inv > 0) return;
+    lives--; combo = 0; player.inv = 90; sfx('crash');
+    burst(player.x, player.y, '#ff5a3c', 24);
+    player.x = 120; player.y = 270; player.vx = 0; player.vy = 0;
+    if (carrying) { carrying = null; spawnParcel(); }
+    updateHUD('Crash! ' + lives + ' lives left.');
+    if (lives <= 0) endGame(false);
+  }
+
+  // Input: keyboard
+  document.addEventListener('keydown', function(e) {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+    if (e.key.toLowerCase() === 'r' && (state === 'won' || state === 'over' || state === 'playing' || state === 'paused')) startGame();
+    if (e.key.toLowerCase() === 'p' && state === 'playing') { state = 'paused'; updateHUD('Paused'); }
+    else if (e.key.toLowerCase() === 'p' && state === 'paused') { state = 'playing'; updateHUD('Riding!'); }
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key.toLowerCase()] = false; });
+  // Input: mouse
+  canvas.addEventListener('mousemove', function(e) {
+    var r = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - r.left) * (W / r.width);
+    mouse.y = (e.clientY - r.top) * (H / r.height);
+    mouse.active = true;
+  });
+  canvas.addEventListener('mousedown', function(e) {
+    var r = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - r.left) * (W / r.width);
+    mouse.y = (e.clientY - r.top) * (H / r.height);
+    mouse.active = true;
+    if (state === 'title') startGame();
+  });
+  canvas.addEventListener('mouseleave', function() { mouse.active = false; });
+  // Input: touch
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    touch.x = (t.clientX - r.left) * (W / r.width);
+    touch.y = (t.clientY - r.top) * (H / r.height);
+    touch.active = true;
+    if (state === 'title') startGame();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    touch.x = (t.clientX - r.left) * (W / r.width);
+    touch.y = (t.clientY - r.top) * (H / r.height);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function() { touch.active = false; touch.x = null; });
+
+  function startGame() {
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+
+  function update(dt) {
+    frame++; elapsed += dt;
+    if (player.inv > 0) player.inv--;
+    // steering
+    var ax = 0, ay = 0;
+    if (keys['arrowleft'] || keys['a']) ax -= 1;
+    if (keys['arrowright'] || keys['d']) ax += 1;
+    if (keys['arrowup'] || keys['w']) ay -= 1;
+    if (keys['arrowdown'] || keys['s']) ay += 1;
+    var steer = null;
+    if (touch.active && touch.x !== null) steer = touch;
+    else if (mouse.active && (Math.abs(mouse.x - player.x) > 12 || Math.abs(mouse.y - player.y) > 12) && !keys['arrowleft'] && !keys['arrowright'] && !keys['arrowup'] && !keys['arrowdown'] && !keys['w'] && !keys['a'] && !keys['s'] && !keys['d']) steer = mouse;
+    if (steer) {
+      var dx = steer.x - player.x, dy = steer.y - player.y;
+      var d = Math.sqrt(dx*dx + dy*dy) || 1;
+      ax = dx / d; ay = dy / d;
+      if (d < 20) { ax = 0; ay = 0; }
+    }
+    var boosting = (keys[' '] || keys['shift']) && boost > 0;
+    var speed = boosting ? 5.2 : 3.4;
+    if (boosting) boost = Math.max(0, boost - 0.6); else boost = Math.min(100, boost + 0.25);
+    player.vx += ax * 0.45; player.vy += ay * 0.45;
+    player.vx *= 0.90; player.vy *= 0.90;
+    // gusts push sideways
+    for (var gi = 0; gi < gusts.length; gi++) {
+      var g = gusts[gi];
+      if (Math.abs(player.y - g.y) < 55 && player.x > g.x && player.x < g.x + 220) {
+        player.vx += g.dir * 0.35;
+      }
+    }
+    var sp = Math.sqrt(player.vx*player.vx + player.vy*player.vy);
+    if (sp > speed) { player.vx = player.vx / sp * speed; player.vy = player.vy / sp * speed; }
+    player.x += player.vx; player.y += player.vy;
+    player.tilt = player.vx * 0.04;
+    player.x = Math.max(24, Math.min(W - 24, player.x));
+    player.y = Math.max(24, Math.min(H - 24, player.y));
+
+    // canyon walls drift + rocks
+    for (var ri = 0; ri < rocks.length; ri++) {
+      var rk = rocks[ri];
+      rk.y += rk.drift; if (rk.y < 40 || rk.y > H-40) rk.drift *= -1;
+      if (dist(player, rk) < player.r + rk.r - 6) crash();
+    }
+    // gusts spawn / move
+    gustTimer -= dt;
+    if (gustTimer <= 0) {
+      gusts.push({ x: -220, y: rand(60, H-60), dir: Math.random() < 0.5 ? -1 : 1, life: 600 });
+      gustTimer = rand(5, 9);
+    }
+    for (var gi2 = gusts.length - 1; gi2 >= 0; gi2--) {
+      gusts[gi2].x += 1.6; gusts[gi2].life -= dt;
+      if (gusts[gi2].x > W + 240 || gusts[gi2].life <= 0) gusts.splice(gi2, 1);
+    }
+    // parcel pickup
+    if (!carrying && currentParcel) {
+      currentParcel.bob += 0.1;
+      if (dist(player, currentParcel) < 34) {
+        carrying = currentParcel; currentParcel = null;
+        sfx('pickup'); burst(player.x, player.y, '#ffe14d', 16);
+        updateHUD('Deliver to ' + carrying.dest.label + '!');
+      }
+    }
+    if (carrying) {
+      carrying.time -= dt;
+      carrying.x = player.x; carrying.y = player.y - 30;
+      if (Math.ceil(carrying.time) === 5) sfx('warn');
+      if (carrying.time <= 0) {
+        burst(player.x, player.y, '#888888', 12);
+        score = Math.max(0, score - 50); combo = 0; carrying = null;
+        spawnParcel(); updateHUD('Parcel expired! New parcel ready.');
+      } else {
+        // delivery check
+        if (dist(player, carrying.dest) < 52) {
+          var bonus = Math.round(carrying.time * 10) + combo * 25;
+          score += 100 + bonus; deliveries++; combo++;
+          sfx('deliver'); burst(carrying.dest.x, carrying.dest.y, carrying.color, 26);
+          carrying = null;
+          if (deliveries >= 8) { updateHUD('Victory!'); endGame(true); return; }
+          spawnParcel(); updateHUD('Delivered! Bonus +' + bonus);
+        }
+      }
+    }
+    // particles
+    for (var pi = particles.length - 1; pi >= 0; pi--) {
+      var p = particles[pi];
+      p.x += p.vx; p.y += p.vy; p.life--;
+      if (p.life <= 0) particles.splice(pi, 1);
+    }
+    // boost regen display via HUD occasionally
+    if (frame % 20 === 0) updateHUD();
+  }
+
+  function drawCanyon() {
+    // sky + layered canyon
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#ffd98a'); grad.addColorStop(0.5, '#e8a85c'); grad.addColorStop(1, '#c97a3a');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffedb8';
+    ctx.beginPath(); ctx.arc(780, 70, 36, 0, Math.PI*2); ctx.fill();
+    // distant mesas
+    ctx.fillStyle = '#b85f2a';
+    ctx.beginPath(); ctx.moveTo(0, 120); ctx.lineTo(140, 60); ctx.lineTo(300, 130); ctx.lineTo(430, 70); ctx.lineTo(600, 140); ctx.lineTo(760, 60); ctx.lineTo(900, 120); ctx.lineTo(900, 200); ctx.lineTo(0, 200); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#8a3f18';
+    ctx.fillRect(0, 0, W, 26); ctx.fillRect(0, H-26, W, 26);
+    ctx.fillStyle = '#6b2f10';
+    for (var i = 0; i < 20; i++) { ctx.fillRect(i*48, 6, 18, 14); ctx.fillRect(i*48+20, H-20, 18, 14); }
+    // road line
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.setLineDash([24, 20]); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke(); ctx.setLineDash([]);
+  }
+  function drawOutposts() {
+    outposts.forEach(function(o) {
+      o.pulse += 0.05;
+      var glow = 46 + Math.sin(o.pulse) * 8;
+      ctx.fillStyle = o.color; ctx.globalAlpha = 0.22;
+      ctx.beginPath(); ctx.arc(o.x, o.y, glow, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = '#2b1200'; ctx.fillRect(o.x-30, o.y-14, 60, 38);
+      ctx.fillStyle = o.color; ctx.fillRect(o.x-30, o.y-14, 60, 10);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('🏠', o.x, o.y+14);
+      ctx.fillStyle = '#ffe8c8'; ctx.font = 'bold 11px Arial';
+      ctx.fillText(o.label, o.x, o.y+36);
+      if (carrying && carrying.dest === o) {
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.setLineDash([6,6]);
+        ctx.beginPath(); ctx.arc(o.x, o.y, 56, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+      }
+    });
+  }
+  function draw() {
+    drawCanyon();
+    // gusts
+    gusts.forEach(function(g) {
+      ctx.fillStyle = 'rgba(255,240,200,0.35)';
+      for (var i = 0; i < 5; i++) ctx.fillRect(g.x + i*40, g.y - 30 + i*12, 60, 8);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(g.dir > 0 ? '💨 →' : '← 💨', g.x + 110, g.y - 36);
+    });
+    // rocks
+    rocks.forEach(function(rk) {
+      ctx.fillStyle = '#5b2d0a'; ctx.beginPath();
+      ctx.moveTo(rk.x, rk.y - rk.r); ctx.lineTo(rk.x + rk.r*0.8, rk.y + rk.r*0.6); ctx.lineTo(rk.x - rk.r*0.8, rk.y + rk.r*0.6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#8a4a1a'; ctx.beginPath(); ctx.arc(rk.x, rk.y, rk.r*0.45, 0, Math.PI*2); ctx.fill();
+    });
+    drawOutposts();
+    // parcel on ground
+    if (currentParcel) {
+      var bobY = Math.sin(currentParcel.bob) * 5;
+      ctx.fillStyle = currentParcel.color; ctx.globalAlpha = 0.25;
+      ctx.beginPath(); ctx.arc(currentParcel.x, currentParcel.y + bobY, 32, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = currentParcel.color; ctx.fillRect(currentParcel.x-14, currentParcel.y-12+bobY, 28, 24);
+      ctx.fillStyle = '#2b1200'; ctx.fillRect(currentParcel.x-14, currentParcel.y-2+bobY, 28, 4);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText('📦', currentParcel.x, currentParcel.y+6+bobY);
+      ctx.fillStyle = '#2b1200'; ctx.fillRect(currentParcel.x-26, currentParcel.y-34+bobY, 52, 14);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.fillText(Math.ceil(currentParcel.time) + 's', currentParcel.x, currentParcel.y-23+bobY);
+    }
+    // player hover-bike
+    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.tilt);
+    if (player.inv > 0 && Math.floor(frame/6) % 2 === 0) ctx.globalAlpha = 0.45;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0, 16, 26, 7, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.fillRect(-26, -4, 52, 12);
+    ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.arc(14, -2, 10, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#1e6fff'; ctx.beginPath(); ctx.arc(-4, -10, 7, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff4d6d'; ctx.fillRect(-30, 2, 10, 6);
+    ctx.fillStyle = '#7dff6a'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText('🏍️', 0, 8);
+    ctx.restore(); ctx.globalAlpha = 1;
+    if (carrying) {
+      ctx.fillStyle = carrying.color; ctx.fillRect(player.x-12, player.y-44, 24, 18);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(carrying.time) + 's', player.x, player.y-48);
+    }
+    // particles
+    particles.forEach(function(p) {
+      ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life/45);
+      ctx.fillRect(p.x, p.y, 5, 5); ctx.globalAlpha = 1;
+    });
+    // boost bar
+    ctx.fillStyle = '#2b1200'; ctx.fillRect(20, H-44, 180, 14);
+    ctx.fillStyle = boost > 25 ? '#7dff6a' : '#ff5a3c'; ctx.fillRect(22, H-42, 176 * (boost/100), 10);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'left'; ctx.fillText('BOOST', 20, H-50);
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('PAUSED — press P', W/2, H/2);
+    }
+  }
+  function loop(now) {
+    if (state !== 'playing' && state !== 'paused') { draw(); return; }
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    if (state === 'playing') update(dt);
+    draw();
+    if (state === 'playing' || state === 'paused') requestAnimationFrame(loop);
+  }
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>
