@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orchard Overseer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1d2b1a; color: #f5f0d8; font-family: Georgia, 'Times New Roman', serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 30px; color: #ffe08a; text-shadow: 2px 2px 0 #3a5a2a; margin: 6px 0 2px; text-align: center; }
+  .subtitle { color: #b8d98a; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 8px 0; width: 100%; max-width: 760px; }
+  .pill { background: #2f4a26; border: 2px solid #6fae4f; border-radius: 20px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill.warn { background: #5a2a20; border-color: #e07a5f; }
+  #wrap { position: relative; width: 100%; max-width: 760px; }
+  canvas { width: 100%; height: auto; background: #7cb85c; border: 4px solid #5a3d24; border-radius: 12px; display: block; touch-action: none; }
+  #controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0; max-width: 760px; }
+  button { background: #e8a33d; color: #2b1c08; border: 3px solid #fff3c4; border-radius: 10px; padding: 10px 16px; font-size: 16px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffc95e; }
+  button.secondary { background: #4a7a3a; color: white; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #msg { min-height: 46px; text-align: center; background: #24351f; border: 1px solid #557a44; border-radius: 8px; padding: 8px; max-width: 760px; width: 100%; margin-bottom: 8px; }
+  .overlay { position: absolute; inset: 0; background: rgba(20,32,15,.93); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 10px; }
+  .overlay h2 { color: #ffe08a; font-size: 32px; }
+  .overlay p { max-width: 520px; line-height: 1.5; }
+  .overlay.hidden { display: none; }
+  .keys { font-size: 13px; color: #cfe8b0; }
+  #selected { text-align: center; color: #ffe08a; font-weight: bold; min-height: 22px; }
+  .legend { font-size: 13px; color: #d8e8c0; text-align: center; max-width: 760px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🌳 Orchard Overseer 🍎</h1>
+<p class="subtitle">Plant, water, and harvest your way through four seasons!</p>
+
+<div id="hud">
+  <div class="pill" id="hudCoins">🪙 Coins: 30</div>
+  <div class="pill" id="hudWater">💧 Water: 12</div>
+  <div class="pill" id="hudSeason">🌱 Season 1: Spring</div>
+  <div class="pill" id="hudDay">📅 Day 1 / 20</div>
+  <div class="pill" id="hudQuota">🎯 Harvested: 0 / 8</div>
+  <div class="pill" id="hudScore">⭐ Score: 0</div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🌳 Orchard Overseer</h2>
+    <p><strong>How to Play:</strong> You manage a small orchard across four seasons. Click or tap a plot, then plant a tree. Water it through its growth stages, harvest ripe fruit, and earn coins. Meet each season's harvest quota before the days run out!</p>
+    <p>🍎 Apple costs 5 coins, sells for 4 each &bull; 🍐 Pear costs 7, sells for 6 &bull; 🍒 Cherry costs 10, sells for 9. Trees yield 2&ndash;4 fruit when ripe. Rainy days refill water. Miss a quota and the orchard fails!</p>
+    <p class="keys">Mouse / Touch: click a plot, then use the action buttons. Keyboard: Arrow keys move the cursor, A/P/C plant, W waters, H harvests, N advances a day, R restarts.</p>
+    <button id="startBtn">▶ Start Orchard</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+
+<div id="selected">Selected plot: none — click a plot to begin.</div>
+<div id="msg">Welcome, Overseer! Plant your first trees and watch them grow.</div>
+
+<div id="controls">
+  <button id="btnApple" class="secondary">🍎 Plant Apple (5)</button>
+  <button id="btnPear" class="secondary">🍐 Plant Pear (7)</button>
+  <button id="btnCherry" class="secondary">🍒 Plant Cherry (10)</button>
+  <button id="btnWater">💧 Water Plot</button>
+  <button id="btnHarvest">🧺 Harvest</button>
+  <button id="btnDay">⏭ Next Day</button>
+  <button id="btnRestart2">↻ Restart</button>
+</div>
+<p class="legend">Growth: seed 🌱 → sprout 🌿 → sapling 🌳 → ripe fruit 🍎. Each growth stage needs one watering. Dry trees stall; rain helps. Seasons: Spring, Summer, Autumn, Winter — finish Winter's quota to win!</p>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const COLS = 8, ROWS = 5, CELL = 88, OX = 28, OY = 20;
+  const SEASONS = [
+    {name:'Spring', quota:8, days:20, color:'#7cb85c'},
+    {name:'Summer', quota:16, days:20, color:'#8fbf4a'},
+    {name:'Autumn', quota:24, days:20, color:'#a8a04a'},
+    {name:'Winter', quota:32, days:20, color:'#9db8c4'}
+  ];
+  const TYPES = {
+    apple: {emoji:'🍎', cost:5, price:4, yield:[2,3]},
+    pear: {emoji:'🍐', cost:7, price:6, yield:[2,4]},
+    cherry: {emoji:'🍒', cost:10, price:9, yield:[3,4]}
+  };
+  const STAGES = ['🌱','🌿','🌳','🌳'];
+  let started=false, over=false, won=false;
+  let grid, coins, water, seasonIdx, day, harvested, score, selected, cursor, rainToday, message;
+  let audioCtx=null;
+
+  function newGame(){
+    grid = [];
+    for(let y=0;y<ROWS;y++){ let row=[]; for(let x=0;x<COLS;x++) row.push(null); grid.push(row); }
+    coins=30; water=12; seasonIdx=0; day=1; harvested=0; score=0;
+    selected=null; cursor={x:0,y:0}; rainToday=false; over=false; won=false; started=true;
+    setMsg('Spring begins! Plant trees, water them, and harvest 8 fruit before Day 20 ends.');
+    document.getElementById('endScreen').classList.add('hidden');
+    document.getElementById('titleScreen').classList.add('hidden');
+    updateHUD();
+  }
+  function setMsg(t){ message=t; document.getElementById('msg').textContent=t; }
+  function updateHUD(){
+    const s=SEASONS[seasonIdx];
+    document.getElementById('hudCoins').textContent='🪙 Coins: '+coins;
+    document.getElementById('hudWater').textContent='💧 Water: '+water;
+    document.getElementById('hudSeason').textContent='🌱 Season '+(seasonIdx+1)+': '+s.name;
+    document.getElementById('hudDay').textContent='📅 Day '+day+' / '+s.days;
+    document.getElementById('hudQuota').textContent='🎯 Harvested: '+harvested+' / '+s.quota;
+    document.getElementById('hudScore').textContent='⭐ Score: '+score;
+    const q=document.getElementById('hudQuota');
+    q.classList.toggle('warn', s.days-day<5 && harvested<s.quota);
+    document.getElementById('selected').textContent = selected ? ('Selected plot: row '+(selected.y+1)+', column '+(selected.x+1)+' — '+(grid[selected.y][selected.x] ? describe(grid[selected.y][selected.x]) : 'empty soil')) : 'Selected plot: none — click a plot to begin.';
+  }
+  function describe(t){ return t.type+' tree, stage '+(t.stage+1)+'/4, '+(t.stage>=3 ? 'RIPE — harvest now!' : 'needs water to grow'); }
+  function initAudio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }
+  function beep(freq,dur,type){
+    if(!audioCtx) return;
+    try{
+      const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type||'sine'; o.frequency.value=freq; g.gain.value=0.12;
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function plant(kind){
+    if(!started||over||won||!selected) { setMsg(selected?'Choose a tree type.':'First select an empty plot!'); return; }
+    const cell=grid[selected.y][selected.x];
+    if(cell){ setMsg('That plot already has a tree. Harvest it or pick an empty plot.'); return; }
+    const t=TYPES[kind];
+    if(coins<t.cost){ setMsg('Not enough coins for a '+kind+' tree! Harvest fruit to earn more.'); beep(140,0.2,'square'); return; }
+    coins-=t.cost; grid[selected.y][selected.x]={type:kind, stage:0, watered:false};
+    score+=5; beep(520,0.15,'triangle'); setMsg('Planted a '+kind+' tree! Water it to help it grow.'); updateHUD();
+  }
+  function waterPlot(){
+    if(!started||over||won||!selected){ setMsg('Select a tree plot first.'); return; }
+    const cell=grid[selected.y][selected.x];
+    if(!cell){ setMsg('Nothing to water there — plant a tree first.'); return; }
+    if(cell.stage>=3){ setMsg('That tree is already ripe! Harvest it instead.'); return; }
+    if(water<=0){ setMsg('Out of water! Wait for a rainy day or advance days to recover.'); beep(140,0.2,'square'); return; }
+    water--; cell.stage++; cell.watered=true;
+    beep(660,0.12,'sine'); setMsg('Watered! The tree grew to stage '+(cell.stage+1)+'/4.'+(cell.stage>=3?' It is RIPE — harvest it!':'')); score+=2; updateHUD();
+  }
+  function harvest(){
+    if(!started||over||won||!selected){ setMsg('Select a ripe tree first.'); return; }
+    const cell=grid[selected.y][selected.x];
+    if(!cell||cell.stage<3){ setMsg('Nothing ripe here yet. Water trees until they reach stage 4.'); return; }
+    const t=TYPES[cell.type];
+    const amount=t.yield[0]+Math.floor(Math.random()*(t.yield[1]-t.yield[0]+1));
+    const earned=amount*t.price;
+    coins+=earned; harvested+=amount; score+=amount*10;
+    grid[selected.y][selected.x]=null;
+    beep(880,0.2,'triangle'); beep(990,0.2,'triangle');
+    setMsg('Harvested '+amount+' '+cell.type+' fruit for '+earned+' coins! Season total: '+harvested+' / '+SEASONS[seasonIdx].quota+'.');
+    checkSeasonEnd(); updateHUD();
+  }
+  function checkSeasonEnd(){
+    if(harvested>=SEASONS[seasonIdx].quota){
+      if(seasonIdx>=SEASONS.length-1){ endGame(true); return true; }
+      seasonIdx++; day=1; harvested=0; water+=6;
+      setMsg('Season complete! Welcome to '+SEASONS[seasonIdx].name+'. Water refilled by 6. New quota: '+SEASONS[seasonIdx].quota+' fruit.');
+      beep(740,0.25,'triangle'); return true;
+    }
+    return false;
+  }
+  function nextDay(){
+    if(!started||over||won) return;
+    rainToday=Math.random()<0.3;
+    if(rainToday){ water+=4; }
+    day++;
+    const s=SEASONS[seasonIdx];
+    if(day>s.days){
+      if(harvested>=s.quota){ checkSeasonEnd(); }
+      else { endGame(false); }
+      updateHUD(); return;
+    }
+    setMsg((rainToday?'🌧 Rain today! +4 water. ':'☀️ A new day dawns. ')+'Day '+day+' of '+s.days+' in '+s.name+'. Harvested '+harvested+' / '+s.quota+'.');
+    updateHUD();
+  }
+  function endGame(didWin){
+    won=didWin; over=!didWin;
+    const el=document.getElementById('endScreen');
+    document.getElementById('endTitle').textContent = didWin ? '🏆 You Win! Master Overseer!' : '💔 Game Over';
+    document.getElementById('endText').textContent = didWin ? 'You completed all four seasons and your orchard thrived through Winter. The harvest festival celebrates you!' : 'The season ended before you met the harvest quota ('+harvested+' / '+SEASONS[seasonIdx].quota+'). The orchard needs a fresh start.';
+    document.getElementById('endScore').textContent='Final score: '+score+' | Coins: '+coins;
+    el.classList.remove('hidden');
+    beep(didWin?880:180,0.4,didWin?'triangle':'sawtooth');
+  }
+  function draw(){
+    ctx.fillStyle=SEASONS[seasonIdx].color; ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(rainToday){ ctx.fillStyle='rgba(200,220,255,0.25)'; ctx.fillRect(0,0,canvas.width,canvas.height); }
+    ctx.font='bold 15px Georgia, serif'; ctx.fillStyle='#24351f';
+    ctx.fillText(rainToday?'🌧 Rainy day — water refills!':'☀️ '+SEASONS[seasonIdx].name+' — tend your orchard', 28, 14);
+    for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
+      const px=OX+x*CELL, py=OY+y*CELL;
+      const cell=grid ? grid[y][x] : null;
+      ctx.fillStyle = (selected && selected.x===x && selected.y===y) ? '#ffe08a' : '#8a5a32';
+      ctx.fillRect(px-3,py-3,CELL+6,CELL+6);
+      ctx.fillStyle = cell ? '#6f9a4a' : '#a67c52';
+      ctx.fillRect(px,py,CELL,CELL);
+      ctx.font='38px serif'; ctx.textAlign='center';
+      if(cell){ ctx.fillText(STAGES[cell.stage], px+CELL/2, py+42); ctx.font='34px serif'; ctx.fillText(TYPES[cell.type].emoji, px+CELL/2, py+78); }
+      else { ctx.font='26px serif'; ctx.fillText('🟫', px+CELL/2, py+55); }
+      if(cursor && cursor.x===x && cursor.y===y && started && !over && !won){
+        ctx.strokeStyle='#fff'; ctx.lineWidth=3; ctx.setLineDash([6,4]); ctx.strokeRect(px-2,py-2,CELL+4,CELL+4); ctx.setLineDash([]);
+      }
+    }
+    ctx.textAlign='left';
+    ctx.font='13px Georgia, serif'; ctx.fillStyle='#24351f';
+    ctx.fillText('Tip: water each tree 3 times (seed → sprout → sapling → ripe), then harvest.', 28, 505);
+  }
+  function loop(){ draw(); requestAnimationFrame(loop); }
+  function pickFromEvent(e){
+    const r=canvas.getBoundingClientRect();
+    const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left;
+    const cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;
+    const x=Math.floor((cx/r.width*canvas.width-OX)/CELL);
+    const y=Math.floor((cy/r.height*canvas.height-OY)/CELL);
+    if(x>=0&&x<COLS&&y>=0&&y<ROWS){ selected={x:x,y:y}; cursor={x:x,y:y}; beep(440,0.08,'sine'); updateHUD(); }
+  }
+  document.getElementById('startBtn').addEventListener('click', function(){ initAudio(); newGame(); beep(660,0.2,'triangle'); });
+  document.getElementById('restartBtn').addEventListener('click', function(){ initAudio(); newGame(); });
+  document.getElementById('btnRestart2').addEventListener('click', function(){ initAudio(); newGame(); });
+  document.getElementById('btnApple').addEventListener('click', function(){ initAudio(); plant('apple'); });
+  document.getElementById('btnPear').addEventListener('click', function(){ initAudio(); plant('pear'); });
+  document.getElementById('btnCherry').addEventListener('click', function(){ initAudio(); plant('cherry'); });
+  document.getElementById('btnWater').addEventListener('click', function(){ initAudio(); waterPlot(); });
+  document.getElementById('btnHarvest').addEventListener('click', function(){ initAudio(); harvest(); });
+  document.getElementById('btnDay').addEventListener('click', function(){ initAudio(); nextDay(); });
+  canvas.addEventListener('mousedown', function(e){ initAudio(); if(started&&!over&&!won) pickFromEvent(e); });
+  canvas.addEventListener('click', function(e){ initAudio(); if(started&&!over&&!won) pickFromEvent(e); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); initAudio(); if(started&&!over&&!won) pickFromEvent(e); }, {passive:false});
+  document.addEventListener('keydown', function(e){
+    if(!started) return;
+    const k=e.key.toLowerCase();
+    if(k==='arrowleft') cursor.x=Math.max(0,cursor.x-1);
+    else if(k==='arrowright') cursor.x=Math.min(COLS-1,cursor.x+1);
+    else if(k==='arrowup') cursor.y=Math.max(0,cursor.y-1);
+    else if(k==='arrowdown') cursor.y=Math.min(ROWS-1,cursor.y+1);
+    else if(k==='a'||k==='p'){ selected={x:cursor.x,y:cursor.y}; plant('apple'); return; }
+    else if(k==='c'){ selected={x:cursor.x,y:cursor.y}; plant('cherry'); return; }
+    else if(k==='w'){ selected={x:cursor.x,y:cursor.y}; waterPlot(); return; }
+    else if(k==='h'){ selected={x:cursor.x,y:cursor.y}; harvest(); return; }
+    else if(k==='n'){ nextDay(); return; }
+    else if(k==='r'){ newGame(); return; }
+    else return;
+    selected={x:cursor.x,y:cursor.y}; updateHUD();
+  });
+  // Initial empty grid for the title-screen backdrop
+  grid=[]; for(let y=0;y<ROWS;y++){ let r=[]; for(let x=0;x<COLS;x++) r.push(null); grid.push(r); }
+  seasonIdx=0; day=1; harvested=0; coins=30; water=12; score=0; selected=null; cursor={x:0,y:0};
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

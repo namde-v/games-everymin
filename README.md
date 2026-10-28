@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 130
-- **Latest game:** 0130 — Pendulum Plunge
+- **Total games:** 140
+- **Latest game:** 0140 — Crane Commander
 - **Current volume:** 002 (Games 0101 to 0200)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -14,7 +14,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | Volume | Games | Catalog |
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
-| 002 | 0101–0200 (30 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
+| 002 | 0101–0200 (40 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -28,20 +28,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 013
+## Latest batch — Batch 014
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0121 | Tide Turner | Puzzle / Tidal Flow Routing | [Play](./games/game-0121.html) |
-| 0122 | Forge Frenzy | Arcade / Blacksmith Timing | [Play](./games/game-0122.html) |
-| 0123 | Starship Steward | Strategy / Crew Allocation | [Play](./games/game-0123.html) |
-| 0124 | Tempo Temple | Rhythm / Drum Pattern | [Play](./games/game-0124.html) |
-| 0125 | Magnet Miner | Precision / Polarity Swing | [Play](./games/game-0125.html) |
-| 0126 | Shadow Sprinter | Arcade / Stealth Runner | [Play](./games/game-0126.html) |
-| 0127 | Glyph Grader | Puzzle / Symbol Sorting Logic | [Play](./games/game-0127.html) |
-| 0128 | Bakery Baron | Strategy / Bakery Economy | [Play](./games/game-0128.html) |
-| 0129 | Chime Chase | Rhythm / Melody Echo | [Play](./games/game-0129.html) |
-| 0130 | Pendulum Plunge | Precision / Pendulum Drop | [Play](./games/game-0130.html) |
+| 0131 | Avalanche Ace | Arcade / Snowboard Slalom | [Play](./games/game-0131.html) |
+| 0132 | Cipher Circuit | Puzzle / Logic-Gate Routing | [Play](./games/game-0132.html) |
+| 0133 | Orchard Overseer | Strategy / Orchard Management | [Play](./games/game-0133.html) |
+| 0134 | Beat Beacon | Rhythm / Beat Timing | [Play](./games/game-0134.html) |
+| 0135 | Orbit Overture | Precision / Gravity Slingshot | [Play](./games/game-0135.html) |
+| 0136 | Ink Infiltrator | Arcade / Stealth Spray | [Play](./games/game-0136.html) |
+| 0137 | Sigil Solver | Puzzle / Rune Deduction | [Play](./games/game-0137.html) |
+| 0138 | Dockside Director | Strategy / Port Logistics | [Play](./games/game-0138.html) |
+| 0139 | Samba Step | Rhythm / Dance Steps | [Play](./games/game-0139.html) |
+| 0140 | Crane Commander | Precision / Crane Stacking | [Play](./games/game-0140.html) |
 
 ## Quality standard
 

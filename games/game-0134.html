@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Beat Beacon</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #070714; font-family: Arial, Helvetica, sans-serif; color: #fff; }
+  #wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 40%, #1a1440 0%, #070714 65%); }
+  canvas { display: block; background: #0a0a22; border: 2px solid #3a2f7a; border-radius: 16px; max-width: 96vw; max-height: 96vh; touch-action: none; }
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; font-weight: bold; font-size: 15px; text-shadow: 0 1px 3px #000; pointer-events: none; width: 96%; }
+  #hud span { background: rgba(0,0,0,.55); border: 1px solid #5b4bc4; padding: 6px 10px; border-radius: 999px; }
+  #hud .hot { color: #ffe066; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 22px; background: rgba(4,4,18,.82); }
+  .overlay.hidden { display: none; }
+  h1 { font-size: 52px; letter-spacing: 3px; color: #ffe066; text-shadow: 0 0 24px rgba(255,224,102,.7), 0 4px 0 #7a4a00; }
+  h2 { font-size: 40px; color: #7dffb0; text-shadow: 0 0 18px rgba(125,255,176,.6); }
+  h2.bad { color: #ff6b6b; text-shadow: 0 0 18px rgba(255,107,107,.6); }
+  p { max-width: 560px; line-height: 1.55; font-size: 16px; color: #e8e8ff; }
+  .keys { font-size: 14px; color: #c9c9ff; background: rgba(255,255,255,.07); border: 1px solid #44448a; border-radius: 10px; padding: 12px 16px; max-width: 580px; line-height: 1.6; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 14px 34px; font-size: 20px; font-weight: bold; color: #14101f; background: #ffe066; box-shadow: 0 6px 0 #b8860b, 0 0 28px rgba(255,224,102,.5); }
+  button:active { transform: translateY(4px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #7dffb0; box-shadow: 0 6px 0 #1f7a44, 0 0 22px rgba(125,255,176,.4); }
+  .big { font-size: 22px; }
+  #feedback { font-size: 26px; font-weight: bold; min-height: 32px; color: #ffe066; }
+  .dots { display: flex; gap: 8px; justify-content: center; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; background: #ff5da2; box-shadow: 0 0 12px #ff5da2; }
+  .dot:nth-child(2) { background: #4dd8ff; box-shadow: 0 0 12px #4dd8ff; }
+  .dot:nth-child(3) { background: #7dffb0; box-shadow: 0 0 12px #7dffb0; }
+  .dot:nth-child(4) { background: #c084fc; box-shadow: 0 0 12px #c084fc; }
+  .dot:nth-child(5) { background: #ffa94d; box-shadow: 0 0 12px #ffa94d; }
+  @media (max-width: 600px) { h1 { font-size: 38px; } p { font-size: 15px; } #hud { font-size: 13px; gap: 8px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="820" height="560"></canvas>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Combo: <b id="combo">x0</b></span>
+    <span>Lives: <b id="lives">♥♥♥</b></span>
+    <span>Beat: <b id="beat">0 / 48</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+
+  <div id="titleScreen" class="overlay">
+    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    <h1>BEAT BEACON</h1>
+    <p class="big">Catch the light exactly on the beat.</p>
+    <div class="keys"><b>How to Play</b><br>
+      Five beacons glow around the ring. Each one flashes white on its beat and sends a pulse outward.<br>
+      Tap or click the flashing beacon <b>right as it flashes</b> — not early, not late.<br>
+      Perfect hits build your combo and score. A missed beat breaks your combo and costs a life.<br>
+      Keyboard: <b>1–5</b> (or A S D F G) for beacons left to right, <b>Space</b> to start / restart.<br>
+      Mouse: click a beacon. Touch: tap a beacon. Complete all 48 beats to win!</div>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Headphones recommended. Sound starts only after you press Start.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <div id="feedback"></div>
+    <button id="restartBtn" class="secondary">↻ Play Again</button>
+    <p>Tip: watch the expanding ring — the flash lands when the ring touches the beacon.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var livesEl = document.getElementById('lives');
+  var beatEl = document.getElementById('beat');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var feedbackEl = document.getElementById('feedback');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+
+  var W = canvas.width, H = canvas.height;
+  var CX = W / 2, CY = 300;
+  var COLORS = ['#ff5da2', '#4dd8ff', '#7dffb0', '#c084fc', '#ffa94d'];
+  var TOTAL_BEATS = 48;
+  var BEACONS = [];
+  for (var i = 0; i < 5; i++) {
+    var ang = Math.PI * 0.9 + i * (Math.PI * 1.2 / 4);
+    // Spread beacons in a wide arc so all are reachable on mobile and desktop.
+    var bx = CX + Math.cos(ang) * 260;
+    var by = 150 + i * 0 + Math.sin(ang) * -20 + 190;
+    if (i === 0) { bx = CX - 300; by = 300; }
+    if (i === 1) { bx = CX - 160; by = 180; }
+    if (i === 2) { bx = CX; by = 130; }
+    if (i === 3) { bx = CX + 160; by = 180; }
+    if (i === 4) { bx = CX + 300; by = 300; }
+    BEACONS.push({ x: bx, y: by, r: 52, color: COLORS[i], flash: 0, ring: 0, hitGlow: 0 });
+  }
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, combo = 0, bestCombo = 0, lives = 3;
+  var beatIndex = 0, perfectCount = 0, goodCount = 0, missCount = 0;
+  var sequence = [], startTime = 0, lastTime = 0, elapsed = 0;
+  var activeBeat = null, activeDone = false;
+  var particles = [], rings = [], message = '', messageUntil = 0;
+  var audioCtx = null, metronomeOn = true;
+
+  function buildSequence() {
+    sequence = [];
+    var patterns = [
+      [0, 1, 2, 3, 4, 3, 2, 1],
+      [2, 0, 4, 1, 3, 2, 4, 0],
+      [0, 2, 4, 2, 1, 3, 4, 3],
+      [4, 3, 2, 1, 0, 1, 2, 3],
+      [1, 1, 3, 3, 2, 0, 4, 2],
+      [0, 4, 1, 3, 2, 2, 4, 0]
+    ];
+    var t = 900;
+    for (var p = 0; p < patterns.length; p++) {
+      var pat = patterns[p];
+      var gap = p < 2 ? 700 : (p < 4 ? 620 : 540);
+      for (var j = 0; j < pat.length; j++) {
+        sequence.push({ beacon: pat[j], time: t });
+        t += gap;
+      }
+      t += 500; // short breath between phrases
+    }
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      var t0 = audioCtx.currentTime + (when || 0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol || 0.18, t0 + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t0); o.stop(t0 + dur + 0.05);
+    } catch (e) {}
+  }
+  function playTick() { tone(880, 0.12, 'sine', 0.12); tone(440, 0.1, 'triangle', 0.08); }
+  function playPerfect() { tone(1046, 0.18, 'sine', 0.2); tone(1568, 0.22, 'sine', 0.14, 0.05); }
+  function playGood() { tone(784, 0.15, 'triangle', 0.16); }
+  function playMiss() { tone(160, 0.3, 'sawtooth', 0.14); tone(110, 0.3, 'square', 0.08); }
+  function playWin() { [523, 659, 784, 1046].forEach(function (f, i) { tone(f, 0.35, 'sine', 0.18, i * 0.16); }); }
+
+  function setStatus(s) { statusEl.textContent = s; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    comboEl.textContent = 'x' + combo;
+    comboEl.parentElement.className = combo >= 8 ? 'hot' : '';
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    beatEl.textContent = Math.min(beatIndex, TOTAL_BEATS) + ' / ' + TOTAL_BEATS;
+  }
+  function showMessage(text, color) {
+    message = text; messageUntil = performance.now() + 900;
+    feedbackEl.textContent = text; feedbackEl.style.color = color || '#ffe066';
+  }
+  function spawnBurst(x, y, color) {
+    for (var i = 0; i < 16; i++) {
+      var a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 180;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.7, color: color });
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    buildSequence();
+    score = 0; combo = 0; bestCombo = 0; lives = 3;
+    beatIndex = 0; perfectCount = 0; goodCount = 0; missCount = 0;
+    activeBeat = null; activeDone = false; particles = []; rings = [];
+    state = 'playing'; startTime = performance.now(); elapsed = 0;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    setStatus('Listen for the beat…');
+    updateHUD();
+    playTick();
+  }
+
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? '★ YOU WIN! ★' : 'Game Over';
+    endTitle.className = win ? '' : 'bad';
+    endText.textContent = (win ? 'You completed all ' + TOTAL_BEATS + ' beats like a true beacon master! ' : 'The beacons faded out. ') +
+      'Score: ' + score + ' • Best combo: x' + bestCombo + ' • Perfect: ' + perfectCount + ' • Good: ' + goodCount + ' • Missed: ' + missCount;
+    setStatus(win ? 'Victory!' : 'Game Over');
+    endScreen.classList.remove('hidden');
+    if (win) playWin();
+    updateHUD();
+  }
+
+  function registerMiss(reason) {
+    if (state !== 'playing' || !activeBeat || activeDone) return;
+    activeDone = true; missCount++; combo = 0; lives--;
+    BEACONS[activeBeat.beacon].flash = 0;
+    showMessage(reason || 'MISS!', '#ff6b6b');
+    playMiss();
+    setStatus('Miss — combo lost');
+    updateHUD();
+    if (lives <= 0) { endGame(false); return; }
+  }
+
+  function hitBeacon(idx, source) {
+    if (state !== 'playing') return;
+    if (!activeBeat || activeDone) {
+      // Tapping an idle beacon is harmless but breaks nothing; nudge the player.
+      if (activeBeat) { showMessage('Wait for the flash!', '#c9c9ff'); }
+      return;
+    }
+    var now = performance.now();
+    var diff = Math.abs(now - activeBeat.hitAt);
+    if (idx !== activeBeat.beacon) {
+      // Wrong beacon on a live beat counts as a miss for that beat.
+      registerMiss('WRONG BEACON!');
+      return;
+    }
+    if (diff <= 130) {
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      var pts = 100 + (combo - 1) * 25;
+      score += pts; perfectCount++;
+      showMessage('PERFECT! +' + pts, '#7dffb0'); playPerfect();
+      setStatus('Perfect — combo x' + combo);
+    } else if (diff <= 260) {
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      score += 50; goodCount++;
+      showMessage('GOOD! +50', '#4dd8ff'); playGood();
+      setStatus('Good — combo x' + combo);
+    } else {
+      registerMiss('TOO LATE!');
+      return;
+    }
+    var b = BEACONS[idx];
+    b.hitGlow = 1; spawnBurst(b.x, b.y, b.color);
+    rings.push({ x: b.x, y: b.y, r: 10, color: b.color, life: 0.6 });
+    activeDone = true;
+    updateHUD();
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    var now = performance.now();
+    elapsed = now - startTime;
+    // Activate the next beat when its approach window opens (400ms early).
+    if (!activeBeat && beatIndex < sequence.length) {
+      var next = sequence[beatIndex];
+      if (elapsed >= next.time - 400) {
+        activeBeat = { beacon: next.beacon, time: next.time, hitAt: startTime + next.time };
+        activeDone = false;
+        BEACONS[next.beacon].ring = 0;
+        playTick();
+      }
+    }
+    if (activeBeat) {
+      var b = BEACONS[activeBeat.beacon];
+      var until = activeBeat.time - elapsed;
+      // Ring shrinks toward the beacon as the beat approaches, flash at hit moment.
+      b.ring = Math.max(0, Math.min(1, 1 - until / 400));
+      if (elapsed >= activeBeat.time - 40 && elapsed <= activeBeat.time + 260) b.flash = 1;
+      else if (elapsed > activeBeat.time + 260) b.flash = 0;
+      if (elapsed > activeBeat.time + 260 && !activeDone) {
+        registerMiss('MISSED BEAT!');
+        if (state !== 'playing') return;
+      }
+      if (activeDone && elapsed > activeBeat.time + 300) {
+        activeBeat = null; beatIndex++;
+        if (beatIndex >= TOTAL_BEATS) { endGame(true); return; }
+        updateHUD();
+      }
+      if (!activeDone && elapsed > activeBeat.time + 300) {
+        // Safety: miss already handled above; advance if still stuck.
+        activeBeat = null; beatIndex++; updateHUD();
+        if (beatIndex >= TOTAL_BEATS) { endGame(true); return; }
+      }
+    }
+    // Particles and rings.
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 40 * dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    for (var j = rings.length - 1; j >= 0; j--) {
+      var r = rings[j]; r.life -= dt; r.r += 260 * dt;
+      if (r.life <= 0) rings.splice(j, 1);
+    }
+    for (var k = 0; k < BEACONS.length; k++) {
+      if (BEACONS[k].hitGlow > 0) BEACONS[k].hitGlow = Math.max(0, BEACONS[k].hitGlow - dt * 2);
+    }
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Starfield backdrop.
+    ctx.fillStyle = '#0a0a22'; ctx.fillRect(0, 0, W, H);
+    for (var s = 0; s < 60; s++) {
+      var sx = (s * 137) % W, sy = (s * 89) % H;
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.08 + (s % 3) * 0.06) + ')';
+      ctx.beginPath(); ctx.arc(sx, sy, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+    // Connecting arc line.
+    ctx.strokeStyle = 'rgba(91,75,196,.5)'; ctx.lineWidth = 3; ctx.beginPath();
+    BEACONS.forEach(function (b, i) { if (i === 0) ctx.moveTo(b.x, b.y); else ctx.lineTo(b.x, b.y); });
+    ctx.stroke();
+    // Center stage label.
+    ctx.fillStyle = '#8f8fd8'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(state === 'playing' ? 'TAP THE FLASHING BEACON ON THE BEAT' : 'BEAT BEACON', CX, 480);
+    ctx.font = '14px Arial'; ctx.fillStyle = '#b9b9e8';
+    ctx.fillText('Keys 1-5 / A S D F G  •  Click or tap a beacon', CX, 505);
+    // Rings.
+    rings.forEach(function (r) {
+      ctx.globalAlpha = Math.max(0, r.life);
+      ctx.strokeStyle = r.color; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+    // Beacons.
+    BEACONS.forEach(function (b, i) {
+      // Approach ring: large at window open, shrinking to beacon at beat time.
+      if (activeBeat && activeBeat.beacon === i && !activeDone) {
+        var rr = 130 - b.ring * 78;
+        ctx.strokeStyle = b.color; ctx.globalAlpha = 0.85; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.arc(b.x, b.y, rr, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      var glow = b.flash ? 1 : 0.35;
+      var grad = ctx.createRadialGradient(b.x, b.y, 4, b.x, b.y, b.r + 30);
+      grad.addColorStop(0, b.flash ? '#ffffff' : b.color);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = 0.35 + glow * 0.65;
+      ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 30, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = b.flash ? '#ffffff' : b.color;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = b.flash ? 5 : 2;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke();
+      if (b.hitGlow > 0) {
+        ctx.globalAlpha = b.hitGlow; ctx.strokeStyle = '#fff'; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 12, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = '#14101f'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(i + 1), b.x, b.y + 1);
+      ctx.textBaseline = 'alphabetic';
+    });
+    // Particles.
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    // Live message on canvas.
+    if (message && performance.now() < messageUntil) {
+      ctx.fillStyle = '#ffe066'; ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(message, CX, 540);
+    }
+  }
+
+  function loop(ts) {
+    var dt = Math.min(0.05, (ts - lastTime) / 1000 || 0);
+    lastTime = ts;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function beaconAt(x, y) {
+    var rect = canvas.getBoundingClientRect();
+    var sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+    var cx = (x - rect.left) * sx, cy = (y - rect.top) * sy;
+    for (var i = 0; i < BEACONS.length; i++) {
+      var dx = cx - BEACONS[i].x, dy = cy - BEACONS[i].y;
+      if (dx * dx + dy * dy <= (BEACONS[i].r + 28) * (BEACONS[i].r + 28)) return i;
+    }
+    return -1;
+  }
+  function handlePointer(x, y) {
+    var idx = beaconAt(x, y);
+    if (idx >= 0) hitBeacon(idx, 'pointer');
+  }
+
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+  canvas.addEventListener('mousedown', function (e) { handlePointer(e.clientX, e.clientY); });
+  canvas.addEventListener('click', function (e) { handlePointer(e.clientX, e.clientY); });
+  canvas.addEventListener('touchstart', function (e) {
+    if (e.preventDefault) e.preventDefault();
+    var t = e.touches && e.touches[0];
+    if (t) handlePointer(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === ' ' || e.key === 'Enter') {
+      if (state === 'title' || state === 'win' || state === 'over') { startGame(); return; }
+    }
+    if (state !== 'playing') return;
+    var map = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, 'a': 0, 's': 1, 'd': 2, 'f': 3, 'g': 4, 'A': 0, 'S': 1, 'D': 2, 'F': 3, 'G': 4 };
+    if (map.hasOwnProperty(e.key)) hitBeacon(map[e.key], 'key');
+  });
+  document.addEventListener('touchstart', function () {}, { passive: true });
+
+  updateHUD();
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

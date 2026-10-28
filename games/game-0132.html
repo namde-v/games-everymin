@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cipher Circuit</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1020; color: #e8ecff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 26px; letter-spacing: 2px; margin: 6px 0 2px; color: #7ef0c1; text-shadow: 0 0 12px rgba(126,240,193,.5); }
+  p.sub { font-size: 13px; color: #9aa7d8; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; width: 100%; max-width: 640px; }
+  .pill { background: #16214a; border: 1px solid #2c3f7e; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .pill span { color: #ffd166; }
+  #status { min-height: 20px; font-size: 14px; color: #ffd166; text-align: center; margin-bottom: 6px; }
+  #wrap { position: relative; width: 100%; max-width: 640px; }
+  canvas { display: block; width: 100%; background: #0e1734; border: 2px solid #2c3f7e; border-radius: 12px; touch-action: none; }
+  .screen { position: absolute; inset: 0; background: rgba(7,12,28,.93); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 22px; text-align: center; }
+  .screen.hidden { display: none; }
+  .screen h2 { font-size: 30px; color: #7ef0c1; }
+  .screen p { font-size: 15px; line-height: 1.55; color: #c6cdea; max-width: 480px; }
+  .screen ul { text-align: left; font-size: 14px; line-height: 1.6; color: #c6cdea; max-width: 480px; }
+  button { background: #ffd166; color: #131a33; border: none; border-radius: 10px; padding: 13px 26px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:active { transform: scale(.97); }
+  button.secondary { background: #2c3f7e; color: #fff; }
+  #legend { font-size: 12px; color: #9aa7d8; margin-top: 8px; text-align: center; line-height: 1.5; max-width: 640px; }
+  #howto { display: none; }
+  #howto.show { display: block; }
+</style>
+</head>
+<body>
+<h1>CIPHER CIRCUIT</h1>
+<p class="sub">Rotate logic-gate tiles so power flows from every source to every target.</p>
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Level: <span id="level">1 / 5</span></div>
+  <div class="pill">Lives: <span id="lives">3</span></div>
+  <div class="pill">Moves: <span id="moves">0</span></div>
+  <div class="pill">Time: <span id="time">120</span>s</div>
+</div>
+<div id="status">Press Start to power up the circuit.</div>
+<div id="wrap">
+  <canvas id="game" width="640" height="560"></canvas>
+  <div class="screen" id="titleScreen">
+    <h2>CIPHER CIRCUIT</h2>
+    <p>Power the grid! Click or tap a tile to rotate it. Keyboard: arrow keys / WASD to move the cursor, Space or R to rotate, Enter to start.</p>
+    <button id="startBtn">Start</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <div id="howto">
+      <ul>
+        <li><b>Goal:</b> light up EVERY target lamp on the grid before moves or time run out.</li>
+        <li><b>Wires &amp; corners</b> carry power straight or around bends.</li>
+        <li><b>AND gates</b> output power only when BOTH inputs are powered.</li>
+        <li><b>OR gates</b> output power when ANY input is powered.</li>
+        <li><b>NOT gates</b> flip the signal: an unpowered input gives a powered output.</li>
+        <li><b>Sources</b> always output power. <b>Targets</b> must receive power to light.</li>
+        <li>Running out of moves or time on a level costs one life. Lose all 3 lives and it is Game Over. Clear all 5 levels to win.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="screen hidden" id="winScreen">
+    <h2>YOU WIN!</h2>
+    <p id="winText">Every circuit is powered. Brilliant engineering!</p>
+    <button id="winRestart">Restart</button>
+  </div>
+  <div class="screen hidden" id="overScreen">
+    <h2>GAME OVER</h2>
+    <p id="overText">The circuits went dark.</p>
+    <button id="overRestart">Restart</button>
+  </div>
+</div>
+<div id="legend">Click / tap a tile to rotate it &bull; Arrows or WASD move &bull; Space / R rotates &bull; Powered wires glow green, unpowered wires stay blue.</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // N E S W
+  function opp(d) { return (d + 2) % 4; }
+  function key(x, y) { return x + ',' + y; }
+
+  // Tile: t = type, r = solution rotation, dir = fixed direction for source/target
+  // rotatable tiles start scrambled by +1 or +2 from solution.
+  var LEVELS = [
+    { cols: 5, rows: 4, moves: 14, time: 120, cells: [
+      { x: 0, y: 2, t: 'source', dir: 1 },
+      { x: 1, y: 2, t: 'wire', r: 1 },
+      { x: 2, y: 2, t: 'corner', r: 2 },
+      { x: 2, y: 3, t: 'corner', r: 0 },
+      { x: 3, y: 3, t: 'wire', r: 1 },
+      { x: 4, y: 3, t: 'target', dir: 3 },
+      { x: 1, y: 0, t: 'wire', r: 0 },
+      { x: 3, y: 1, t: 'corner', r: 1 }
+    ]},
+    { cols: 6, rows: 4, moves: 18, time: 120, cells: [
+      { x: 0, y: 1, t: 'source', dir: 1 },
+      { x: 1, y: 1, t: 'wire', r: 1 },
+      { x: 2, y: 1, t: 'corner', r: 2 },
+      { x: 2, y: 2, t: 'wire', r: 0 },
+      { x: 2, y: 3, t: 'wire', r: 1 },
+      { x: 3, y: 0, t: 'source', dir: 2 },
+      { x: 3, y: 1, t: 'wire', r: 0 },
+      { x: 3, y: 2, t: 'wire', r: 0 },
+      { x: 3, y: 3, t: 'or', r: 1 },
+      { x: 4, y: 3, t: 'wire', r: 1 },
+      { x: 5, y: 3, t: 'target', dir: 3 },
+      { x: 0, y: 3, t: 'corner', r: 3 }
+    ]},
+    { cols: 6, rows: 5, moves: 16, time: 120, cells: [
+      { x: 0, y: 2, t: 'source', dir: 1 },
+      { x: 1, y: 2, t: 'wire', r: 1 },
+      { x: 2, y: 2, t: 'wire', r: 1 },
+      { x: 3, y: 4, t: 'source', dir: 0 },
+      { x: 3, y: 3, t: 'wire', r: 0 },
+      { x: 3, y: 2, t: 'and', r: 1 },
+      { x: 4, y: 2, t: 'wire', r: 1 },
+      { x: 5, y: 2, t: 'target', dir: 3 },
+      { x: 1, y: 0, t: 'corner', r: 0 },
+      { x: 5, y: 4, t: 'wire', r: 0 }
+    ]},
+    { cols: 6, rows: 5, moves: 16, time: 120, cells: [
+      { x: 0, y: 2, t: 'source', dir: 1 },
+      { x: 1, y: 2, t: 'wire', r: 0 },
+      { x: 2, y: 2, t: 'wire', r: 1 },
+      { x: 3, y: 2, t: 'not', r: 1 },
+      { x: 4, y: 2, t: 'wire', r: 1 },
+      { x: 5, y: 2, t: 'target', dir: 3 },
+      { x: 2, y: 0, t: 'corner', r: 2 },
+      { x: 4, y: 4, t: 'wire', r: 0 }
+    ]},
+    { cols: 7, rows: 6, moves: 24, time: 150, cells: [
+      { x: 0, y: 0, t: 'source', dir: 1 },
+      { x: 1, y: 0, t: 'wire', r: 1 },
+      { x: 2, y: 0, t: 'corner', r: 2 },
+      { x: 2, y: 1, t: 'wire', r: 0 },
+      { x: 2, y: 2, t: 'corner', r: 0 },
+      { x: 3, y: 5, t: 'source', dir: 0 },
+      { x: 3, y: 4, t: 'wire', r: 0 },
+      { x: 3, y: 3, t: 'wire', r: 0 },
+      { x: 3, y: 2, t: 'or', r: 1 },
+      { x: 4, y: 2, t: 'wire', r: 1 },
+      { x: 5, y: 4, t: 'source', dir: 0 },
+      { x: 5, y: 3, t: 'wire', r: 0 },
+      { x: 5, y: 2, t: 'and', r: 0 },
+      { x: 5, y: 1, t: 'target', dir: 2 },
+      { x: 6, y: 4, t: 'corner', r: 3 },
+      { x: 0, y: 4, t: 'wire', r: 1 }
+    ]}
+  ];
+
+  function portsOf(tile) {
+    var t = tile.t, r = tile.r;
+    if (t === 'source' || t === 'target') return [tile.dir];
+    if (t === 'wire') return (r % 2 === 0) ? [0, 2] : [1, 3];
+    if (t === 'corner') {
+      if (r === 0) return [0, 1];
+      if (r === 1) return [1, 2];
+      if (r === 2) return [2, 3];
+      return [3, 0];
+    }
+    if (t === 'and' || t === 'or') return [r, (r + 2) % 4, (r + 3) % 4];
+    if (t === 'not') return [r, opp(r)];
+    return [];
+  }
+  function gateInputs(tile) {
+    var r = tile.r;
+    if (tile.t === 'and' || tile.t === 'or') return [(r + 2) % 4, (r + 3) % 4];
+    if (tile.t === 'not') return [opp(r)];
+    return [];
+  }
+
+  var state = 'title'; // title | play | win | over
+  var levelIdx = 0, score = 0, lives = 3, movesLeft = 0, timeLeft = 0;
+  var grid = {}, targets = [];
+  var cursor = { x: 0, y: 0 };
+  var cell = 80, ox = 0, oy = 0;
+  var lastTick = 0, lastSecond = 0;
+  var audioCtx = null;
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function initAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+  function setStatus(msg) { document.getElementById('status').textContent = msg; }
+  function updateHud() {
+    document.getElementById('score').textContent = score;
+    document.getElementById('level').textContent = (levelIdx + 1) + ' / ' + LEVELS.length;
+    document.getElementById('lives').textContent = lives;
+    document.getElementById('moves').textContent = movesLeft;
+    document.getElementById('time').textContent = Math.max(0, Math.ceil(timeLeft));
+  }
+
+  function loadLevel(idx) {
+    var L = LEVELS[idx];
+    grid = {}; targets = [];
+    L.cells.forEach(function (c, i) {
+      var rot = c.t;
+      var tile = { x: c.x, y: c.y, t: c.t, dir: c.dir, r: 0 };
+      if (c.t === 'source' || c.t === 'target') { tile.r = c.dir; }
+      else { tile.r = (c.r + ((i % 2) + 1)) % 4; } // scrambled from solution
+      grid[key(c.x, c.y)] = tile;
+      if (c.t === 'target') targets.push(tile);
+    });
+    movesLeft = L.moves; timeLeft = L.time;
+    cursor = { x: 0, y: 0 };
+    // fit grid to canvas
+    cell = Math.min(640 / L.cols, 520 / L.rows);
+    ox = (640 - cell * L.cols) / 2; oy = (560 - cell * L.rows) / 2 - 10;
+    setStatus('Level ' + (idx + 1) + ': light all ' + targets.length + ' target(s). Click a tile to rotate it.');
+    updateHud();
+  }
+
+  // Signal simulation: monotonic true-propagation. Power only flows forward
+  // from sources; a wire/gate output turns true when its inputs justify it.
+  // NOT gates fire in an outer loop once their input is settled as unpowered.
+  function simulate() {
+    var out = {}; // key "x,y,dir" -> true (only true signals are stored)
+    function isOut(tile, dir) { return out[key(tile.x, tile.y) + ',' + dir] === true; }
+    function setOut(tile, dir) { out[key(tile.x, tile.y) + ',' + dir] = true; }
+    function neighborOut(t, port) {
+      var nx = t.x + DIRS[port][0], ny = t.y + DIRS[port][1];
+      var nb = grid[key(nx, ny)];
+      if (!nb || portsOf(nb).indexOf(opp(port)) < 0) return false;
+      return isOut(nb, opp(port));
+    }
+    function propagate() {
+      var changed = true;
+      while (changed) {
+        changed = false;
+        Object.keys(grid).forEach(function (k) {
+          var t = grid[k];
+          if (t.t === 'source') { if (!isOut(t, t.dir)) { setOut(t, t.dir); changed = true; } return; }
+          if (t.t === 'wire' || t.t === 'corner') {
+            var ports = portsOf(t);
+            var any = ports.some(function (pp) { return neighborOut(t, pp); });
+            if (any) ports.forEach(function (pp) { if (!isOut(t, pp)) { setOut(t, pp); changed = true; } });
+          } else if (t.t === 'and' || t.t === 'or') {
+            var ins = gateInputs(t), val;
+            if (t.t === 'and') val = ins.every(function (pp) { return neighborOut(t, pp); });
+            else val = ins.some(function (pp) { return neighborOut(t, pp); });
+            if (val && !isOut(t, t.r)) { setOut(t, t.r); changed = true; }
+          }
+        });
+      }
+    }
+    for (var outer = 0; outer < 20; outer++) {
+      propagate();
+      var added = false;
+      Object.keys(grid).forEach(function (k) {
+        var t = grid[k];
+        if (t.t === 'not' && !isOut(t, t.r)) {
+          var inp = gateInputs(t)[0];
+          if (!neighborOut(t, inp)) { setOut(t, t.r); added = true; }
+        }
+      });
+      if (!added) break;
+    }
+    var lit = {};
+    targets.forEach(function (tg) {
+      lit[key(tg.x, tg.y)] = neighborOut(tg, tg.dir);
+    });
+    return { out: out, known: {}, lit: lit };
+  }
+  function tilePowered(sim, tile) {
+    var ports = portsOf(tile);
+    for (var i = 0; i < ports.length; i++) {
+      var v = sim.out[key(tile.x, tile.y) + ',' + ports[i]];
+      if (v === true) return true;
+    }
+    return false;
+  }
+
+  function checkWin() {
+    var sim = simulate();
+    var all = targets.length > 0 && targets.every(function (tg) { return sim.lit[key(tg.x, tg.y)]; });
+    if (all) {
+      score += 100 + movesLeft * 5 + Math.ceil(timeLeft);
+      beep(523, 0.15); setTimeout(function () { beep(659, 0.15); }, 120);
+      setTimeout(function () { beep(784, 0.3); }, 240);
+      if (levelIdx + 1 >= LEVELS.length) {
+        state = 'win';
+        document.getElementById('winText').textContent = 'Every circuit is powered! Final score: ' + score + '.';
+        document.getElementById('winScreen').classList.remove('hidden');
+      } else {
+        levelIdx++;
+        setStatus('Circuit complete! Next level...');
+        loadLevel(levelIdx);
+      }
+      updateHud();
+    }
+    return all;
+  }
+
+  function loseLife(reason) {
+    lives--; beep(160, 0.3, 'sawtooth');
+    if (lives <= 0) {
+      state = 'over';
+      document.getElementById('overText').textContent = reason + ' Final score: ' + score + '.';
+      document.getElementById('overScreen').classList.remove('hidden');
+      updateHud();
+    } else {
+      setStatus(reason + ' You lost a life. Level restarted.');
+      loadLevel(levelIdx);
+      updateHud();
+    }
+  }
+
+  function rotateAt(x, y) {
+    if (state !== 'play') return;
+    var t = grid[key(x, y)];
+    if (!t || t.t === 'source' || t.t === 'target') {
+      setStatus('Sources and targets are fixed. Rotate a wire or gate tile.');
+      return;
+    }
+    t.r = (t.r + 1) % 4;
+    movesLeft--; beep(440, 0.07);
+    updateHud();
+    if (!checkWin() && movesLeft <= 0) loseLife('Out of moves!');
+  }
+
+  function draw() {
+    var L = LEVELS[levelIdx];
+    ctx.clearRect(0, 0, 640, 560);
+    ctx.fillStyle = '#0e1734'; ctx.fillRect(0, 0, 640, 560);
+    var sim = simulate();
+    for (var gy = 0; gy < L.rows; gy++) {
+      for (var gx = 0; gx < L.cols; gx++) {
+        var px = ox + gx * cell, py = oy + gy * cell;
+        ctx.strokeStyle = '#22346b'; ctx.lineWidth = 1;
+        ctx.strokeRect(px, py, cell, cell);
+        var t = grid[key(gx, gy)];
+        if (!t) continue;
+        var cx = px + cell / 2, cy = py + cell / 2;
+        var powered = tilePowered(sim, t);
+        var col = powered ? '#7ef0c1' : '#5b7de0';
+        // body
+        ctx.fillStyle = t.t === 'source' ? '#2b3a2b' : t.t === 'target' ? '#3a2b2b' : '#16214a';
+        ctx.beginPath(); ctx.arc(cx, cy, cell * 0.30, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
+        // ports
+        ctx.strokeStyle = col; ctx.lineWidth = Math.max(3, cell * 0.07); ctx.lineCap = 'round';
+        portsOf(t).forEach(function (p) {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + DIRS[p][0] * cell * 0.48, cy + DIRS[p][1] * cell * 0.48);
+          ctx.stroke();
+        });
+        // label
+        ctx.fillStyle = '#e8ecff'; ctx.font = 'bold ' + Math.max(11, cell * 0.22) + 'px Arial';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        var label = t.t === 'source' ? 'PWR' : t.t === 'target' ? (sim.lit[key(gx, gy)] ? 'LIT' : 'DARK') : t.t.toUpperCase();
+        ctx.fillText(label, cx, cy);
+        if (t.t === 'target' && sim.lit[key(gx, gy)]) {
+          ctx.fillStyle = 'rgba(255,209,102,.35)';
+          ctx.beginPath(); ctx.arc(cx, cy, cell * 0.42, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+    // cursor
+    if (state === 'play') {
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+      ctx.strokeRect(ox + cursor.x * cell + 2, oy + cursor.y * cell + 2, cell - 4, cell - 4);
+    }
+  }
+
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    if (state === 'play') {
+      if (!lastSecond) lastSecond = ts;
+      if (ts - lastSecond >= 1000) {
+        lastSecond = ts; timeLeft -= 1; updateHud();
+        if (timeLeft <= 0) loseLife('Time ran out!');
+      }
+    }
+    draw();
+  }
+
+  function startGame() {
+    initAudio();
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('winScreen').classList.add('hidden');
+    document.getElementById('overScreen').classList.add('hidden');
+    score = 0; lives = 3; levelIdx = 0; state = 'play';
+    loadLevel(0); beep(523, 0.12);
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX - rect.left) * (640 / rect.width);
+    var cy = (evt.clientY - rect.top) * (560 / rect.height);
+    var gx = Math.floor((cx - ox) / cell), gy = Math.floor((cy - oy) / cell);
+    return { x: gx, y: gy };
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function () {
+    document.getElementById('howto').classList.toggle('show');
+  });
+  document.getElementById('winRestart').addEventListener('click', startGame);
+  document.getElementById('overRestart').addEventListener('click', startGame);
+
+  canvas.addEventListener('mousedown', function (evt) {
+    initAudio();
+    var p = canvasPos(evt);
+    cursor = { x: p.x, y: p.y };
+    rotateAt(p.x, p.y);
+  });
+  canvas.addEventListener('click', function (evt) {
+    var p = canvasPos(evt);
+    cursor = { x: p.x, y: p.y };
+  });
+  canvas.addEventListener('touchstart', function (evt) {
+    evt.preventDefault(); initAudio();
+    var touch = evt.touches[0];
+    var p = canvasPos(touch);
+    cursor = { x: p.x, y: p.y };
+    rotateAt(p.x, p.y);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (evt) {
+    var L = LEVELS[levelIdx];
+    if (evt.key === 'Enter' && (state === 'title' || state === 'win' || state === 'over')) { startGame(); return; }
+    if (state !== 'play') return;
+    if (evt.key === 'ArrowUp' || evt.key === 'w' || evt.key === 'W') cursor.y = Math.max(0, cursor.y - 1);
+    else if (evt.key === 'ArrowDown' || evt.key === 's' || evt.key === 'S') cursor.y = Math.min(L.rows - 1, cursor.y + 1);
+    else if (evt.key === 'ArrowLeft' || evt.key === 'a' || evt.key === 'A') cursor.x = Math.max(0, cursor.x - 1);
+    else if (evt.key === 'ArrowRight' || evt.key === 'd' || evt.key === 'D') cursor.x = Math.min(L.cols - 1, cursor.x + 1);
+    else if (evt.key === ' ' || evt.key === 'r' || evt.key === 'R') { evt.preventDefault(); rotateAt(cursor.x, cursor.y); }
+  });
+
+  loadLevel(0);
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

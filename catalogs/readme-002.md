@@ -35,10 +35,21 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0128 | Bakery Baron | Strategy / Bakery Economy | Click/tap shop actions, 1-4 actions, N next day | [Play](./../games/game-0128.html) |
 | 0129 | Chime Chase | Rhythm / Melody Echo | Click/tap bells, 1-4 keys, touch tap | [Play](./../games/game-0129.html) |
 | 0130 | Pendulum Plunge | Precision / Pendulum Drop | Space / click / tap release, Arrow Keys | [Play](./../games/game-0130.html) |
+| 0131 | Avalanche Ace | Arcade / Snowboard Slalom | Arrow Keys / A-D steer, mouse move, touch drag | [Play](./../games/game-0131.html) |
+| 0132 | Cipher Circuit | Puzzle / Logic-Gate Routing | Click/tap tiles rotate, Arrow Keys / WASD select, Space / R rotate | [Play](./../games/game-0132.html) |
+| 0133 | Orchard Overseer | Strategy / Orchard Management | Click/tap plots, mouse/touch | [Play](./../games/game-0133.html) |
+| 0134 | Beat Beacon | Rhythm / Beat Timing | 1-5 / A S D F G keys, mouse click, touch tap | [Play](./../games/game-0134.html) |
+| 0135 | Orbit Overture | Precision / Gravity Slingshot | Mouse/touch drag aim and release | [Play](./../games/game-0135.html) |
+| 0136 | Ink Infiltrator | Arcade / Stealth Spray | WASD / Arrow Keys move, Space spray, mouse/touch drag | [Play](./../games/game-0136.html) |
+| 0137 | Sigil Solver | Puzzle / Rune Deduction | Click/tap runes, 1-8 keys, Submit | [Play](./../games/game-0137.html) |
+| 0138 | Dockside Director | Strategy / Port Logistics | Click/tap ships and docks, mouse/touch | [Play](./../games/game-0138.html) |
+| 0139 | Samba Step | Rhythm / Dance Steps | Arrow Keys, mouse click pads, touch tap | [Play](./../games/game-0139.html) |
+| 0140 | Crane Commander | Precision / Crane Stacking | Space / click / tap drop | [Play](./../games/game-0140.html) |
 
 ## Batch notes
 
 - Batch 011: 10 games, produced in one cycle. Volume 002 opened at game 0101.
 - Batch 012: 10 games, produced in one cycle.
 - Batch 013: 10 games, produced in one cycle.
+- Batch 014: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

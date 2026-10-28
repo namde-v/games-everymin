@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Sigil Solver</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:#0d0a1d;color:#f3ecff;font-family:Georgia,serif;overflow-x:hidden}
+  .wrap{max-width:860px;margin:0 auto;padding:16px 14px 30px}
+  header{text-align:center}
+  h1{margin:8px 0 2px;font-size:42px;letter-spacing:2px;color:#ffd86b;text-shadow:0 0 18px #b36bff}
+  .tag{color:#c9b8ff;margin:0 0 14px}
+  #hud{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}
+  .stat{background:#221a45;border:1px solid #6a4fc0;border-radius:10px;padding:9px;text-align:center}
+  .stat b{display:block;font-size:20px;color:#ffe28a}
+  .stat span{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#b8a9e8}
+  #status{min-height:28px;text-align:center;font-weight:bold;color:#9dffc4}
+  canvas{display:block;width:100%;height:170px;background:radial-gradient(circle at 50% 45%,#2c1e63,#120e28 72%);border:1px solid #7b5bd6;border-radius:14px}
+  .panel{background:#1a1440;border:1px solid #5b43a8;border-radius:14px;padding:14px;margin-top:12px}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center}
+  .slot{width:58px;height:58px;border:2px solid #8a72d8;border-radius:50%;display:grid;place-items:center;font-size:32px;background:#0f0b27}
+  .slot.filled{border-color:#ffd86b;background:#32235f;box-shadow:0 0 14px rgba(255,216,107,.35)}
+  .sym{width:56px;height:56px;border:0;border-radius:12px;background:#2e2368;color:#fff;font-size:28px;cursor:pointer}
+  .sym:hover,.sym.sel{background:#ffd86b;color:#24124f;transform:translateY(-2px)}
+  button.action{border:0;border-radius:10px;padding:12px 18px;font-size:16px;font-weight:bold;cursor:pointer;background:#ffd86b;color:#24124f}
+  button.ghost{background:#372a6d;color:#fff}
+  button.action:active{transform:scale(.97)}
+  .history{display:grid;gap:7px;margin-top:12px}
+  .guess{display:flex;justify-content:space-between;align-items:center;background:#0f0b27;border:1px solid #4a377f;border-radius:10px;padding:8px 10px}
+  .guess .g{font-size:26px;letter-spacing:6px}
+  .peg{display:inline-block;width:16px;height:16px;border-radius:50%;margin:2px;border:1px solid #fff}
+  .peg.good{background:#35e08a}.peg.close{background:#ffd86b}.peg.miss{background:#3a2f62}
+  #overlay{position:fixed;inset:0;background:rgba(7,4,20,.94);display:flex;align-items:center;justify-content:center;padding:18px;z-index:10}
+  #overlay .card{max-width:620px;background:#1d1544;border:2px solid #8a68e8;border-radius:18px;padding:24px;text-align:center;box-shadow:0 0 40px rgba(150,90,255,.35)}
+  #overlay h2{font-size:36px;margin:0 0 8px;color:#ffd86b}
+  #overlay p{line-height:1.6;color:#ddd3ff}
+  #overlay ul{text-align:left;line-height:1.7;color:#ddd3ff}
+  .big{font-size:22px;padding:14px 28px}
+  .hidden{display:none !important}
+  @media(max-width:560px){h1{font-size:32px}.slot,.sym{width:48px;height:48px}.slot{font-size:26px}#hud{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>✦ SIGIL SOLVER ✦</h1>
+    <p class="tag">Read the ancient runes. Crack the hidden sigil before the magic fades.</p>
+  </header>
+
+  <div id="hud" aria-label="Game status">
+    <div class="stat"><b id="score">0</b><span>Score</span></div>
+    <div class="stat"><b id="guesses">8</b><span>Guesses Left</span></div>
+    <div class="stat"><b id="round">1 / 3</b><span>Round</span></div>
+    <div class="stat"><b id="lives">● ● ●</b><span>Seals Intact</span></div>
+  </div>
+  <div id="status">Choose four runes, then submit your deduction.</div>
+
+  <canvas id="sigilCanvas" width="860" height="170"></canvas>
+
+  <section class="panel">
+    <div class="row" id="current" aria-label="Current guess"></div>
+    <p style="text-align:center;color:#c9b8ff;margin:10px 0 6px">Tap a rune (or press keys 1–8), then Submit. Backspace clears the last rune.</p>
+    <div class="row" id="palette" aria-label="Rune palette"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="action" id="submitBtn" type="button">Submit Guess</button>
+      <button class="action ghost" id="clearBtn" type="button">Clear</button>
+      <button class="action ghost" id="hintBtn" type="button">Reveal One Clue (Costs 25)</button>
+    </div>
+    <div class="history" id="history"></div>
+  </section>
+  <p style="text-align:center;color:#8f7fc0">Green peg = right rune, right place. Gold peg = right rune, wrong place. Dark peg = rune not in the sigil.</p>
+</div>
+
+<div id="overlay">
+  <div class="card" id="overlayCard">
+    <h2 id="overlayTitle">Sigil Solver</h2>
+    <div id="overlayBody">
+      <p>An ancient seal hides a secret sequence of four runes. Your task is to deduce it by logic, not luck.</p>
+      <ul>
+        <li><b>How to play:</b> Build a four-rune guess from the palette, then submit it.</li>
+        <li><b>Clues:</b> Green means the rune is correct and in the correct position. Gold means the rune is in the sigil but in another position.</li>
+        <li><b>Win:</b> Solve all 3 rounds. Each round grows trickier and gives fewer spare guesses.</li>
+        <li><b>Lose:</b> Run out of guesses in any round and the seal breaks.</li>
+        <li><b>Controls:</b> Mouse click, touch, or keyboard keys 1–8, Backspace, and Enter.</li>
+      </ul>
+      <p>Scoring: 100 points per solved round, plus 20 points for every unused guess. Hints cost 25 points but never reveal a position you already know.</p>
+    </div>
+    <button class="action big" id="startBtn" type="button">Start the Ritual</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var SYMBOLS = ["\u25B3","\u25CB","\u25A1","\u2726","\u263E","\u2641","\u26A1","\u2727"];
+  var NAMES = ["Triangle","Circle","Square","Star","Moon","Earth","Bolt","Spark"];
+  var ROUNDS = [
+    {guesses:8, length:4},
+    {guesses:7, length:4},
+    {guesses:6, length:4}
+  ];
+  var roundIndex = 0, secret = [], current = [], guessesLeft = 8, score = 0, gameOver = false, started = false;
+  var revealed = [false,false,false,false];
+  var audioCtx = null, angle = 0, sparkles = [];
+
+  var canvas = document.getElementById("sigilCanvas");
+  var ctx = canvas.getContext("2d");
+  var scoreEl = document.getElementById("score");
+  var guessesEl = document.getElementById("guesses");
+  var roundEl = document.getElementById("round");
+  var statusEl = document.getElementById("status");
+  var currentEl = document.getElementById("current");
+  var paletteEl = document.getElementById("palette");
+  var historyEl = document.getElementById("history");
+  var overlay = document.getElementById("overlay");
+  var overlayTitle = document.getElementById("overlayTitle");
+  var overlayBody = document.getElementById("overlayBody");
+  var startBtn = document.getElementById("startBtn");
+
+  function beep(freq, dur, type){
+    if(!audioCtx || gameOver === null) return;
+    try{
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    }catch(e){}
+  }
+  function ensureAudio(){
+    if(!audioCtx){
+      try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){}
+    }
+    if(audioCtx && audioCtx.state === "suspended"){ audioCtx.resume(); }
+  }
+  function shuffle(arr){
+    var a = arr.slice();
+    for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; }
+    return a;
+  }
+  function newRound(){
+    var cfg = ROUNDS[roundIndex];
+    secret = shuffle(SYMBOLS).slice(0, cfg.length);
+    current = []; guessesLeft = cfg.guesses; revealed = [false,false,false,false];
+    historyEl.innerHTML = "";
+    statusEl.textContent = "Round " + (roundIndex+1) + ": decode the hidden sigil.";
+    renderAll();
+  }
+  function renderHUD(){
+    scoreEl.textContent = String(score);
+    guessesEl.textContent = String(guessesLeft);
+    roundEl.textContent = (roundIndex+1) + " / 3";
+    var seals = roundIndex === 0 ? "\u25CF \u25CF \u25CF" : (roundIndex === 1 ? "\u25CF \u25CF \u25CB" : "\u25CF \u25CB \u25CB");
+    document.getElementById("lives").textContent = gameOver ? "\u25CB \u25CB \u25CB" : seals;
+  }
+  function renderCurrent(){
+    currentEl.innerHTML = "";
+    for(var i=0;i<4;i++){
+      var d = document.createElement("div");
+      d.className = "slot" + (current[i] ? " filled" : "");
+      d.textContent = current[i] || "?";
+      d.setAttribute("data-slot", String(i));
+      currentEl.appendChild(d);
+    }
+  }
+  function renderPalette(){
+    paletteEl.innerHTML = "";
+    SYMBOLS.forEach(function(sym, idx){
+      var b = document.createElement("button");
+      b.className = "sym"; b.type = "button"; b.textContent = sym;
+      b.title = NAMES[idx] + " (key " + (idx+1) + ")";
+      b.setAttribute("data-symbol", sym);
+      b.addEventListener("click", function(){ addSymbol(sym); });
+      paletteEl.appendChild(b);
+    });
+  }
+  function renderAll(){ renderHUD(); renderCurrent(); }
+  function addSymbol(sym){
+    if(!started || gameOver || current.length >= 4) return;
+    if(current.indexOf(sym) !== -1){ statusEl.textContent = "Each rune may be used only once in a guess."; beep(160,0.12,"square"); return; }
+    current.push(sym); beep(420 + current.length*70, 0.09, "sine"); renderCurrent();
+  }
+  function clearCurrent(){ current = []; renderCurrent(); }
+  function evaluate(guess){
+    var good = 0, close = 0, secretUsed = [false,false,false,false], guessUsed = [false,false,false,false];
+    for(var i=0;i<4;i++){ if(guess[i] === secret[i]){ good++; secretUsed[i]=true; guessUsed[i]=true; } }
+    for(var j=0;j<4;j++){
+      if(guessUsed[j]) continue;
+      for(var k=0;k<4;k++){ if(!secretUsed[k] && guess[j] === secret[k]){ close++; secretUsed[k]=true; break; } }
+    }
+    return {good:good, close:close};
+  }
+  function addHistoryRow(guess, fb){
+    var row = document.createElement("div"); row.className = "guess";
+    var g = document.createElement("span"); g.className = "g"; g.textContent = guess.join(" ");
+    var pegs = document.createElement("span");
+    var total = 0;
+    for(var i=0;i<fb.good;i++){ var p=document.createElement("i"); p.className="peg good"; pegs.appendChild(p); total++; }
+    for(var j=0;j<fb.close;j++){ var q=document.createElement("i"); q.className="peg close"; pegs.appendChild(q); total++; }
+    while(total < 4){ var m=document.createElement("i"); m.className="peg miss"; pegs.appendChild(m); total++; }
+    row.appendChild(g); row.appendChild(pegs); historyEl.appendChild(row);
+  }
+  function endGame(win, message){
+    gameOver = true;
+    overlayTitle.textContent = win ? "The Seal Opens!" : "The Seal Breaks...";
+    overlayBody.innerHTML = "<p>" + message + "</p><p><b>Final score:</b> " + score + "</p><p>The hidden sigil was: <span style='font-size:30px;letter-spacing:6px'>" + secret.join(" ") + "</span></p><p>Press Restart to attempt the ritual again.</p>";
+    startBtn.textContent = "Restart";
+    overlay.classList.remove("hidden");
+    if(win){ beep(660,0.25,"sine"); setTimeout(function(){ beep(880,0.3,"sine"); },180); }
+    else { beep(180,0.4,"sawtooth"); }
+  }
+  function submitGuess(){
+    if(!started || gameOver) return;
+    if(current.length !== 4){ statusEl.textContent = "Choose four different runes first."; beep(160,0.12,"square"); return; }
+    var guess = current.slice();
+    var fb = evaluate(guess);
+    addHistoryRow(guess, fb);
+    guessesLeft--;
+    if(fb.good === 4){
+      var bonus = 100 + guessesLeft * 20;
+      score += bonus;
+      statusEl.textContent = "Sigil cracked! +" + bonus + " points.";
+      beep(720,0.2,"sine");
+      if(roundIndex === 2){ renderAll(); endGame(true, "You decoded every sigil and mastered the ancient seal."); return; }
+      roundIndex++; newRound(); return;
+    }
+    if(guessesLeft <= 0){ renderAll(); endGame(false, "You ran out of guesses in round " + (roundIndex+1) + ". The magic fades."); return; }
+    var hint = fb.good > 0 ? fb.good + " rune(s) exactly right." : "No rune is exactly right yet.";
+    statusEl.textContent = hint + " " + fb.close + " rune(s) in the wrong place. " + guessesLeft + " guesses remain.";
+    beep(fb.good ? 520 : 300, 0.12, "triangle");
+    current = []; renderAll();
+  }
+  function giveHint(){
+    if(!started || gameOver) return;
+    if(score < 25 && roundIndex === 0 && historyEl.children.length === 0){ statusEl.textContent = "You need 25 points for a hint. Solve a round first, or keep deducing."; return; }
+    var unknown = [];
+    for(var i=0;i<4;i++){ if(!revealed[i]) unknown.push(i); }
+    if(unknown.length === 0){ statusEl.textContent = "Every position is already revealed."; return; }
+    var pos = unknown[Math.floor(Math.random()*unknown.length)];
+    revealed[pos] = true; score = Math.max(0, score - 25);
+    statusEl.textContent = "Clue: position " + (pos+1) + " is " + secret[pos] + " (" + NAMES[SYMBOLS.indexOf(secret[pos])] + "). Cost: 25 points.";
+    beep(600,0.18,"sine"); renderAll();
+  }
+  function startGame(){
+    ensureAudio();
+    started = true; gameOver = false; score = 0; roundIndex = 0;
+    overlay.classList.add("hidden");
+    startBtn.textContent = "Start the Ritual";
+    newRound(); beep(523,0.18,"sine");
+  }
+
+  document.getElementById("submitBtn").addEventListener("click", submitGuess);
+  document.getElementById("clearBtn").addEventListener("click", clearCurrent);
+  document.getElementById("hintBtn").addEventListener("click", giveHint);
+  startBtn.addEventListener("click", startGame);
+  document.addEventListener("keydown", function(e){
+    if(!started || gameOver){
+      if(e.key === "Enter"){ startGame(); }
+      return;
+    }
+    if(e.key >= "1" && e.key <= "8"){ addSymbol(SYMBOLS[Number(e.key)-1]); }
+    else if(e.key === "Backspace"){ current.pop(); renderCurrent(); }
+    else if(e.key === "Enter"){ submitGuess(); }
+  });
+  document.addEventListener("mousedown", function(e){
+    if(e.target && e.target.classList && e.target.classList.contains("slot")){
+      var idx = Number(e.target.getAttribute("data-slot"));
+      if(current[idx]){ current.splice(idx,1); renderCurrent(); }
+    }
+  });
+  document.addEventListener("touchstart", function(e){
+    if(e.target && (e.target.id === "startBtn" || e.target.id === "submitBtn")){ ensureAudio(); }
+  }, {passive:true});
+  document.addEventListener("click", function(e){
+    if(e.target && e.target.id === "startBtn"){ ensureAudio(); }
+  });
+
+  function draw(){
+    angle += 0.008;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.save(); ctx.translate(430,85);
+    ctx.strokeStyle = "rgba(255,216,107,0.55)"; ctx.lineWidth = 2;
+    for(var r=0;r<3;r++){
+      ctx.beginPath(); ctx.arc(0,0,28+r*20,0,Math.PI*2); ctx.stroke();
+    }
+    ctx.rotate(angle);
+    for(var i=0;i<8;i++){
+      ctx.save(); ctx.rotate(i*Math.PI/4); ctx.fillStyle = "#ffe28a"; ctx.font = "26px Georgia";
+      ctx.fillText(SYMBOLS[i], 62, 9); ctx.restore();
+    }
+    ctx.restore();
+    if(sparkles.length < 24 && Math.random() < 0.08){
+      sparkles.push({x:Math.random()*860, y:Math.random()*170, v:0.4+Math.random(), s:1+Math.random()*2});
+    }
+    sparkles = sparkles.filter(function(s){ return s.y > -5; });
+    sparkles.forEach(function(s){ s.y -= s.v; ctx.fillStyle = "rgba(255,226,138,0.8)"; ctx.beginPath(); ctx.arc(s.x,s.y,s.s,0,Math.PI*2); ctx.fill(); });
+    if(started && !gameOver){
+      ctx.fillStyle = "#f3ecff"; ctx.font = "bold 18px Georgia"; ctx.textAlign = "center";
+      ctx.fillText("Round " + (roundIndex+1) + "  \u2022  " + current.join(" ") + "  \u2022  " + guessesLeft + " guesses left", 430, 160);
+    }
+    requestAnimationFrame(draw);
+  }
+  renderPalette(); renderAll(); draw();
+})();
+</script>
+</body>
+</html>

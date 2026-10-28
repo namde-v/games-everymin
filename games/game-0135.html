@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Orbit Overture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050816; color: #eef2ff; font-family: Arial, Helvetica, sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 28px; letter-spacing: 2px; margin: 10px 0 2px; color: #ffd166; text-shadow: 0 0 18px rgba(255,209,102,.6); }
+  p.sub { color: #9fb3ff; font-size: 13px; margin-bottom: 8px; }
+  #hud { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; font-size: 14px; font-weight: bold; margin-bottom: 6px; }
+  #hud span { background: #121a3a; border: 1px solid #33448a; border-radius: 999px; padding: 5px 12px; }
+  #hud b { color: #ffd166; }
+  #wrap { position: relative; width: min(92vw, 860px); }
+  canvas { width: 100%; height: 540px; display: block; background: radial-gradient(circle at 30% 25%, #16204d 0%, #050816 62%); border: 2px solid #33448a; border-radius: 14px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(3,6,22,.88); border-radius: 14px; padding: 24px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #dbe4ff; font-size: 15px; }
+  .overlay .small { font-size: 13px; color: #9fb3ff; }
+  button { background: #ffd166; color: #111; border: none; font-weight: bold; font-size: 17px; padding: 12px 26px; border-radius: 999px; cursor: pointer; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #2a3a7a; color: #fff; }
+  #keys { font-size: 12px; color: #9fb3ff; margin-top: 6px; text-align: center; }
+  #msg { min-height: 20px; font-weight: bold; color: #7CFC9A; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>ORBIT OVERTURE</h1>
+<p class="sub">A precision gravity-slingshot symphony &mdash; bend your probe around planets into the golden ring.</p>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Level: <b id="level">1 / 5</b></span>
+  <span>Launches left: <b id="launches">3</b></span>
+  <span>Status: <b id="status">Aim &amp; launch</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="540"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>ORBIT OVERTURE</h2>
+    <p><strong>How to Play:</strong> Drag from the launch pad to pull back the slingshot, aim the dotted trajectory, and release to launch your probe. Planets pull the probe with gravity &mdash; use their wells to curve around and fly into the glowing golden target ring. Each level gives you 3 launches. Crash into a planet or fly off into deep space and you lose a launch.</p>
+    <p class="small">Mouse: drag &amp; release to launch &bull; Touch: drag &amp; release &bull; Keyboard: Arrow keys aim, Space launches, R restarts &bull; Complete all 5 levels to win.</p>
+    <button id="startBtn">Start</button>
+    <p class="small">Sound starts only after you press Start. No downloads, fully offline.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText">You conducted every orbit perfectly.</p>
+    <p class="small">Final score: <span id="finalScore">0</span></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<div id="msg"></div>
+<div id="keys">Drag to aim &bull; Release to launch &bull; Arrows + Space work too &bull; R = Restart</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var levelEl = document.getElementById('level');
+  var launchesEl = document.getElementById('launches');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+
+  // Procedural Web Audio, created only after user interaction.
+  var audioCtx = null, audioOn = false;
+  function initAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+    audioOn = !!audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.2));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.2));
+    } catch(e) {}
+  }
+  function fanfare() { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f,0.35,'triangle',0.14); }, i*130); }); }
+
+  // Levels: launch pad, planets (x,y,radius,mass), target ring, par launches.
+  var LEVELS = [
+    { pad: {x:90,y:430}, planets: [{x:430,y:270,r:34,m:9000}], target: {x:750,y:120,r:34} },
+    { pad: {x:90,y:110}, planets: [{x:380,y:300,r:38,m:11000},{x:600,y:180,r:26,m:6500}], target: {x:760,y:430,r:34} },
+    { pad: {x:90,y:430}, planets: [{x:300,y:260,r:30,m:8000},{x:550,y:340,r:42,m:13000}], target: {x:750,y:110,r:32} },
+    { pad: {x:430,y:470}, planets: [{x:250,y:280,r:36,m:10000},{x:580,y:220,r:30,m:9000},{x:650,y:400,r:24,m:6000}], target: {x:110,y:100,r:32} },
+    { pad: {x:90,y:270}, planets: [{x:320,y:150,r:32,m:9500},{x:480,y:380,r:40,m:12500},{x:660,y:200,r:28,m:7500}], target: {x:760,y:430,r:30} }
+  ];
+  var levelIdx = 0, score = 0, launchesLeft = 3, state = 'title'; // title, aiming, flying, win, over
+  var probe = null, trail = [], aiming = false, dragPos = null, aimAngle = -0.7, aimPower = 8;
+  var stars = [];
+  for (var i=0;i<110;i++) stars.push({x:Math.random()*860, y:Math.random()*540, r:Math.random()*1.8+0.4, tw:Math.random()*Math.PI*2});
+
+  function level() { return LEVELS[levelIdx]; }
+  function resetProbe() {
+    probe = { x: level().pad.x, y: level().pad.y, vx:0, vy:0 };
+    trail = []; aiming = false; dragPos = null;
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    levelEl.textContent = (levelIdx+1) + ' / ' + LEVELS.length;
+    launchesEl.textContent = launchesLeft;
+    if (status) statusEl.textContent = status;
+  }
+  function setMsg(t, color) { msgEl.textContent = t; msgEl.style.color = color || '#7CFC9A'; }
+
+  function startGame() {
+    initAudio(); beep(660,0.2,'sine',0.12);
+    levelIdx = 0; score = 0; launchesLeft = 3;
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    state = 'aiming'; resetProbe(); updateHUD('Aim & launch'); setMsg('Level 1: slingshot around the planet into the golden ring!');
+  }
+  function gameOver() {
+    state = 'over'; endTitle.textContent = 'GAME OVER'; endText.textContent = 'Out of launches. The orchestra falls silent — try the overture again.';
+    finalScore.textContent = score; endScreen.classList.remove('hidden'); updateHUD('Game Over');
+  }
+  function winGame() {
+    state = 'win'; endTitle.textContent = 'YOU WIN!'; endText.textContent = 'All 5 orbits conducted. A flawless overture!';
+    finalScore.textContent = score; endScreen.classList.remove('hidden'); updateHUD('Victory!'); fanfare();
+  }
+  function nextLevel() {
+    score += 250 + launchesLeft * 100;
+    levelIdx++;
+    if (levelIdx >= LEVELS.length) { updateHUD('Victory!'); winGame(); return; }
+    launchesLeft = 3; state = 'aiming'; resetProbe(); updateHUD('Aim & launch');
+    setMsg('Level ' + (levelIdx+1) + '! New gravity puzzle — watch the wells.');
+    fanfare();
+  }
+  function loseLaunch(reason) {
+    launchesLeft--; beep(160,0.35,'sawtooth',0.12); updateHUD('Lost a launch');
+    setMsg(reason, '#ff8a8a');
+    if (launchesLeft <= 0) { gameOver(); return; }
+    state = 'aiming'; resetProbe(); updateHUD('Aim & launch');
+  }
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - r.left) * canvas.width / r.width, y: (cy - r.top) * canvas.height / r.height };
+  }
+  function aimFromDrag(p) {
+    var pad = level().pad;
+    var dx = pad.x - p.x, dy = pad.y - p.y;
+    var dist = Math.sqrt(dx*dx+dy*dy);
+    if (dist > 10) { aimAngle = Math.atan2(dy, dx); aimPower = Math.min(16, Math.max(3, dist / 12)); }
+  }
+  function launch() {
+    if (state !== 'aiming') return;
+    probe.vx = Math.cos(aimAngle) * aimPower;
+    probe.vy = Math.sin(aimAngle) * aimPower;
+    state = 'flying'; aiming = false; trail = [];
+    updateHUD('Flying…'); beep(880,0.15,'sine',0.12);
+  }
+
+  canvas.addEventListener('mousedown', function(e) {
+    if (state !== 'aiming') return;
+    aiming = true; dragPos = canvasPos(e); aimFromDrag(dragPos);
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    if (!aiming || state !== 'aiming') return;
+    dragPos = canvasPos(e); aimFromDrag(dragPos);
+  });
+  window.addEventListener('mouseup', function(e) {
+    if (aiming && state === 'aiming') { aiming = false; launch(); }
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (state !== 'aiming') return;
+    aiming = true; dragPos = canvasPos(e); aimFromDrag(dragPos);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    if (!aiming || state !== 'aiming') return;
+    dragPos = canvasPos(e); aimFromDrag(dragPos);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    if (aiming && state === 'aiming') { aiming = false; launch(); }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowLeft') aimAngle -= 0.12;
+    if (e.key === 'ArrowRight') aimAngle += 0.12;
+    if (e.key === 'ArrowUp') aimPower = Math.min(16, aimPower + 1);
+    if (e.key === 'ArrowDown') aimPower = Math.max(3, aimPower - 1);
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (state === 'aiming') launch(); else if (state === 'title') startGame(); }
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') startGame(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  function physics() {
+    if (state !== 'flying' || !probe) return;
+    var lv = level();
+    lv.planets.forEach(function(pl) {
+      var dx = pl.x - probe.x, dy = pl.y - probe.y;
+      var d2 = dx*dx + dy*dy, d = Math.sqrt(d2) || 1;
+      var f = pl.m / Math.max(d2, 900);
+      probe.vx += (dx/d) * f; probe.vy += (dy/d) * f;
+      if (d < pl.r + 8) { loseLaunch('Crashed into a planet! Drag to aim again.'); return; }
+    });
+    if (state !== 'flying') return;
+    probe.x += probe.vx; probe.y += probe.vy;
+    trail.push({x:probe.x, y:probe.y});
+    if (trail.length > 90) trail.shift();
+    var t = lv.target, td = Math.hypot(probe.x - t.x, probe.y - t.y);
+    if (td < t.r) {
+      score += 500; beep(1047,0.3,'triangle',0.14);
+      setMsg('Target ring entered! Beautiful trajectory.');
+      nextLevel(); return;
+    }
+    if (probe.x < -40 || probe.x > 900 || probe.y < -40 || probe.y > 580) {
+      loseLaunch('Lost to deep space! Use gravity to bend the path.');
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0,0,860,540);
+    stars.forEach(function(s) {
+      ctx.globalAlpha = 0.5 + 0.5*Math.sin(s.tw + Date.now()/500);
+      ctx.fillStyle = '#cdd8ff'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    var lv = level();
+    // Gravity well hints
+    lv.planets.forEach(function(pl) {
+      var g = ctx.createRadialGradient(pl.x,pl.y,pl.r,pl.x,pl.y,pl.r+90);
+      g.addColorStop(0,'rgba(120,90,220,0.35)'); g.addColorStop(1,'rgba(120,90,220,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(pl.x,pl.y,pl.r+90,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#7b5cff'; ctx.beginPath(); ctx.arc(pl.x,pl.y,pl.r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#c9b8ff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText('G', pl.x, pl.y+5);
+    });
+    // Target ring
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(lv.target.x, lv.target.y, lv.target.r, 0, Math.PI*2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,209,102,0.35)'; ctx.lineWidth = 12;
+    ctx.beginPath(); ctx.arc(lv.target.x, lv.target.y, lv.target.r, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center'; ctx.fillText('TARGET', lv.target.x, lv.target.y - lv.target.r - 10);
+    // Launch pad
+    ctx.fillStyle = '#33448a'; ctx.fillRect(lv.pad.x-22, lv.pad.y-8, 44, 16);
+    ctx.fillStyle = '#eef2ff'; ctx.font = 'bold 11px Arial'; ctx.fillText('LAUNCH', lv.pad.x, lv.pad.y+30);
+    // Aim line
+    if (state === 'aiming' && probe) {
+      var px = probe.x, py = probe.y, vx = Math.cos(aimAngle)*aimPower, vy = Math.sin(aimAngle)*aimPower;
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.setLineDash([6,8]); ctx.beginPath(); ctx.moveTo(px,py);
+      for (var s=0;s<26;s++) {
+        var nx = px+vx, ny = py+vy;
+        lv.planets.forEach(function(pl){ var dx=pl.x-px, dy=pl.y-py; var d2=dx*dx+dy*dy, d=Math.sqrt(d2)||1; var f=pl.m/Math.max(d2,900); vx+=(dx/d)*f; vy+=(dy/d)*f; });
+        px=nx; py=ny; ctx.lineTo(px,py);
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+      // Slingshot band
+      ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 3; ctx.beginPath();
+      ctx.moveTo(lv.pad.x, lv.pad.y);
+      ctx.lineTo(lv.pad.x - Math.cos(aimAngle)*aimPower*4, lv.pad.y - Math.sin(aimAngle)*aimPower*4); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('Power ' + Math.round(aimPower), lv.pad.x, lv.pad.y - 22);
+    }
+    // Trail
+    if (trail.length > 1) {
+      ctx.strokeStyle = 'rgba(124,252,154,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(trail[0].x, trail[0].y);
+      trail.forEach(function(p){ ctx.lineTo(p.x,p.y); }); ctx.stroke();
+    }
+    // Probe
+    if (probe && state !== 'title') {
+      ctx.fillStyle = '#7CFC9A'; ctx.beginPath(); ctx.arc(probe.x, probe.y, 9, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(probe.x+3, probe.y-2, 2.5, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  function loop() { physics(); draw(); requestAnimationFrame(loop); }
+  resetProbe(); updateHUD('Press Start'); loop();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Avalanche Ace - Snowboard Slalom</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e33; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; color: #fff; overflow: hidden; }
+  h1 { font-size: 28px; letter-spacing: 2px; margin: 10px 0 4px; text-shadow: 2px 2px 0 #e63946; }
+  p.tag { color: #a8d8ff; font-size: 13px; margin-bottom: 8px; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: 640px; background: linear-gradient(#dff3ff, #ffffff); border: 3px solid #fff; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; background: #122a4a; border: 2px solid #fff; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-weight: bold; font-size: 15px; }
+  #hud span { color: #ffd166; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(8, 25, 47, 0.88); border-radius: 12px; padding: 24px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; margin-bottom: 10px; color: #ffd166; }
+  .overlay p { font-size: 15px; line-height: 1.6; max-width: 360px; margin-bottom: 10px; }
+  .overlay .keys { background: rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 14px; font-size: 13px; line-height: 1.7; text-align: left; }
+  button { margin-top: 16px; font-size: 20px; font-weight: bold; padding: 12px 34px; border: none; border-radius: 30px; background: #e63946; color: #fff; cursor: pointer; box-shadow: 0 4px 0 #8f1d28; }
+  button:hover { background: #f2545b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #statusMsg { text-align: center; font-size: 13px; color: #a8d8ff; margin-top: 6px; min-height: 18px; }
+  .snow { font-size: 26px; }
+</style>
+</head>
+<body>
+<h1>🏂 AVALANCHE ACE</h1>
+<p class="tag">Snowboard Slalom &mdash; thread the gates, dodge the mountain!</p>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">❤❤❤</span></div>
+    <div>Distance: <span id="dist">0</span>m</div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="480" height="640"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="snow">❄️ 🏂 ❄️</div>
+    <h2>AVALANCHE ACE</h2>
+    <p>Carve down the mountain! Thread every slalom gate for points, dodge rocks and pine trees, and reach the finish before you run out of lives.</p>
+    <div class="keys">
+      <strong>How to Play:</strong><br>
+      ⬅️ ➡️ Arrow keys or A / D &mdash; steer left / right<br>
+      🖱️ Mouse move &mdash; steer toward the cursor<br>
+      👆 Touch &amp; drag &mdash; steer with your finger<br>
+      Gate passed: +50 points &nbsp;|&nbsp; Missed gate: lose 1 life<br>
+      Crash into rock/tree: lose 1 life<br>
+      🏆 Win by reaching 1000 points!
+    </div>
+    <button id="startBtn">▶ START RIDE</button>
+    <p style="font-size:12px;color:#a8d8ff;">Sound starts only after you press Start.</p>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <div class="snow">🏆 🎉 ❄️</div>
+    <h2>YOU WIN!</h2>
+    <p id="winText">You conquered the mountain!</p>
+    <p>Final score shown on the HUD. Ride again for a faster run!</p>
+    <button id="winRestartBtn">↻ RESTART</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <div class="snow">💥 😵 ❄️</div>
+    <h2>GAME OVER</h2>
+    <p id="overText">Wiped out on the slope!</p>
+    <p>Try again &mdash; thread more gates and dodge the trees!</p>
+    <button id="overRestartBtn">↻ RESTART</button>
+  </div>
+</div>
+<div id="statusMsg">Use arrows, mouse, or touch to steer. Press Start to ride!</div>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var statusEl = document.getElementById('status');
+  var statusMsg = document.getElementById('statusMsg');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+  var WIN_SCORE = 1000;
+
+  var state = 'title'; // title, playing, win, over
+  var player = { x: 240, y: 520, w: 34, h: 44, speed: 7, vx: 0, inv: 0 };
+  var score = 0, lives = 3, distance = 0, speed = 4.2, frame = 0;
+  var gates = [], obstacles = [], flakes = [], trail = [];
+  var keys = {};
+  var pointerX = null;
+  var audioCtx = null;
+
+  function initAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function sndGate() { beep(880, 0.18, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.15, 'sine', 0.12); }, 80); }
+  function sndCrash() { beep(120, 0.35, 'sawtooth', 0.18); }
+  function sndWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.15); }, i * 140); }); }
+
+  function resetGame() {
+    score = 0; lives = 3; distance = 0; speed = 4.2; frame = 0;
+    player.x = 240; player.inv = 0; player.vx = 0;
+    gates = []; obstacles = []; trail = [];
+    flakes = [];
+    for (var i = 0; i < 90; i++) flakes.push({ x: Math.random() * 480, y: Math.random() * 640, s: 1 + Math.random() * 2.5, d: Math.random() * 2 });
+    updateHUD('Riding!');
+  }
+  function updateHUD(st) {
+    scoreEl.textContent = score;
+    distEl.textContent = Math.floor(distance);
+    livesEl.textContent = '❤'.repeat(Math.max(0, lives)) + (lives <= 0 ? '💀' : '');
+    if (st) statusEl.textContent = st;
+  }
+  function spawnRow() {
+    // A gate row: two flags with a gap; sometimes an obstacle elsewhere.
+    var gapW = 120;
+    var gapX = 60 + Math.random() * (480 - 120 - gapW);
+    gates.push({ y: -40, gapX: gapX, gapW: gapW, passed: false, scored: false });
+    var r = Math.random();
+    if (r < 0.75) {
+      var kind = Math.random() < 0.5 ? 'rock' : 'tree';
+      var ox;
+      if (Math.random() < 0.5) ox = 20 + Math.random() * Math.max(10, gapX - 60);
+      else ox = gapX + gapW + 10 + Math.random() * Math.max(10, 460 - (gapX + gapW));
+      obstacles.push({ x: Math.max(15, Math.min(445, ox)), y: -50, kind: kind });
+    }
+    if (Math.random() < 0.4) {
+      obstacles.push({ x: 20 + Math.random() * 420, y: -160, kind: Math.random() < 0.5 ? 'rock' : 'tree' });
+    }
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    overScreen.classList.add('hidden');
+    state = 'playing';
+    updateHUD('Riding!');
+    statusMsg.textContent = 'Ride! Thread the gates, dodge rocks and trees!';
+    beep(523, 0.2, 'triangle', 0.14);
+  }
+  function endWin() {
+    state = 'win';
+    document.getElementById('winText').textContent = 'You reached ' + score + ' points over ' + Math.floor(distance) + 'm! Mountain conquered!';
+    winScreen.classList.remove('hidden');
+    updateHUD('YOU WIN!');
+    statusMsg.textContent = 'Victory! Press Restart to ride again.';
+    sndWin();
+  }
+  function endOver() {
+    state = 'over';
+    document.getElementById('overText').textContent = 'Wiped out after ' + Math.floor(distance) + 'm with ' + score + ' points.';
+    overScreen.classList.remove('hidden');
+    updateHUD('Game Over');
+    statusMsg.textContent = 'Game Over. Press Restart to try again.';
+    sndCrash();
+  }
+  function loseLife(reason) {
+    lives--;
+    player.inv = 90;
+    sndCrash();
+    statusMsg.textContent = reason + ' Lives left: ' + lives;
+    updateHUD('Hit!');
+    if (lives <= 0) { setTimeout(endOver, 300); }
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    distance += speed * 0.35;
+    if (frame % 6 === 0) score += 1;
+    speed = Math.min(8.5, 4.2 + distance / 600);
+    if (player.inv > 0) player.inv--;
+
+    // Steering
+    var move = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) move -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) move += 1;
+    if (move !== 0) {
+      player.vx += move * 1.1;
+    } else if (pointerX !== null) {
+      var diff = pointerX - player.x;
+      player.vx += Math.max(-2, Math.min(2, diff * 0.06));
+    } else {
+      player.vx *= 0.82;
+    }
+    player.vx = Math.max(-9, Math.min(9, player.vx));
+    player.x += player.vx;
+    if (player.x < 24) { player.x = 24; player.vx = 0; }
+    if (player.x > 456) { player.x = 456; player.vx = 0; }
+    trail.push({ x: player.x, y: player.y + 24, life: 18 });
+    if (trail.length > 40) trail.shift();
+    trail.forEach(function(t){ t.life--; });
+
+    if (frame % 95 === 0) spawnRow();
+
+    gates.forEach(function(g) {
+      g.y += speed;
+      if (!g.passed && g.y > player.y + 10) {
+        g.passed = true;
+        if (player.x > g.gapX - 5 && player.x < g.gapX + g.gapW + 5) {
+          score += 50; sndGate(); statusMsg.textContent = 'Gate! +50 points';
+        } else {
+          loseLife('Missed a gate!');
+        }
+      }
+    });
+    obstacles.forEach(function(o) {
+      o.y += speed;
+      if (player.inv <= 0 && Math.abs(o.x - player.x) < 32 && Math.abs(o.y - player.y) < 32) {
+        o.y = 900; // consume it
+        loseLife('Crashed into a ' + o.kind + '!');
+      }
+    });
+    gates = gates.filter(function(g){ return g.y < 700; });
+    obstacles = obstacles.filter(function(o){ return o.y < 700; });
+    flakes.forEach(function(f){ f.y += f.s + speed * 0.3; f.x += Math.sin(frame / 30 + f.d) * 0.4; if (f.y > 640) { f.y = -5; f.x = Math.random() * 480; } });
+
+    updateHUD();
+    if (score >= WIN_SCORE) { endWin(); return; }
+  }
+
+  function drawSlope() {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 480, 640);
+    ctx.fillStyle = '#e8f4ff';
+    for (var i = 0; i < 14; i++) {
+      var yy = (i * 48 + Math.floor(distance * 2) % 48);
+      ctx.fillRect(0, yy, 480, 4);
+    }
+    // Side pine silhouettes
+    ctx.fillStyle = '#d6ecff';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(28, 0); ctx.lineTo(12, 640); ctx.lineTo(0, 640); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(480, 0); ctx.lineTo(452, 0); ctx.lineTo(468, 640); ctx.lineTo(480, 640); ctx.fill();
+  }
+  function draw() {
+    drawSlope();
+    // Trail
+    trail.forEach(function(t){
+      ctx.fillStyle = 'rgba(120,170,220,' + (t.life / 40) + ')';
+      ctx.fillRect(t.x - 8, t.y, 16, 6);
+    });
+    // Gates
+    gates.forEach(function(g){
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(g.gapX - 8, g.y - 18, 6, 36);
+      ctx.fillRect(g.gapX + g.gapW + 2, g.y - 18, 6, 36);
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(g.gapX - 5, g.y - 18, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(g.gapX + g.gapW + 5, g.y - 18, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(230,57,70,0.35)'; ctx.setLineDash([8, 8]);
+      ctx.beginPath(); ctx.moveTo(g.gapX, g.y); ctx.lineTo(g.gapX + g.gapW, g.y); ctx.stroke();
+      ctx.setLineDash([]);
+    });
+    // Obstacles
+    obstacles.forEach(function(o){
+      if (o.kind === 'rock') {
+        ctx.fillStyle = '#6c757d';
+        ctx.beginPath(); ctx.moveTo(o.x - 18, o.y + 14); ctx.lineTo(o.x - 6, o.y - 16); ctx.lineTo(o.x + 16, o.y - 10); ctx.lineTo(o.x + 18, o.y + 14); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#adb5bd'; ctx.fillRect(o.x - 8, o.y - 8, 10, 6);
+      } else {
+        ctx.fillStyle = '#2d6a4f';
+        ctx.beginPath(); ctx.moveTo(o.x, o.y - 22); ctx.lineTo(o.x - 18, o.y + 6); ctx.lineTo(o.x + 18, o.y + 6); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(o.x, o.y - 10); ctx.lineTo(o.x - 14, o.y + 16); ctx.lineTo(o.x + 14, o.y + 16); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#7f4f24'; ctx.fillRect(o.x - 3, o.y + 14, 6, 10);
+      }
+    });
+    // Snowflakes
+    ctx.fillStyle = 'rgba(180,215,245,0.9)';
+    flakes.forEach(function(f){ ctx.beginPath(); ctx.arc(f.x, f.y, f.s, 0, Math.PI * 2); ctx.fill(); });
+    // Player snowboarder
+    if (player.inv <= 0 || Math.floor(frame / 6) % 2 === 0) {
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      ctx.rotate(player.vx * 0.06);
+      ctx.fillStyle = '#e63946'; ctx.fillRect(-17, 18, 34, 6); // board
+      ctx.fillStyle = '#14213d';
+      ctx.beginPath(); ctx.arc(0, -4, 13, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(0, -4, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#14213d'; ctx.fillRect(-8, 6, 16, 12);
+      ctx.restore();
+    }
+    // Progress to win
+    ctx.fillStyle = 'rgba(11,30,51,0.75)'; ctx.fillRect(10, 10, 200, 14);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(10, 10, Math.min(200, 200 * score / WIN_SCORE), 14);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.fillText('TO WIN: ' + WIN_SCORE + ' PTS', 220, 21);
+  }
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, touch
+  document.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') e.preventDefault();
+    if ((e.key === 'Enter' || e.key === ' ') && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+  document.addEventListener('mousemove', function(e) {
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (canvas.width / r.width);
+  });
+  document.addEventListener('mousedown', function(e) {
+    initAudio();
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (canvas.width / r.width);
+  });
+  document.addEventListener('click', function(e) {
+    if (e.target && e.target.tagName === 'BUTTON') return;
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault(); initAudio();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    pointerX = (t.clientX - r.left) * (canvas.width / r.width);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    pointerX = (t.clientX - r.left) * (canvas.width / r.width);
+  }, { passive: false });
+  document.addEventListener('touchstart', function(e) { initAudio(); }, { passive: true });
+  document.addEventListener('touchmove', function(e) {}, { passive: true });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+
+  resetGame();
+  state = 'title';
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
