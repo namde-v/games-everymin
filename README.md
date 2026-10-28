@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 140
-- **Latest game:** 0140 — Crane Commander
+- **Total games:** 150
+- **Latest game:** 0150 — Zip Line Zephyr
 - **Current volume:** 002 (Games 0101 to 0200)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -14,7 +14,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | Volume | Games | Catalog |
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
-| 002 | 0101–0200 (40 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
+| 002 | 0101–0200 (50 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -28,20 +28,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 014
+## Latest batch — Batch 015
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0131 | Avalanche Ace | Arcade / Snowboard Slalom | [Play](./games/game-0131.html) |
-| 0132 | Cipher Circuit | Puzzle / Logic-Gate Routing | [Play](./games/game-0132.html) |
-| 0133 | Orchard Overseer | Strategy / Orchard Management | [Play](./games/game-0133.html) |
-| 0134 | Beat Beacon | Rhythm / Beat Timing | [Play](./games/game-0134.html) |
-| 0135 | Orbit Overture | Precision / Gravity Slingshot | [Play](./games/game-0135.html) |
-| 0136 | Ink Infiltrator | Arcade / Stealth Spray | [Play](./games/game-0136.html) |
-| 0137 | Sigil Solver | Puzzle / Rune Deduction | [Play](./games/game-0137.html) |
-| 0138 | Dockside Director | Strategy / Port Logistics | [Play](./games/game-0138.html) |
-| 0139 | Samba Step | Rhythm / Dance Steps | [Play](./games/game-0139.html) |
-| 0140 | Crane Commander | Precision / Crane Stacking | [Play](./games/game-0140.html) |
+| 0141 | Meteor Miner | Arcade / Asteroid Mining | [Play](./games/game-0141.html) |
+| 0142 | Hex Harvest | Puzzle / Hex Tile Matching | [Play](./games/game-0142.html) |
+| 0143 | Desert Depot | Strategy / Caravan Trading | [Play](./games/game-0143.html) |
+| 0144 | Jazz Jamboree | Rhythm / Swing Beat | [Play](./games/game-0144.html) |
+| 0145 | Lantern Lift | Precision / Balloon Altitude | [Play](./games/game-0145.html) |
+| 0146 | Coral Courier | Arcade / Reef Delivery | [Play](./games/game-0146.html) |
+| 0147 | Pattern Painter | Puzzle / Nonogram Logic | [Play](./games/game-0147.html) |
+| 0148 | Apiary Architect | Strategy / Bee Colony | [Play](./games/game-0148.html) |
+| 0149 | Metronome March | Rhythm / Marching Steps | [Play](./games/game-0149.html) |
+| 0150 | Zip Line Zephyr | Precision / Zipline Timing | [Play](./games/game-0150.html) |
 
 ## Quality standard
 

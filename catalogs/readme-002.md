@@ -45,6 +45,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0138 | Dockside Director | Strategy / Port Logistics | Click/tap ships and docks, mouse/touch | [Play](./../games/game-0138.html) |
 | 0139 | Samba Step | Rhythm / Dance Steps | Arrow Keys, mouse click pads, touch tap | [Play](./../games/game-0139.html) |
 | 0140 | Crane Commander | Precision / Crane Stacking | Space / click / tap drop | [Play](./../games/game-0140.html) |
+| 0141 | Meteor Miner | Arcade / Asteroid Mining | Arrow Keys / WASD thrust, Space / click / tap fire | [Play](./../games/game-0141.html) |
+| 0142 | Hex Harvest | Puzzle / Hex Tile Matching | Arrow Keys / WASD cursor, Space select, arrows swap, R restart | [Play](./../games/game-0142.html) |
+| 0143 | Desert Depot | Strategy / Caravan Trading | Arrow Keys select town, Enter travel, B buy, S sell, touch | [Play](./../games/game-0143.html) |
+| 0144 | Jazz Jamboree | Rhythm / Swing Beat | D/F/J/K lanes, mouse click lanes, touch tap lanes | [Play](./../games/game-0144.html) |
+| 0145 | Lantern Lift | Precision / Balloon Altitude | Space / Up Arrow / mouse / touch hold burner | [Play](./../games/game-0145.html) |
+| 0146 | Coral Courier | Arcade / Reef Delivery | Arrow Keys / WASD swim, mouse steer, touch drag, Space dash | [Play](./../games/game-0146.html) |
+| 0147 | Pattern Painter | Puzzle / Nonogram Logic | Click/tap cells paint, Space paint, X mark, E erase | [Play](./../games/game-0147.html) |
+| 0148 | Apiary Architect | Strategy / Bee Colony | Click/tap build comb and assign roles, Space speed up day | [Play](./../games/game-0148.html) |
+| 0149 | Metronome March | Rhythm / Marching Steps | Arrow Keys step, mouse click step buttons, touch tap | [Play](./../games/game-0149.html) |
+| 0150 | Zip Line Zephyr | Precision / Zipline Timing | Space / Down Arrow / click / tap release | [Play](./../games/game-0150.html) |
 
 ## Batch notes
 
@@ -52,4 +62,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 012: 10 games, produced in one cycle.
 - Batch 013: 10 games, produced in one cycle.
 - Batch 014: 10 games, produced in one cycle.
+- Batch 015: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Meteor Miner — Game 0141</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #050510; font-family: 'Segoe UI', Arial, sans-serif; }
+  #wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 40%, #131a33 0%, #050510 70%); }
+  #gameCanvas { display: block; background: #070714; border: 2px solid #3a4a7a; border-radius: 8px; max-width: 96vw; max-height: 92vh; touch-action: none; }
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 18px; color: #ffe066; font-weight: bold; font-size: 16px; text-shadow: 1px 1px 2px #000; background: rgba(0,0,0,0.55); padding: 8px 16px; border-radius: 20px; border: 1px solid #3a4a7a; flex-wrap: wrap; justify-content: center; z-index: 5; }
+  #hud span { white-space: nowrap; }
+  #hud .label { color: #9db4ff; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: rgba(3,3,15,0.88); color: #fff; text-align: center; padding: 24px; z-index: 10; }
+  .overlay.hidden { display: none; }
+  .overlay h1 { font-size: clamp(32px, 7vw, 56px); color: #ffe066; text-shadow: 0 0 18px rgba(255,224,102,0.6); letter-spacing: 2px; }
+  .overlay h2 { font-size: clamp(26px, 5vw, 40px); color: #7CFC9A; }
+  .overlay p { max-width: 560px; line-height: 1.6; color: #d7dcff; font-size: 16px; }
+  .overlay .howto { background: rgba(255,255,255,0.08); border: 1px solid #3a4a7a; border-radius: 12px; padding: 14px 18px; text-align: left; max-width: 560px; }
+  .overlay .howto b { color: #ffe066; }
+  button { cursor: pointer; border: none; border-radius: 28px; padding: 14px 34px; font-size: 19px; font-weight: bold; color: #111; background: #ffe066; box-shadow: 0 4px 0 #b8962a, 0 8px 24px rgba(255,224,102,0.35); transition: transform 0.08s ease; }
+  button:hover { transform: translateY(-2px); }
+  button:active { transform: translateY(2px); box-shadow: 0 1px 0 #b8962a; }
+  button.secondary { background: #9db4ff; box-shadow: 0 4px 0 #5a6fb0; color: #111; }
+  #oreBarWrap { width: min(420px, 80vw); height: 16px; background: #222; border-radius: 10px; border: 1px solid #555; overflow: hidden; }
+  #oreBar { height: 100%; width: 0%; background: linear-gradient(90deg, #ffb347, #ffe066); transition: width 0.2s; }
+  #msg { min-height: 22px; color: #7CFC9A; font-weight: bold; }
+  #touchPad { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 6; }
+  #touchPad button { padding: 12px 16px; font-size: 15px; border-radius: 14px; }
+  @media (max-width: 600px) { #hud { font-size: 13px; gap: 10px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="gameCanvas" width="900" height="600"></canvas>
+  <div id="hud">
+    <span><span class="label">SCORE</span> <span id="score">0</span></span>
+    <span><span class="label">ORE</span> <span id="ore">0</span>/<span id="oreGoal">12</span></span>
+    <span><span class="label">LIVES</span> <span id="lives">♥♥♥</span></span>
+    <span><span class="label">LEVEL</span> <span id="level">1</span></span>
+    <span><span class="label">STATUS</span> <span id="status">READY</span></span>
+  </div>
+
+  <div id="titleScreen" class="overlay">
+    <h1>⛏️ METEOR MINER</h1>
+    <p>Pilot your mining ship through a drifting asteroid field. Blast rocks with your laser, scoop up the glowing ore they drop, and dodge every collision. Fill the ore quota to clear each level!</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      • <b>Thrust:</b> Arrow keys / WASD, or drag on touch screen<br>
+      • <b>Fire laser:</b> Space, mouse click, or tap FIRE<br>
+      • <b>Aim:</b> Mouse moves the ship's nose toward the cursor<br>
+      • <b>Collect:</b> Fly over glowing ore chunks (+50 pts each)<br>
+      • <b>Survive:</b> 3 lives. Hitting a big asteroid costs a life.<br>
+      • <b>Win:</b> Clear all 5 levels by meeting every ore quota.
+    </div>
+    <div id="oreBarWrap"><div id="oreBar"></div></div>
+    <button id="startBtn">▶ START MINING</button>
+    <p style="font-size:13px; color:#8a90b8;">Tip: small asteroids are worth more ore but drift faster. Keep moving — standing still is a miner's worst enemy.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText"></p>
+    <p>Final Score: <b id="finalScore" style="color:#ffe066;">0</b> &nbsp;|&nbsp; Ore Collected: <b id="finalOre" style="color:#ffe066;">0</b></p>
+    <button id="restartBtn">↻ RESTART INSTANTLY</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+
+  <div id="touchPad">
+    <button id="fireBtn" type="button">🔥 FIRE</button>
+    <button id="thrustBtn" type="button">🚀 THRUST</button>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('gameCanvas');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var oreEl = document.getElementById('ore');
+  var oreGoalEl = document.getElementById('oreGoal');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var oreBar = document.getElementById('oreBar');
+
+  // ---- Procedural Web Audio (created only after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'square';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfxShoot() { beep(880, 0.12, 'sawtooth', 0.05); }
+  function sfxOre() { beep(1320, 0.18, 'sine', 0.10); setTimeout(function(){ beep(1760, 0.15, 'sine', 0.08); }, 60); }
+  function sfxCrash() { beep(120, 0.4, 'sawtooth', 0.14); }
+  function sfxLevel() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.2, 'triangle', 0.10); }, i * 90); }); }
+
+  // ---- Game state ----
+  var MAX_LEVEL = 5;
+  var state = 'title'; // title | playing | over | win
+  var score, ore, oreGoal, lives, level;
+  var ship, bullets, asteroids, ores, particles, stars;
+  var keys = {};
+  var mouse = { x: W / 2, y: H / 2, down: false };
+  var touch = { active: false, x: W / 2, y: H / 2, thrust: false };
+  var lastTime = 0, fireCooldown = 0, invincibleUntil = 0, shake = 0;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function makeStars() {
+    stars = [];
+    for (var i = 0; i < 90; i++) stars.push({ x: Math.random() * W, y: Math.random() * H, r: rand(0.5, 2), tw: rand(0, 6.28) });
+  }
+  function spawnAsteroid(size) {
+    var edge = Math.floor(Math.random() * 4), x, y;
+    if (edge === 0) { x = rand(0, W); y = -40; }
+    else if (edge === 1) { x = W + 40; y = rand(0, H); }
+    else if (edge === 2) { x = rand(0, W); y = H + 40; }
+    else { x = -40; y = rand(0, H); }
+    var speed = rand(0.5, 1.1) + level * 0.22;
+    var ang = Math.atan2(H / 2 - y, W / 2 - x) + rand(-0.6, 0.6);
+    var r = size === 'big' ? rand(34, 48) : size === 'med' ? rand(22, 32) : rand(12, 20);
+    return { x: x, y: y, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, r: r, rot: rand(0, 6.28), vr: rand(-0.03, 0.03), size: size, verts: makeVerts(r) };
+  }
+  function makeVerts(r) {
+    var v = [];
+    for (var i = 0; i < 9; i++) v.push(rand(0.75, 1.15));
+    return v;
+  }
+  function spawnLevel(n) {
+    asteroids = []; bullets = []; ores = []; particles = [];
+    oreGoal = 10 + n * 2;
+    ore = 0;
+    var count = 5 + n * 2;
+    for (var i = 0; i < count; i++) {
+      var kind = i % 3 === 0 ? 'big' : (i % 3 === 1 ? 'med' : 'small');
+      asteroids.push(spawnAsteroid(kind));
+    }
+    ship.x = W / 2; ship.y = H / 2; ship.vx = 0; ship.vy = 0; ship.angle = -Math.PI / 2;
+    invincibleUntil = performance.now() + 2000;
+    updateHUD('LEVEL ' + n + ' — MINE ' + oreGoal + ' ORE');
+  }
+  function resetGame() {
+    score = 0; lives = 3; level = 1;
+    ship = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2 };
+    makeStars();
+    spawnLevel(1);
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    oreEl.textContent = ore;
+    oreGoalEl.textContent = oreGoal;
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives));
+    levelEl.textContent = level + ' / ' + MAX_LEVEL;
+    if (status) statusEl.textContent = status;
+    oreBar.style.width = Math.min(100, (ore / oreGoal) * 100) + '%';
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      var a = rand(0, 6.28), s = rand(0.5, 3);
+      particles.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(20, 45), color: color });
+    }
+  }
+  function fireLaser() {
+    if (fireCooldown > 0 || state !== 'playing') return;
+    fireCooldown = 14;
+    bullets.push({ x: ship.x + Math.cos(ship.angle) * 22, y: ship.y + Math.sin(ship.angle) * 22, vx: Math.cos(ship.angle) * 8 + ship.vx, vy: Math.sin(ship.angle) * 8 + ship.vy, life: 55 });
+    sfxShoot();
+  }
+  function loseLife() {
+    if (performance.now() < invincibleUntil) return;
+    lives--;
+    sfxCrash();
+    shake = 14;
+    burst(ship.x, ship.y, '#ff5544', 30);
+    updateHUD('HIT! LIVES LEFT: ' + lives);
+    if (lives <= 0) { endGame(false); return; }
+    ship.x = W / 2; ship.y = H / 2; ship.vx = 0; ship.vy = 0;
+    invincibleUntil = performance.now() + 2500;
+  }
+  function nextLevel() {
+    sfxLevel();
+    if (level >= MAX_LEVEL) { endGame(true); return; }
+    level++;
+    spawnLevel(level);
+    updateHUD('LEVEL ' + level + ' — GO!');
+  }
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 YOU WIN, MASTER MINER!' : '💥 GAME OVER';
+    endText.textContent = won
+      ? 'You cleared all ' + MAX_LEVEL + ' levels and hauled a fortune in space ore. The asteroid belt salutes you!'
+      : 'Your ship broke apart in the belt. The ore drifts on without you... but the belt is always hiring.';
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('finalOre').textContent = ore;
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'VICTORY!' : 'GAME OVER');
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    updateHUD('MINING...');
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Update ----
+  function update() {
+    fireCooldown = Math.max(0, fireCooldown - 1);
+    if (shake > 0) shake--;
+    // Steering: keyboard rotates, mouse aims, touch drag aims
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) ship.angle -= 0.09;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) ship.angle += 0.09;
+    var thrusting = keys['ArrowUp'] || keys['w'] || keys['W'] || touch.thrust;
+    if (touch.active) {
+      var ta = Math.atan2(touch.y - ship.y, touch.x - ship.x);
+      var diff = ta - ship.angle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      ship.angle += diff * 0.15;
+      thrusting = true;
+    }
+    if (mouse.aim) {
+      ship.angle = Math.atan2(mouse.y - ship.y, mouse.x - ship.x);
+    }
+    if (thrusting) {
+      ship.vx += Math.cos(ship.angle) * 0.14;
+      ship.vy += Math.sin(ship.angle) * 0.14;
+      if (Math.random() < 0.7) particles.push({ x: ship.x - Math.cos(ship.angle) * 16, y: ship.y - Math.sin(ship.angle) * 16, vx: rand(-0.6, 0.6) - Math.cos(ship.angle), vy: rand(-0.6, 0.6) - Math.sin(ship.angle), life: rand(12, 26), color: '#66ccff' });
+    }
+    if (keys[' '] || mouse.down) fireLaser();
+    ship.vx *= 0.99; ship.vy *= 0.99;
+    ship.x += ship.vx; ship.y += ship.vy;
+    if (ship.x < 12) { ship.x = 12; ship.vx = Math.abs(ship.vx); }
+    if (ship.x > W - 12) { ship.x = W - 12; ship.vx = -Math.abs(ship.vx); }
+    if (ship.y < 12) { ship.y = 12; ship.vy = Math.abs(ship.vy); }
+    if (ship.y > H - 12) { ship.y = H - 12; ship.vy = -Math.abs(ship.vy); }
+
+    for (var i = bullets.length - 1; i >= 0; i--) {
+      var b = bullets[i];
+      b.x += b.vx; b.y += b.vy; b.life--;
+      if (b.life <= 0 || b.x < 0 || b.x > W || b.y < 0 || b.y > H) bullets.splice(i, 1);
+    }
+    for (var j = asteroids.length - 1; j >= 0; j--) {
+      var a = asteroids[j];
+      a.x += a.vx; a.y += a.vy; a.rot += a.vr;
+      if (a.x < -60) a.x = W + 50; if (a.x > W + 60) a.x = -50;
+      if (a.y < -60) a.y = H + 50; if (a.y > H + 60) a.y = -50;
+      // Bullet hits
+      for (var k = bullets.length - 1; k >= 0; k--) {
+        if (dist(bullets[k], a) < a.r) {
+          bullets.splice(k, 1);
+          burst(a.x, a.y, '#ffb347', 18);
+          score += a.size === 'small' ? 100 : a.size === 'med' ? 60 : 40;
+          var oreCount = a.size === 'small' ? 3 : a.size === 'med' ? 2 : 1;
+          for (var o = 0; o < oreCount; o++) ores.push({ x: a.x + rand(-14, 14), y: a.y + rand(-14, 14), vx: rand(-1, 1), vy: rand(-1, 1), life: 600, pulse: rand(0, 6.28) });
+          asteroids.splice(j, 1);
+          if (a.size !== 'small') {
+            var next = a.size === 'big' ? 'med' : 'small';
+            for (var s = 0; s < 2; s++) { var na = spawnAsteroid(next); na.x = a.x + rand(-20, 20); na.y = a.y + rand(-20, 20); asteroids.push(na); }
+          }
+          break;
+        }
+      }
+      if (j >= asteroids.length) continue;
+      // Ship collision
+      if (state === 'playing' && dist(ship, asteroids[j]) < asteroids[j].r + 12) { loseLife(); }
+    }
+    // Keep the field populated
+    if (asteroids.length < 3 + level) asteroids.push(spawnAsteroid(Math.random() < 0.4 ? 'small' : 'med'));
+    for (var m = ores.length - 1; m >= 0; m--) {
+      var oreObj = ores[m];
+      oreObj.x += oreObj.vx; oreObj.y += oreObj.vy; oreObj.vx *= 0.97; oreObj.vy *= 0.97; oreObj.life--; oreObj.pulse += 0.12;
+      if (dist(ship, oreObj) < 24) {
+        ores.splice(m, 1);
+        ore++; score += 50; sfxOre();
+        burst(oreObj.x, oreObj.y, '#ffe066', 10);
+        updateHUD('ORE COLLECTED!');
+        if (ore >= oreGoal) { nextLevel(); return; }
+      } else if (oreObj.life <= 0) ores.splice(m, 1);
+    }
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    updateHUD();
+  }
+
+  // ---- Draw ----
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake) * 0.4, rand(-shake, shake) * 0.4);
+    ctx.fillStyle = '#070714'; ctx.fillRect(-20, -20, W + 40, H + 40);
+    ctx.fillStyle = '#cdd6ff';
+    stars.forEach(function (st) { ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(st.tw + performance.now() / 900)); ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, 6.283); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    ores.forEach(function (o) {
+      var s = 7 + Math.sin(o.pulse) * 2;
+      ctx.fillStyle = '#ffe066'; ctx.shadowColor = '#ffe066'; ctx.shadowBlur = 14;
+      ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.pulse);
+      ctx.fillRect(-s / 2, -s / 2, s, s);
+      ctx.restore(); ctx.shadowBlur = 0;
+    });
+    asteroids.forEach(function (a) {
+      ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.rot);
+      ctx.fillStyle = a.size === 'big' ? '#8a6a4a' : a.size === 'med' ? '#7a7a95' : '#5a6a8a';
+      ctx.strokeStyle = '#d8c9b0'; ctx.lineWidth = 2; ctx.beginPath();
+      for (var i = 0; i < 9; i++) {
+        var ang = (i / 9) * 6.283, rr = a.r * a.verts[i];
+        if (i === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr); else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    });
+    bullets.forEach(function (b) {
+      ctx.strokeStyle = '#ff5544'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(b.x - b.vx * 1.6, b.y - b.vy * 1.6); ctx.lineTo(b.x, b.y); ctx.stroke();
+    });
+    if (state === 'playing' || state === 'over' || state === 'win') {
+      var blink = performance.now() < invincibleUntil && Math.floor(performance.now() / 150) % 2 === 0;
+      if (!blink) {
+        ctx.save(); ctx.translate(ship.x, ship.y); ctx.rotate(ship.angle);
+        ctx.fillStyle = '#ffe066'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-12, -12); ctx.lineTo(-6, 0); ctx.lineTo(-12, 12); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#66ccff'; ctx.beginPath(); ctx.arc(-6, 0, 4, 0, 6.283); ctx.fill();
+        ctx.restore();
+      }
+    }
+    particles.forEach(function (pt) { ctx.fillStyle = pt.color; ctx.globalAlpha = Math.max(0, pt.life / 45); ctx.fillRect(pt.x - 2, pt.y - 2, 4, 4); });
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function loop(now) {
+    if (state !== 'playing') { draw(); return; }
+    var dt = now - lastTime; lastTime = now;
+    if (dt < 200) update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input: keyboard, mouse, touch ----
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      if (state === 'title') startGame();
+      else if (state === 'over' || state === 'win') startGame();
+    }
+    if (e.key === 'r' || e.key === 'R') { if (state === 'over' || state === 'win') startGame(); }
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * (W / rect.width);
+    mouse.y = (e.clientY - rect.top) * (H / rect.height);
+    mouse.aim = true;
+  });
+  canvas.addEventListener('mousedown', function (e) { mouse.down = true; ensureAudio(); if (state === 'playing') fireLaser(); });
+  document.addEventListener('mouseup', function () { mouse.down = false; });
+  canvas.addEventListener('click', function () { ensureAudio(); });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault(); ensureAudio();
+    var t = e.touches[0], rect = canvas.getBoundingClientRect();
+    touch.active = true;
+    touch.x = (t.clientX - rect.left) * (W / rect.width);
+    touch.y = (t.clientY - rect.top) * (H / rect.height);
+    if (state === 'playing') fireLaser();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0], rect = canvas.getBoundingClientRect();
+    touch.active = true;
+    touch.x = (t.clientX - rect.left) * (W / rect.width);
+    touch.y = (t.clientY - rect.top) * (H / rect.height);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); touch.active = false; }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    state = 'title';
+  });
+  document.getElementById('fireBtn').addEventListener('click', function () { ensureAudio(); fireLaser(); });
+  document.getElementById('fireBtn').addEventListener('touchstart', function (e) { e.preventDefault(); ensureAudio(); fireLaser(); }, { passive: false });
+  document.getElementById('thrustBtn').addEventListener('mousedown', function () { touch.thrust = true; });
+  document.getElementById('thrustBtn').addEventListener('mouseup', function () { touch.thrust = false; });
+  document.getElementById('thrustBtn').addEventListener('touchstart', function (e) { e.preventDefault(); touch.thrust = true; }, { passive: false });
+  document.getElementById('thrustBtn').addEventListener('touchend', function (e) { e.preventDefault(); touch.thrust = false; }, { passive: false });
+
+  makeStars();
+  score = 0; ore = 0; oreGoal = 12; lives = 3; level = 1;
+  ship = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2 };
+  bullets = []; asteroids = []; ores = []; particles = [];
+  updateHUD('READY');
+  draw();
+})();
+</script>
+</body>
+</html>

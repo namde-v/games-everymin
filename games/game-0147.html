@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pattern Painter — Nonogram Puzzle</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; background: #14101f; color: #f2efff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display: flex; align-items: center; justify-content: center; padding: 14px; }
+  .wrap { width: min(680px, 100%); }
+  h1 { margin: 4px 0 2px; font-size: clamp(28px, 6vw, 44px); letter-spacing: .5px; text-align: center; }
+  .tag { text-align: center; color: #c9b8ff; margin-bottom: 12px; }
+  .hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px; }
+  .pill { background: #241d3d; border: 1px solid #4b3f7d; border-radius: 999px; padding: 7px 12px; font-weight: 700; font-size: 14px; }
+  .pill span { color: #ffd166; }
+  .board-card { background: #1e1834; border: 2px solid #4b3f7d; border-radius: 16px; padding: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 12px; }
+  button { cursor: pointer; border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 800; font-size: 15px; background: #ffd166; color: #241a00; }
+  button.secondary { background: #2f2752; color: #fff; border: 1px solid #6b5aa8; }
+  button.active { background: #7c5cff; color: #fff; outline: 3px solid #ffd166; }
+  button:active { transform: translateY(1px); }
+  .grid-outer { display: flex; justify-content: center; overflow-x: auto; }
+  table { border-collapse: collapse; background: #0f0b1e; }
+  th, td { text-align: center; vertical-align: middle; }
+  th { color: #c9b8ff; font-size: 12px; line-height: 1.15; padding: 3px; min-width: 34px; }
+  td.cell { width: 34px; height: 34px; border: 1px solid #3d3566; background: #221c3e; cursor: pointer; font-size: 18px; font-weight: 900; user-select: none; }
+  td.cell:nth-child(6), td.cell:nth-child(11) { border-left-width: 3px; border-left-color: #7c5cff; }
+  tr:nth-child(6) td.cell, tr:nth-child(11) td.cell { border-top-width: 3px; border-top-color: #7c5cff; }
+  td.cell.cursor { outline: 3px solid #ffd166; outline-offset: -3px; }
+  td.cell.filled { background: #7c5cff; color: #fff; }
+  td.cell.wrong { background: #e63946; }
+  td.cell.marked { color: #ff8fa3; }
+  td.cell.hint { background: #3a2f66; }
+  .corner { background: #1e1834; }
+  .status { text-align: center; min-height: 28px; font-weight: 700; margin-top: 10px; }
+  .status.win { color: #7bf1a8; }
+  .status.lose { color: #ff8fa3; }
+  .legend { text-align: center; color: #b8aad9; font-size: 13px; line-height: 1.5; margin-top: 8px; }
+  .overlay { position: fixed; inset: 0; background: rgba(10,7,20,.92); display: flex; align-items: center; justify-content: center; padding: 18px; z-index: 10; }
+  .overlay.hidden { display: none; }
+  .card { max-width: 560px; background: #1e1834; border: 2px solid #7c5cff; border-radius: 18px; padding: 24px; text-align: center; }
+  .card h2 { margin-top: 0; font-size: 30px; }
+  .card p, .card li { text-align: left; line-height: 1.6; color: #ddd3ff; }
+  .card ul { padding-left: 20px; }
+  .big { font-size: 18px; padding: 13px 22px; }
+  .palette { display: flex; gap: 6px; justify-content: center; margin: 10px 0 0; flex-wrap: wrap; }
+  .swatch { width: 26px; height: 26px; border-radius: 7px; border: 2px solid #fff3; }
+  canvas#fx { width: 100%; height: 46px; display: block; background: #0f0b1e; border-radius: 10px; margin-top: 10px; }
+  @media (max-width: 520px) { td.cell { width: 30px; height: 30px; } th { min-width: 30px; font-size: 11px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎨 Pattern Painter</h1>
+  <div class="tag">Game #0147 · Puzzle / Nonogram Logic · Reveal the hidden picture!</div>
+
+  <div class="hud" aria-label="Game status">
+    <div class="pill">Score: <span id="score">0</span></div>
+    <div class="pill">Lives: <span id="lives">❤️❤️❤️</span></div>
+    <div class="pill">Progress: <span id="progress">0%</span></div>
+    <div class="pill">Time: <span id="time">0:00</span></div>
+    <div class="pill">Status: <span id="statusText">Ready</span></div>
+  </div>
+
+  <div class="board-card">
+    <div class="controls">
+      <button id="modePaint" class="active" type="button">🖌️ Paint</button>
+      <button id="modeMark" class="secondary" type="button">✖ Mark Empty</button>
+      <button id="modeErase" class="secondary" type="button">🧽 Erase</button>
+      <button id="hintBtn" class="secondary" type="button">💡 Hint (−25)</button>
+      <button id="newBtn" class="secondary" type="button">↻ New Picture</button>
+    </div>
+    <div class="grid-outer"><div id="board"></div></div>
+    <canvas id="fx" width="620" height="46"></canvas>
+    <div id="status" class="status">Press Start, then paint the picture using the number clues.</div>
+    <div class="legend">
+      Row and column numbers tell you the lengths of painted runs, in order, separated by at least one empty cell.<br>
+      Keyboard: Arrows move · Space paints · X marks · E erases · M changes mode · H hint · R restarts.<br>
+      Mouse: click a cell. Touch: tap a cell. Right-click also marks a cell as empty.
+    </div>
+    <div class="palette" aria-hidden="true">
+      <div class="swatch" style="background:#7c5cff"></div><div class="swatch" style="background:#ffd166"></div><div class="swatch" style="background:#7bf1a8"></div><div class="swatch" style="background:#ff8fa3"></div><div class="swatch" style="background:#221c3e"></div>
+    </div>
+  </div>
+</div>
+
+<div id="titleScreen" class="overlay">
+  <div class="card">
+    <h2>🎨 Pattern Painter</h2>
+    <p><strong>How to Play</strong></p>
+    <ul>
+      <li>A hidden picture is waiting inside a 10 × 10 grid. The numbers beside each row and above each column are your clues.</li>
+      <li>A clue like <strong>3 1</strong> means: a run of 3 painted cells, then at least one empty cell, then 1 painted cell — in that order.</li>
+      <li>Paint cells you are sure belong to the picture. Mark cells you are sure are empty with an ✖.</li>
+      <li>Painting a cell that is <em>not</em> part of the picture costs one life. You have 3 lives.</li>
+      <li>Reveal every painted cell in the picture to win. Use hints sparingly — each one costs 25 points.</li>
+      <li>Three pictures rotate: a Rocket, a Flower, and a Cat. Finish one, then try a new picture for a fresh puzzle.</li>
+    </ul>
+    <p>Controls: mouse click, touch tap, or keyboard arrows + Space / X / E. Sound starts only after you press Start.</p>
+    <button id="startBtn" class="big" type="button">▶ Start Painting</button>
+  </div>
+</div>
+
+<div id="endScreen" class="overlay hidden">
+  <div class="card">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText">Beautiful work — the picture is complete.</p>
+    <p id="endScore">Score: 0</p>
+    <button id="restartBtn" class="big" type="button">↻ Play Again — Instant Restart</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  // Three hand-designed 10x10 pictures. 1 = painted, 0 = empty.
+  var PICTURES = [
+    { name: 'Rocket', art: [
+      [0,0,0,0,1,1,0,0,0,0],
+      [0,0,0,1,1,1,1,0,0,0],
+      [0,0,1,1,0,0,1,1,0,0],
+      [0,0,1,1,0,0,1,1,0,0],
+      [0,1,1,1,1,1,1,1,1,0],
+      [0,1,1,1,1,1,1,1,1,0],
+      [0,0,1,1,1,1,1,1,0,0],
+      [0,1,0,0,1,1,0,0,1,0],
+      [1,0,0,0,0,0,0,0,0,1],
+      [0,0,0,0,0,0,0,0,0,0]
+    ]},
+    { name: 'Flower', art: [
+      [0,0,1,1,0,0,1,1,0,0],
+      [0,1,1,1,1,1,1,1,1,0],
+      [1,1,1,1,1,1,1,1,1,1],
+      [0,1,1,1,1,1,1,1,1,0],
+      [0,0,1,1,0,0,1,1,0,0],
+      [0,0,0,0,1,1,0,0,0,0],
+      [0,0,0,0,1,1,0,0,0,0],
+      [0,0,1,0,1,1,0,1,0,0],
+      [0,0,0,1,1,1,1,0,0,0],
+      [0,0,0,0,0,0,0,0,0,0]
+    ]},
+    { name: 'Cat', art: [
+      [1,0,0,0,0,0,0,0,0,1],
+      [1,1,0,0,0,0,0,0,1,1],
+      [1,1,1,1,1,1,1,1,1,1],
+      [0,1,1,0,1,1,0,1,1,0],
+      [0,1,1,1,1,1,1,1,1,0],
+      [0,0,1,1,1,1,1,1,0,0],
+      [0,0,0,1,1,1,1,0,0,0],
+      [0,0,0,0,1,1,0,0,0,0],
+      [0,1,0,0,0,0,0,0,1,0],
+      [0,0,0,0,0,0,0,0,0,0]
+    ]}
+  ];
+
+  var SIZE = 10;
+  var pictureIndex = 0;
+  var solution = [];
+  var state = []; // 0 empty, 1 painted, 2 marked X
+  var score = 0, lives = 3, mistakes = 0;
+  var mode = 'paint'; // paint | mark | erase
+  var playing = false, over = false;
+  var cursorR = 0, cursorC = 0;
+  var startTime = 0, elapsed = 0, lastFrame = 0;
+  var audioCtx = null;
+
+  var boardEl = document.getElementById('board');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var progressEl = document.getElementById('progress');
+  var timeEl = document.getElementById('time');
+  var statusTextEl = document.getElementById('statusText');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var fx = document.getElementById('fx');
+  var fxCtx = fx.getContext('2d');
+
+  function cluesForLine(line) {
+    var out = [], run = 0;
+    for (var i = 0; i < line.length; i++) {
+      if (line[i] === 1) run++;
+      else if (run > 0) { out.push(run); run = 0; }
+    }
+    if (run > 0) out.push(run);
+    return out.length ? out : [0];
+  }
+
+  function totalFilled() {
+    var n = 0;
+    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (solution[r][c] === 1) n++;
+    return n;
+  }
+
+  function correctPainted() {
+    var n = 0;
+    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (state[r][c] === 1 && solution[r][c] === 1) n++;
+    return n;
+  }
+
+  function buildBoard() {
+    solution = PICTURES[pictureIndex].art;
+    state = [];
+    for (var r = 0; r < SIZE; r++) { state.push([]); for (var c = 0; c < SIZE; c++) state[r].push(0); }
+    var rowClues = [], colClues = [];
+    for (var i = 0; i < SIZE; i++) {
+      rowClues.push(cluesForLine(solution[i]));
+      var col = []; for (var j = 0; j < SIZE; j++) col.push(solution[j][i]);
+      colClues.push(cluesForLine(col));
+    }
+    var html = '<table aria-label="Nonogram grid"><tr><th class="corner">Picture:<br>' + PICTURES[pictureIndex].name + '</th>';
+    for (var c = 0; c < SIZE; c++) html += '<th>' + colClues[c].join('<br>') + '</th>';
+    html += '</tr>';
+    for (var r = 0; r < SIZE; r++) {
+      html += '<tr><th>' + rowClues[r].join(' ') + '</th>';
+      for (var cc = 0; cc < SIZE; cc++) {
+        html += '<td class="cell" data-r="' + r + '" data-c="' + cc + '" role="button" aria-label="Row ' + (r + 1) + ' column ' + (cc + 1) + '"></td>';
+      }
+      html += '</tr>';
+    }
+    html += '</table>';
+    boardEl.innerHTML = html;
+    var cells = boardEl.querySelectorAll('.cell');
+    cells.forEach(function (cell) {
+      cell.addEventListener('click', function () {
+        cursorR = parseInt(cell.getAttribute('data-r'), 10);
+        cursorC = parseInt(cell.getAttribute('data-c'), 10);
+        applyToCell(cursorR, cursorC);
+        render();
+      });
+      cell.addEventListener('touchstart', function (e) {
+        e.preventDefault();
+        cursorR = parseInt(cell.getAttribute('data-r'), 10);
+        cursorC = parseInt(cell.getAttribute('data-c'), 10);
+        applyToCell(cursorR, cursorC);
+        render();
+      }, { passive: false });
+      cell.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        cursorR = parseInt(cell.getAttribute('data-r'), 10);
+        cursorC = parseInt(cell.getAttribute('data-c'), 10);
+        state[cursorR][cursorC] = state[cursorR][cursorC] === 2 ? 0 : 2;
+        beep(520, 0.06);
+        render();
+      });
+    });
+    render();
+  }
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+    statusTextEl.textContent = playing ? (over ? msg : 'Painting: ' + PICTURES[pictureIndex].name) : 'Ready';
+  }
+
+  function render() {
+    var cells = boardEl.querySelectorAll('.cell');
+    cells.forEach(function (cell) {
+      var r = parseInt(cell.getAttribute('data-r'), 10);
+      var c = parseInt(cell.getAttribute('data-c'), 10);
+      var v = state[r][c];
+      cell.className = 'cell' + (v === 1 ? ' filled' : '') + (v === 2 ? ' marked' : '') + (r === cursorR && c === cursorC ? ' cursor' : '');
+      cell.textContent = v === 1 ? '■' : (v === 2 ? '✖' : '');
+    });
+    scoreEl.textContent = score;
+    livesEl.textContent = '❤️'.repeat(Math.max(0, lives)) + (lives === 0 ? ' — none left' : '');
+    var total = totalFilled();
+    var pct = total ? Math.round(correctPainted() / total * 100) : 0;
+    progressEl.textContent = pct + '%';
+    var mm = Math.floor(elapsed / 60), ss = Math.floor(elapsed % 60);
+    timeEl.textContent = mm + ':' + (ss < 10 ? '0' + ss : ss);
+    document.getElementById('modePaint').className = mode === 'paint' ? 'active' : 'secondary';
+    document.getElementById('modeMark').className = mode === 'mark' ? 'active' : 'secondary';
+    document.getElementById('modeErase').className = mode === 'erase' ? 'active' : 'secondary';
+  }
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is optional */ }
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function applyToCell(r, c) {
+    if (!playing || over) return;
+    if (mode === 'paint') {
+      if (state[r][c] === 1) return;
+      if (solution[r][c] === 1) {
+        state[r][c] = 1; score += 10; beep(760, 0.09, 'triangle');
+        setStatus('Nice! That cell belongs to the picture.');
+      } else {
+        state[r][c] = 1;
+        // Show it briefly as wrong, then clear it and lose a life.
+        var cell = boardEl.querySelector('[data-r="' + r + '"][data-c="' + c + '"]');
+        if (cell) cell.classList.add('wrong');
+        lives--; mistakes++; score = Math.max(0, score - 5); beep(160, 0.22, 'sawtooth');
+        setStatus('Oops — that cell is empty. Lives left: ' + lives + '.', 'lose');
+        setTimeout(function () { state[r][c] = 0; render(); checkEnd(); }, 450);
+        render(); checkEnd(); return;
+      }
+    } else if (mode === 'mark') {
+      state[r][c] = state[r][c] === 2 ? 0 : 2; beep(520, 0.06);
+      if (solution[r][c] === 0 && state[r][c] === 2) score += 2;
+    } else {
+      state[r][c] = 0; beep(420, 0.05);
+    }
+    render(); checkEnd();
+  }
+
+  function checkEnd() {
+    if (over) return;
+    if (lives <= 0) {
+      over = true; playing = false;
+      var bonus = 0;
+      setStatus('Game Over — you ran out of lives. The picture was: ' + PICTURES[pictureIndex].name + '.', 'lose');
+      showEnd(false, score);
+      beep(140, 0.4, 'sawtooth');
+      return;
+    }
+    var total = totalFilled();
+    if (total > 0 && correctPainted() === total) {
+      // A win also requires no wrongly painted cell still on the board.
+      for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) if (state[r][c] === 1 && solution[r][c] !== 1) return;
+      over = true; playing = false;
+      score += 100 + lives * 25;
+      setStatus('You win! The picture is: ' + PICTURES[pictureIndex].name + '!', 'win');
+      beep(880, 0.15, 'triangle'); setTimeout(function () { beep(1100, 0.2, 'triangle'); }, 140);
+      showEnd(true, score);
+    }
+  }
+
+  function showEnd(won, finalScore) {
+    document.getElementById('endTitle').textContent = won ? '🎉 You Win!' : '💔 Game Over';
+    document.getElementById('endText').textContent = won
+      ? 'Beautiful work — you revealed the ' + PICTURES[pictureIndex].name + '!'
+      : 'Out of lives. The picture was the ' + PICTURES[pictureIndex].name + '. Try again — a fresh grid awaits.';
+    document.getElementById('endScore').textContent = 'Score: ' + finalScore + ' · Mistakes: ' + mistakes;
+    endScreen.classList.remove('hidden');
+  }
+
+  function startGame(resetPicture) {
+    ensureAudio();
+    if (resetPicture) { score = 0; }
+    lives = 3; mistakes = 0; elapsed = 0; startTime = performance.now();
+    playing = true; over = false;
+    buildBoard();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    setStatus('Painting: ' + PICTURES[pictureIndex].name + ' — use the clues!');
+    beep(660, 0.12, 'triangle');
+  }
+
+  function giveHint() {
+    if (!playing || over) return;
+    ensureAudio();
+    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++) {
+      if (solution[r][c] === 1 && state[r][c] !== 1) {
+        state[r][c] = 1; score = Math.max(0, score - 25);
+        cursorR = r; cursorC = c; beep(980, 0.12, 'triangle');
+        setStatus('Hint: one true cell revealed (−25 points).');
+        render(); checkEnd(); return;
+      }
+    }
+    setStatus('No hint needed — the picture is already complete!');
+  }
+
+  function cycleMode() {
+    mode = mode === 'paint' ? 'mark' : (mode === 'mark' ? 'erase' : 'paint');
+    render();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function () { startGame(true); });
+  document.getElementById('restartBtn').addEventListener('click', function () { startGame(true); });
+  document.getElementById('modePaint').addEventListener('click', function () { mode = 'paint'; render(); });
+  document.getElementById('modeMark').addEventListener('click', function () { mode = 'mark'; render(); });
+  document.getElementById('modeErase').addEventListener('click', function () { mode = 'erase'; render(); });
+  document.getElementById('hintBtn').addEventListener('click', giveHint);
+  document.getElementById('newBtn').addEventListener('click', function () {
+    pictureIndex = (pictureIndex + 1) % PICTURES.length;
+    startGame(false);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (!playing || over) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startGame(true); }
+      return;
+    }
+    if (e.key === 'ArrowUp') { cursorR = Math.max(0, cursorR - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { cursorR = Math.min(SIZE - 1, cursorR + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { cursorC = Math.max(0, cursorC - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { cursorC = Math.min(SIZE - 1, cursorC + 1); e.preventDefault(); }
+    else if (e.key === ' ') { e.preventDefault(); var old = mode; mode = 'paint'; applyToCell(cursorR, cursorC); mode = old; }
+    else if (e.key === 'x' || e.key === 'X') { var old2 = mode; mode = 'mark'; applyToCell(cursorR, cursorC); mode = old2; }
+    else if (e.key === 'e' || e.key === 'E') { state[cursorR][cursorC] = 0; }
+    else if (e.key === 'm' || e.key === 'M') { cycleMode(); }
+    else if (e.key === 'h' || e.key === 'H') { giveHint(); }
+    else if (e.key === 'r' || e.key === 'R') { startGame(true); return; }
+    render();
+  });
+  document.addEventListener('touchstart', function () { /* touch support is active; per-cell handlers do the work */ }, { passive: true });
+
+  // Animated footer canvas: drifting paint dots, driven by requestAnimationFrame.
+  var dots = [];
+  for (var i = 0; i < 26; i++) dots.push({ x: Math.random() * 620, y: Math.random() * 46, s: 2 + Math.random() * 4, v: 0.2 + Math.random() * 0.6, col: ['#7c5cff', '#ffd166', '#7bf1a8', '#ff8fa3'][i % 4] });
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    if (playing && !over) elapsed = (performance.now() - startTime) / 1000;
+    // Throttle HUD time text to about twice a second via frame parity.
+    if (Math.floor(ts / 500) !== Math.floor(lastFrame / 500)) render();
+    lastFrame = ts;
+    fxCtx.clearRect(0, 0, fx.width, fx.height);
+    for (var i = 0; i < dots.length; i++) {
+      var d = dots[i];
+      d.x += d.v; if (d.x > 625) { d.x = -5; d.y = Math.random() * 46; }
+      fxCtx.fillStyle = d.col; fxCtx.globalAlpha = 0.85;
+      fxCtx.beginPath(); fxCtx.arc(d.x, d.y, d.s, 0, Math.PI * 2); fxCtx.fill();
+    }
+    fxCtx.globalAlpha = 1;
+  }
+  buildBoard();
+  playing = false;
+  setStatus('Press Start to begin painting.');
+  render();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
