@@ -55,6 +55,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0048 | Number Nexus | Puzzle / Number Merge Logic | Arrow Keys / WASD slide, swipe, mouse drag, on-screen D-pad | [Play](./../games/game-0048.html) |
 | 0049 | Tide Trader | Simulation / Sea Trading | Click/tap ports, Arrow Keys / WASD steer, 1-5 ports, E dock | [Play](./../games/game-0049.html) |
 | 0050 | Metronome Mayhem | Rhythm / Tempo Shift | Space tap, mouse click, touch tap | [Play](./../games/game-0050.html) |
+| 0051 | Ember Escape | Arcade / Lava Platform Hopper | Arrow Keys / WASD, Space hop, mouse click, touch tap | [Play](./../games/game-0051.html) |
+| 0052 | Rune Rings | Puzzle / Ring Rotation Logic | Click/tap ring to rotate, Arrow Keys, Enter rotate | [Play](./../games/game-0052.html) |
+| 0053 | Antlion Empire | Strategy / Ant Colony Builder | Mouse click / touch tap place, 1-5 select, Space next wave | [Play](./../games/game-0053.html) |
+| 0054 | Neon Note Runner | Rhythm / Lane Runner | D/F/J/K, mouse click, touch/tap lanes | [Play](./../games/game-0054.html) |
+| 0055 | Paper Plane Pilot | Precision / Wind Glider | Arrow Keys / WASD steer, mouse/touch drag, Space thrust | [Play](./../games/game-0055.html) |
+| 0056 | Deep Dive Dash | Arcade / Cave Diver | Arrow Keys / WASD swim, mouse/touch drag, Space dash | [Play](./../games/game-0056.html) |
+| 0057 | Shadow Shapes | Puzzle / Silhouette Matching | Click/tap place, R rotate, F flip, 1-5 select | [Play](./../games/game-0057.html) |
+| 0058 | Skyline Tycoon | Strategy / City Builder | Mouse clicks/taps, 1-5 build, N next day | [Play](./../games/game-0058.html) |
+| 0059 | Synth Surfer | Rhythm / Wave Riding | Space / J / K strike peaks, mouse click, touch tap | [Play](./../games/game-0059.html) |
+| 0060 | Boomerang Bay | Precision / Boomerang Throw | Mouse/touch drag aim and release, Arrow Keys aim, Space throw | [Play](./../games/game-0060.html) |
 
 ## Batch notes
 
@@ -63,5 +73,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 003: 10 games, produced in one cycle.
 - Batch 004: 10 games, produced in one cycle.
 - Batch 005: 10 games, produced in one cycle.
+- Batch 006: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 - Next volume starts at game 0101 in `catalogs/readme-002.md`, after this volume reaches 100 entries.

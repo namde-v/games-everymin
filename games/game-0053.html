@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Antlion Empire — Ant Colony Builder</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #1a120b; color: #f5e6c8; font-family: Arial, Helvetica, sans-serif; text-align: center; }
+  h1 { margin: 10px 0 2px; font-size: 30px; letter-spacing: 1px; color: #ffcf5c; }
+  p.sub { margin: 0 0 8px; color: #d8b98a; font-size: 14px; }
+  #hud { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 6px auto; max-width: 940px; }
+  .pill { background: #3a2415; border: 2px solid #8a5a2b; border-radius: 10px; padding: 6px 12px; font-weight: bold; font-size: 15px; }
+  .pill b { color: #ffcf5c; }
+  #wrap { position: relative; width: 940px; max-width: 98vw; margin: 0 auto; }
+  canvas { display: block; width: 100%; height: auto; background: #2b1d10; border: 3px solid #8a5a2b; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  #tools { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 10px auto; max-width: 940px; }
+  button { font-size: 16px; font-weight: bold; padding: 10px 16px; border-radius: 10px; border: 2px solid #ffcf5c; background: #6b3f16; color: #fff; cursor: pointer; }
+  button:hover, button.active { background: #ffb52e; color: #221100; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .overlay { position: absolute; inset: 0; background: rgba(10,6,2,.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 42px; margin: 0 0 8px; color: #ffcf5c; }
+  .overlay p { max-width: 620px; line-height: 1.55; font-size: 16px; }
+  .overlay .big { font-size: 20px; font-weight: bold; }
+  #howto { text-align: left; background: #2b1d10; border: 1px solid #8a5a2b; border-radius: 10px; padding: 12px 18px; }
+  #msg { min-height: 22px; font-weight: bold; color: #ffe08a; margin: 4px 0; }
+  .hint { font-size: 13px; color: #d8b98a; }
+</style>
+</head>
+<body>
+<h1>🐜 ANTLION EMPIRE</h1>
+<p class="sub">Strategy / Ant Colony Builder — defend the Queen through 8 waves</p>
+<div id="hud">
+  <div class="pill">🍯 Food: <b id="food">50</b></div>
+  <div class="pill">⭐ Score: <b id="score">0</b></div>
+  <div class="pill">👑 Queen: <b id="queen">100</b> HP</div>
+  <div class="pill">🌊 Wave: <b id="wave">0 / 8</b></div>
+  <div class="pill">🐜 Workers: <b id="workers">0</b> &nbsp;⚔️ Soldiers: <b id="soldiers">0</b></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="940" height="480"></canvas>
+  <div id="title" class="overlay">
+    <h2>🐜 ANTLION EMPIRE</h2>
+    <p class="big">Build tunnels. Feed the colony. Defend the Queen.</p>
+    <div id="howto">
+      <b>How to Play</b>
+      <ul>
+        <li><b>Build:</b> pick a tool below, then click / tap a glowing cell next to your colony. Tunnels are free, Pantries cost 20 food and earn food over time, Barracks cost 35 food and train soldiers.</li>
+        <li><b>Gather:</b> worker ants automatically walk your tunnels to green food piles and carry food back to the Queen.</li>
+        <li><b>Defend:</b> press <b>Start Wave</b> when ready. Soldiers hunt intruders; any intruder that reaches the Queen deals 10 damage.</li>
+        <li><b>Win:</b> survive all 8 waves with the Queen alive. <b>Lose:</b> the Queen falls.</li>
+        <li><b>Keys:</b> 1 = Tunnel, 2 = Pantry, 3 = Barracks, Space / W = Start Wave, P = Pause, R = Restart.</li>
+      </ul>
+    </div>
+    <p><button id="startBtn" style="font-size:22px;padding:14px 34px;">▶ START GAME</button></p>
+    <p class="hint">Sound starts only after you press Start. Mouse, touch and keyboard all work.</p>
+  </div>
+  <div id="end" class="overlay hidden">
+    <h2 id="endTitle">Victory!</h2>
+    <p id="endText"></p>
+    <p><button id="restartBtn" style="font-size:22px;padding:14px 34px;">↻ RESTART</button></p>
+  </div>
+</div>
+<div id="tools">
+  <button id="toolTunnel" class="active">🕳️ Tunnel (Free) [1]</button>
+  <button id="toolPantry">🍯 Pantry (20) [2]</button>
+  <button id="toolBarracks">🏰 Barracks (35) [3]</button>
+  <button id="waveBtn">🌊 Start Wave [Space]</button>
+  <button id="pauseBtn">⏸ Pause [P]</button>
+</div>
+<div id="msg">Choose a tool, then build beside your colony. Press Start Wave when ready.</div>
+<p class="hint">Tip: reach the green food piles with tunnels first — food is how you afford soldiers before the later, harder waves.</p>
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 16, ROWS = 11, CELL = 40, OX = 10, OY = 10;
+  var PANELX = 660, PANELW = 270;
+  var foodEl = document.getElementById('food'), scoreEl = document.getElementById('score');
+  var queenEl = document.getElementById('queen'), waveEl = document.getElementById('wave');
+  var workersEl = document.getElementById('workers'), soldiersEl = document.getElementById('soldiers');
+  var msgEl = document.getElementById('msg');
+  var titleEl = document.getElementById('title'), endEl = document.getElementById('end');
+  var endTitle = document.getElementById('endTitle'), endText = document.getElementById('endText');
+  var waveBtn = document.getElementById('waveBtn'), pauseBtn = document.getElementById('pauseBtn');
+
+  var state, audioCtx = null, started = false, paused = false, hover = null, tool = 'tunnel';
+  var costs = { tunnel: 0, pantry: 20, barracks: 35 };
+
+  function beep(freq, dur, type){
+    if(!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function initAudio(){
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if(AC){ audioCtx = new AC(); if(audioCtx.resume) audioCtx.resume(); }
+    } catch(e) {}
+  }
+  function key(r,c){ return r + ',' + c; }
+  function inGrid(r,c){ return r >= 0 && r < ROWS && c >= 0 && c < COLS; }
+  function cellCenter(r,c){ return { x: OX + c*CELL + CELL/2, y: OY + r*CELL + CELL/2 }; }
+
+  function newState(){
+    var grid = [];
+    for(var r=0;r<ROWS;r++){ var row=[]; for(var c=0;c<COLS;c++) row.push('empty'); grid.push(row); }
+    // Queen chamber and starter tunnels.
+    grid[5][8] = 'queen';
+    var starter = [[5,7],[5,9],[4,8],[6,8],[5,6],[5,10],[4,7],[6,9]];
+    starter.forEach(function(p){ grid[p[0]][p[1]] = 'tunnel'; });
+    var s = { grid: grid, food: 50, score: 0, queenHp: 100, wave: 0, maxWaves: 8,
+      waveActive: false, enemies: [], workers: [], soldiers: [], foods: [],
+      spawnTimer: 0, pantryTimer: 0, barracksTimer: 0, over: false, won: false, time: 0 };
+    // Five workers start at the queen.
+    for(var i=0;i<5;i++) s.workers.push(makeWorker(s));
+    // Food piles, away from the queen.
+    var spots = [[0,1],[0,14],[10,1],[10,14],[2,0],[8,15],[0,7],[10,8]];
+    spots.forEach(function(p){ s.foods.push({ r: p[0], c: p[1], amount: 3 }); s.grid[p[0]][p[1]] = 'food'; });
+    return s;
+  }
+  function makeWorker(s){
+    var q = cellCenter(5,8);
+    return { x: q.x, y: q.y, path: [], target: null, carrying: false, speed: 55 };
+  }
+  function isColony(t){ return t === 'queen' || t === 'tunnel' || t === 'pantry' || t === 'barracks'; }
+  function traversable(t, forEnemy){
+    if(forEnemy) return true; // Intruders dig through anything to reach the queen.
+    return isColony(t) || t === 'food';
+  }
+  function bfs(s, sr, sc, tr, tc, forEnemy){
+    if(!inGrid(sr,sc) || !inGrid(tr,tc)) return null;
+    var prev = {}, seen = {}, q = [[sr,sc]]; seen[key(sr,sc)] = true;
+    while(q.length){
+      var cur = q.shift();
+      if(cur[0] === tr && cur[1] === tc){
+        var path = [], k = key(tr,tc);
+        while(k !== key(sr,sc)){ var parts = k.split(','); path.unshift([parseInt(parts[0],10), parseInt(parts[1],10)]); k = prev[k]; }
+        return path;
+      }
+      [[-1,0],[1,0],[0,-1],[0,1]].forEach(function(d){
+        var nr = cur[0]+d[0], nc = cur[1]+d[1];
+        if(inGrid(nr,nc) && !seen[key(nr,nc)] && traversable(s.grid[nr][nc], forEnemy)){
+          seen[key(nr,nc)] = true; prev[key(nr,nc)] = key(cur[0],cur[1]); q.push([nr,nc]);
+        }
+      });
+    }
+    return null;
+  }
+  function cellOf(x,y){
+    var c = Math.floor((x - OX) / CELL), r = Math.floor((y - OY) / CELL);
+    return inGrid(r,c) ? { r: r, c: c } : null;
+  }
+  function adjacentToColony(s, r, c){
+    return [[-1,0],[1,0],[0,-1],[0,1]].some(function(d){
+      var nr = r+d[0], nc = c+d[1];
+      return inGrid(nr,nc) && isColony(s.grid[nr][nc]);
+    });
+  }
+  function setTool(t){
+    tool = t;
+    ['tunnel','pantry','barracks'].forEach(function(k){
+      document.getElementById('tool' + k.charAt(0).toUpperCase() + k.slice(1)).classList.toggle('active', k === t);
+    });
+  }
+  function tryBuild(r,c){
+    if(!started || state.over || paused) return;
+    if(!inGrid(r,c) || state.grid[r][c] !== 'empty') { msgEl.textContent = 'That cell is already used.'; return; }
+    if(!adjacentToColony(state, r, c)) { msgEl.textContent = 'Build next to your colony (glowing cells).'; return; }
+    var cost = costs[tool];
+    if(state.food < cost) { msgEl.textContent = 'Not enough food for that building.'; beep(140, 0.15, 'sawtooth'); return; }
+    state.food -= cost; state.grid[r][c] = tool; state.score += 5;
+    msgEl.textContent = tool.charAt(0).toUpperCase() + tool.slice(1) + ' built! ' + (tool === 'pantry' ? 'It will earn food over time.' : tool === 'barracks' ? 'It will train soldiers.' : 'Workers can now travel through it.');
+    beep(520, 0.12, 'square'); beep(780, 0.12, 'square');
+  }
+  function startWave(){
+    if(!started || state.over || paused || state.waveActive) return;
+    if(state.wave >= state.maxWaves) return;
+    state.wave++; state.waveActive = true;
+    var n = 3 + state.wave * 2, hp = 2 + state.wave;
+    for(var i=0;i<n;i++){
+      var edge = [[0, Math.floor(Math.random()*COLS)], [ROWS-1, Math.floor(Math.random()*COLS)],
+                  [Math.floor(Math.random()*ROWS), 0], [Math.floor(Math.random()*ROWS), COLS-1]][i % 4];
+      var p = cellCenter(edge[0], edge[1]);
+      state.enemies.push({ x: p.x, y: p.y, r: edge[0], c: edge[1], path: bfs(state, edge[0], edge[1], 5, 8, true) || [],
+        hp: hp, maxHp: hp, speed: 34 + state.wave * 4, delay: i * 0.7 });
+    }
+    msgEl.textContent = 'Wave ' + state.wave + ' incoming! Defend the Queen!';
+    beep(220, 0.25, 'sawtooth');
+  }
+  function endGame(won){
+    state.over = true; state.won = won;
+    endTitle.textContent = won ? '🏆 VICTORY!' : '💀 GAME OVER';
+    endText.textContent = won
+      ? 'The Queen survived all 8 waves! Final score: ' + state.score + ' with ' + state.food + ' food left. The empire endures.'
+      : 'The Queen has fallen on wave ' + state.wave + '. Final score: ' + state.score + '. Rebuild and try again.';
+    endEl.classList.remove('hidden');
+    beep(won ? 880 : 160, 0.5, won ? 'sine' : 'sawtooth');
+  }
+  function restart(){
+    state = newState(); paused = false; pauseBtn.textContent = '⏸ Pause [P]';
+    endEl.classList.add('hidden'); setTool('tunnel');
+    msgEl.textContent = 'New colony! Build tunnels toward the green food piles.';
+  }
+  function spawnFood(s){
+    var tries = 0;
+    while(tries++ < 40){
+      var r = Math.floor(Math.random()*ROWS), c = Math.floor(Math.random()*COLS);
+      if(s.grid[r][c] === 'empty' && !(r === 5 && c === 8)){
+        s.grid[r][c] = 'food'; s.foods.push({ r: r, c: c, amount: 3 }); return;
+      }
+    }
+  }
+  function moveAlong(e, dt, speed){
+    if(!e.path || !e.path.length) return true;
+    var t = e.path[0], p = cellCenter(t[0], t[1]);
+    var dx = p.x - e.x, dy = p.y - e.y, d = Math.sqrt(dx*dx + dy*dy);
+    if(d < 4){ e.path.shift(); return e.path.length === 0; }
+    e.x += dx / d * speed * dt; e.y += dy / d * speed * dt;
+    return false;
+  }
+  function update(dt){
+    if(!started || state.over || paused) return;
+    state.time += dt;
+    // Pantries earn food; barracks train soldiers.
+    state.pantryTimer += dt; state.barracksTimer += dt;
+    var pantries = 0, barracks = 0;
+    for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){ if(state.grid[r][c] === 'pantry') pantries++; if(state.grid[r][c] === 'barracks') barracks++; }
+    if(state.pantryTimer >= 4 && pantries){ state.food += pantries; state.score += pantries; state.pantryTimer = 0; }
+    if(state.barracksTimer >= 6 && barracks && state.soldiers.length < barracks * 3){
+      var q = cellCenter(5,8);
+      state.soldiers.push({ x: q.x, y: q.y, path: [], cool: 0, speed: 70 });
+      state.barracksTimer = 0; beep(660, 0.08, 'square');
+    }
+    // Workers: seek food, then return to the queen.
+    state.workers.forEach(function(w){
+      if(!w.target){
+        var f = state.foods[Math.floor(Math.random()*state.foods.length)];
+        if(f) w.target = f;
+      }
+      if(!w.target) return;
+      var cur = cellOf(w.x, w.y) || { r: 5, c: 8 };
+      if(!w.path.length){
+        var dest = w.carrying ? { r: 5, c: 8 } : w.target;
+        w.path = bfs(state, cur.r, cur.c, dest.r, dest.c, false) || [];
+        if(!w.path.length && !w.carrying){ w.target = null; return; }
+      }
+      if(moveAlong(w, dt, w.speed)){
+        if(w.carrying){ state.food += 10; state.score += 10; w.carrying = false; w.target = null; beep(880, 0.06, 'sine'); }
+        else {
+          w.target.amount--; w.carrying = true; w.path = [];
+          if(w.target.amount <= 0){
+            state.grid[w.target.r][w.target.c] = 'empty';
+            state.foods = state.foods.filter(function(x){ return x !== w.target; });
+            spawnFood(state);
+          }
+        }
+      }
+    });
+    // Soldiers: chase and strike the nearest intruder.
+    state.soldiers.forEach(function(sol){
+      sol.cool -= dt;
+      var foe = null, best = 1e9;
+      state.enemies.forEach(function(en){ var d = Math.hypot(en.x - sol.x, en.y - sol.y); if(d < best){ best = d; foe = en; } });
+      if(foe){
+        if(best < CELL * 1.4){
+          if(sol.cool <= 0){ foe.hp--; sol.cool = 0.5; beep(300, 0.05, 'square'); }
+        } else {
+          var cur = cellOf(sol.x, sol.y) || { r: 5, c: 8 };
+          var fc = cellOf(foe.x, foe.y) || { r: 5, c: 8 };
+          if(!sol.path.length) sol.path = bfs(state, cur.r, cur.c, fc.r, fc.c, true) || [];
+          moveAlong(sol, dt, sol.speed);
+          if(Math.random() < 0.02) sol.path = [];
+        }
+      }
+    });
+    state.enemies = state.enemies.filter(function(en){ return en.hp > 0; });
+    // Enemies: march on the queen.
+    state.enemies.forEach(function(en){
+      if(en.delay > 0){ en.delay -= dt; return; }
+      if(moveAlong(en, dt, en.speed)){
+        state.queenHp -= 10; state.score = Math.max(0, state.score - 20);
+        en.hp = 0; beep(120, 0.3, 'sawtooth');
+        msgEl.textContent = 'An intruder reached the Queen! Queen HP: ' + state.queenHp;
+      }
+    });
+    state.enemies = state.enemies.filter(function(en){ return en.hp > 0; });
+    if(state.queenHp <= 0){ state.queenHp = 0; endGame(false); return; }
+    if(state.waveActive && !state.enemies.length){
+      state.waveActive = false; state.score += 100; state.food += 20;
+      msgEl.textContent = 'Wave ' + state.wave + ' repelled! +100 score, +20 food. Build, then start the next wave.';
+      beep(660, 0.15, 'sine'); beep(990, 0.2, 'sine');
+      if(state.wave >= state.maxWaves) endGame(true);
+    }
+  }
+  function drawAnt(x, y, color, carrying){
+    ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(x, y, 9, 6, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+9, y-2, 4, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+    ctx.moveTo(x-4,y-5); ctx.lineTo(x-8,y-10); ctx.moveTo(x,y-6); ctx.lineTo(x-2,y-11); ctx.stroke();
+    if(carrying){ ctx.fillStyle = '#7ed957'; ctx.beginPath(); ctx.arc(x+14, y-6, 4, 0, Math.PI*2); ctx.fill(); }
+  }
+  function draw(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
+      var x = OX + c*CELL, y = OY + r*CELL, t = state.grid[r][c];
+      ctx.fillStyle = t === 'queen' ? '#5b2d8e' : t === 'tunnel' ? '#6b4a26' : t === 'pantry' ? '#a8791a' : t === 'barracks' ? '#7a2e1d' : t === 'food' ? '#1f4d1f' : '#33241a';
+      ctx.fillRect(x, y, CELL-2, CELL-2);
+      if(t === 'queen'){ ctx.fillStyle = '#ffcf5c'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('👑', x+CELL/2, y+CELL/2); }
+      if(t === 'pantry'){ ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.fillText('🍯', x+CELL/2, y+CELL/2); }
+      if(t === 'barracks'){ ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.fillText('🏰', x+CELL/2, y+CELL/2); }
+      if(t === 'food'){ ctx.fillStyle = '#7ed957'; ctx.beginPath(); ctx.arc(x+CELL/2, y+CELL/2, 9, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#d8ffb0'; ctx.beginPath(); ctx.arc(x+CELL/2-3, y+CELL/2-3, 3, 0, Math.PI*2); ctx.fill(); }
+      if(hover && hover.r === r && hover.c === c && state.grid[r][c] === 'empty' && adjacentToColony(state, r, c)){
+        ctx.fillStyle = 'rgba(255,207,92,.45)'; ctx.fillRect(x, y, CELL-2, CELL-2);
+      }
+    }
+    state.workers.forEach(function(w){ drawAnt(w.x, w.y, '#c98a3a', w.carrying); });
+    state.soldiers.forEach(function(s){ drawAnt(s.x, s.y, '#c23b2a', false); });
+    state.enemies.forEach(function(en){
+      if(en.delay > 0) return;
+      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(en.x, en.y, 11, 8, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ff4444'; ctx.beginPath(); ctx.arc(en.x+10, en.y-3, 5, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ff4444'; ctx.fillRect(en.x-12, en.y-16, 24, 4);
+      ctx.fillStyle = '#7ed957'; ctx.fillRect(en.x-12, en.y-16, 24 * Math.max(0, en.hp / en.maxHp), 4);
+    });
+    // Side panel.
+    ctx.fillStyle = '#241708'; ctx.fillRect(PANELX, OY, PANELW, ROWS*CELL);
+    ctx.strokeStyle = '#8a5a2b'; ctx.strokeRect(PANELX, OY, PANELW, ROWS*CELL);
+    ctx.fillStyle = '#ffcf5c'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('COLONY REPORT', PANELX+14, OY+14);
+    ctx.fillStyle = '#f5e6c8'; ctx.font = '15px Arial';
+    var lines = ['Tool: ' + tool, 'Food: ' + state.food, 'Score: ' + state.score,
+      'Queen HP: ' + state.queenHp, 'Wave: ' + state.wave + ' / ' + state.maxWaves,
+      'Workers: ' + state.workers.length, 'Soldiers: ' + state.soldiers.length,
+      'Intruders: ' + state.enemies.length, '', 'Build beside the colony,',
+      'then start the next wave.', '', state.waveActive ? '⚔️ WAVE IN PROGRESS' : '🛠️ BUILD PHASE'];
+    lines.forEach(function(l, i){ ctx.fillText(l, PANELX+14, OY+44 + i*22); });
+    foodEl.textContent = state.food; scoreEl.textContent = state.score;
+    queenEl.textContent = state.queenHp; waveEl.textContent = state.wave + ' / ' + state.maxWaves;
+    workersEl.textContent = state.workers.length; soldiersEl.textContent = state.soldiers.length;
+    waveBtn.disabled = !started || state.over || state.waveActive || state.wave >= state.maxWaves;
+  }
+  var last = 0;
+  function loop(ts){
+    if(!last) last = ts;
+    var dt = Math.min(0.05, (ts - last) / 1000); last = ts;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  function canvasPos(e){
+    var rect = canvas.getBoundingClientRect();
+    var clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (clientX - rect.left) * canvas.width / rect.width, y: (clientY - rect.top) * canvas.height / rect.height };
+  }
+  canvas.addEventListener('mousemove', function(e){ var p = canvasPos(e); hover = cellOf(p.x, p.y); });
+  canvas.addEventListener('mousedown', function(e){ var p = canvasPos(e); hover = cellOf(p.x, p.y); });
+  canvas.addEventListener('click', function(e){
+    var p = canvasPos(e); var cell = cellOf(p.x, p.y);
+    if(cell) tryBuild(cell.r, cell.c);
+  });
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    var p = canvasPos(e); var cell = cellOf(p.x, p.y);
+    hover = cell; if(cell) tryBuild(cell.r, cell.c);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    var p = canvasPos(e); hover = cellOf(p.x, p.y);
+  }, { passive: false });
+  document.addEventListener('keydown', function(e){
+    if(e.key === '1') setTool('tunnel');
+    else if(e.key === '2') setTool('pantry');
+    else if(e.key === '3') setTool('barracks');
+    else if(e.key === ' ' || e.key.toLowerCase() === 'w'){ e.preventDefault(); startWave(); }
+    else if(e.key.toLowerCase() === 'p'){ paused = !paused; pauseBtn.textContent = paused ? '▶ Resume [P]' : '⏸ Pause [P]'; }
+    else if(e.key.toLowerCase() === 'r' && state.over) restart();
+  });
+  document.getElementById('toolTunnel').addEventListener('click', function(){ setTool('tunnel'); });
+  document.getElementById('toolPantry').addEventListener('click', function(){ setTool('pantry'); });
+  document.getElementById('toolBarracks').addEventListener('click', function(){ setTool('barracks'); });
+  waveBtn.addEventListener('click', startWave);
+  pauseBtn.addEventListener('click', function(){ paused = !paused; pauseBtn.textContent = paused ? '▶ Resume [P]' : '⏸ Pause [P]'; });
+  document.getElementById('startBtn').addEventListener('click', function(){
+    initAudio(); started = true; titleEl.classList.add('hidden'); beep(523, 0.15, 'sine'); beep(784, 0.2, 'sine');
+  });
+  document.getElementById('restartBtn').addEventListener('click', function(){ restart(); beep(523, 0.12, 'sine'); });
+  state = newState();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

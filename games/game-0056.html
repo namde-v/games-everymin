@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Deep Dive Dash — Cave Diver</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #02121f; color: #eafcff; font-family: Verdana, Geneva, sans-serif;
+         display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 14px; }
+  h1 { font-size: 26px; letter-spacing: 1px; color: #7fe3ff; text-shadow: 0 0 14px #0aa; margin-bottom: 6px; text-align: center; }
+  .sub { color: #9fd8c8; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(920px, 100%); }
+  canvas { display: block; width: 100%; height: auto; background: #06283d; border: 3px solid #1d7a8c;
+           border-radius: 14px; box-shadow: 0 0 30px rgba(0,180,220,.35); touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+         background: #073044; border: 1px solid #1d7a8c; border-radius: 10px;
+         padding: 8px 12px; margin-bottom: 10px; font-size: 15px; font-weight: bold; }
+  #hud span { white-space: nowrap; }
+  #oxygenBar { display: inline-block; width: 110px; height: 14px; background: #123; border: 1px solid #7fe3ff;
+                border-radius: 8px; vertical-align: middle; overflow: hidden; }
+  #oxygenFill { display: block; height: 100%; width: 100%; background: linear-gradient(90deg,#00e5ff,#7dffb0); transition: width .2s; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+             background: rgba(2, 20, 34, .86); border-radius: 14px; text-align: center; padding: 22px; gap: 10px; }
+  .overlay h2 { font-size: 30px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #d8f6ff; }
+  .overlay .big { font-size: 18px; }
+  button { cursor: pointer; font-size: 19px; font-weight: bold; color: #03202e; background: #ffd166;
+           border: none; border-radius: 999px; padding: 13px 30px; margin-top: 6px; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #7fe3ff; box-shadow: 0 4px 0 #0a6a7d; }
+  .keys { font-size: 13px; color: #aee; background: #0a3a4d; border-radius: 8px; padding: 9px 12px; }
+  .hidden { display: none !important; }
+  #msg { min-height: 22px; color: #ffd166; font-weight: bold; margin-top: 8px; text-align: center; }
+  .legend { font-size: 13px; color: #9fd8c8; margin-top: 8px; text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🌊 Deep Dive Dash</h1>
+<p class="sub">An underwater cave diving adventure — reach the cave exit before your oxygen runs out!</p>
+<div id="wrap">
+  <div id="hud">
+    <span>⭐ Score: <span id="score">0</span></span>
+    <span>❤️ Lives: <span id="lives">3</span></span>
+    <span>🫧 Oxygen: <span id="oxygenBar"><span id="oxygenFill"></span></span> <span id="oxygenText">100%</span></span>
+    <span>📏 Depth: <span id="depth">0</span>m / 1200m</span>
+    <span id="status">Ready</span>
+  </div>
+  <canvas id="game" width="920" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🌊 Deep Dive Dash</h2>
+    <p class="big">Swim through the flooded cave, dodge rocks and stalactites, grab air bubbles and pearls, and reach the glowing exit at 1200m!</p>
+    <p><strong>How to Play</strong><br>
+    Move the diver up and down to steer through gaps. Collect <b>🫧 air bubbles</b> to refill oxygen and <b>🦪 pearls</b> for 50 points each.<br>
+    Hitting a rock or stalactite costs 1 life. 3 collisions, or oxygen reaching 0%, ends the dive. Reach 1200m to win!</p>
+    <div class="keys">⌨️ Keyboard: ↑ / ↓ or W / S to swim &nbsp;•&nbsp; 🖱️ Mouse: move to steer, click to dash &nbsp;•&nbsp; 👆 Touch: drag to swim</div>
+    <button id="startBtn">▶ Start Dive</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <p id="howText" class="hidden">Tip: stay near the middle of gaps, grab every bubble you see, and use a short dash (click / Space) to escape tight spots. Oxygen drains faster the deeper you go — bubbles are life!</p>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>🏆 You Escaped the Cave!</h2>
+    <p class="big" id="winText">You reached the cave exit!</p>
+    <p>Brilliant diving! You found the treasure chamber and surfaced with your pearls intact.</p>
+    <button id="winRestartBtn">↻ Dive Again</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <h2>💀 Dive Over</h2>
+    <p class="big" id="overText">The cave claimed this dive.</p>
+    <p>Don't give up — the exit is waiting at 1200m. Watch the oxygen gauge and grab every bubble!</p>
+    <button id="overRestartBtn">↻ Try Again</button>
+  </div>
+</div>
+<div id="msg"></div>
+<p class="legend">Oxygen drains over time and faster at depth • Bubbles +25% oxygen • Pearls +50 points • Distance also scores points<br>Works fully offline — no downloads, no accounts, just dive.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var oxygenFill = document.getElementById('oxygenFill');
+  var oxygenText = document.getElementById('oxygenText');
+  var depthEl = document.getElementById('depth');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  var TARGET_DEPTH = 1200;
+  var state = 'title'; // title | playing | win | over
+  var score = 0, lives = 3, oxygen = 100, distance = 0, depth = 0;
+  var speed = 2.6, spawnTimer = 0, time = 0, lastTs = 0;
+  var invulnerable = 0, dashTimer = 0, flash = 0;
+
+  var diver = { x: 150, y: H / 2, vy: 0, targetY: H / 2, r: 20 };
+  var obstacles = [], bubbles = [], pearls = [], particles = [], ambient = [];
+
+  for (var i = 0; i < 28; i++) {
+    ambient.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 3, s: 0.2 + Math.random() * 0.6 });
+  }
+
+  // ---- Procedural Web Audio (created only after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    if (kind === 'bubble') { beep(880, 0.18, 'sine', 0.14); setTimeout(function () { beep(1320, 0.15, 'sine', 0.10); }, 60); }
+    else if (kind === 'pearl') { beep(1046, 0.12, 'triangle', 0.14); setTimeout(function () { beep(1568, 0.18, 'triangle', 0.12); }, 90); }
+    else if (kind === 'hit') { beep(160, 0.35, 'sawtooth', 0.18); }
+    else if (kind === 'win') { [523, 659, 784, 1046].forEach(function (f, k) { setTimeout(function () { beep(f, 0.3, 'triangle', 0.14); }, k * 140); }); }
+    else if (kind === 'over') { [400, 300, 200, 130].forEach(function (f, k) { setTimeout(function () { beep(f, 0.3, 'sawtooth', 0.12); }, k * 150); }); }
+  }
+
+  function show(el) { el.classList.remove('hidden'); }
+  function hide(el) { el.classList.add('hidden'); }
+
+  function resetGame() {
+    score = 0; lives = 3; oxygen = 100; distance = 0; depth = 0;
+    speed = 2.6; spawnTimer = 0; time = 0; invulnerable = 0; dashTimer = 0; flash = 0;
+    diver.x = 150; diver.y = H / 2; diver.vy = 0; diver.targetY = H / 2;
+    obstacles = []; bubbles = []; pearls = []; particles = [];
+    updateHud('Diving!');
+    msgEl.textContent = '';
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    hide(titleScreen); hide(winScreen); hide(overScreen);
+    statusEl.textContent = 'Diving!';
+    lastTs = performance.now();
+    requestAnimationFrame(loop);
+    beep(440, 0.2, 'sine', 0.12);
+  }
+  function restartGame() { startGame(); }
+
+  function endWin() {
+    state = 'win';
+    document.getElementById('winText').textContent = 'You reached the exit at 1200m with ' + score + ' points and ' + lives + ' lives left!';
+    statusEl.textContent = 'WINNER!';
+    show(winScreen); sfx('win');
+  }
+  function endOver(reason) {
+    state = 'over';
+    document.getElementById('overText').textContent = reason + ' Final score: ' + score + ' points, depth reached: ' + depth + 'm.';
+    statusEl.textContent = 'Game Over';
+    show(overScreen); sfx('over');
+  }
+
+  function updateHud(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    oxygenFill.style.width = Math.max(0, Math.min(100, oxygen)) + '%';
+    oxygenText.textContent = Math.max(0, Math.ceil(oxygen)) + '%';
+    depthEl.textContent = depth;
+    if (status) statusEl.textContent = status;
+    oxygenFill.style.background = oxygen > 40 ? 'linear-gradient(90deg,#00e5ff,#7dffb0)' : (oxygen > 20 ? 'linear-gradient(90deg,#ffd166,#ff9f1c)' : 'linear-gradient(90deg,#ff4d4d,#ff0000)');
+  }
+
+  function spawnPattern() {
+    var gapY = 70 + Math.random() * (H - 200);
+    var gapH = 150 + Math.random() * 40;
+    var kind = Math.random();
+    if (kind < 0.55) {
+      // Stalactite top + rock bottom pair, leaving a gap
+      obstacles.push({ x: W + 20, y: 0, w: 46, h: gapY - gapH / 2, type: 'stal' });
+      obstacles.push({ x: W + 20, y: gapY + gapH / 2, w: 46, h: H - (gapY + gapH / 2), type: 'rock' });
+    } else if (kind < 0.8) {
+      // Single floating rock in the middle
+      obstacles.push({ x: W + 20, y: gapY - 30, w: 60, h: 60, type: 'rock' });
+    } else {
+      // Twin stalactites, narrow gap
+      obstacles.push({ x: W + 20, y: 0, w: 40, h: gapY - 45, type: 'stal' });
+      obstacles.push({ x: W + 20, y: gapY + 45, w: 40, h: H - (gapY + 45), type: 'stal' });
+    }
+    // Rewards: usually a bubble near the gap, sometimes a pearl trail
+    if (Math.random() < 0.8) bubbles.push({ x: W + 90, y: gapY + (Math.random() * 60 - 30), r: 14 });
+    if (Math.random() < 0.65) {
+      var py = 60 + Math.random() * (H - 120);
+      for (var k = 0; k < 3; k++) pearls.push({ x: W + 140 + k * 36, y: py, r: 11 });
+    }
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 30 + Math.random() * 20, color: color });
+    }
+  }
+
+  function hitObstacle(o) {
+    var cx = Math.max(o.x, Math.min(diver.x, o.x + o.w));
+    var cy = Math.max(o.y, Math.min(diver.y, o.y + o.h));
+    var dx = diver.x - cx, dy = diver.y - cy;
+    return (dx * dx + dy * dy) < (diver.r * diver.r);
+  }
+
+  function update(dt) {
+    time += dt;
+    var drain = (1.1 + depth / 1200 * 1.1) * dt;
+    oxygen -= drain;
+    distance += speed * dt * 10;
+    depth = Math.min(TARGET_DEPTH, Math.floor(distance / 8));
+    score += Math.floor(speed * dt * 0.6);
+    speed = Math.min(5.4, 2.6 + depth / 400);
+
+    // Diver movement: keyboard velocity + pointer target smoothing
+    diver.y += diver.vy * dt * 60;
+    if (Math.abs(diver.targetY - diver.y) > 2 && !keysActive) {
+      diver.y += (diver.targetY - diver.y) * 0.18;
+    }
+    diver.y = Math.max(42, Math.min(H - 42, diver.y));
+    diver.x = Math.max(90, Math.min(320, diver.x + (dashTimer > 0 ? 1.2 : 0)));
+    if (dashTimer > 0) dashTimer -= dt;
+    if (invulnerable > 0) invulnerable -= dt;
+    if (flash > 0) flash -= dt;
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnPattern(); spawnTimer = 1.15 - Math.min(0.4, depth / 3000); }
+
+    function moveList(list, extra) {
+      for (var i = list.length - 1; i >= 0; i--) {
+        list[i].x -= (speed + (extra || 0)) * dt * 60 * 0.55;
+        if (list[i].x < -80) list.splice(i, 1);
+      }
+    }
+    moveList(obstacles); moveList(bubbles, -0.3); moveList(pearls);
+    for (var a = 0; a < ambient.length; a++) {
+      ambient[a].x -= ambient[a].s * dt * 60 * 0.3;
+      ambient[a].y -= ambient[a].s * 0.4;
+      if (ambient[a].x < -5) { ambient[a].x = W + 5; ambient[a].y = Math.random() * H; }
+    }
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx; particles[p].y += particles[p].vy; particles[p].life--;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+
+    // Collisions
+    if (invulnerable <= 0) {
+      for (var oi = 0; oi < obstacles.length; oi++) {
+        if (hitObstacle(obstacles[oi])) {
+          lives--; invulnerable = 1.6; flash = 0.35;
+          burst(diver.x, diver.y, '#ff6b6b', 22); sfx('hit');
+          obstacles.splice(oi, 1);
+          msgEl.textContent = 'CRASH! Lives left: ' + lives;
+          if (lives <= 0) { updateHud('Game Over'); endOver('Out of lives!'); return; }
+          break;
+        }
+      }
+    }
+    for (var bi = bubbles.length - 1; bi >= 0; bi--) {
+      var b = bubbles[bi];
+      var bd = Math.hypot(diver.x - b.x, diver.y - b.y);
+      if (bd < diver.r + b.r + 4) {
+        oxygen = Math.min(100, oxygen + 25); bubbles.splice(bi, 1);
+        burst(b.x, b.y, '#7fe3ff', 12); sfx('bubble');
+        msgEl.textContent = 'Air bubble! +25% oxygen';
+      }
+    }
+    for (var pi = pearls.length - 1; pi >= 0; pi--) {
+      var pl = pearls[pi];
+      var pd = Math.hypot(diver.x - pl.x, diver.y - pl.y);
+      if (pd < diver.r + pl.r + 4) {
+        score += 50; pearls.splice(pi, 1);
+        burst(pl.x, pl.y, '#ffd166', 12); sfx('pearl');
+        msgEl.textContent = 'Pearl! +50 points';
+      }
+    }
+
+    if (oxygen <= 0) { oxygen = 0; updateHud('Game Over'); endOver('Oxygen ran out!'); return; }
+    if (depth >= TARGET_DEPTH) { updateHud('WINNER!'); endWin(); return; }
+    updateHud();
+  }
+
+  function draw() {
+    // Water
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0a4a66'); grad.addColorStop(0.5, '#06324a'); grad.addColorStop(1, '#021c2e');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // Light rays
+    ctx.save(); ctx.globalAlpha = 0.10; ctx.fillStyle = '#7fe3ff';
+    for (var r = 0; r < 4; r++) {
+      ctx.beginPath();
+      var rx = 120 + r * 220 + Math.sin(time * 0.6 + r) * 20;
+      ctx.moveTo(rx, 0); ctx.lineTo(rx + 90, 0); ctx.lineTo(rx + 200, H); ctx.lineTo(rx + 60, H); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    // Cave walls (wavy)
+    ctx.fillStyle = '#2b1d12';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W, 0);
+    for (var x = W; x >= 0; x -= 20) ctx.lineTo(x, 26 + Math.sin(x * 0.012 + time * 0.8) * 10);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(W, H);
+    for (var x2 = W; x2 >= 0; x2 -= 20) ctx.lineTo(x2, H - 26 - Math.sin(x2 * 0.014 - time * 0.8) * 10);
+    ctx.closePath(); ctx.fill();
+    // Ambient bubbles
+    ctx.fillStyle = 'rgba(127,227,255,.5)';
+    ambient.forEach(function (a) { ctx.beginPath(); ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2); ctx.fill(); });
+    // Exit glow when close
+    if (depth > 1000) {
+      var glowX = W - 60 - (TARGET_DEPTH - depth) * 0.4;
+      ctx.save(); ctx.globalAlpha = 0.8; ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(Math.max(760, glowX), H / 2, 42, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff7cc'; ctx.beginPath(); ctx.arc(Math.max(760, glowX), H / 2, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#03202e'; ctx.font = 'bold 13px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('EXIT', Math.max(760, glowX), H / 2 + 5);
+    }
+    // Obstacles
+    obstacles.forEach(function (o) {
+      if (o.type === 'stal') {
+        ctx.fillStyle = '#6b543a';
+        ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(o.x + o.w, o.y);
+        ctx.lineTo(o.x + o.w / 2, o.y + o.h); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#8a6f4d'; ctx.beginPath(); ctx.moveTo(o.x + 8, o.y); ctx.lineTo(o.x + o.w - 8, o.y); ctx.lineTo(o.x + o.w / 2, o.y + o.h * 0.7); ctx.closePath(); ctx.fill();
+      } else {
+        ctx.fillStyle = '#4a4a58'; ctx.beginPath(); ctx.arc(o.x + o.w / 2, o.y + o.h / 2, o.w / 2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#6d6d84'; ctx.beginPath(); ctx.arc(o.x + o.w / 2 - 8, o.y + o.h / 2 - 8, o.w / 4, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    // Bubbles
+    bubbles.forEach(function (b) {
+      ctx.strokeStyle = '#bff3ff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(b.x, b.y + Math.sin(time * 4 + b.x) * 2, b.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.beginPath(); ctx.arc(b.x - 4, b.y - 4, 3.5, 0, Math.PI * 2); ctx.fill();
+    });
+    // Pearls
+    pearls.forEach(function (p) {
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff3d6'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(p.x - 3, p.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    // Particles
+    particles.forEach(function (pt) {
+      ctx.globalAlpha = Math.max(0, pt.life / 40); ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+    // Diver (flashing while invulnerable)
+    if (!(invulnerable > 0 && Math.floor(time * 12) % 2 === 0)) {
+      ctx.save(); ctx.translate(diver.x, diver.y);
+      ctx.fillStyle = '#ff9f1c'; ctx.beginPath(); ctx.ellipse(0, 0, 24, 13, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.ellipse(-4, 0, 14, 9, 0, 0, Math.PI * 2); ctx.fill();
+      // Tank + fins
+      ctx.fillStyle = '#c0c0c0'; ctx.fillRect(-14, -16, 8, 12);
+      ctx.fillStyle = '#0aa'; ctx.beginPath(); ctx.moveTo(-22, 0); ctx.lineTo(-36, -10); ctx.lineTo(-36, 10); ctx.closePath(); ctx.fill();
+      // Mask / face
+      ctx.fillStyle = '#eafcff'; ctx.beginPath(); ctx.arc(12, -2, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#06283d'; ctx.beginPath(); ctx.arc(14, -2, 4, 0, Math.PI * 2); ctx.fill();
+      // Trail bubbles
+      ctx.strokeStyle = 'rgba(127,227,255,.7)'; ctx.beginPath(); ctx.arc(-28, -14, 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+    if (flash > 0) { ctx.fillStyle = 'rgba(255,60,60,' + (flash * 0.5) + ')'; ctx.fillRect(0, 0, W, H); }
+    // Depth marker
+    ctx.fillStyle = 'rgba(234,252,255,.9)'; ctx.font = 'bold 16px Verdana'; ctx.textAlign = 'left';
+    ctx.fillText('Depth ' + depth + 'm  •  Goal 1200m', 16, 30);
+  }
+
+  function loop(ts) {
+    if (state !== 'playing') return;
+    var dt = Math.min(0.05, (ts - lastTs) / 1000 || 0.016);
+    lastTs = ts;
+    update(dt);
+    draw();
+    if (state === 'playing') requestAnimationFrame(loop);
+    else draw();
+  }
+
+  // ---- Input: keyboard, mouse, touch (all functional) ----
+  var keysActive = false;
+  var keysDown = {};
+  document.addEventListener('keydown', function (e) {
+    keysDown[e.key] = true;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { diver.vy = -4.2; diver.targetY = diver.y; keysActive = true; e.preventDefault(); }
+    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { diver.vy = 4.2; diver.targetY = diver.y; keysActive = true; e.preventDefault(); }
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { diver.x -= 8; }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { diver.x += 8; }
+    if (e.key === ' ') { dashTimer = 0.35; if (state === 'title') startGame(); e.preventDefault(); }
+    if (e.key === 'Enter' && (state === 'win' || state === 'over')) { restartGame(); }
+  });
+  document.addEventListener('keyup', function (e) {
+    keysDown[e.key] = false;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'w' || e.key === 'W' || e.key === 's' || e.key === 'S') {
+      diver.vy = 0; keysActive = false;
+    }
+  });
+  function pointerToCanvas(clientY) {
+    var rect = canvas.getBoundingClientRect();
+    return (clientY - rect.top) / rect.height * H;
+  }
+  canvas.addEventListener('mousemove', function (e) {
+    diver.targetY = pointerToCanvas(e.clientY); keysActive = false;
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    ensureAudio();
+    diver.targetY = pointerToCanvas(e.clientY); keysActive = false;
+    if (state === 'playing') dashTimer = 0.35;
+  });
+  canvas.addEventListener('click', function (e) {
+    diver.targetY = pointerToCanvas(e.clientY); keysActive = false;
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio();
+    if (e.touches && e.touches[0]) { diver.targetY = pointerToCanvas(e.touches[0].clientY); keysActive = false; }
+    if (state === 'playing') dashTimer = 0.3;
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    if (e.touches && e.touches[0]) { diver.targetY = pointerToCanvas(e.touches[0].clientY); keysActive = false; }
+    e.preventDefault();
+  }, { passive: false });
+
+  // ---- Buttons ----
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', restartGame);
+  document.getElementById('overRestartBtn').addEventListener('click', restartGame);
+  document.getElementById('howBtn').addEventListener('click', function () {
+    document.getElementById('howText').classList.toggle('hidden');
+  });
+
+  updateHud('Ready');
+  draw();
+})();
+</script>
+</body>
+</html>
