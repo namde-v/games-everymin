@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pendulum Painter</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #17131f;
+    color: #f5efe0;
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 10px;
+    overflow: hidden;
+  }
+  h1 { font-size: 28px; letter-spacing: 1px; margin-bottom: 4px; text-align: center; }
+  p.sub { color: #c9bfae; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(92vw, 760px); }
+  canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+    background: #f7f1dd;
+    border: 4px solid #6b4d2e;
+    border-radius: 14px;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  #hud {
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between;
+    background: #2c2438; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px;
+    font-size: 15px; font-weight: bold;
+  }
+  #hud span { white-space: nowrap; }
+  #colors { display: flex; gap: 8px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+  .swatch {
+    width: 46px; height: 46px; border-radius: 50%; border: 3px solid transparent;
+    cursor: pointer; font-size: 20px; line-height: 40px; text-align: center; color: #fff;
+    text-shadow: 0 1px 2px #000;
+  }
+  .swatch.sel { border-color: #fff; transform: scale(1.12); box-shadow: 0 0 0 3px #ffd166; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; gap: 12px; padding: 24px;
+    background: rgba(23, 19, 31, 0.88); border-radius: 14px; z-index: 5;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; }
+  .overlay p { max-width: 520px; line-height: 1.55; color: #e8e0cf; font-size: 15px; }
+  .overlay .keys { background: #2c2438; border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+  button {
+    background: #ffd166; color: #20180f; border: none; border-radius: 999px;
+    padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer;
+  }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #8ecae6; }
+  #msg { text-align: center; min-height: 22px; margin-top: 8px; font-weight: bold; color: #ffd166; }
+  #controlsHint { text-align: center; color: #bdb2a0; font-size: 13px; margin-top: 4px; }
+</style>
+</head>
+<body>
+  <h1>🎨 Pendulum Painter</h1>
+  <p class="sub">Swing. Aim. Release. Paint the picture one perfect drop at a time.</p>
+  <div id="wrap">
+    <div id="hud">
+      <span>Score: <span id="score">0</span></span>
+      <span>Paint: <span id="paint">24</span> drops</span>
+      <span>Filled: <span id="filled">0</span>%</span>
+      <span>Status: <span id="status">Ready</span></span>
+    </div>
+    <canvas id="game" width="760" height="520"></canvas>
+
+    <div id="titleScreen" class="overlay">
+      <h2>🎨 Pendulum Painter</h2>
+      <p><strong>How to Play:</strong> A paint pendulum swings above a blank picture made of target shapes. Watch the swing, pick the colour each shape needs, and release a drop at the exact moment it passes over the shape. A perfect landing fills that piece. Misses and wrong colours cost paint.</p>
+      <div class="keys">
+        <strong>Controls:</strong> SPACE / Click / Tap = release a drop &nbsp;•&nbsp;
+        1–5 or tap a colour dot = change paint &nbsp;•&nbsp;
+        ← → = nudge the swing &nbsp;•&nbsp; R = restart
+      </div>
+      <p>Fill the whole picture before your paint runs out to win. You have 24 drops — make every swing count.</p>
+      <button id="startBtn">▶ Start Painting</button>
+    </div>
+
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">Picture Complete!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">↻ Play Again</button>
+    </div>
+  </div>
+
+  <div id="colors" aria-label="Paint colours">
+    <button class="swatch sel" data-color="#e63946" data-name="Red" style="background:#e63946">●</button>
+    <button class="swatch" data-color="#f4a261" data-name="Orange" style="background:#f4a261">●</button>
+    <button class="swatch" data-color="#2a9d8f" data-name="Teal" style="background:#2a9d8f">●</button>
+    <button class="swatch" data-color="#457b9d" data-name="Blue" style="background:#457b9d">●</button>
+    <button class="swatch" data-color="#f9c74f" data-name="Yellow" style="background:#f9c74f">●</button>
+  </div>
+  <div id="msg">Pick a colour, then release when the pendulum is over a matching shape.</div>
+  <div id="controlsHint">SPACE / Click / Tap to release &nbsp;•&nbsp; Keys 1–5 to change colour &nbsp;•&nbsp; Arrow keys nudge the swing</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var paintEl = document.getElementById('paint');
+  var filledEl = document.getElementById('filled');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var COLORS = ['#e63946', '#f4a261', '#2a9d8f', '#457b9d', '#f9c74f'];
+  var COLOR_NAMES = ['Red', 'Orange', 'Teal', 'Blue', 'Yellow'];
+
+  // The picture: a cheerful landscape made of target shapes.
+  // Each shape needs a specific colour. Filled shapes are painted in.
+  var shapes = [
+    { x: 380, y: 128, r: 52, color: '#f9c74f', name: 'Sun', filled: false, kind: 'circle' },
+    { x: 150, y: 300, w: 130, h: 90, color: '#2a9d8f', name: 'Hill', filled: false, kind: 'rect' },
+    { x: 610, y: 300, w: 130, h: 90, color: '#2a9d8f', name: 'Hill', filled: false, kind: 'rect' },
+    { x: 380, y: 340, w: 200, h: 90, color: '#457b9d', name: 'Lake', filled: false, kind: 'rect' },
+    { x: 250, y: 210, w: 90, h: 90, color: '#e63946', name: 'Flower', filled: false, kind: 'circle' },
+    { x: 520, y: 210, w: 90, h: 90, color: '#e63946', name: 'Flower', filled: false, kind: 'circle' },
+    { x: 380, y: 440, w: 320, h: 60, color: '#f4a261', name: 'Path', filled: false, kind: 'rect' },
+    { x: 90, y: 130, w: 100, h: 60, color: '#457b9d', name: 'Cloud', filled: false, kind: 'rect' },
+    { x: 670, y: 130, w: 100, h: 60, color: '#457b9d', name: 'Cloud', filled: false, kind: 'rect' },
+    { x: 380, y: 215, w: 70, h: 70, color: '#f9c74f', name: 'Star', filled: false, kind: 'circle' }
+  ];
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0;
+  var paint = 24;
+  var selected = 0;
+  var lastResult = '';
+
+  // Pendulum physics: angle swings, velocity driven by gravity, with a nudge control.
+  var pivotX = W / 2, pivotY = 42;
+  var armLen = 150;
+  var angle = -0.9;       // radians from vertical
+  var angularVel = 0;
+  var gravity = 2.4;
+  var time = 0;
+
+  var drops = [];         // falling paint drops
+  var splats = [];        // landed paint marks
+  var particles = [];
+  var swingTrail = [];
+
+  // ---- Procedural audio: created only after the Start button is pressed ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + dur);
+  }
+  function soundDrop() { tone(520, 0.12, 'triangle', 0.14); }
+  function soundHit() { tone(660, 0.18, 'sine', 0.18); tone(880, 0.22, 'sine', 0.14); }
+  function soundMiss() { tone(160, 0.25, 'sawtooth', 0.10); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.35, 'sine', 0.18); }, i * 140); }); }
+  function soundLose() { [330, 262, 196, 131].forEach(function (f, i) { setTimeout(function () { tone(f, 0.35, 'triangle', 0.14); }, i * 150); }); }
+
+  function reset() {
+    score = 0; paint = 24; selected = 0;
+    angle = -0.9; angularVel = 0; time = 0;
+    drops = []; splats = []; particles = []; swingTrail = [];
+    shapes.forEach(function (s) { s.filled = false; });
+    updateSwatches();
+    updateHUD('Painting');
+    msgEl.textContent = 'Pick a colour, then release when the pendulum is over a matching shape.';
+  }
+
+  function updateHUD(status) {
+    var done = shapes.filter(function (s) { return s.filled; }).length;
+    var pct = Math.round(done / shapes.length * 100);
+    scoreEl.textContent = score;
+    paintEl.textContent = paint;
+    filledEl.textContent = pct;
+    statusEl.textContent = status || statusEl.textContent;
+  }
+
+  function updateSwatches() {
+    var sw = document.querySelectorAll('.swatch');
+    sw.forEach(function (el, i) { el.classList.toggle('sel', i === selected); });
+    msgEl.textContent = 'Paint selected: ' + COLOR_NAMES[selected] + '. Release over a ' + COLOR_NAMES[selected] + ' shape.';
+  }
+
+  function selectColor(i) {
+    selected = i;
+    updateSwatches();
+    if (audioCtx) tone(440 + i * 80, 0.08, 'sine', 0.08);
+  }
+
+  function dropX() { return pivotX + Math.sin(angle) * armLen; }
+  function dropY() { return pivotY + Math.cos(angle) * armLen; }
+
+  function releaseDrop() {
+    if (state !== 'playing') return;
+    if (paint <= 0) return;
+    paint--;
+    drops.push({ x: dropX(), y: dropY(), vy: 1.5, color: COLORS[selected], r: 9 });
+    soundDrop();
+    updateHUD('Painting');
+    if (paint <= 0 && drops.length === 0) checkEnd();
+  }
+
+  function shapeAt(x, y) {
+    for (var i = 0; i < shapes.length; i++) {
+      var s = shapes[i];
+      if (s.filled) continue;
+      if (s.kind === 'circle') {
+        var dx = x - s.x, dy = y - s.y;
+        if (dx * dx + dy * dy <= s.r * s.r) return s;
+      } else {
+        if (x >= s.x - s.w / 2 && x <= s.x + s.w / 2 && y >= s.y - s.h / 2 && y <= s.y + s.h / 2) return s;
+      }
+    }
+    return null;
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) {
+      particles.push({
+        x: x, y: y,
+        vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.7) * 4,
+        life: 28 + Math.random() * 14, color: color, r: 2 + Math.random() * 3
+      });
+    }
+  }
+
+  function landDrop(d) {
+    var target = shapeAt(d.x, d.y);
+    if (target && target.color === d.color) {
+      target.filled = true;
+      score += 100;
+      // Bonus for landing near the centre of the shape.
+      var centreDist = Math.abs(d.x - target.x) + Math.abs(d.y - target.y);
+      if (centreDist < 35) { score += 50; lastResult = 'PERFECT! +150'; }
+      else { lastResult = 'Nice hit! +100'; }
+      splats.push({ x: d.x, y: d.y, color: d.color, r: 16 });
+      burst(d.x, d.y, d.color);
+      soundHit();
+    } else if (target) {
+      score = Math.max(0, score - 10);
+      lastResult = 'Wrong colour! That shape needs a different paint.';
+      splats.push({ x: d.x, y: d.y, color: d.color, r: 10 });
+      soundMiss();
+    } else {
+      lastResult = 'Missed the picture — the drop splashed on the ground.';
+      splats.push({ x: d.x, y: d.y, color: d.color, r: 8 });
+      soundMiss();
+    }
+    msgEl.textContent = lastResult + '  Paint left: ' + paint + '.';
+    updateHUD('Painting');
+    checkEnd();
+  }
+
+  function checkEnd() {
+    var done = shapes.filter(function (s) { return s.filled; }).length;
+    if (done === shapes.length) {
+      state = 'win';
+      score += paint * 25;
+      updateHUD('Picture Complete!');
+      endTitle.textContent = '🎉 Picture Complete!';
+      endText.textContent = 'You painted every shape! Final score: ' + score + ' (including a ' + (paint * 25) + ' point paint bonus).';
+      endScreen.classList.remove('hidden');
+      soundWin();
+    } else if (paint <= 0 && drops.length === 0) {
+      state = 'over';
+      updateHUD('Out of Paint');
+      endTitle.textContent = '💧 Out of Paint';
+      endText.textContent = 'You filled ' + done + ' of ' + shapes.length + ' shapes and scored ' + score + ' points. Try again — watch the swing and match the colours.';
+      endScreen.classList.remove('hidden');
+      soundLose();
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Painting');
+  }
+
+  function restart() {
+    ensureAudio();
+    startGame();
+  }
+
+  // ---- Drawing ----
+  function drawBackground() {
+    ctx.fillStyle = '#f7f1dd';
+    ctx.fillRect(0, 0, W, H);
+    // Faint sketch guides so the picture reads even before painting.
+    ctx.strokeStyle = '#d8cdb2';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    shapes.forEach(function (s) {
+      if (s.filled) return;
+      ctx.beginPath();
+      if (s.kind === 'circle') ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      else ctx.rect(s.x - s.w / 2, s.y - s.h / 2, s.w, s.h);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+
+  function drawShapes() {
+    shapes.forEach(function (s) {
+      if (!s.filled) {
+        // Unfilled target: pale outline plus a small colour hint dot.
+        ctx.fillStyle = 'rgba(0,0,0,0.05)';
+        ctx.beginPath();
+        if (s.kind === 'circle') ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        else ctx.rect(s.x - s.w / 2, s.y - s.h / 2, s.w, s.h);
+        ctx.fill();
+        ctx.fillStyle = s.color;
+        ctx.beginPath(); ctx.arc(s.x, s.y - (s.kind === 'circle' ? s.r - 10 : s.h / 2 - 12), 7, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.fillStyle = s.color;
+        ctx.beginPath();
+        if (s.kind === 'circle') ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        else ctx.rect(s.x - s.w / 2, s.y - s.h / 2, s.w, s.h);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.font = 'bold 15px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('✓', s.x, s.y + 5);
+      }
+    });
+  }
+
+  function drawPendulum() {
+    var bx = dropX(), by = dropY();
+    // Swing trail
+    swingTrail.push({ x: bx, y: by });
+    if (swingTrail.length > 18) swingTrail.shift();
+    swingTrail.forEach(function (p, i) {
+      ctx.fillStyle = 'rgba(230,57,70,' + (i / swingTrail.length * 0.25) + ')';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5 + i * 0.3, 0, Math.PI * 2); ctx.fill();
+    });
+    // Arm and pivot
+    ctx.strokeStyle = '#3d2c22'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(bx, by); ctx.stroke();
+    ctx.fillStyle = '#6b4d2e';
+    ctx.beginPath(); ctx.arc(pivotX, pivotY, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(pivotX, pivotY, 5, 0, Math.PI * 2); ctx.fill();
+    // Paint bucket at the end of the arm
+    ctx.fillStyle = COLORS[selected];
+    ctx.beginPath(); ctx.arc(bx, by, 18, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#20180f'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('💧', bx, by + 5);
+    // Angle readout to help timing judgement
+    ctx.fillStyle = '#3d2c22'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Swing angle: ' + Math.round(angle * 57.3) + '°', 14, 30);
+    ctx.fillText('Current paint: ' + COLOR_NAMES[selected], 14, 48);
+  }
+
+  function drawDropsAndSplats() {
+    splats.forEach(function (s) {
+      ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    drops.forEach(function (d) {
+      ctx.fillStyle = d.color;
+      ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.beginPath(); ctx.arc(d.x - 3, d.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    particles.forEach(function (p) {
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  function drawTargetHint() {
+    // Highlight the unfilled shape whose colour matches the selected paint.
+    var next = null;
+    for (var i = 0; i < shapes.length; i++) {
+      if (!shapes[i].filled && shapes[i].color === COLORS[selected]) { next = shapes[i]; break; }
+    }
+    if (next && state === 'playing') {
+      ctx.strokeStyle = COLORS[selected];
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 5]);
+      ctx.beginPath();
+      if (next.kind === 'circle') ctx.arc(next.x, next.y, next.r + 6, 0, Math.PI * 2);
+      else ctx.rect(next.x - next.w / 2 - 6, next.y - next.h / 2 - 6, next.w + 12, next.h + 12);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // ---- Main loop ----
+  var lastTime = 0;
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    var dt = Math.min(0.033, (ts - lastTime) / 1000 || 0.016);
+    lastTime = ts;
+    time += dt;
+
+    if (state === 'playing') {
+      // Pendulum: gravity pulls toward vertical, velocity integrates angle.
+      var accel = -gravity * Math.sin(angle) / (armLen / 100);
+      angularVel += accel * dt;
+      angularVel *= 0.999;
+      angle += angularVel * dt;
+      // Keep the swing lively so the pendulum never stalls at the bottom.
+      if (Math.abs(angle) < 0.15 && Math.abs(angularVel) < 0.25) {
+        angularVel += (angle >= 0 ? -1 : 1) * 0.6 * dt * 10;
+      }
+    }
+
+    // Falling drops
+    for (var i = drops.length - 1; i >= 0; i--) {
+      var d = drops[i];
+      d.vy += 0.35;
+      d.y += d.vy * 4;
+      if (d.y >= H - 20 || shapeAt(d.x, d.y)) {
+        landDrop(d);
+        drops.splice(i, 1);
+      }
+    }
+    // Particles
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var p = particles[j];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--;
+      if (p.life <= 0) particles.splice(j, 1);
+    }
+
+    drawBackground();
+    drawShapes();
+    drawTargetHint();
+    drawDropsAndSplats();
+    drawPendulum();
+
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start, then time your release!', W / 2, H - 24);
+    }
+  }
+
+  // ---- Controls: keyboard, mouse, and touch ----
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space') { e.preventDefault(); releaseDrop(); }
+    if (e.key === 'ArrowLeft') { angularVel -= 0.35; }
+    if (e.key === 'ArrowRight') { angularVel += 0.35; }
+    if (e.key >= '1' && e.key <= '5') { selectColor(parseInt(e.key, 10) - 1); }
+    if (e.key === 'r' || e.key === 'R') { if (state === 'win' || state === 'over') restart(); }
+    if (e.key === 'Enter' && state === 'title') { startGame(); }
+  });
+
+  canvas.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    if (state === 'playing') releaseDrop();
+  });
+  canvas.addEventListener('click', function () {
+    if (state === 'playing') { /* click handled via mousedown; kept for mouse users */ }
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state === 'playing') releaseDrop();
+  }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', restart);
+
+  document.querySelectorAll('.swatch').forEach(function (el) {
+    el.addEventListener('click', function () { selectColor(parseInt(el.getAttribute('data-color') === COLORS[0] ? 0 : COLORS.indexOf(el.getAttribute('data-color')), 10)); });
+    el.addEventListener('touchstart', function (e) {
+      e.preventDefault();
+      selectColor(COLORS.indexOf(el.getAttribute('data-color')));
+    }, { passive: false });
+  });
+
+  reset();
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

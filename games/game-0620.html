@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Orbit Docking</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #04081a; overflow: hidden; font-family: Arial, Helvetica, sans-serif; color: #eaf2ff; }
+  #wrap { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 30%, #16224d 0%, #04081a 62%); }
+  canvas { display: block; background: #050a1e; border: 2px solid #3b5b8f; border-radius: 12px; box-shadow: 0 0 40px rgba(80,140,255,.25); max-width: 96vw; max-height: 92vh; touch-action: none; }
+  #hud { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 96%; pointer-events: none; z-index: 5; }
+  .pill { background: rgba(5,15,35,.88); border: 1px solid #46679f; border-radius: 999px; padding: 7px 12px; font-size: 14px; font-weight: bold; white-space: nowrap; }
+  .pill b { color: #ffd75e; }
+  #fuelbar { width: 130px; height: 12px; background: #223; border: 1px solid #5b7aa8; border-radius: 99px; overflow: hidden; display: inline-block; vertical-align: middle; }
+  #fuelfill { height: 100%; width: 100%; background: linear-gradient(90deg,#35d07f,#ffd75e); transition: width .15s; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(2,6,18,.78); z-index: 10; padding: 18px; }
+  .card { background: #0b1732; border: 2px solid #5b7aa8; border-radius: 16px; padding: 26px 28px; max-width: 620px; width: 100%; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+  .card h1 { font-size: 42px; letter-spacing: 1px; color: #ffd75e; margin-bottom: 6px; }
+  .card h2 { font-size: 30px; margin-bottom: 10px; }
+  .card p, .card li { font-size: 16px; line-height: 1.55; color: #dbe7ff; }
+  .card ul { text-align: left; margin: 14px auto; max-width: 500px; }
+  .card .sub { color: #9fb6dd; font-size: 15px; }
+  button { cursor: pointer; border: none; border-radius: 12px; padding: 14px 26px; font-size: 18px; font-weight: bold; color: #081226; background: #ffd75e; margin-top: 16px; box-shadow: 0 4px 0 #b8962a; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #7fd4ff; box-shadow: 0 4px 0 #3f7fa3; }
+  #controls { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 6; }
+  .cbtn { width: 64px; height: 64px; border-radius: 50%; background: rgba(20,40,80,.9); border: 2px solid #7fa8e0; color: #fff; font-size: 26px; font-weight: bold; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-user-select: none; touch-action: none; }
+  .cbtn.active { background: #ffd75e; color: #081226; }
+  .cbtn.wide { width: 84px; border-radius: 32px; font-size: 16px; }
+  #msg { position: absolute; top: 62px; left: 50%; transform: translateX(-50%); font-weight: bold; font-size: 17px; color: #ffd75e; text-shadow: 0 2px 8px #000; z-index: 5; text-align: center; pointer-events: none; }
+  .hidden { display: none !important; }
+  @media (max-width: 600px) { .card h1 { font-size: 32px; } .pill { font-size: 12px; } .cbtn { width: 56px; height: 56px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span class="pill">Score: <b id="score">0</b></span>
+    <span class="pill">Lives: <b id="lives">3</b></span>
+    <span class="pill">Dockings: <b id="docks">0</b></span>
+    <span class="pill">Fuel: <span id="fuelbar"><span id="fuelfill"></span></span> <b id="fueltext">100%</b></span>
+    <span class="pill">Status: <b id="status">READY</b></span>
+    <span class="pill">Speed: <b id="speed">0.0</b></span>
+  </div>
+  <div id="msg">Match the station rotation — dock gently at the glowing port.</div>
+  <canvas id="game" width="900" height="640"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="card">
+      <h1>ORBIT DOCKING</h1>
+      <p class="sub">Precision Spacecraft Docking</p>
+      <ul>
+        <li><b>Goal:</b> Fly your capsule to the glowing docking port on the rotating station and dock softly.</li>
+        <li><b>Rotate:</b> Left / Right arrows or A / D keys, or the on-screen turn buttons.</li>
+        <li><b>Thrust:</b> Up arrow or W key, the THRUST button, or hold the mouse / touch on space.</li>
+        <li><b>Brake gently:</b> Down arrow or S key fires a retro burst. Docking needs LOW speed and good alignment.</li>
+        <li><b>Crash warning:</b> Touching the station hull away from the port costs a life. Running out of fuel ends the run.</li>
+        <li><b>Win:</b> Dock cleanly to score. Each successful docking makes the station spin a little faster.</li>
+      </ul>
+      <p><b>How to Play:</b> Watch the port marker, line up your nose with it, and creep in. Speed over the safe limit bounces you off — or worse.</p>
+      <button id="startBtn" type="button">Start Docking</button>
+    </div>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div class="card">
+      <h2 id="endTitle">DOCKED!</h2>
+      <p id="endText">Perfect approach.</p>
+      <p style="margin-top:10px;">Final Score: <b id="finalScore" style="color:#ffd75e;">0</b> &nbsp;|&nbsp; Dockings: <b id="finalDocks">0</b></p>
+      <button id="restartBtn" type="button">Restart</button>
+      <button id="nextBtn" type="button" class="secondary hidden">Next Docking</button>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="cbtn" id="btnLeft" role="button" aria-label="Rotate left">◀</div>
+    <div class="cbtn wide" id="btnThrust" role="button" aria-label="Thrust">THRUST</div>
+    <div class="cbtn" id="btnRight" role="button" aria-label="Rotate right">▶</div>
+    <div class="cbtn wide" id="btnBrake" role="button" aria-label="Brake">BRAKE</div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var docksEl = document.getElementById('docks');
+  var statusEl = document.getElementById('status');
+  var speedEl = document.getElementById('speed');
+  var fuelFill = document.getElementById('fuelfill');
+  var fuelText = document.getElementById('fueltext');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+  var finalDocks = document.getElementById('finalDocks');
+  var nextBtn = document.getElementById('nextBtn');
+
+  var state = 'title'; // title | playing | docked | over
+  var score = 0, lives = 3, docks = 0, level = 1;
+  var keys = {};
+  var mouseDown = false;
+  var touchThrust = false;
+
+  var station = { x: W / 2, y: 250, r: 92, angle: 0, spin: 0.35, portOffset: 0 };
+  var ship = null;
+  var particles = [];
+  var stars = [];
+  var flash = 0;
+  var dockTimer = 0;
+  var audioCtx = null;
+  var lastTime = 0;
+  var timeLeft = 0;
+
+  for (var i = 0; i < 110; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.8 + 0.4, tw: Math.random() * Math.PI * 2 });
+  }
+
+  function resetShip() {
+    ship = {
+      x: W / 2, y: H - 90, vx: 0, vy: 0,
+      angle: -Math.PI / 2, av: 0,
+      fuel: 100, radius: 14, thrusting: false
+    };
+    dockTimer = 0;
+  }
+
+  function resetGame() {
+    score = 0; lives = 3; docks = 0; level = 1;
+    station.spin = 0.35; station.angle = 0;
+    resetShip();
+    updateHud('READY');
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || state === 'title') return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+
+  function thrustSound() {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = 'sawtooth'; o.frequency.value = 90 + Math.random() * 30;
+      g.gain.setValueAtTime(0.05, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + 0.12);
+    } catch (e) {}
+  }
+
+  function spawnParticles(x, y, color, n, speed) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2;
+      var s = (Math.random() * speed) + 20;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.6 + Math.random() * 0.5, color: color });
+    }
+  }
+
+  function updateHud(status) {
+    if (status) statusEl.textContent = status;
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    docksEl.textContent = docks;
+    if (ship) {
+      speedEl.textContent = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy).toFixed(1);
+      var f = Math.max(0, Math.round(ship.fuel));
+      fuelText.textContent = f + '%';
+      fuelFill.style.width = f + '%';
+      fuelFill.style.background = f > 40 ? 'linear-gradient(90deg,#35d07f,#ffd75e)' : '#ff5a5a';
+    }
+  }
+
+  function portPos() {
+    var a = station.angle + station.portOffset;
+    return { x: station.x + Math.cos(a) * (station.r + 6), y: station.y + Math.sin(a) * (station.r + 6), angle: a };
+  }
+
+  function angleDiff(a, b) {
+    var d = a - b;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  function crash(reason) {
+    spawnParticles(ship.x, ship.y, '#ff6a3d', 30, 160);
+    flash = 0.5;
+    beep(120, 0.4, 'sawtooth', 0.2);
+    lives--;
+    updateHud('CRASH — ' + reason);
+    if (lives <= 0) {
+      gameOver('Hull destroyed. The station is out of reach.');
+    } else {
+      msgEl.textContent = reason + ' — ' + lives + (lives === 1 ? ' life' : ' lives') + ' left. Re-approaching...';
+      setTimeout(function () { if (state === 'playing') { resetShip(); updateHud('APPROACH'); } }, 900);
+    }
+  }
+
+  function gameOver(text) {
+    state = 'over';
+    endTitle.textContent = 'MISSION FAILED';
+    endText.textContent = text;
+    finalScore.textContent = score;
+    finalDocks.textContent = docks;
+    nextBtn.classList.add('hidden');
+    endScreen.classList.remove('hidden');
+    beep(90, 0.7, 'sawtooth', 0.2);
+  }
+
+  function winDock() {
+    state = 'docked';
+    docks++;
+    var speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+    var fuelBonus = Math.round(ship.fuel);
+    var speedBonus = Math.max(0, Math.round((55 - speed) * 4));
+    var gained = 500 + fuelBonus + speedBonus + (level * 100);
+    score += gained;
+    spawnParticles(ship.x, ship.y, '#ffd75e', 40, 120);
+    beep(660, 0.18, 'sine', 0.16);
+    setTimeout(function () { beep(880, 0.22, 'sine', 0.16); }, 160);
+    endTitle.textContent = 'DOCKED!';
+    endText.textContent = 'Clean docking! +' + gained + ' points. Fuel bonus ' + fuelBonus + ', gentle-approach bonus ' + speedBonus + '.';
+    finalScore.textContent = score;
+    finalDocks.textContent = docks;
+    nextBtn.classList.remove('hidden');
+    endScreen.classList.remove('hidden');
+    updateHud('DOCKED');
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    msgEl.textContent = 'Approach the glowing port slowly and line up your nose with it.';
+    updateHud('APPROACH');
+    beep(440, 0.15, 'sine', 0.14);
+  }
+
+  function nextLevel() {
+    level++;
+    station.spin = 0.35 + (level - 1) * 0.12;
+    station.spin = station.spin * (Math.random() < 0.5 ? 1 : -1);
+    resetShip();
+    state = 'playing';
+    endScreen.classList.add('hidden');
+    msgEl.textContent = 'Level ' + level + ': the station is spinning faster. Dock again!';
+    updateHud('APPROACH');
+  }
+
+  function update(dt) {
+    if (state !== 'playing' || !ship) return;
+    station.angle += station.spin * dt;
+
+    var left = keys.ArrowLeft || keys.a || keys.A;
+    var right = keys.ArrowRight || keys.d || keys.D;
+    var thrust = keys.ArrowUp || keys.w || keys.W || mouseDown || touchThrust;
+    var brake = keys.ArrowDown || keys.s || keys.S;
+
+    // Buttons feed the same flags through data attributes handled below.
+    if (btnLeft.classList.contains('active')) left = true;
+    if (btnRight.classList.contains('active')) right = true;
+    if (btnThrust.classList.contains('active')) thrust = true;
+    if (btnBrake.classList.contains('active')) brake = true;
+
+    if (left) ship.av -= 2.6 * dt;
+    if (right) ship.av += 2.6 * dt;
+    ship.av *= Math.pow(0.35, dt);
+    ship.angle += ship.av * dt;
+
+    ship.thrusting = false;
+    if (thrust && ship.fuel > 0) {
+      ship.vx += Math.cos(ship.angle) * 150 * dt;
+      ship.vy += Math.sin(ship.angle) * 150 * dt;
+      ship.fuel -= 7 * dt;
+      ship.thrusting = true;
+      if (Math.random() < 0.25) thrustSound();
+      var bx = ship.x - Math.cos(ship.angle) * 16;
+      var by = ship.y - Math.sin(ship.angle) * 16;
+      particles.push({ x: bx, y: by, vx: -Math.cos(ship.angle) * 60 + (Math.random() - 0.5) * 30, vy: -Math.sin(ship.angle) * 60 + (Math.random() - 0.5) * 30, life: 0.35, color: '#ffb347' });
+    }
+    if (brake && ship.fuel > 0) {
+      ship.vx *= Math.pow(0.25, dt);
+      ship.vy *= Math.pow(0.25, dt);
+      ship.fuel -= 5 * dt;
+    }
+
+    ship.x += ship.vx * dt;
+    ship.y += ship.vy * dt;
+
+    // Soft walls: bounce back inside the play area.
+    if (ship.x < 20) { ship.x = 20; ship.vx = Math.abs(ship.vx) * 0.5; }
+    if (ship.x > W - 20) { ship.x = W - 20; ship.vx = -Math.abs(ship.vx) * 0.5; }
+    if (ship.y < 70) { ship.y = 70; ship.vy = Math.abs(ship.vy) * 0.5; }
+    if (ship.y > H - 20) { ship.y = H - 20; ship.vy = -Math.abs(ship.vy) * 0.5; }
+
+    if (ship.fuel <= 0) {
+      ship.fuel = 0;
+      gameOver('Fuel exhausted before docking. Drift carefully next time — thrust less, plan more.');
+      updateHud('OUT OF FUEL');
+      return;
+    }
+
+    var p = portPos();
+    var dx = ship.x - p.x, dy = ship.y - p.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+    var align = Math.abs(angleDiff(ship.angle, p.angle));
+    var distCenter = Math.sqrt((ship.x - station.x) * (ship.x - station.x) + (ship.y - station.y) * (ship.y - station.y));
+
+    if (dist < 26 && speed < 55 && align < 0.55) {
+      dockTimer += dt;
+      if (dockTimer > 0.25) { winDock(); return; }
+      updateHud('DOCKING...');
+    } else if (dist < 30 && speed >= 55) {
+      // Too fast: bounce off the port and warn.
+      ship.vx *= -0.4; ship.vy *= -0.4;
+      msgEl.textContent = 'Too fast! Slow below 55 and align before touching the port.';
+      beep(220, 0.2, 'square', 0.12);
+    } else {
+      dockTimer = 0;
+      if (distCenter < station.r + 12) {
+        crash('Hull impact');
+        return;
+      }
+      updateHud(dist < 150 ? 'FINAL APPROACH' : 'APPROACH');
+    }
+    if (dist < 120) msgEl.textContent = 'Port ' + Math.round(dist) + ' away — speed ' + speed.toFixed(0) + ' (keep under 55), alignment ' + Math.round(align * 57) + '°.';
+    updateHud();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var t = performance.now() / 1000;
+    ctx.fillStyle = '#050a1e';
+    ctx.fillRect(0, 0, W, H);
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t * 2 + s.tw);
+      ctx.fillStyle = '#cfe0ff';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Docking guide line from ship to port.
+    if (state === 'playing' && ship) {
+      var p0 = portPos();
+      ctx.strokeStyle = 'rgba(255,215,94,0.35)';
+      ctx.setLineDash([6, 8]);
+      ctx.beginPath(); ctx.moveTo(ship.x, ship.y); ctx.lineTo(p0.x, p0.y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Station: hull, ring, spokes, modules, rotating port.
+    ctx.save();
+    ctx.translate(station.x, station.y);
+    ctx.rotate(station.angle);
+    ctx.fillStyle = '#22365e';
+    ctx.beginPath(); ctx.arc(0, 0, station.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#8fb2e8'; ctx.lineWidth = 4; ctx.stroke();
+    ctx.strokeStyle = '#46679f'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, station.r - 18, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 34, 0, Math.PI * 2); ctx.stroke();
+    for (var m = 0; m < 4; m++) {
+      var a = m * Math.PI / 2;
+      ctx.strokeStyle = '#7fa8e0'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(Math.cos(a) * 34, Math.sin(a) * 34); ctx.lineTo(Math.cos(a) * (station.r - 6), Math.sin(a) * (station.r - 6)); ctx.stroke();
+      ctx.fillStyle = '#5b7aa8';
+      ctx.fillRect(Math.cos(a) * 58 - 8, Math.sin(a) * 58 - 8, 16, 16);
+    }
+    // Solar panels.
+    ctx.fillStyle = '#2a5aa8';
+    ctx.fillRect(-110, -10, 36, 20);
+    ctx.fillRect(74, -10, 36, 20);
+    ctx.strokeStyle = '#9fc4ff'; ctx.strokeRect(-110, -10, 36, 20); ctx.strokeRect(74, -10, 36, 20);
+    // Docking port at portOffset (angle 0 in station frame).
+    ctx.save();
+    ctx.rotate(station.portOffset);
+    ctx.fillStyle = '#ffd75e';
+    ctx.shadowColor = '#ffd75e'; ctx.shadowBlur = 22;
+    ctx.fillRect(station.r - 4, -16, 24, 32);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#081226';
+    ctx.font = 'bold 13px Arial';
+    ctx.fillText('DOCK', station.r - 1, 5);
+    ctx.restore();
+    ctx.fillStyle = '#dbe7ff';
+    ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff5a5a';
+    ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // Particles.
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var pt = particles[j];
+      pt.life -= 0.016; pt.x += pt.vx * 0.016; pt.y += pt.vy * 0.016;
+      if (pt.life <= 0) { particles.splice(j, 1); continue; }
+      ctx.globalAlpha = Math.max(0, pt.life);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Ship capsule.
+    if (ship && state !== 'over') {
+      ctx.save();
+      ctx.translate(ship.x, ship.y);
+      ctx.rotate(ship.angle + Math.PI / 2);
+      if (ship.thrusting) {
+        ctx.fillStyle = '#ffb347';
+        ctx.beginPath(); ctx.moveTo(-6, 14); ctx.lineTo(0, 30 + Math.random() * 10); ctx.lineTo(6, 14); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = '#e8eefc';
+      ctx.beginPath(); ctx.moveTo(0, -18); ctx.quadraticCurveTo(13, -4, 11, 10); ctx.lineTo(-11, 10); ctx.quadraticCurveTo(-13, -4, 0, -18); ctx.fill();
+      ctx.strokeStyle = '#5b7aa8'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#7fd4ff';
+      ctx.beginPath(); ctx.arc(0, -4, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ff5a5a';
+      ctx.fillRect(-3, 12, 6, 5);
+      ctx.restore();
+      // Alignment helper: nose direction tick.
+      ctx.strokeStyle = 'rgba(127,212,255,0.7)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(ship.x, ship.y); ctx.lineTo(ship.x + Math.cos(ship.angle) * 26, ship.y + Math.sin(ship.angle) * 26); ctx.stroke();
+    }
+
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(255,90,60,' + Math.min(0.35, flash) + ')';
+      ctx.fillRect(0, 0, W, H);
+      flash -= 0.016;
+    }
+  }
+
+  function loop(ts) {
+    var dt = Math.min(0.033, (ts - lastTime) / 1000 || 0.016);
+    lastTime = ts;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  var btnLeft = document.getElementById('btnLeft');
+  var btnRight = document.getElementById('btnRight');
+  var btnThrust = document.getElementById('btnThrust');
+  var btnBrake = document.getElementById('btnBrake');
+
+  function bindHold(el) {
+    el.addEventListener('mousedown', function (e) { e.preventDefault(); el.classList.add('active'); ensureAudio(); });
+    el.addEventListener('mouseup', function () { el.classList.remove('active'); });
+    el.addEventListener('mouseleave', function () { el.classList.remove('active'); });
+    el.addEventListener('touchstart', function (e) { e.preventDefault(); el.classList.add('active'); ensureAudio(); }, { passive: false });
+    el.addEventListener('touchend', function () { el.classList.remove('active'); });
+    el.addEventListener('touchcancel', function () { el.classList.remove('active'); });
+  }
+  bindHold(btnLeft); bindHold(btnRight); bindHold(btnThrust); bindHold(btnBrake);
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) >= 0) e.preventDefault();
+    if ((e.key === 'Enter' || e.key === ' ') && state === 'title') startGame();
+    if ((e.key === 'Enter' || e.key === 'r' || e.key === 'R') && (state === 'over' || state === 'docked')) startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  canvas.addEventListener('mousedown', function () { mouseDown = true; ensureAudio(); });
+  canvas.addEventListener('mouseup', function () { mouseDown = false; });
+  canvas.addEventListener('mouseleave', function () { mouseDown = false; });
+  canvas.addEventListener('click', function () { ensureAudio(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); touchThrust = true; ensureAudio(); }, { passive: false });
+  canvas.addEventListener('touchend', function () { touchThrust = false; });
+  canvas.addEventListener('touchcancel', function () { touchThrust = false; });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  nextBtn.addEventListener('click', nextLevel);
+
+  resetGame();
+  updateHud('READY');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

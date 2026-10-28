@@ -14,3 +14,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0608 | Taiko Thunder Drums | Rhythm / Taiko Drum Timing | Keys strike left/right drums, mouse/touch tap drums | [Play](./../games/game-0608.html) |
 | 0609 | Lantern Lake Fishing | Arcade / Night Fishing Tension | Space cast and reel, mouse/touch cast and reel | [Play](./../games/game-0609.html) |
 | 0610 | Avalanche Architect | Precision / Avalanche Barrier Placement | Mouse/touch click slope to place barriers, Space trigger, Keys select | [Play](./../games/game-0610.html) |
+| 0611 | Starlight Parcel Run | Arcade / Space Delivery Action | Arrow Keys/WASD steer, Space deliver, mouse/touch drag | [Play](./../games/game-0611.html) |
+| 0612 | Prism Relay | Puzzle / Light Beam Logic | Mouse/touch click tiles to rotate, Arrow Keys move cursor | [Play](./../games/game-0612.html) |
+| 0613 | Quayside Commander | Strategy / Port Docking Simulation | Mouse/touch click ships and docks, Keys 1-4 assign | [Play](./../games/game-0613.html) |
+| 0614 | Neon Beat Bounce | Rhythm / Bouncing Beat Timing | Keys tap pads on beat, mouse/touch tap pads | [Play](./../games/game-0614.html) |
+| 0615 | Kite Storm Surfer | Arcade / Wind Kite Surfing | Arrow Keys/W-S steer, Space jump, mouse/touch drag | [Play](./../games/game-0615.html) |
+| 0616 | Circuit Gardener | Puzzle / Circuit Connection Logic | Mouse/touch click tiles to rotate, Arrow Keys move cursor | [Play](./../games/game-0616.html) |
+| 0617 | Ovenlight Bakery | Strategy / Bakery Order Management | Mouse/touch tap ovens and orders, Keys select | [Play](./../games/game-0617.html) |
+| 0618 | Pendulum Painter | Precision / Pendulum Timing Painting | Space/click release paint, mouse/touch tap, Keys select color | [Play](./../games/game-0618.html) |
+| 0619 | Subzero Skater | Arcade / Ice Skating Collect | Arrow Keys/WASD slide, mouse/touch steer | [Play](./../games/game-0619.html) |
+| 0620 | Orbit Docking | Precision / Spacecraft Docking | Arrow Keys thrust/rotate, mouse/touch thrust, Space dock | [Play](./../games/game-0620.html) |

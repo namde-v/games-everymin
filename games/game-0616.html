@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Circuit Gardener</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #0e1f16;
+    color: #eafff0;
+    font-family: Verdana, Geneva, Tahoma, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    overflow-x: hidden;
+  }
+  h1 { font-size: 26px; letter-spacing: 1px; margin: 6px 0 2px; color: #a8ffb8; text-align: center; }
+  .tag { font-size: 13px; color: #bfe8c8; margin-bottom: 8px; text-align: center; }
+  #hud {
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    background: #173626; border: 2px solid #3f7d55; border-radius: 10px;
+    padding: 8px 12px; margin-bottom: 10px; width: min(640px, 96vw);
+  }
+  #hud span { font-size: 15px; font-weight: bold; }
+  #hud .label { color: #9fd6ab; font-weight: normal; }
+  #status { width: min(640px, 96vw); text-align: center; min-height: 22px; font-size: 15px; color: #ffe9a8; margin-bottom: 6px; }
+  #wrap { position: relative; width: min(640px, 96vw); }
+  canvas {
+    display: block; width: 100%; height: auto; aspect-ratio: 6 / 6;
+    background: #1d4a2c; border: 3px solid #57a86b; border-radius: 12px;
+    touch-action: none; cursor: pointer;
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; text-align: center;
+    background: rgba(6, 22, 13, 0.92); border-radius: 12px; padding: 22px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #a8ffb8; }
+  .overlay p { font-size: 15px; line-height: 1.55; max-width: 480px; color: #dff5e3; }
+  .overlay .big { font-size: 44px; }
+  button {
+    background: #ffd94d; color: #1a2b1e; border: none; border-radius: 10px;
+    padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer;
+  }
+  button:hover { background: #ffe88a; }
+  button.secondary { background: #2f6b45; color: #eafff0; padding: 10px 18px; font-size: 15px; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  .hint { font-size: 13px; color: #bfe8c8; margin-top: 10px; text-align: center; max-width: 640px; line-height: 1.5; }
+  kbd { background: #243c2c; border: 1px solid #57a86b; border-radius: 4px; padding: 1px 6px; }
+</style>
+</head>
+<body>
+<h1>🌱 Circuit Gardener ⚡</h1>
+<div class="tag">Puzzle / Circuit Connection Logic — wire the power, bloom every plant!</div>
+
+<div id="hud">
+  <span><span class="label">Score:</span> <span id="score">0</span></span>
+  <span><span class="label">Moves left:</span> <span id="moves">40</span></span>
+  <span><span class="label">Lives:</span> <span id="lives">❤❤❤</span></span>
+  <span><span class="label">Plants:</span> <span id="plants">0 / 3</span></span>
+</div>
+<div id="status">Press Start and wire up the garden!</div>
+
+<div id="wrap">
+  <canvas id="game" width="600" height="600"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="big">🌱⚡🌸</div>
+    <h2>Circuit Gardener</h2>
+    <p><strong>How to Play:</strong> A power source on the left must reach all three
+    plants through wire tiles. Click or tap a wire tile to rotate it 90 degrees.
+    Use arrow keys to move the glowing cursor and <kbd>Space</kbd> or
+    <kbd>Enter</kbd> to rotate the selected tile. Each rotation costs one move.
+    Beware the thorny weeds: powering a weed causes a short circuit and costs a life!
+    Win when all 3 plants bloom. You lose if you run out of moves or lives.</p>
+    <p>Wire pieces: straight lines, corners and junctions. A wire only carries power
+    when its metal ends line up with its neighbours.</p>
+    <button id="startBtn">▶ Start Game</button>
+    <button id="helpBtn" class="secondary">How to Play (again)</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div class="big" id="endEmoji">🌸</div>
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart</button>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="restartBtn2" class="secondary">↻ Restart</button>
+  <button id="helpBtn2" class="secondary">? How to Play</button>
+  <button id="soundBtn" class="secondary">🔊 Sound: On</button>
+</div>
+<div class="hint">
+  Mouse: click a tile to rotate it &nbsp;•&nbsp; Touch: tap a tile &nbsp;•&nbsp;
+  Keyboard: <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> move cursor, <kbd>Space</kbd> rotate, <kbd>R</kbd> restart
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 6, ROWS = 6, CELL = 100;
+  var N = 1, E = 2, S = 4, W = 8;
+  var DIRS = [{ dx: 0, dy: -1, bit: N, opp: S }, { dx: 1, dy: 0, bit: E, opp: W },
+              { dx: 0, dy: 1, bit: S, opp: N }, { dx: -1, dy: 0, bit: W, opp: E }];
+
+  function rotCW(mask) { return ((mask << 1) & 15) | ((mask >> 3) & 1); }
+  function rotTimes(mask, n) { var m = mask; for (var i = 0; i < n; i++) m = rotCW(m); return m; }
+
+  // Solution layout, then scrambled by rotating wire tiles.
+  // key "x,y": { kind, mask }  kind: source | plant | wire | weed | empty
+  var SOLUTION = {
+    '0,2': { kind: 'source', mask: E },
+    '1,2': { kind: 'wire', mask: E | W },
+    '2,2': { kind: 'wire', mask: W | E | N },
+    '2,1': { kind: 'wire', mask: N | S },
+    '2,0': { kind: 'plant', mask: 15 },
+    '3,2': { kind: 'wire', mask: E | W },
+    '4,2': { kind: 'wire', mask: W | E | S },
+    '4,3': { kind: 'wire', mask: N | S },
+    '4,4': { kind: 'wire', mask: N | S },
+    '4,5': { kind: 'plant', mask: 15 },
+    '5,2': { kind: 'plant', mask: 15 },
+    '2,3': { kind: 'weed', mask: N },
+    '4,1': { kind: 'weed', mask: S }
+  };
+  // How many quarter-turns each wire is scrambled away from the solution.
+  var SCRAMBLE = { '1,2': 1, '2,2': 1, '2,1': 1, '3,2': 1, '4,2': 2, '4,3': 1, '4,4': 3 };
+
+  var grid, cursor, moves, lives, score, state, powered, plantsPowered, burnt;
+  var audioCtx = null, soundOn = true, particles = [], lastTime = 0, bloomPhase = 0;
+
+  function newGrid() {
+    grid = [];
+    for (var y = 0; y < ROWS; y++) {
+      var row = [];
+      for (var x = 0; x < COLS; x++) {
+        var def = SOLUTION[x + ',' + y];
+        if (!def) { row.push({ kind: 'empty', mask: 0 }); continue; }
+        var mask = def.mask;
+        if (def.kind === 'wire') mask = rotTimes(def.mask, SCRAMBLE[x + ',' + y] || 0);
+        row.push({ kind: def.kind, mask: mask });
+      }
+      grid.push(row);
+    }
+  }
+
+  function reset() {
+    newGrid();
+    cursor = { x: 1, y: 2 };
+    moves = 40; lives = 3; score = 0;
+    state = 'title'; powered = {}; plantsPowered = 0; burnt = {};
+    particles = [];
+    document.getElementById('endScreen').classList.add('hidden');
+    updateHud('Press Start and wire up the garden!');
+    draw();
+  }
+
+  function cellKey(x, y) { return x + ',' + y; }
+
+  // Flood power from every source through aligned wires.
+  function computePower() {
+    powered = {}; plantsPowered = 0;
+    var queue = [];
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
+      if (grid[y][x].kind === 'source') { queue.push([x, y]); powered[cellKey(x, y)] = true; }
+    }
+    while (queue.length) {
+      var cur = queue.shift(), cx = cur[0], cy = cur[1];
+      var tile = grid[cy][cx];
+      for (var i = 0; i < DIRS.length; i++) {
+        var d = DIRS[i];
+        if (!(tile.mask & d.bit)) continue;
+        var nx = cx + d.dx, ny = cy + d.dy;
+        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+        var nb = grid[ny][nx];
+        if (nb.kind === 'empty') continue;
+        if (nb.kind === 'weed' && burnt[cellKey(nx, ny)]) continue;
+        if (!(nb.mask & d.opp)) continue;
+        var k = cellKey(nx, ny);
+        if (powered[k]) continue;
+        powered[k] = true;
+        if (nb.kind === 'plant') plantsPowered++;
+        else if (nb.kind === 'wire') queue.push([nx, ny]);
+        else if (nb.kind === 'weed') queue.push([nx, ny]); // weed only flags a short, it does not pass power on
+      }
+    }
+    // Weeds must not pass power onward: remove weed cells from the frontier effect
+    // by recomputing without weed traversal (weeds are endpoints only).
+    return powered;
+  }
+
+  function checkShorts() {
+    var hits = [];
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
+      var t = grid[y][x];
+      if (t.kind === 'weed' && !burnt[cellKey(x, y)] && powered[cellKey(x, y)]) hits.push([x, y]);
+    }
+    return hits;
+  }
+
+  function updateHud(msg) {
+    document.getElementById('score').textContent = score;
+    document.getElementById('moves').textContent = moves;
+    document.getElementById('lives').textContent = '❤'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    document.getElementById('plants').textContent = plantsPowered + ' / 3';
+    if (msg !== undefined) document.getElementById('status').textContent = msg;
+  }
+
+  function beep(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is decorative */ }
+  }
+  function melody(notes) {
+    if (!soundOn || !audioCtx) return;
+    notes.forEach(function (n, i) {
+      setTimeout(function () { beep(n, 0.22, 'triangle', 0.12); }, i * 140);
+    });
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) {
+      particles.push({ x: x * CELL + CELL / 2, y: y * CELL + CELL / 2,
+        vx: (Math.random() - 0.5) * 220, vy: (Math.random() - 0.5) * 220,
+        life: 0.7, color: color });
+    }
+  }
+
+  function rotateTile(x, y) {
+    if (state !== 'playing') return;
+    var t = grid[y][x];
+    if (t.kind !== 'wire') {
+      if (t.kind === 'plant') updateHud('That plant needs power, not a twist!');
+      else if (t.kind === 'source') updateHud('The power source is fixed in place.');
+      else if (t.kind === 'weed') updateHud('Do not feed the thorny weed!');
+      else updateHud('Nothing to rotate there — try a wire tile.');
+      beep(140, 0.08, 'square', 0.05);
+      return;
+    }
+    t.mask = rotCW(t.mask);
+    moves--;
+    beep(520, 0.09, 'square', 0.08);
+    computePower();
+    var shorts = checkShorts();
+    if (shorts.length) {
+      shorts.forEach(function (s) {
+        burnt[cellKey(s[0], s[1])] = true;
+        burst(s[0], s[1], '#ff5533', 22);
+      });
+      lives--;
+      beep(110, 0.35, 'sawtooth', 0.14);
+      if (lives <= 0) { score = Math.max(0, score); updateHud(); return endGame(false, 'short'); }
+      updateHud('SHORT CIRCUIT! A weed stole the power. Lives left: ' + lives);
+      computePower(); // weeds burnt out no longer conduct
+    }
+    score = plantsPowered * 100 + (40 - moves) * 0;
+    if (plantsPowered >= 3) {
+      score += moves * 10 + lives * 50;
+      return endGame(true);
+    }
+    if (moves <= 0) return endGame(false, 'moves');
+    if (!shorts.length) updateHud('Plants powered: ' + plantsPowered + ' / 3 — keep wiring!');
+    updateHud();
+    document.getElementById('status').textContent =
+      shorts.length ? document.getElementById('status').textContent : 'Plants powered: ' + plantsPowered + ' / 3 — keep wiring!';
+    draw();
+  }
+
+  function endGame(won, reason) {
+    state = won ? 'won' : 'lost';
+    var title = document.getElementById('endTitle');
+    var text = document.getElementById('endText');
+    var emoji = document.getElementById('endEmoji');
+    if (won) {
+      title.textContent = 'Garden in Bloom!';
+      emoji.textContent = '🌸🌻🌷';
+      text.textContent = 'All 3 plants are powered and blooming! Final score: ' + score +
+        ' (moves left: ' + moves + ', lives left: ' + lives + ').';
+      melody([523, 659, 784, 1047]);
+      for (var i = 0; i < 3; i++) burst(2 + i, 0, '#ff9de2', 10);
+    } else {
+      title.textContent = 'Game Over';
+      emoji.textContent = '🥀';
+      text.textContent = reason === 'short'
+        ? 'Too many short circuits! The weeds fried the circuit. Final score: ' + score + '. Try again!'
+        : 'Out of moves! The garden stayed dark. Final score: ' + score + '. Try again!';
+      beep(160, 0.5, 'sawtooth', 0.12);
+    }
+    updateHud();
+    document.getElementById('endScreen').classList.remove('hidden');
+    draw();
+  }
+
+  function startGame() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    reset();
+    state = 'playing';
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    computePower();
+    updateHud('Rotate the wires to light up all 3 plants!');
+    melody([440, 554, 659]);
+    draw();
+  }
+
+  function showHelp() {
+    state = state === 'playing' ? 'playing' : state;
+    document.getElementById('titleScreen').classList.remove('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+  }
+
+  // ---------- Drawing ----------
+  function drawTile(x, y) {
+    var t = grid[y][x], px = x * CELL, py = y * CELL;
+    ctx.fillStyle = (x + y) % 2 ? '#245c33' : '#2a6a3a';
+    ctx.fillRect(px, py, CELL, CELL);
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2;
+    ctx.strokeRect(px + 1, py + 1, CELL - 2, CELL - 2);
+    var cx = px + CELL / 2, cy = py + CELL / 2;
+    var isPowered = !!powered[cellKey(x, y)];
+    if (t.kind === 'empty') {
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.beginPath(); ctx.arc(px + 22, py + 78, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px + 80, py + 24, 5, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    if (t.kind === 'weed') {
+      if (burnt[cellKey(x, y)]) {
+        ctx.fillStyle = '#1a1a1a'; ctx.beginPath(); ctx.arc(cx, cy, 18, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#888'; ctx.font = '22px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('✕', cx, cy);
+      } else {
+        ctx.fillStyle = '#6b2d8f'; ctx.font = '44px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('🌵', cx, cy + 2);
+        ctx.fillStyle = '#ff5533'; ctx.font = 'bold 13px Verdana';
+        ctx.fillText('WEED', cx, py + 90);
+      }
+      return;
+    }
+    if (t.kind === 'source') {
+      ctx.fillStyle = '#ffd94d';
+      ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#1a2b1e'; ctx.font = 'bold 30px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⚡', cx, cy + 1);
+      ctx.fillStyle = '#ffe88a'; ctx.font = 'bold 12px Verdana'; ctx.fillText('POWER', cx, py + 92);
+      return;
+    }
+    if (t.kind === 'plant') {
+      // pot
+      ctx.fillStyle = '#b5651d';
+      ctx.beginPath(); ctx.moveTo(cx - 22, cy + 8); ctx.lineTo(cx + 22, cy + 8);
+      ctx.lineTo(cx + 16, cy + 34); ctx.lineTo(cx - 16, cy + 34); ctx.closePath(); ctx.fill();
+      if (isPowered) {
+        var wob = Math.sin(bloomPhase + x * 1.3 + y) * 3;
+        ctx.fillStyle = '#3fae5a'; ctx.fillRect(cx - 2, cy - 14, 4, 22);
+        ctx.fillStyle = '#ff9de2';
+        for (var p = 0; p < 6; p++) {
+          var a = p * Math.PI / 3 + bloomPhase * 0.4;
+          ctx.beginPath(); ctx.arc(cx + Math.cos(a) * 17, cy - 22 + Math.sin(a) * 17 + wob, 10, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = '#ffd94d'; ctx.beginPath(); ctx.arc(cx, cy - 22 + wob, 9, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 4; ctx.beginPath();
+        ctx.moveTo(cx, cy + 8); ctx.quadraticCurveTo(cx + 6, cy - 8, cx, cy - 16); ctx.stroke();
+        ctx.fillStyle = '#5d7a4a'; ctx.font = '26px Verdana'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('🌱', cx, cy - 24);
+      }
+      return;
+    }
+    // wire tile
+    ctx.fillStyle = '#3a3f45';
+    ctx.beginPath(); ctx.arc(cx, cy, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = isPowered ? '#ffe45c' : '#9aa5ad'; ctx.lineWidth = isPowered ? 10 : 8;
+    ctx.lineCap = 'round';
+    DIRS.forEach(function (d) {
+      if (!(t.mask & d.bit)) return;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + d.dx * 46, cy + d.dy * 46); ctx.stroke();
+    });
+    ctx.fillStyle = isPowered ? '#ffe45c' : '#c8d0d6';
+    ctx.beginPath(); ctx.arc(cx, cy, 9, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) drawTile(x, y);
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (state === 'playing') {
+      ctx.strokeStyle = '#ffd94d'; ctx.lineWidth = 5;
+      ctx.strokeRect(cursor.x * CELL + 3, cursor.y * CELL + 3, CELL - 6, CELL - 6);
+    }
+  }
+
+  function loop(ts) {
+    var dt = Math.min(0.05, (ts - lastTime) / 1000 || 0);
+    lastTime = ts; bloomPhase += dt * 2;
+    particles.forEach(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function cellFromEvent(e) {
+    var r = canvas.getBoundingClientRect();
+    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: Math.floor((clientX - r.left) / r.width * COLS),
+             y: Math.floor((clientY - r.top) / r.height * ROWS) };
+  }
+
+  canvas.addEventListener('mousedown', function (e) {
+    var c = cellFromEvent(e);
+    if (c.x < 0 || c.y < 0 || c.x >= COLS || c.y >= ROWS) return;
+    cursor = c; rotateTile(c.x, c.y); draw();
+  });
+  canvas.addEventListener('click', function (e) {
+    var c = cellFromEvent(e);
+    if (c.x >= 0 && c.y >= 0 && c.x < COLS && c.y < ROWS) cursor = c;
+    draw();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var c = cellFromEvent(e);
+    if (c.x < 0 || c.y < 0 || c.x >= COLS || c.y >= ROWS) return;
+    cursor = c; rotateTile(c.x, c.y); draw();
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (state !== 'playing' && (e.key === 'Enter' || e.key === ' ')) {
+      if (!document.getElementById('titleScreen').classList.contains('hidden')) { startGame(); return; }
+      if (!document.getElementById('endScreen').classList.contains('hidden')) { startGame(); return; }
+    }
+    if (e.key === 'r' || e.key === 'R') { startGame(); return; }
+    if (state !== 'playing') return;
+    if (e.key === 'ArrowLeft') cursor.x = Math.max(0, cursor.x - 1);
+    else if (e.key === 'ArrowRight') cursor.x = Math.min(COLS - 1, cursor.x + 1);
+    else if (e.key === 'ArrowUp') cursor.y = Math.max(0, cursor.y - 1);
+    else if (e.key === 'ArrowDown') cursor.y = Math.min(ROWS - 1, cursor.y + 1);
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); rotateTile(cursor.x, cursor.y); }
+    draw();
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn2').addEventListener('click', startGame);
+  document.getElementById('helpBtn').addEventListener('click', function () {
+    document.getElementById('titleScreen').classList.remove('hidden');
+  });
+  document.getElementById('helpBtn2').addEventListener('click', showHelp);
+  document.getElementById('soundBtn').addEventListener('click', function (e) {
+    soundOn = !soundOn;
+    e.target.textContent = soundOn ? '🔊 Sound: On' : '🔇 Sound: Off';
+  });
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

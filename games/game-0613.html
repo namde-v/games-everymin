@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Quayside Commander</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b1e2d; color: #eaf6ff; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { margin: 6px 0 2px; font-size: 26px; letter-spacing: 1px; text-shadow: 0 2px 0 #000; }
+  p.sub { margin: 0 0 10px; color: #9fd8ef; font-size: 14px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: min(920px, 96vw); margin-bottom: 8px; }
+  .pill { background: #14324a; border: 2px solid #2a5a7d; border-radius: 10px; padding: 7px 12px; font-weight: bold; font-size: 14px; min-width: 130px; text-align: center; }
+  .pill span { color: #ffd166; }
+  #wrap { position: relative; width: min(920px, 96vw); }
+  canvas { width: 100%; height: auto; display: block; background: #1a6b8a; border: 3px solid #f4d35e; border-radius: 12px; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; background: rgba(4, 22, 38, 0.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; margin: 4px 0 8px; color: #ffd166; }
+  .overlay p { max-width: 620px; line-height: 1.55; font-size: 15px; margin: 6px 0; }
+  .howto { background: #122f45; border: 1px solid #2a5a7d; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; max-width: 620px; }
+  .howto b { color: #7bd0f0; }
+  button { margin-top: 14px; background: #ffd166; color: #102a43; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8912a; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8912a; }
+  button.secondary { background: #7bd0f0; box-shadow: 0 4px 0 #2a7aa0; }
+  #msg { min-height: 22px; font-weight: bold; color: #ffd166; margin-top: 6px; }
+  #legend { font-size: 13px; color: #cfeaff; margin-top: 6px; text-align: center; line-height: 1.5; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin: 0 3px; }
+</style>
+</head>
+<body>
+<h1>⚓ HARBOR MASTER</h1>
+<p class="sub">Run the docks. Match every ship before its patience runs out.</p>
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Reputation: <span id="lives">★★★★★</span></div>
+  <div class="pill">Delivered: <span id="delivered">0</span> / 15</div>
+  <div class="pill">Shift Time: <span id="timer">180</span>s</div>
+  <div class="pill">Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>⚓ HARBOR MASTER</h2>
+    <p>You are in charge of a busy harbor. Ships arrive with different cargo. Send each one to the right dock before it loses patience and sails away angry.</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      • <b>Mouse / Touch:</b> Tap a waiting ship to select it, then tap its matching dock.<br>
+      • <b>Keyboard:</b> ← → to choose a ship, 1 = Container dock, 2 = Tanker dock, 3 = Ferry dock.<br>
+      • <span class="dot" style="background:#38bdf8"></span> <b>Container</b> &nbsp; <span class="dot" style="background:#fb923c"></span> <b>Tanker</b> &nbsp; <span class="dot" style="background:#34d399"></span> <b>Ferry</b><br>
+      • Right dock = points + cargo unloaded. Wrong dock = −50 points and −1 reputation.<br>
+      • A ship that runs out of patience = −1 reputation.<br>
+      • <b>WIN:</b> Deliver 15 ships. <b>LOSE:</b> Reputation hits zero, or the 180-second shift ends first.
+    </div>
+    <button id="startBtn">▶ Start Shift</button>
+    <p style="font-size:13px;color:#9fd8ef">Tip: serve ships with the shortest patience bar first. Green bars are calm, red bars are urgent.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Shift Complete</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ Restart</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+<div id="msg"></div>
+<div id="legend">Docks: 1 Container &nbsp;|&nbsp; 2 Tanker &nbsp;|&nbsp; 3 Ferry &nbsp;—&nbsp; Click a ship, then its dock. Press R to restart after the game ends.</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var deliveredEl = document.getElementById('delivered');
+  var timerEl = document.getElementById('timer');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var TYPES = [
+    { name: 'Container', color: '#38bdf8', dark: '#0369a1', icon: '▦', cargo: 'Crates' },
+    { name: 'Tanker', color: '#fb923c', dark: '#9a3412', icon: '◉', cargo: 'Fuel' },
+    { name: 'Ferry', color: '#34d399', dark: '#065f46', icon: '⛴', cargo: 'Passengers' }
+  ];
+  var DOCKS = [
+    { type: 0, label: 'CONTAINER DOCK', x: 40, y: 430, w: 260, h: 95 },
+    { type: 1, label: 'TANKER DOCK', x: 320, y: 430, w: 260, h: 95 },
+    { type: 2, label: 'FERRY DOCK', x: 600, y: 430, w: 260, h: 95 }
+  ];
+
+  var state = 'title';
+  var score = 0, reputation = 5, delivered = 0, shiftTime = 180, lastTime = 0;
+  var ships = [], selected = -1, nextId = 1, spawnTimer = 1.2, wave = 0, flash = 0, flashMsg = '';
+  var audioCtx = null;
+
+  function beep(freq, dur, kind) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = kind || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.16, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundGood() { beep(660, 0.14, 'sine'); setTimeout(function(){ beep(880, 0.18, 'sine'); }, 90); }
+  function soundBad() { beep(180, 0.25, 'sawtooth'); setTimeout(function(){ beep(130, 0.25, 'sawtooth'); }, 120); }
+  function soundDock() { beep(440, 0.12, 'triangle'); setTimeout(function(){ beep(550, 0.12, 'triangle'); }, 80); }
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function resetGame() {
+    score = 0; reputation = 5; delivered = 0; shiftTime = 180;
+    ships = []; selected = -1; nextId = 1; spawnTimer = 1.0; flash = 0; flashMsg = '';
+    for (var i = 0; i < 3; i++) spawnShip();
+    updateHUD('Harbor open — assign ships!');
+  }
+  function spawnShip() {
+    var waiting = ships.filter(function(s){ return s.state === 'waiting'; }).length;
+    if (waiting >= 5) return;
+    var type = Math.floor(Math.random() * 3);
+    var patience = 26 + Math.random() * 10;
+    ships.push({ id: nextId++, type: type, patience: patience, maxPatience: patience, state: 'waiting', progress: 0, dock: -1, x: 0, y: 0, leaveX: 0 });
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = '★'.repeat(Math.max(0, reputation)) + '☆'.repeat(Math.max(0, 5 - reputation));
+    deliveredEl.textContent = delivered;
+    timerEl.textContent = Math.max(0, Math.ceil(shiftTime));
+    if (status) statusEl.textContent = status;
+  }
+  function showMsg(text, bad) {
+    msgEl.textContent = text;
+    msgEl.style.color = bad ? '#ff8a8a' : '#ffd166';
+    flash = 2.5; flashMsg = text;
+  }
+  function endGame(win, reason) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    if (win) {
+      endTitle.textContent = '🏆 SHIFT COMPLETE — YOU WIN!';
+      endText.textContent = reason || 'You delivered 15 ships and kept the harbor running smoothly.';
+      soundGood();
+    } else {
+      endTitle.textContent = '💥 GAME OVER';
+      endText.textContent = reason || 'Your reputation ran out.';
+      soundBad();
+    }
+    endScore.textContent = 'Final Score: ' + score + '  •  Ships Delivered: ' + delivered + '  •  Reputation left: ' + reputation;
+    updateHUD(win ? 'WIN!' : 'GAME OVER');
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    lastTime = performance.now();
+    soundDock();
+    requestAnimationFrame(loop);
+  }
+  function assignSelected(dockIndex) {
+    if (state !== 'playing') return;
+    if (selected < 0 || selected >= ships.length) { showMsg('Select a waiting ship first!', true); soundBad(); return; }
+    var ship = ships[selected];
+    if (!ship || ship.state !== 'waiting') { showMsg('That ship is already at a dock.', true); return; }
+    var dock = DOCKS[dockIndex];
+    var occupied = ships.some(function(s){ return s.state === 'unloading' && s.dock === dockIndex; });
+    if (occupied) { showMsg(dock.label + ' is busy — pick another dock.', true); soundBad(); return; }
+    if (ship.type !== dock.type) {
+      score = Math.max(0, score - 50); reputation -= 1;
+      showMsg('Wrong dock! ' + TYPES[ship.type].name + ' does not belong at ' + dock.label + '. −50, −1 reputation.', true);
+      soundBad(); updateHUD('Wrong dock!');
+      if (reputation <= 0) { endGame(false, 'Too many mistakes — your reputation hit zero.'); return; }
+      return;
+    }
+    ship.state = 'unloading'; ship.dock = dockIndex; ship.progress = 0;
+    selected = -1;
+    showMsg('Docked! Unloading ' + TYPES[ship.type].cargo + ' at ' + dock.label + '…');
+    soundDock(); updateHUD('Unloading…');
+  }
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0));
+    var cy = (evt.clientY !== undefined ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0));
+    return { x: (cx - r.left) * (canvas.width / r.width), y: (cy - r.top) * (canvas.height / r.height) };
+  }
+  function handlePoint(pos) {
+    if (state !== 'playing') return;
+    // Docks first if a ship is selected
+    for (var d = 0; d < DOCKS.length; d++) {
+      var dk = DOCKS[d];
+      if (pos.x >= dk.x && pos.x <= dk.x + dk.w && pos.y >= dk.y && pos.y <= dk.y + dk.h) {
+        if (selected >= 0) assignSelected(d); else showMsg('Select a ship first, then tap its dock.', true);
+        return;
+      }
+    }
+    // Waiting ships are drawn in a row near the top
+    var waiting = ships.filter(function(s){ return s.state === 'waiting'; });
+    for (var i = 0; i < waiting.length; i++) {
+      var x = 40 + i * 172, y = 90, w = 152, h = 110;
+      if (pos.x >= x && pos.x <= x + w && pos.y >= y && pos.y <= y + h) {
+        selected = ships.indexOf(waiting[i]);
+        showMsg('Selected: ' + TYPES[waiting[i].type].name + ' ship — now tap its matching dock.');
+        beep(520, 0.08, 'triangle');
+        return;
+      }
+    }
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function() {
+    endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); state = 'title'; updateHUD('Ready');
+  });
+  canvas.addEventListener('mousedown', function(e) { handlePoint(canvasPos(e)); });
+  canvas.addEventListener('click', function(e) { if (state !== 'playing') return; });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); handlePoint(canvasPos(e)); }, { passive: false });
+  document.addEventListener('keydown', function(e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startGame(); return; }
+    if (state === 'over' && (e.key === 'r' || e.key === 'R' || e.key === 'Enter')) { startGame(); return; }
+    if (state !== 'playing') return;
+    var waiting = ships.filter(function(s){ return s.state === 'waiting'; });
+    if (e.key === 'ArrowRight') { selected = waiting.length ? ships.indexOf(waiting[(waiting.indexOf(ships[selected]) + 1 + waiting.length) % waiting.length]) : -1; if (selected >= 0) beep(520, 0.08, 'triangle'); }
+    if (e.key === 'ArrowLeft') { selected = waiting.length ? ships.indexOf(waiting[(waiting.indexOf(ships[selected]) - 1 + waiting.length) % waiting.length]) : -1; if (selected >= 0) beep(520, 0.08, 'triangle'); }
+    if (e.key === '1') assignSelected(0);
+    if (e.key === '2') assignSelected(1);
+    if (e.key === '3') assignSelected(2);
+  });
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    shiftTime -= dt; wave += dt;
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnShip(); spawnTimer = 4 + Math.random() * 2.5; }
+    if (shiftTime <= 0) { endGame(false, 'The shift ended before you delivered 15 ships. Deliver faster next time!'); return; }
+    for (var i = ships.length - 1; i >= 0; i--) {
+      var s = ships[i];
+      if (s.state === 'waiting') {
+        s.patience -= dt;
+        if (s.patience <= 0) {
+          ships.splice(i, 1); reputation -= 1;
+          showMsg('A ship lost patience and left! −1 reputation.', true); soundBad(); updateHUD('Ship left!');
+          if (selected >= ships.length) selected = -1;
+          if (reputation <= 0) { endGame(false, 'Too many ships left angry — your reputation hit zero.'); return; }
+        }
+      } else if (s.state === 'unloading') {
+        s.progress += dt / 3.5;
+        if (s.progress >= 1) {
+          var bonus = Math.max(0, Math.round(s.patience)) * 2;
+          score += 100 + bonus; delivered += 1;
+          showMsg('Cargo delivered! + ' + (100 + bonus) + ' points (' + delivered + '/15).');
+          soundGood(); ships.splice(i, 1); updateHUD('Delivered ' + delivered + '/15');
+          if (delivered >= 15) { endGame(true, 'Quota reached! 15 ships served with reputation to spare.'); return; }
+        }
+      }
+    }
+    updateHUD();
+  }
+
+  function drawShip(x, y, w, h, type, patienceFrac, isSelected, label) {
+    var t = TYPES[type];
+    ctx.fillStyle = isSelected ? '#fff7cc' : '#0f2c44';
+    ctx.strokeStyle = isSelected ? '#ffd166' : '#2a5a7d';
+    ctx.lineWidth = isSelected ? 4 : 2;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 10); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = t.color;
+    ctx.beginPath(); ctx.roundRect(x + 10, y + 12, w - 20, 42, 6); ctx.fill();
+    ctx.fillStyle = '#0b1e2d'; ctx.font = 'bold 26px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText(t.icon, x + w / 2, y + 42);
+    ctx.fillStyle = '#eaf6ff'; ctx.font = 'bold 14px Verdana';
+    ctx.fillText(t.name, x + w / 2, y + 72);
+    ctx.fillStyle = '#9fd8ef'; ctx.font = '12px Verdana';
+    ctx.fillText(label, x + w / 2, y + 90);
+    var pw = w - 20;
+    ctx.fillStyle = '#334155'; ctx.fillRect(x + 10, y + h - 14, pw, 7);
+    ctx.fillStyle = patienceFrac > 0.5 ? '#34d399' : (patienceFrac > 0.25 ? '#facc15' : '#ef4444');
+    ctx.fillRect(x + 10, y + h - 14, pw * Math.max(0, patienceFrac), 7);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Sea
+    var grad = ctx.createLinearGradient(0, 0, 0, 420);
+    grad.addColorStop(0, '#1d7fa8'); grad.addColorStop(1, '#155e75');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, canvas.width, 420);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
+    for (var wv = 0; wv < 5; wv++) {
+      ctx.beginPath();
+      for (var x = 0; x <= canvas.width; x += 20) {
+        var yy = 40 + wv * 55 + Math.sin(x / 60 + wave * 2 + wv) * 6;
+        if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#eaf6ff'; ctx.font = 'bold 16px Verdana'; ctx.textAlign = 'left';
+    ctx.fillText('ANCHORAGE — waiting ships (tap one, then its dock)', 30, 70);
+    ctx.fillStyle = '#cfeaff'; ctx.font = '13px Verdana';
+    ctx.fillText('Serve the reddest patience bars first. Quota: 15 deliveries.', 30, 34);
+    var waiting = ships.filter(function(s){ return s.state === 'waiting'; });
+    if (waiting.length === 0 && state === 'playing') {
+      ctx.fillStyle = '#eaf6ff'; ctx.font = '16px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('No ships waiting — the next one is on its way…', canvas.width / 2, 150);
+    }
+    waiting.forEach(function(s, i) {
+      var x = 40 + i * 172;
+      drawShip(x, 90, 152, 110, s.type, s.patience / s.maxPatience, ships.indexOf(s) === selected, Math.ceil(s.patience) + 's left');
+    });
+    // Pier
+    ctx.fillStyle = '#8a5a2b'; ctx.fillRect(0, 400, canvas.width, 22);
+    ctx.fillStyle = '#5b3a1a'; ctx.fillRect(0, 422, canvas.width, 8);
+    ctx.fillStyle = '#eaf6ff'; ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'left';
+    ctx.fillText('DOCKS — tap a dock after selecting a ship', 30, 452 - 28);
+    // Docks
+    DOCKS.forEach(function(d, di) {
+      var busy = ships.find(function(s){ return s.state === 'unloading' && s.dock === di; });
+      var t = TYPES[d.type];
+      ctx.fillStyle = busy ? '#1e3a52' : '#14324a';
+      ctx.strokeStyle = (selected >= 0 && ships[selected] && ships[selected].type === d.type) ? '#ffd166' : '#2a5a7d';
+      ctx.lineWidth = (selected >= 0 && ships[selected] && ships[selected].type === d.type) ? 4 : 2;
+      ctx.beginPath(); ctx.roundRect(d.x, d.y, d.w, d.h, 10); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = t.color; ctx.font = 'bold 26px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(t.icon, d.x + d.w / 2, d.y + 36);
+      ctx.fillStyle = '#eaf6ff'; ctx.font = 'bold 13px Verdana';
+      ctx.fillText(d.label + '  [' + (di + 1) + ']', d.x + d.w / 2, d.y + 60);
+      if (busy) {
+        ctx.fillStyle = '#334155'; ctx.fillRect(d.x + 20, d.y + 70, d.w - 40, 10);
+        ctx.fillStyle = '#ffd166'; ctx.fillRect(d.x + 20, d.y + 70, (d.w - 40) * busy.progress, 10);
+        ctx.fillStyle = '#9fd8ef'; ctx.font = '12px Verdana';
+        ctx.fillText('Unloading ' + TYPES[busy.type].cargo + '…', d.x + d.w / 2, d.y + 92);
+      } else {
+        ctx.fillStyle = '#9fd8ef'; ctx.font = '12px Verdana';
+        ctx.fillText('FREE — for ' + t.name + ' ships', d.x + d.w / 2, d.y + 82);
+      }
+    });
+    if (flash > 0 && flashMsg) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(180, 220, 540, 44);
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(flashMsg, canvas.width / 2, 248);
+      ctx.textAlign = 'left';
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(4,22,38,0.35)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  function loop(now) {
+    if (state !== 'playing') { draw(); return; }
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    if (flash > 0) flash -= dt;
+    update(dt);
+    if (state === 'playing') { draw(); requestAnimationFrame(loop); }
+    else draw();
+  }
+
+  updateHUD('Ready');
+  draw();
+  // Keep the loop warm for the title backdrop without starting the shift timer.
+  requestAnimationFrame(function(){ if (state === 'title') draw(); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Starlight Parcel Run</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050514; color: #f2f2ff; font-family: Arial, Helvetica, sans-serif; overflow: hidden; }
+  #wrap { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #1a1440 0%, #050514 55%); }
+  canvas { background: #070722; border: 2px solid #6a5cff; border-radius: 10px; max-width: 96vw; max-height: 92vh; box-shadow: 0 0 40px rgba(106,92,255,.45); touch-action: none; }
+  #hud { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 18px; background: rgba(5,5,25,.82); border: 1px solid #6a5cff; border-radius: 999px; padding: 8px 18px; font-weight: bold; font-size: 15px; z-index: 5; white-space: nowrap; }
+  #hud span { color: #ffd75e; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(3,3,18,.78); z-index: 10; }
+  .card { width: min(560px, 92vw); background: #141435; border: 2px solid #ffd75e; border-radius: 16px; padding: 26px; text-align: center; box-shadow: 0 0 30px rgba(255,215,94,.25); }
+  .card h1 { font-size: 42px; letter-spacing: 1px; margin-bottom: 8px; }
+  .card h2 { font-size: 34px; margin-bottom: 10px; }
+  .card p { line-height: 1.55; margin: 8px 0; color: #d9d9ff; }
+  .card .big { font-size: 20px; color: #fff; font-weight: bold; }
+  button { margin-top: 16px; padding: 13px 30px; font-size: 19px; font-weight: bold; border: 0; border-radius: 999px; background: #ffd75e; color: #171733; cursor: pointer; }
+  button:hover { background: #fff0a8; }
+  button:active { transform: scale(.97); }
+  .keys { display: inline-block; background: #2a2a5e; border: 1px solid #7777cc; border-radius: 6px; padding: 2px 8px; color: #fff; }
+  .hidden { display: none !important; }
+  #toast { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(255,215,94,.95); color: #171733; font-weight: bold; padding: 8px 16px; border-radius: 999px; z-index: 6; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="600"></canvas>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">3</span></div>
+    <div>Package: <span id="pkg">1 / 6</span></div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+
+  <div id="titleScreen" class="overlay">
+    <div class="card">
+      <h1>COMET COURIER</h1>
+      <p class="big">Deliver the packages. Dodge the rocks. Beat the belt.</p>
+      <p><strong>How to Play:</strong> Pilot your courier ship through the asteroid field. Collect the glowing packages <strong>in numbered order</strong>, then fly to the moving station dock to deliver each one.</p>
+      <p>Each delivery scores 100 points. Collecting out of order does nothing. Hitting an asteroid costs a life. Complete all 6 deliveries to win.</p>
+      <p>Controls: <span class="keys">Arrow keys / WASD</span> to fly &nbsp; <span class="keys">Mouse</span> move to steer, click to boost &nbsp; <span class="keys">Touch</span> drag to steer</p>
+      <p>Boost with <span class="keys">Space</span> or a mouse click for a short burst of speed. Careful: boosting makes tight turns harder.</p>
+      <button id="startBtn" type="button">Start Delivery Run</button>
+    </div>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div class="card">
+      <h2 id="endTitle">Mission Complete</h2>
+      <p id="endText" class="big">All packages delivered.</p>
+      <p>Final Score: <strong id="finalScore">0</strong></p>
+      <p id="endHint">Great flying, courier. The station thanks you.</p>
+      <button id="restartBtn" type="button">Restart</button>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden">Package collected</div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var pkgEl = document.getElementById('pkg');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+  var toast = document.getElementById('toast');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+
+  var TOTAL = 6;
+  var state = 'title';
+  var score = 0, lives = 3, nextPkg = 1, carrying = false;
+  var keys = {};
+  var mouse = { x: W / 2, y: H / 2, down: false, active: false };
+  var touch = { x: W / 2, y: H / 2, active: false };
+  var toastTimer = 0;
+  var audioCtx = null, muted = false;
+
+  var ship = { x: 90, y: H / 2, vx: 0, vy: 0, angle: 0, r: 16, invuln: 0, trail: [] };
+  var dock = { x: W - 110, y: 120, vy: 1.15, r: 42 };
+  var packages = [];
+  var asteroids = [];
+  var stars = [];
+  var particles = [];
+  var comets = [];
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.remove('hidden');
+    toastTimer = 140;
+  }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(Math.max(40, freq * 0.6), audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: rand(-2.4, 2.4), vy: rand(-2.4, 2.4), life: rand(22, 50), color: color });
+    }
+  }
+
+  function resetWorld() {
+    score = 0; lives = 3; nextPkg = 1; carrying = false;
+    ship = { x: 90, y: H / 2, vx: 0, vy: 0, angle: 0, r: 16, invuln: 0, trail: [] };
+    dock = { x: W - 110, y: 120, vy: 1.15, r: 42 };
+    packages = [];
+    var spots = [
+      { x: 280, y: 120 }, { x: 430, y: 470 }, { x: 560, y: 150 },
+      { x: 350, y: 300 }, { x: 650, y: 380 }, { x: 490, y: 250 }
+    ];
+    for (var i = 0; i < TOTAL; i++) {
+      packages.push({ n: i + 1, x: spots[i].x, y: spots[i].y, r: 18, taken: false, pulse: Math.random() * 6 });
+    }
+    asteroids = [];
+    for (var j = 0; j < 16; j++) {
+      asteroids.push({
+        x: rand(180, W - 60), y: rand(40, H - 40), vx: rand(-0.9, 0.9), vy: rand(-0.7, 0.7),
+        r: rand(16, 34), rot: rand(0, 6.28), spin: rand(-0.03, 0.03), bumps: [rand(.8, 1.2), rand(.8, 1.2), rand(.8, 1.2), rand(.8, 1.2), rand(.8, 1.2), rand(.8, 1.2), rand(.8, 1.2), rand(.8, 1.2)]
+      });
+    }
+    stars = [];
+    for (var s = 0; s < 90; s++) stars.push({ x: rand(0, W), y: rand(0, H), r: rand(0.6, 2.2), tw: rand(0, 6.28) });
+    comets = [];
+    for (var c = 0; c < 3; c++) comets.push({ x: rand(0, W), y: rand(0, H / 2), vx: rand(1.2, 2.2), vy: rand(0.4, 0.9), life: rand(100, 300) });
+    particles = [];
+    updateHUD('Flying');
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    pkgEl.textContent = (carrying ? 'Deliver ' : '') + nextPkg + ' / ' + TOTAL;
+    if (status) statusEl.textContent = status;
+  }
+
+  function crash() {
+    if (ship.invuln > 0) return;
+    lives -= 1;
+    beep(120, 0.35, 'sawtooth', 0.18);
+    burst(ship.x, ship.y, '#ff5a4e', 28);
+    ship.x = 90; ship.y = H / 2; ship.vx = 0; ship.vy = 0; ship.angle = 0;
+    carrying = false;
+    ship.invuln = 150;
+    updateHUD(lives > 0 ? 'Hit! Package dropped' : 'Game Over');
+    showToast(lives > 0 ? 'Asteroid hit! Package dropped.' : 'Ship destroyed!');
+    if (lives <= 0) endGame(false);
+  }
+
+  function endGame(won) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endTitle.textContent = 'MISSION COMPLETE';
+      endText.textContent = 'All 6 packages delivered safely.';
+      statusEl.textContent = 'You Win!';
+      beep(660, 0.3, 'sine', 0.14); setTimeout(function () { beep(880, 0.3, 'sine', 0.14); }, 180);
+    } else {
+      endTitle.textContent = 'GAME OVER';
+      endText.textContent = 'The asteroid field claimed your ship.';
+      statusEl.textContent = 'Game Over';
+    }
+    finalScore.textContent = score;
+  }
+
+  function startGame() {
+    initAudio();
+    resetWorld();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    updateHUD('Flying');
+    beep(520, 0.18, 'triangle', 0.12);
+  }
+
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') e.preventDefault();
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) startGame();
+    if (state === 'over' && (e.key === 'Enter' || e.key === 'r' || e.key === 'R')) startGame();
+    if (e.key.toLowerCase() === 'm') muted = !muted;
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+  canvas.addEventListener('mousedown', function (e) {
+    mouse.down = true; mouse.active = true;
+    var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y;
+    if (state === 'title') startGame();
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y; mouse.active = true;
+  });
+  document.addEventListener('mouseup', function () { mouse.down = false; });
+  canvas.addEventListener('click', function (e) {
+    var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y;
+  });
+
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    touch.active = true;
+    var p = canvasPos(e); touch.x = p.x; touch.y = p.y;
+    if (state === 'title') startGame();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var p = canvasPos(e); touch.x = p.x; touch.y = p.y;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { touch.active = false; }, { passive: true });
+
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+
+  function update() {
+    if (state !== 'playing') return;
+    var thrust = 0.16;
+    var boost = (keys[' '] || mouse.down) ? 1.9 : 1;
+    if (keys['arrowup'] || keys['w']) ship.vy -= thrust * boost;
+    if (keys['arrowdown'] || keys['s']) ship.vy += thrust * boost;
+    if (keys['arrowleft'] || keys['a']) ship.vx -= thrust * boost;
+    if (keys['arrowright'] || keys['d']) ship.vx += thrust * boost;
+
+    var steer = null;
+    if (touch.active) steer = touch;
+    else if (mouse.active && (Math.abs(mouse.x - ship.x) > 12 || Math.abs(mouse.y - ship.y) > 12)) steer = mouse;
+    if (steer && !keys['arrowup'] && !keys['arrowdown'] && !keys['arrowleft'] && !keys['arrowright'] && !keys['w'] && !keys['a'] && !keys['s'] && !keys['d']) {
+      var dx = steer.x - ship.x, dy = steer.y - ship.y;
+      var d = Math.sqrt(dx * dx + dy * dy) || 1;
+      var pull = Math.min(0.14, d * 0.0012) * boost;
+      ship.vx += (dx / d) * pull * 10;
+      ship.vy += (dy / d) * pull * 10;
+    }
+
+    ship.vx *= 0.985; ship.vy *= 0.985;
+    var speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+    if (speed > 6.2) { ship.vx *= 6.2 / speed; ship.vy *= 6.2 / speed; }
+    ship.x += ship.vx; ship.y += ship.vy;
+    if (speed > 0.6) ship.angle = Math.atan2(ship.vy, ship.vx);
+    if (ship.x < 18) { ship.x = 18; ship.vx = Math.abs(ship.vx) * 0.5; }
+    if (ship.x > W - 18) { ship.x = W - 18; ship.vx = -Math.abs(ship.vx) * 0.5; }
+    if (ship.y < 18) { ship.y = 18; ship.vy = Math.abs(ship.vy) * 0.5; }
+    if (ship.y > H - 18) { ship.y = H - 18; ship.vy = -Math.abs(ship.vy) * 0.5; }
+    if (ship.invuln > 0) ship.invuln -= 1;
+
+    ship.trail.push({ x: ship.x, y: ship.y });
+    if (ship.trail.length > 16) ship.trail.shift();
+
+    dock.y += dock.vy;
+    if (dock.y < 70 || dock.y > H - 70) dock.vy *= -1;
+
+    for (var i = 0; i < asteroids.length; i++) {
+      var a = asteroids[i];
+      a.x += a.vx; a.y += a.vy; a.rot += a.spin;
+      if (a.x < -40) a.x = W + 40; if (a.x > W + 40) a.x = -40;
+      if (a.y < -40) a.y = H + 40; if (a.y > H + 40) a.y = -40;
+      if (dist(ship, a) < ship.r + a.r - 4) crash();
+    }
+
+    for (var p = 0; p < packages.length; p++) {
+      var pk = packages[p];
+      pk.pulse += 0.08;
+      if (!pk.taken && !carrying && pk.n === nextPkg && dist(ship, pk) < ship.r + pk.r) {
+        pk.taken = true; carrying = true;
+        score += 25; beep(740, 0.2, 'triangle', 0.14);
+        burst(pk.x, pk.y, '#ffd75e', 16);
+        showToast('Package ' + pk.n + ' collected! Deliver it to the dock.');
+        updateHUD('Carrying package ' + pk.n);
+      }
+    }
+
+    if (carrying && dist(ship, dock) < ship.r + dock.r) {
+      score += 100;
+      beep(880, 0.22, 'sine', 0.15);
+      burst(dock.x, dock.y, '#7dff9a', 26);
+      showToast('Delivered! +100 points');
+      nextPkg += 1; carrying = false;
+      if (nextPkg > TOTAL) {
+        score += 250;
+        updateHUD('You Win!');
+        endGame(true);
+        return;
+      }
+      updateHUD('Flying to package ' + nextPkg);
+    }
+
+    for (var q = particles.length - 1; q >= 0; q--) {
+      var pt = particles[q];
+      pt.x += pt.vx; pt.y += pt.vy; pt.life -= 1;
+      if (pt.life <= 0) particles.splice(q, 1);
+    }
+    if (toastTimer > 0) { toastTimer -= 1; if (toastTimer === 0) toast.classList.add('hidden'); }
+  }
+
+  function drawShip() {
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(ship.angle);
+    if (ship.invuln > 0 && Math.floor(ship.invuln / 8) % 2 === 0) ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = 'rgba(125,255,154,.35)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 0; i < ship.trail.length; i++) {
+      var t = ship.trail[i];
+      if (i === 0) ctx.moveTo(t.x - ship.x, t.y - ship.y); else ctx.lineTo(t.x - ship.x, t.y - ship.y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#7dd7ff';
+    ctx.beginPath();
+    ctx.moveTo(20, 0); ctx.lineTo(-13, -13); ctx.lineTo(-6, 0); ctx.lineTo(-13, 13);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff8c4e';
+    ctx.beginPath(); ctx.arc(-8, 0, 5, 0, Math.PI * 2); ctx.fill();
+    if (carrying) {
+      ctx.fillStyle = '#ffd75e';
+      ctx.fillRect(-16, -20, 12, 10);
+      ctx.fillStyle = '#171733'; ctx.font = 'bold 9px Arial'; ctx.fillText(String(nextPkg), -13, -12);
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#070722'; ctx.fillRect(0, 0, W, H);
+    for (var s = 0; s < stars.length; s++) {
+      var st = stars[s];
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(st.tw + Date.now() / 900));
+      ctx.fillStyle = '#cdd2ff';
+      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (var c = 0; c < comets.length; c++) {
+      var cm = comets[c];
+      cm.x += cm.vx; cm.y += cm.vy; cm.life -= 1;
+      if (cm.life <= 0 || cm.x > W + 40) { cm.x = rand(0, W / 2); cm.y = rand(0, H / 2); cm.life = rand(150, 320); }
+      ctx.strokeStyle = 'rgba(160,220,255,.5)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cm.x, cm.y); ctx.lineTo(cm.x - 42, cm.y - 18); ctx.stroke();
+      ctx.fillStyle = '#dff4ff'; ctx.beginPath(); ctx.arc(cm.x, cm.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Moving station dock
+    ctx.fillStyle = '#2a2a5e'; ctx.strokeStyle = '#7dff9a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(dock.x, dock.y, dock.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#7dff9a'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('DOCK', dock.x, dock.y - 4);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px Arial';
+    ctx.fillText(carrying ? 'DELIVER' : 'STATION', dock.x, dock.y + 16);
+    ctx.textAlign = 'left';
+
+    // Packages in order
+    for (var p = 0; p < packages.length; p++) {
+      var pk = packages[p];
+      if (pk.taken) continue;
+      var glow = 1 + Math.sin(pk.pulse) * 0.18;
+      var isNext = (pk.n === nextPkg && !carrying);
+      ctx.fillStyle = isNext ? '#ffd75e' : '#8a7dff';
+      ctx.globalAlpha = isNext ? 1 : 0.55;
+      ctx.beginPath(); ctx.arc(pk.x, pk.y, pk.r * glow, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#171733'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(String(pk.n), pk.x, pk.y + 6);
+      ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+    }
+
+    // Asteroids
+    for (var i = 0; i < asteroids.length; i++) {
+      var a = asteroids[i];
+      ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.rot);
+      ctx.fillStyle = '#5d4a3a'; ctx.strokeStyle = '#a88a6a'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (var k = 0; k < 8; k++) {
+        var ang = (k / 8) * Math.PI * 2;
+        var rr = a.r * a.bumps[k];
+        if (k === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr); else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#3d2f24'; ctx.beginPath(); ctx.arc(-a.r * 0.3, -a.r * 0.2, a.r * 0.22, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    for (var q = 0; q < particles.length; q++) {
+      var pt = particles[q];
+      ctx.globalAlpha = Math.max(0, pt.life / 50);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    drawShip();
+
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and deliver package 1 first!', W / 2, H - 26);
+      ctx.textAlign = 'left';
+    }
+    if (state === 'playing') {
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 14px Arial';
+      var hint = carrying ? 'Fly to the green DOCK to deliver package ' + nextPkg : 'Fly to glowing package ' + nextPkg;
+      ctx.fillText(hint, 16, H - 14);
+      ctx.fillText('Arrows / WASD / Mouse / Touch  |  Space or click = boost  |  M = mute', 16, 24);
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  resetWorld();
+  state = 'title';
+  updateHUD('Ready');
+  loop();
+})();
+</script>
+</body>
+</html>

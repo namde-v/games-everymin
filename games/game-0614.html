@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Neon Beat Bounce</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #0a0a18;
+    color: #eaf6ff;
+    font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px;
+    overflow-x: hidden;
+    user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  }
+  h1 {
+    font-size: clamp(22px, 5vw, 38px); letter-spacing: 3px; text-transform: uppercase;
+    background: linear-gradient(90deg, #ff2d95, #00e5ff, #ffe600, #ff2d95);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 0 24px rgba(255,45,149,.35);
+    margin: 6px 0 2px; text-align: center;
+  }
+  .tagline { font-size: 13px; color: #9fb8d8; margin-bottom: 10px; text-align: center; }
+  #hud {
+    width: min(720px, 96vw); display: flex; justify-content: space-between; gap: 8px;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(0,229,255,.35);
+    border-radius: 10px; padding: 8px 12px; font-size: 15px; font-weight: bold;
+    margin-bottom: 10px; flex-wrap: wrap;
+  }
+  #hud span b { color: #ffe600; }
+  #hud .lives b { color: #ff5d7e; }
+  #hud .combo b { color: #00e5ff; }
+  #status { color: #7dffb2; }
+  #wrap { position: relative; width: min(720px, 96vw); }
+  canvas {
+    display: block; width: 100%; height: auto; aspect-ratio: 720 / 460;
+    background: radial-gradient(ellipse at 50% 20%, #1b1140 0%, #0a0a18 70%);
+    border: 2px solid #00e5ff; border-radius: 14px;
+    box-shadow: 0 0 30px rgba(0,229,255,.25), inset 0 0 60px rgba(255,45,149,.12);
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; text-align: center;
+    background: rgba(5,5,20,.82); border-radius: 14px; padding: 20px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: clamp(24px, 6vw, 40px); letter-spacing: 2px; text-transform: uppercase; }
+  .overlay h2.win { color: #7dffb2; text-shadow: 0 0 20px #00ff88; }
+  .overlay h2.lose { color: #ff5d7e; text-shadow: 0 0 20px #ff2d55; }
+  .overlay p { font-size: 15px; line-height: 1.6; color: #cfe3ff; max-width: 520px; }
+  .overlay .score-big { font-size: 22px; font-weight: bold; color: #ffe600; }
+  button {
+    cursor: pointer; border: none; border-radius: 999px; padding: 14px 34px;
+    font-size: 18px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;
+    color: #0a0a18; background: linear-gradient(90deg, #00e5ff, #ffe600);
+    box-shadow: 0 0 24px rgba(0,229,255,.55); transition: transform .1s;
+  }
+  button:active { transform: scale(.96); }
+  button.secondary { background: linear-gradient(90deg, #ff2d95, #ff7a3d); color: #fff; }
+  .keys { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .key {
+    border: 1px solid #00e5ff; border-radius: 8px; padding: 6px 12px;
+    font-family: monospace; font-size: 14px; background: rgba(0,229,255,.12);
+  }
+  #beatbar {
+    width: min(720px, 96vw); height: 14px; background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.2); border-radius: 999px; margin-top: 10px; overflow: hidden;
+  }
+  #beatfill { height: 100%; width: 0%; background: linear-gradient(90deg, #ff2d95, #00e5ff, #ffe600); transition: width .1s linear; }
+  .hint { margin-top: 8px; font-size: 13px; color: #9fb8d8; text-align: center; }
+  .flash { animation: flashAnim .25s ease; }
+  @keyframes flashAnim { from { box-shadow: 0 0 60px rgba(255,230,0,.9); } to { box-shadow: 0 0 30px rgba(0,229,255,.25); } }
+</style>
+</head>
+<body>
+<h1>Neon Beat Bounce</h1>
+<p class="tagline">Ride the beat. Bounce the ball. Chain the combo.</p>
+
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span class="lives">Lives: <b id="lives">♥♥♥</b></span>
+  <span class="combo">Combo: <b id="combo">x0</b></span>
+  <span>Beat: <b id="beat">0 / 48</b></span>
+  <span>Status: <b id="status">READY</b></span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="720" height="460"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Neon Beat Bounce</h2>
+    <p><strong>How to Play:</strong> A glowing ball bounces down a track of neon pads.
+    A beat ring shrinks toward the landing pad on every beat. Press the matching key
+    (or tap the pad) at the exact moment the ball lands to bounce it higher and score.
+    Perfect timing builds your combo multiplier. Press too early, too late, or not at all
+    and the ball drops — lose all 3 lives and the song ends.</p>
+    <div class="keys">
+      <span class="key">A / ← : Left Pad</span>
+      <span class="key">S / ↓ : Mid Pad</span>
+      <span class="key">D / → : Right Pad</span>
+      <span class="key">SPACE : Any Pad</span>
+    </div>
+    <p>Complete all 48 beats to finish the track and WIN. Chain combos for bonus points!</p>
+    <button id="startBtn">▶ Start the Beat</button>
+    <p style="font-size:12px;color:#7f95b8;">Tip: watch the shrinking beat ring — hit when it touches the pad rim.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p class="score-big" id="endScore"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">↻ Restart</button>
+  </div>
+</div>
+
+<div id="beatbar"><div id="beatfill"></div></div>
+<p class="hint">Keyboard: A / S / D or Arrow Keys or Space &nbsp;•&nbsp; Mouse: click a pad &nbsp;•&nbsp; Touch: tap a pad</p>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById("score");
+  var livesEl = document.getElementById("lives");
+  var comboEl = document.getElementById("combo");
+  var beatEl = document.getElementById("beat");
+  var statusEl = document.getElementById("status");
+  var beatFill = document.getElementById("beatfill");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+  var endScore = document.getElementById("endScore");
+  var endStats = document.getElementById("endStats");
+
+  // ---- Audio: procedural Web Audio, created only after user interaction ----
+  var audioCtx = null;
+  var masterGain = null;
+  function initAudio() {
+    if (audioCtx) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = new AC();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.22;
+    masterGain.connect(audioCtx.destination);
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = when || audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    osc.type = type || "sine";
+    osc.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    osc.connect(g); g.connect(masterGain);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  }
+  function playBounce(quality) {
+    if (!audioCtx) return;
+    if (quality === "perfect") { tone(880, 0.18, "sine", 0.6); tone(1320, 0.14, "triangle", 0.4); }
+    else if (quality === "good") { tone(660, 0.15, "sine", 0.5); tone(990, 0.1, "triangle", 0.3); }
+    else { tone(220, 0.2, "sawtooth", 0.35); tone(160, 0.25, "square", 0.25); }
+  }
+  function playKick() { if (audioCtx) tone(120, 0.12, "sine", 0.7); }
+  function playWinJingle() {
+    if (!audioCtx) return;
+    var notes = [523, 659, 784, 1047, 784, 1047];
+    for (var i = 0; i < notes.length; i++) tone(notes[i], 0.22, "triangle", 0.5, audioCtx.currentTime + i * 0.14);
+  }
+  function playLoseJingle() {
+    if (!audioCtx) return;
+    var notes = [392, 330, 262, 196];
+    for (var i = 0; i < notes.length; i++) tone(notes[i], 0.3, "sawtooth", 0.35, audioCtx.currentTime + i * 0.18);
+  }
+
+  // ---- Game state ----
+  var TOTAL_BEATS = 48;
+  var BEAT_MS = 620; // song tempo, ~97 BPM
+  var state = "title"; // title | playing | won | lost
+  var score = 0, lives = 3, combo = 0, bestCombo = 0;
+  var beatIndex = 0;      // beats completed
+  var beatTimer = 0;      // ms into current beat
+  var lastTime = 0;
+  var ball = { x: 0, y: 0, vy: 0, arc: 0, active: false };
+  var hitFlash = 0;       // ms of hit flash remaining
+  var hitText = "";       // floating judgement text
+  var hitTextTimer = 0;
+  var hitTextColor = "#fff";
+  var shake = 0;
+  var particles = [];
+  var stars = [];
+  for (var s = 0; s < 70; s++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.8 + 0.4, tw: Math.random() * Math.PI * 2 });
+  }
+
+  // Three pads across the bottom; the active pad cycles in a pattern.
+  var pads = [
+    { x: 150, y: 392, w: 150, h: 26, key: "A", label: "A / ←", color: "#ff2d95" },
+    { x: 360, y: 392, w: 150, h: 26, key: "S", label: "S / ↓", color: "#00e5ff" },
+    { x: 570, y: 392, w: 150, h: 26, key: "D", label: "D / →", color: "#ffe600" }
+  ];
+  // Beat pattern: which pad is active each beat (a catchy repeating phrase).
+  var pattern = [1, 0, 1, 2, 1, 0, 2, 0, 1, 2, 0, 1, 2, 1, 0, 2,
+                 1, 1, 0, 2, 0, 2, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1,
+                 0, 1, 2, 2, 1, 0, 1, 2, 0, 2, 1, 1, 0, 2, 1, 0];
+  function activePad() { return pads[pattern[beatIndex % pattern.length]]; }
+
+  function resetGame() {
+    score = 0; lives = 3; combo = 0; bestCombo = 0;
+    beatIndex = 0; beatTimer = 0; hitFlash = 0; hitText = ""; particles = [];
+    ball.active = false;
+    updateHUD();
+  }
+
+  function startGame() {
+    initAudio();
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    resetGame();
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    statusEl.textContent = "PLAYING";
+    ball.active = true;
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(won) {
+    state = won ? "won" : "lost";
+    statusEl.textContent = won ? "WIN!" : "GAME OVER";
+    endTitle.textContent = won ? "★ Track Complete! ★" : "Game Over";
+    endTitle.className = won ? "win" : "lose";
+    endText.textContent = won
+      ? "You bounced through all " + TOTAL_BEATS + " beats and finished the song. Neon legend!"
+      : "The ball dropped too many times and the song fell apart. Try again and ride the beat!";
+    endScore.textContent = "Final Score: " + score;
+    endStats.textContent = "Best Combo: x" + bestCombo + "  •  Beats Hit: " + beatIndex + " / " + TOTAL_BEATS;
+    endScreen.classList.remove("hidden");
+    if (won) playWinJingle(); else playLoseJingle();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives > 0 ? "♥".repeat(lives) : "—";
+    comboEl.textContent = "x" + combo;
+    beatEl.textContent = Math.min(beatIndex, TOTAL_BEATS) + " / " + TOTAL_BEATS;
+    beatFill.style.width = (Math.min(beatIndex, TOTAL_BEATS) / TOTAL_BEATS * 100) + "%";
+  }
+
+  function spawnParticles(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 3.5;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.5, life: 500 + Math.random() * 400, color: color });
+    }
+  }
+
+  // ---- Beat handling ----
+  function resolveBeat(pressedPadIndex) {
+    // Called when a beat lands: pressedPadIndex may be null (timeout).
+    var pad = activePad();
+    var correct = pressedPadIndex !== null && pads[pressedPadIndex] === pad;
+    var progress = beatTimer / BEAT_MS; // 0..1 through the beat window
+    var dist = Math.abs(progress - 1);  // how close to the landing moment
+    var quality;
+    if (!correct || pressedPadIndex === null) {
+      quality = "miss";
+    } else if (dist < 0.16) {
+      quality = "perfect";
+    } else if (dist < 0.38) {
+      quality = "good";
+    } else {
+      quality = "miss";
+    }
+
+    if (quality === "perfect") {
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      var pts = 100 + combo * 25;
+      score += pts;
+      hitText = "PERFECT +" + pts; hitTextColor = "#ffe600";
+      spawnParticles(ball.x, pad.y - 10, "#ffe600", 26);
+      hitFlash = 260;
+      ball.vy = -16;
+    } else if (quality === "good") {
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      var pts2 = 50 + combo * 10;
+      score += pts2;
+      hitText = "GOOD +" + pts2; hitTextColor = "#00e5ff";
+      spawnParticles(ball.x, pad.y - 10, "#00e5ff", 14);
+      hitFlash = 160;
+      ball.vy = -12;
+    } else {
+      combo = 0;
+      lives--;
+      hitText = pressedPadIndex === null ? "MISSED!" : "OFF BEAT!";
+      hitTextColor = "#ff5d7e";
+      shake = 260;
+      spawnParticles(ball.x, pad.y - 10, "#ff5d7e", 18);
+      ball.vy = -4; // sad little bounce, then it falls
+    }
+    hitTextTimer = 900;
+    playBounce(quality);
+    beatIndex++;
+    beatTimer = 0;
+    updateHUD();
+    if (lives <= 0) { endGame(false); return; }
+    if (beatIndex >= TOTAL_BEATS) { endGame(true); return; }
+    // Launch ball toward the next active pad.
+    var next = activePad();
+    ball.x = next.x;
+    ball.active = true;
+  }
+
+  function pressPad(index) {
+    if (state !== "playing") return;
+    // Only judge if we are inside the final 55% of the beat window or just past landing.
+    // Early wild presses still count as an attempt on the current beat.
+    resolveBeat(index);
+  }
+
+  // ---- Input: keyboard, mouse, touch ----
+  document.addEventListener("keydown", function (e) {
+    if (e.repeat) return;
+    var k = e.key.toLowerCase();
+    if (state === "title" && (k === " " || k === "enter")) { e.preventDefault(); startGame(); return; }
+    if (state === "playing") {
+      if (k === "a" || k === "arrowleft") pressPad(0);
+      else if (k === "s" || k === "arrowdown") pressPad(1);
+      else if (k === "d" || k === "arrowright") pressPad(2);
+      else if (k === " ") { e.preventDefault(); pressPad(pattern[beatIndex % pattern.length]); }
+    } else if ((state === "won" || state === "lost") && (k === " " || k === "enter")) {
+      startGame();
+    }
+  });
+
+  canvas.addEventListener("mousedown", function (e) {
+    var rect = canvas.getBoundingClientRect();
+    var mx = (e.clientX - rect.left) * (W / rect.width);
+    var my = (e.clientY - rect.top) * (H / rect.height);
+    handlePoint(mx, my);
+  });
+
+  canvas.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.changedTouches[0];
+    var mx = (t.clientX - rect.left) * (W / rect.width);
+    var my = (t.clientY - rect.top) * (H / rect.height);
+    handlePoint(mx, my);
+  }, { passive: false });
+
+  function handlePoint(mx, my) {
+    if (state !== "playing") return;
+    for (var i = 0; i < pads.length; i++) {
+      var p = pads[i];
+      if (mx >= p.x - p.w / 2 - 20 && mx <= p.x + p.w / 2 + 20 && my >= p.y - 90 && my <= p.y + 50) {
+        pressPad(i);
+        return;
+      }
+    }
+    // Tap anywhere else counts as hitting the active pad (SPACE equivalent).
+    pressPad(pattern[beatIndex % pattern.length]);
+  }
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+
+  // ---- Main loop ----
+  function loop(now) {
+    if (state !== "playing") { draw(); return; }
+    var dt = Math.min(50, now - lastTime);
+    lastTime = now;
+    beatTimer += dt;
+    if (hitFlash > 0) hitFlash -= dt;
+    if (hitTextTimer > 0) hitTextTimer -= dt;
+    if (shake > 0) shake -= dt;
+
+    // Beat timeout: ball lands unhit.
+    if (beatTimer >= BEAT_MS) {
+      playKick();
+      resolveBeat(null);
+      if (state !== "playing") { draw(); return; }
+    }
+
+    // Ball arc: starts high above the pad, falls to land exactly at beat end.
+    var progress = beatTimer / BEAT_MS;
+    var pad = activePad();
+    var peak = 250;
+    var arcY = pad.y - 20 - Math.sin(progress * Math.PI) * peak;
+    ball.x = pad.x;
+    ball.y = arcY;
+
+    // Particles
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var pt = particles[i];
+      pt.life -= dt; pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.08;
+      if (pt.life <= 0) particles.splice(i, 1);
+    }
+    draw(progress);
+    requestAnimationFrame(loop);
+  }
+
+  function draw(progress) {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10);
+    ctx.clearRect(-20, -20, W + 40, H + 40);
+
+    // Starfield
+    var t = performance.now() / 1000;
+    for (var i = 0; i < stars.length; i++) {
+      var st = stars[i];
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(t + st.tw));
+      ctx.fillStyle = "#8fb8e8";
+      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Track lane guides
+    ctx.strokeStyle = "rgba(0,229,255,0.18)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 10]);
+    for (var p = 0; p < pads.length; p++) {
+      ctx.beginPath(); ctx.moveTo(pads[p].x, 40); ctx.lineTo(pads[p].x, pads[p].y - 14); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Beat progress bar inside canvas
+    if (state === "playing") {
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      ctx.fillRect(60, 18, W - 120, 10);
+      ctx.fillStyle = "#00e5ff";
+      ctx.fillRect(60, 18, (W - 120) * (progress || 0), 10);
+    }
+
+    // Pads
+    for (var i = 0; i < pads.length; i++) {
+      var pad = pads[i];
+      var isActive = state === "playing" && pad === activePad();
+      ctx.save();
+      if (isActive) {
+        ctx.shadowColor = pad.color; ctx.shadowBlur = 26;
+        // Shrinking beat ring: closes onto the pad as the beat lands.
+        var pr = progress || 0;
+        var ringR = 90 - pr * 62;
+        ctx.strokeStyle = pad.color; ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.25 + pr * 0.75;
+        ctx.beginPath(); ctx.arc(pad.x, pad.y - 12, Math.max(28, ringR), 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = pad.color;
+      ctx.globalAlpha = isActive ? 1 : 0.45;
+      roundRect(pad.x - pad.w / 2, pad.y, pad.w, pad.h, 12);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#0a0a18";
+      ctx.font = "bold 15px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(pad.label, pad.x, pad.y + 18);
+      ctx.restore();
+    }
+
+    // Ball
+    if (ball.active && state === "playing") {
+      var glow = hitFlash > 0 ? "#ffe600" : "#ffffff";
+      ctx.save();
+      ctx.shadowColor = glow; ctx.shadowBlur = 30;
+      var grad = ctx.createRadialGradient(ball.x - 5, ball.y - 6, 2, ball.x, ball.y, 20);
+      grad.addColorStop(0, "#ffffff");
+      grad.addColorStop(0.5, "#ff2d95");
+      grad.addColorStop(1, "#7a1040");
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(ball.x, ball.y, 18, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // Trail
+      ctx.fillStyle = "rgba(255,45,149,0.35)";
+      ctx.beginPath(); ctx.arc(ball.x, ball.y + 26, 10, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Particles
+    for (var j = 0; j < particles.length; j++) {
+      var pt = particles[j];
+      ctx.globalAlpha = Math.max(0, pt.life / 900);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Judgement text
+    if (hitTextTimer > 0 && hitText) {
+      ctx.font = "bold 30px Arial";
+      ctx.textAlign = "center";
+      ctx.fillStyle = hitTextColor;
+      ctx.shadowColor = hitTextColor; ctx.shadowBlur = 18;
+      ctx.fillText(hitText, W / 2, 120);
+      ctx.shadowBlur = 0;
+    }
+
+    // Next-pad hint arrow
+    if (state === "playing") {
+      var np = activePad();
+      ctx.fillStyle = np.color;
+      ctx.font = "bold 16px Arial"; ctx.textAlign = "center";
+      ctx.fillText("▼ HIT NOW ON THE BEAT ▼", np.x, np.y - 118);
+    }
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  // Idle attract-mode draw behind the title screen.
+  ball.active = false;
+  draw(0);
+  updateHUD();
+})();
+</script>
+</body>
+</html>
