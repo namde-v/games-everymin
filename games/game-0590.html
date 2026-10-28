@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Polar Plunge — Precision Ice Dive Aim</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1e2e; font-family: "Segoe UI", system-ui, Arial, sans-serif; color: #eaf6ff; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; gap: 8px; }
+  h1 { font-size: clamp(22px, 4vw, 34px); letter-spacing: 1px; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+  h1 span { color: #7dd3fc; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px 18px; justify-content: center; font-size: 15px; font-weight: 600; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-radius: 10px; padding: 7px 14px; }
+  #hud b { color: #fde68a; }
+  #canvasBox { position: relative; width: min(96vw, 900px); aspect-ratio: 900 / 540; max-height: 72vh; }
+  canvas { width: 100%; height: 100%; display: block; border-radius: 14px; border: 2px solid #7dd3fc; background: linear-gradient(#8ecdf0, #d7f0ff); box-shadow: 0 10px 30px rgba(0,0,0,.45); touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; background: rgba(4, 20, 34, .82); border-radius: 12px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: clamp(26px, 5vw, 42px); }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #dbeafe; }
+  .overlay .big { font-size: 20px; font-weight: 700; color: #fde68a; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 13px 28px; font-size: 17px; font-weight: 800; color: #06202f; background: #fbbf24; box-shadow: 0 4px 0 #b45309; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b45309; }
+  button.secondary { background: #e0f2fe; box-shadow: 0 4px 0 #64748b; }
+  #controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; font-size: 14px; }
+  #controls label { font-weight: 700; }
+  input[type="range"] { width: 180px; accent-color: #f59e0b; }
+  #msg { min-height: 22px; font-weight: 700; color: #fde68a; text-align: center; }
+  .keys { font-size: 13px; color: #cbd5e1; text-align: center; max-width: 900px; line-height: 1.5; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>❄️ POLAR <span>PLUNGE</span> 🏊</h1>
+  <div id="hud">
+    <div>Score: <b id="score">0</b> / <b>150</b></div>
+    <div>Dives left: <b id="dives">10</b></div>
+    <div>Wind: <b id="wind">0</b></div>
+    <div>Last dive: <b id="last">—</b></div>
+    <div>Status: <b id="status">Ready</b></div>
+  </div>
+  <div id="canvasBox">
+    <canvas id="game" width="900" height="540"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>❄️ POLAR PLUNGE ❄️</h2>
+      <p class="big">Precision / Ice Dive Aim</p>
+      <p><strong>How to Play:</strong> You stand on an ice cliff above freezing water. Aim your dive angle, set your power, and watch the wind! Hit the floating target rings to score — bullseyes are worth the most. Dodge the drifting ice floes, or your dive is ruined. You get <strong>10 dives</strong>. Reach <strong>150 points</strong> to win!</p>
+      <p>Controls: <strong>← / →</strong> aim &nbsp;•&nbsp; <strong>↑ / ↓</strong> power &nbsp;•&nbsp; <strong>Space / Enter</strong> dive &nbsp;•&nbsp; Mouse drag to aim, click Dive &nbsp;•&nbsp; Touch drag + Dive button</p>
+      <button id="startBtn" type="button">▶ START DIVING</button>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">Game Over</h2>
+      <p id="endText"></p>
+      <p id="endScore" class="big"></p>
+      <div class="row">
+        <button id="restartBtn" type="button">↻ PLAY AGAIN</button>
+        <button id="howBtn" type="button" class="secondary">How to Play</button>
+      </div>
+    </div>
+  </div>
+  <div id="controls">
+    <label for="angleRange">Angle: <span id="angleVal">45°</span></label>
+    <input id="angleRange" type="range" min="15" max="80" value="45">
+    <label for="powerRange">Power: <span id="powerVal">70%</span></label>
+    <input id="powerRange" type="range" min="30" max="100" value="70">
+    <button id="diveBtn" type="button">💦 DIVE!</button>
+    <button id="resetBtn" type="button" class="secondary">Reset Game</button>
+  </div>
+  <div id="msg">Set your angle and power, then dive!</div>
+  <div class="keys">Tip: a strong headwind pushes you back toward the cliff; a tailwind carries you farther. Small rings pay big points, and clean water entries beat floe hits every time.</div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = 900, H = 540;
+  var WATER_Y = 330;
+  var CLIFF_X = 130, CLIFF_Y = 300;
+
+  var scoreEl = document.getElementById("score");
+  var divesEl = document.getElementById("dives");
+  var windEl = document.getElementById("wind");
+  var lastEl = document.getElementById("last");
+  var statusEl = document.getElementById("status");
+  var msgEl = document.getElementById("msg");
+  var angleRange = document.getElementById("angleRange");
+  var powerRange = document.getElementById("powerRange");
+  var angleVal = document.getElementById("angleVal");
+  var powerVal = document.getElementById("powerVal");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+
+  var TARGET = 150, MAX_DIVES = 10;
+  var state = "title"; // title | aiming | flying | splash | over
+  var score = 0, divesLeft = 10, diveNumber = 0;
+  var angle = 45, power = 70, wind = 0;
+  var diver = null, splashT = 0, splashX = 0, splashY = 0, lastPoints = 0;
+  var rings = [], floes = [], snow = [], ripples = [];
+  var audioCtx = null, muted = false;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || "sine";
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+  function sfx(kind) {
+    if (kind === "dive") tone(500, 0.5, "sine", 0.15, 120);
+    else if (kind === "splash") { tone(300, 0.4, "triangle", 0.2, 60); tone(900, 0.25, "sine", 0.08, 200); }
+    else if (kind === "score") { tone(660, 0.12, "sine", 0.15); setTimeout(function () { tone(880, 0.18, "sine", 0.15); }, 110); }
+    else if (kind === "bonk") tone(140, 0.25, "square", 0.18, 70);
+    else if (kind === "win") { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, "sine", 0.16); }, i * 150); }); }
+    else if (kind === "lose") { [400, 300, 200, 130].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, "triangle", 0.14); }, i * 170); }); }
+  }
+
+  function newWind() {
+    wind = Math.round(rand(-9, 9));
+    windEl.textContent = (wind > 0 ? "+" : "") + wind + (wind > 0 ? " tailwind" : wind < 0 ? " headwind" : " calm");
+  }
+  function newTargets() {
+    rings = [];
+    var used = [];
+    for (var i = 0; i < 4; i++) {
+      var x = 0, ok = false, tries = 0;
+      while (!ok && tries < 50) {
+        x = rand(300, 840); ok = true; tries++;
+        for (var j = 0; j < used.length; j++) { if (Math.abs(used[j] - x) < 130) ok = false; }
+      }
+      used.push(x);
+      var r = rand(26, 46);
+      rings.push({ x: x, y: WATER_Y + rand(14, 60), r: r, bob: rand(0, 6.28), scored: false });
+    }
+    floes = [];
+    for (var k = 0; k < 4; k++) {
+      floes.push({ x: rand(280, 850), y: WATER_Y + rand(6, 46), w: rand(60, 110), h: rand(16, 26), drift: rand(-0.4, 0.4) });
+    }
+  }
+  function newSnow() {
+    snow = [];
+    for (var i = 0; i < 70; i++) snow.push({ x: rand(0, W), y: rand(0, H), s: rand(1, 3), v: rand(0.3, 1.1) });
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    divesEl.textContent = divesLeft;
+    angleVal.textContent = Math.round(angle) + "°";
+    powerVal.textContent = Math.round(power) + "%";
+    angleRange.value = angle;
+    powerRange.value = power;
+  }
+  function setStatus(t) { statusEl.textContent = t; }
+
+  function resetGame() {
+    score = 0; divesLeft = MAX_DIVES; diveNumber = 0;
+    angle = 45; power = 70; diver = null; splashT = 0; lastPoints = 0;
+    newWind(); newTargets(); newSnow(); ripples = [];
+    lastEl.textContent = "—";
+    msgEl.textContent = "Set your angle and power, then dive!";
+    setStatus("Ready");
+    updateHUD();
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    state = "aiming";
+    setStatus("Aiming — dive " + (diveNumber + 1));
+    tone(440, 0.15, "sine", 0.12, 660);
+  }
+
+  function dive() {
+    if (state !== "aiming") return;
+    ensureAudio();
+    var rad = angle * Math.PI / 180;
+    var speed = 4 + power * 0.14;
+    diver = {
+      x: CLIFF_X + 18, y: CLIFF_Y - 30,
+      vx: Math.cos(rad) * speed,
+      vy: -Math.sin(rad) * speed,
+      rot: 0, trail: []
+    };
+    state = "flying";
+    diveNumber++;
+    setStatus("Diving!");
+    msgEl.textContent = "Dive " + diveNumber + " away! Wind " + (wind > 0 ? "+" : "") + wind + " is pushing you...";
+    sfx("dive");
+  }
+
+  function finishDive(points, label) {
+    score += points;
+    lastPoints = points;
+    divesLeft--;
+    lastEl.textContent = label + " (+" + points + ")";
+    msgEl.textContent = label + "! +" + points + " points. Total: " + score + ".";
+    if (points > 0) sfx("score"); else sfx("bonk");
+    updateHUD();
+    if (score >= TARGET) {
+      state = "over";
+      setStatus("YOU WIN!");
+      document.getElementById("endTitle").textContent = "🏆 YOU WIN!";
+      document.getElementById("endText").textContent = "Brilliant diving! You cleared the target with dives to spare.";
+      document.getElementById("endScore").textContent = "Final score: " + score + " in " + diveNumber + " dives";
+      endScreen.classList.remove("hidden");
+      sfx("win");
+    } else if (divesLeft <= 0) {
+      state = "over";
+      setStatus("Game Over");
+      document.getElementById("endTitle").textContent = "🧊 GAME OVER";
+      document.getElementById("endText").textContent = "Out of dives. You needed 150 points — better luck on the next plunge!";
+      document.getElementById("endScore").textContent = "Final score: " + score + " / 150";
+      endScreen.classList.remove("hidden");
+      sfx("lose");
+    } else {
+      state = "aiming";
+      newWind(); newTargets();
+      setStatus("Aiming — dive " + (diveNumber + 1));
+      updateHUD();
+    }
+  }
+
+  function updateDiver() {
+    if (!diver) return;
+    diver.trail.push({ x: diver.x, y: diver.y });
+    if (diver.trail.length > 22) diver.trail.shift();
+    diver.vy += 0.22;
+    diver.vx += wind * 0.004;
+    diver.x += diver.vx;
+    diver.y += diver.vy;
+    diver.rot += 0.06;
+    // Ice floe collision: a floe hit ruins the dive before the water.
+    for (var i = 0; i < floes.length; i++) {
+      var f = floes[i];
+      if (diver.y < WATER_Y + 4 && diver.x > f.x - f.w / 2 && diver.x < f.x + f.w / 2 && diver.y > f.y - 8 && diver.y < f.y + f.h) {
+        diver = null; state = "splash"; splashT = 0;
+        finishDive(0, "Bonk! Hit an ice floe");
+        return;
+      }
+    }
+    if (diver.y >= WATER_Y) {
+      splashX = diver.x; splashY = WATER_Y; splashT = 0;
+      ripples.push({ x: diver.x, r: 6, a: 1 });
+      var hit = null, best = 1e9;
+      for (var j = 0; j < rings.length; j++) {
+        var rg = rings[j];
+        var dx = diver.x - rg.x;
+        var dy = diver.y - (rg.y - 10);
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d < best) { best = d; hit = rg; }
+      }
+      var pts = 0, label = "Missed the rings — splash!";
+      if (hit && best <= hit.r) {
+        var frac = best / hit.r;
+        if (frac <= 0.35) { pts = 50; label = "BULLSEYE! Perfect entry"; }
+        else if (frac <= 0.7) { pts = 30; label = "Ring hit! Great entry"; }
+        else { pts = 15; label = "Clipped the ring"; }
+        if (hit.r < 32) pts += 10;
+      } else if (diver.x < 240 || diver.x > 880) {
+        pts = 0; label = "Way off target — icy miss";
+      }
+      diver = null; state = "splash"; sfx("splash");
+      finishDive(pts, label);
+    } else if (diver.x > W + 40 || diver.x < -40 || diver.y > H + 40) {
+      diver = null; state = "splash"; splashT = 0;
+      finishDive(0, "Diver flew off course");
+    }
+  }
+
+  function drawBackground() {
+    var sky = ctx.createLinearGradient(0, 0, 0, WATER_Y);
+    sky.addColorStop(0, "#7cc4ea"); sky.addColorStop(1, "#d8f1ff");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, WATER_Y);
+    // Sun, clouds, mountains
+    ctx.fillStyle = "#fef3c7"; ctx.beginPath(); ctx.arc(800, 60, 34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.85)";
+    [[120, 60], [170, 50], [640, 90]].forEach(function (c) {
+      ctx.beginPath(); ctx.arc(c[0], c[1], 22, 0, Math.PI * 2); ctx.arc(c[0] + 24, c[1] + 4, 18, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = "#b8d4e8";
+    ctx.beginPath(); ctx.moveTo(0, WATER_Y); ctx.lineTo(180, 150); ctx.lineTo(330, WATER_Y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#e0eef8";
+    ctx.beginPath(); ctx.moveTo(120, 190); ctx.lineTo(180, 150); ctx.lineTo(240, 190); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#dbeafe";
+    ctx.beginPath(); ctx.moveTo(560, WATER_Y); ctx.lineTo(700, 180); ctx.lineTo(850, WATER_Y); ctx.closePath(); ctx.fill();
+    // Snowfall
+    ctx.fillStyle = "rgba(255,255,255,.9)";
+    snow.forEach(function (s) { ctx.fillRect(s.x, s.y, s.s, s.s); });
+    // Water
+    var sea = ctx.createLinearGradient(0, WATER_Y, 0, H);
+    sea.addColorStop(0, "#38bdf8"); sea.addColorStop(1, "#0c4a6e");
+    ctx.fillStyle = sea; ctx.fillRect(0, WATER_Y, W, H - WATER_Y);
+    ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.fillRect(0, WATER_Y, W, 3);
+    // Cliff
+    ctx.fillStyle = "#94a3b8"; ctx.fillRect(0, 250, 130, 90);
+    ctx.fillStyle = "#f1f5f9";
+    ctx.beginPath(); ctx.moveTo(0, 250); ctx.lineTo(130, 250); ctx.lineTo(150, 280); ctx.lineTo(120, 310); ctx.lineTo(0, 310); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#e2e8f0"; ctx.fillRect(0, 240, 150, 14);
+    // Wind arrow
+    ctx.fillStyle = "#0f172a"; ctx.font = "bold 15px Arial"; ctx.textAlign = "center";
+    ctx.fillText("WIND " + (wind > 0 ? "→ +" + wind : wind < 0 ? "← " + Math.abs(wind) : "— calm"), 450, 28);
+    if (wind !== 0) {
+      ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 3; ctx.beginPath();
+      var dir = wind > 0 ? 1 : -1;
+      ctx.moveTo(450 - dir * 40, 46); ctx.lineTo(450 + dir * 40, 46);
+      ctx.moveTo(450 + dir * 30, 40); ctx.lineTo(450 + dir * 40, 46); ctx.lineTo(450 + dir * 30, 52);
+      ctx.stroke();
+    }
+  }
+
+  function drawTargets() {
+    floes.forEach(function (f) {
+      ctx.fillStyle = "#e0f2fe";
+      ctx.beginPath(); ctx.ellipse(f.x, f.y + f.h / 2, f.w / 2, f.h / 2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#bae6fd";
+      ctx.beginPath(); ctx.ellipse(f.x - f.w * 0.15, f.y + f.h / 2 - 3, f.w / 3, f.h / 3, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#0f172a"; ctx.font = "bold 11px Arial"; ctx.textAlign = "center";
+      ctx.fillText("ICE", f.x, f.y + f.h / 2 + 4);
+    });
+    rings.forEach(function (rg, idx) {
+      var bobY = Math.sin(rg.bob + performance.now() / 900) * 4;
+      var y = rg.y + bobY;
+      ctx.strokeStyle = idx % 2 ? "#f59e0b" : "#ef4444";
+      ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(rg.x, y, rg.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(rg.x, y, rg.r * 0.45, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "#ffffff"; ctx.font = "bold 13px Arial"; ctx.textAlign = "center";
+      ctx.fillText(rg.r < 32 ? "50" : "30", rg.x, y + 4);
+    });
+    ripples.forEach(function (r) {
+      ctx.strokeStyle = "rgba(255,255,255," + r.a.toFixed(2) + ")";
+      ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(r.x, WATER_Y + 6, r.r, 0, Math.PI * 2); ctx.stroke();
+    });
+  }
+
+  function drawDiverAndAim() {
+    if (state === "aiming") {
+      var rad = angle * Math.PI / 180;
+      var speed = 4 + power * 0.14;
+      ctx.strokeStyle = "rgba(220,38,38,.9)"; ctx.setLineDash([8, 8]); ctx.lineWidth = 3; ctx.beginPath();
+      var px = CLIFF_X + 18, py = CLIFF_Y - 30, vx = Math.cos(rad) * speed, vy = -Math.sin(rad) * speed;
+      ctx.moveTo(px, py);
+      for (var t = 0; t < 90; t++) {
+        vy += 0.22; vx += wind * 0.004; px += vx; py += vy;
+        if (t % 4 === 0) ctx.lineTo(px, py);
+        if (py >= WATER_Y) break;
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "#0f172a"; ctx.font = "bold 14px Arial"; ctx.textAlign = "left";
+      ctx.fillText("Angle " + Math.round(angle) + "°  •  Power " + Math.round(power) + "%", 20, 520);
+    }
+    if (diver) {
+      ctx.strokeStyle = "rgba(14,165,233,.5)"; ctx.lineWidth = 2; ctx.beginPath();
+      diver.trail.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.stroke();
+      ctx.save();
+      ctx.translate(diver.x, diver.y); ctx.rotate(diver.rot);
+      ctx.fillStyle = "#ef4444"; ctx.fillRect(-16, -5, 32, 10);
+      ctx.fillStyle = "#fde68a"; ctx.beginPath(); ctx.arc(16, 0, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#0f172a"; ctx.beginPath(); ctx.arc(18, -1, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else if (state === "aiming" || state === "title") {
+      // Diver waiting on the cliff
+      ctx.fillStyle = "#1d4ed8"; ctx.fillRect(CLIFF_X - 2, CLIFF_Y - 52, 14, 26);
+      ctx.fillStyle = "#fde68a"; ctx.beginPath(); ctx.arc(CLIFF_X + 5, CLIFF_Y - 60, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ef4444"; ctx.fillRect(CLIFF_X - 6, CLIFF_Y - 52, 22, 6);
+    }
+    if (state === "splash" || splashT > 0) {
+      ctx.fillStyle = "rgba(255,255,255,.85)";
+      for (var i = 0; i < 10; i++) {
+        var a = i * 0.628 + splashT * 2;
+        ctx.beginPath(); ctx.arc(splashX + Math.cos(a) * (20 + splashT * 22), WATER_Y - 6 - Math.abs(Math.sin(a)) * 18, 4, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  function loop() {
+    // Animate snow, floes, ripples
+    snow.forEach(function (s) { s.y += s.v; if (s.y > H) { s.y = -4; s.x = rand(0, W); } });
+    floes.forEach(function (f) { f.x += f.drift; if (f.x < 260) f.x = 260; if (f.x > 860) f.x = 860; });
+    ripples.forEach(function (r) { r.r += 2.2; r.a -= 0.03; });
+    ripples = ripples.filter(function (r) { return r.a > 0; });
+    if (state === "flying") updateDiver();
+    if (state === "splash") { splashT += 0.05; if (splashT > 1.2) { splashT = 0; } }
+    drawBackground();
+    drawTargets();
+    drawDiverAndAim();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: sliders
+  angleRange.addEventListener("input", function () { angle = parseFloat(angleRange.value); updateHUD(); });
+  powerRange.addEventListener("input", function () { power = parseFloat(powerRange.value); updateHUD(); });
+
+  // Buttons
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  document.getElementById("diveBtn").addEventListener("click", dive);
+  document.getElementById("resetBtn").addEventListener("click", function () {
+    ensureAudio(); resetGame(); titleScreen.classList.remove("hidden"); endScreen.classList.add("hidden"); state = "title";
+  });
+  document.getElementById("howBtn").addEventListener("click", function () {
+    endScreen.classList.add("hidden"); titleScreen.classList.remove("hidden"); state = "title";
+  });
+
+  // Keyboard
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowLeft") { angle = clamp(angle - 2, 15, 80); updateHUD(); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { angle = clamp(angle + 2, 15, 80); updateHUD(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { power = clamp(power + 2, 30, 100); updateHUD(); e.preventDefault(); }
+    else if (e.key === "ArrowDown") { power = clamp(power - 2, 30, 100); updateHUD(); e.preventDefault(); }
+    else if (e.key === " " || e.key === "Enter") {
+      if (state === "title") startGame();
+      else if (state === "over") startGame();
+      else dive();
+      e.preventDefault();
+    }
+  });
+
+  // Mouse: drag on canvas to aim (horizontal = angle, vertical = power)
+  var dragging = false;
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX - r.left) / r.width * W;
+    var cy = (e.clientY - r.top) / r.height * H;
+    return { x: cx, y: cy };
+  }
+  canvas.addEventListener("mousedown", function (e) { ensureAudio(); dragging = true; var p = canvasPos(e); setAimFromPoint(p); });
+  canvas.addEventListener("mousemove", function (e) { if (dragging) setAimFromPoint(canvasPos(e)); });
+  document.addEventListener("mouseup", function () { dragging = false; });
+  canvas.addEventListener("click", function (e) {
+    if (state === "aiming") { var p = canvasPos(e); if (p.x > 240) dive(); }
+  });
+  function setAimFromPoint(p) {
+    if (state !== "aiming") return;
+    var dx = p.x - CLIFF_X, dy = (CLIFF_Y - 30) - p.y;
+    if (dx > 20 && dy > 0) {
+      angle = clamp(Math.atan2(dy, dx) * 180 / Math.PI, 15, 80);
+      power = clamp(30 + Math.sqrt(dx * dx + dy * dy) / 6, 30, 100);
+      updateHUD();
+    }
+  }
+
+  // Touch
+  canvas.addEventListener("touchstart", function (e) { ensureAudio(); dragging = true; var t = e.touches[0]; setAimFromPoint(canvasPos(t)); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) { if (dragging) setAimFromPoint(canvasPos(e.touches[0])); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener("touchend", function (e) { dragging = false; e.preventDefault(); }, { passive: false });
+
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

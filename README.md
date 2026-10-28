@@ -4,9 +4,9 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 580
-- **Latest game:** 0580 — Bamboo Bounce
-- **Current volume:** 006 (Games 0501 to 0600) — in progress (80 of 100)
+- **Total games:** 590
+- **Latest game:** 0590 — Polar Plunge
+- **Current volume:** 006 (Games 0501 to 0600) — in progress (90 of 100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
 ## Volume index
@@ -18,7 +18,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 | 004 | 0301–0400 (100, complete) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
 | 005 | 0401–0500 (100, complete) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
-| 006 | 0501–0600 (80 so far) | [catalogs/readme-006.md](./catalogs/readme-006.md) |
+| 006 | 0501–0600 (90 so far) | [catalogs/readme-006.md](./catalogs/readme-006.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -32,21 +32,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 058
+## Latest batch — Batch 059
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0571 | Avalanche Courier | Arcade / Snow Sled Delivery | [Play](./games/game-0571.html) |
-| 0572 | Tidepool Tiles | Puzzle / Rotating Tile Logic | [Play](./games/game-0572.html) |
-| 0573 | Desert Oasis Manager | Strategy / Oasis Resource Planning | [Play](./games/game-0573.html) |
-| 0574 | Volcano Beat Forge | Rhythm / Hammer Beat Timing | [Play](./games/game-0574.html) |
-| 0575 | Nebula Navigator | Precision / Orbital Slingshot Aim | [Play](./games/game-0575.html) |
-| 0576 | Midnight Market Maze | Arcade / Ghost Market Chase | [Play](./games/game-0576.html) |
-| 0577 | Star Chart Cipher | Puzzle / Constellation Logic | [Play](./games/game-0577.html) |
-| 0578 | Fog Lantern Relay | Strategy / Beacon Relay Planning | [Play](./games/game-0578.html) |
-| 0579 | Glacier Chime Choir | Rhythm / Chime Sequence Memory | [Play](./games/game-0579.html) |
-| 0580 | Bamboo Bounce | Precision / Ricochet Aim | [Play](./games/game-0580.html) |
-
+| 0581 | Harbor Hoist | Arcade / Crane Stacking Action | [Play](./games/game-0581.html) |
+| 0582 | Glyph Grid | Puzzle / Symbol Match Logic | [Play](./games/game-0582.html) |
+| 0583 | Alpine Apiary | Strategy / Beehive Management | [Play](./games/game-0583.html) |
+| 0584 | Drumline Dunes | Rhythm / Marching Beat Timing | [Play](./games/game-0584.html) |
+| 0585 | Comet Catcher | Precision / Gravity Steering Aim | [Play](./games/game-0585.html) |
+| 0586 | Jungle Jetpack | Arcade / Jetpack Dodge Flight | [Play](./games/game-0586.html) |
+| 0587 | Rune Vault | Puzzle / Rune Deduction Logic | [Play](./games/game-0587.html) |
+| 0588 | Harvest Haven | Strategy / Farm Season Planning | [Play](./games/game-0588.html) |
+| 0589 | Metronome Meadow | Rhythm / Tempo Matching | [Play](./games/game-0589.html) |
+| 0590 | Polar Plunge | Precision / Ice Dive Aim | [Play](./games/game-0590.html) |
 ## Quality standard
 
 Every game must have: a title screen, Start button, How-to-Play instructions, a score/lives/status HUD, a definitive Win / Game Over state with instant Restart, and keyboard + mouse + touch controls.

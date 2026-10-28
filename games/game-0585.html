@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Comet Catcher — Precision / Gravity Steering Aim</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #050510; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #fff; }
+  #wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 50% 0%, #1a1440 0%, #050510 60%); }
+  canvas { display: block; background: linear-gradient(180deg, #0a0a2a 0%, #141438 45%, #2a1a4a 75%, #3a2030 100%); border: 2px solid #5a4aff; border-radius: 12px; max-width: 96vw; max-height: 92vh; touch-action: none; box-shadow: 0 0 40px rgba(90,74,255,.45); }
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: min(900px, 96vw); pointer-events: none; z-index: 5; }
+  .pill { background: rgba(10,10,30,.85); border: 1px solid #5a4aff; border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 700; letter-spacing: .3px; }
+  .pill b { color: #ffd166; }
+  .pill.warn { border-color: #ff5a5a; color: #ffb3b3; }
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(3,3,15,.78); z-index: 10; padding: 16px; }
+  #card { max-width: 560px; width: 100%; background: #12122e; border: 2px solid #7a6aff; border-radius: 18px; padding: 26px 24px; text-align: center; box-shadow: 0 10px 50px rgba(0,0,0,.6); }
+  #card h1 { font-size: 38px; line-height: 1.05; color: #ffd166; text-shadow: 0 2px 0 #b85a00; }
+  #card h2 { font-size: 15px; letter-spacing: 2px; text-transform: uppercase; color: #9d8cff; margin: 8px 0 14px; }
+  #card p { color: #d8d4ff; line-height: 1.55; font-size: 15px; margin: 8px 0; }
+  #card ul { text-align: left; margin: 14px auto; max-width: 460px; color: #e6e2ff; line-height: 1.6; font-size: 14px; }
+  #card li { margin: 5px 0; }
+  .btn { display: inline-block; margin-top: 16px; background: #ffd166; color: #1a1000; border: none; border-radius: 999px; padding: 14px 30px; font-size: 18px; font-weight: 900; cursor: pointer; }
+  .btn:hover { background: #ffe08a; transform: scale(1.03); }
+  .btn:active { transform: scale(.98); }
+  .btn.secondary { background: #2a2a5a; color: #fff; border: 1px solid #7a6aff; margin-left: 8px; }
+  #statusLine { margin-top: 12px; font-weight: 800; color: #8affc1; min-height: 20px; }
+  #aimHint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 13px; color: #c9c2ff; background: rgba(0,0,0,.45); padding: 6px 12px; border-radius: 999px; pointer-events: none; z-index: 5; white-space: nowrap; }
+  @media (max-width: 600px) { #card h1 { font-size: 30px; } #aimHint { font-size: 11px; } .pill { font-size: 12px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="620" aria-label="Comet Catcher game canvas"></canvas>
+  <div id="hud" aria-live="polite">
+    <div class="pill">Caught: <b id="caught">0</b> / 20</div>
+    <div class="pill">Score: <b id="score">0</b></div>
+    <div class="pill" id="missPill">Missed: <b id="missed">0</b> / 3</div>
+    <div class="pill">Status: <b id="status">Ready</b></div>
+    <div class="pill">Ship: <b id="shipState">Docked</b></div>
+  </div>
+  <div id="aimHint">Aim with mouse / touch drag — click or tap to fire a thrust pulse &bull; Arrow keys / WASD also thrust</div>
+  <div id="overlay">
+    <div id="card">
+      <h1>☄️ Comet Catcher</h1>
+      <h2>Precision / Gravity Steering Aim</h2>
+      <p><strong>Steer your catcher ship with short thrust pulses.</strong> Comets rain down through drifting gravity wells that bend their fall. No slingshots — just careful aiming, timing, and one clean intercept at a time.</p>
+      <ul>
+        <li><strong>How to play:</strong> Move the mouse or drag on touch to aim. A dotted prediction line shows where your next thrust pulse will carry you.</li>
+        <li><strong>Thrust:</strong> Click / tap to pulse toward your aim point. Arrow keys or WASD fire pulses up, down, left, and right. Pulses cost nothing, but momentum carries — plan ahead!</li>
+        <li><strong>Catch:</strong> Fly so a falling comet lands inside your glowing net zone above the ship.</li>
+        <li><strong>Win:</strong> Catch <strong>20 comets</strong>. <strong>Game Over:</strong> Let <strong>3 comets</strong> burn up in the atmosphere at the bottom.</li>
+        <li><strong>Watch out:</strong> Purple gravity wells pull comets sideways. Golden comets are fast and worth double points. Red comets are wild — catch them for bonus points if you dare.</li>
+      </ul>
+      <button class="btn" id="startBtn" type="button">▶ Start Catching</button>
+      <button class="btn secondary" id="howBtn" type="button">How to Play</button>
+      <div id="statusLine">Ready when you are, pilot.</div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var overlay = document.getElementById('overlay');
+  var cardTitle = document.querySelector('#card h1');
+  var cardText = document.querySelector('#card p');
+  var startBtn = document.getElementById('startBtn');
+  var howBtn = document.getElementById('howBtn');
+  var statusLine = document.getElementById('statusLine');
+  var caughtEl = document.getElementById('caught');
+  var scoreEl = document.getElementById('score');
+  var missedEl = document.getElementById('missed');
+  var statusEl = document.getElementById('status');
+  var shipEl = document.getElementById('shipState');
+  var missPill = document.getElementById('missPill');
+
+  var state = 'title'; // title | playing | won | over
+  var caught = 0, score = 0, missed = 0, combo = 0, bestCombo = 0;
+  var time = 0, spawnTimer = 0, spawnEvery = 95, shake = 0, flash = 0;
+  var stars = [], wells = [], comets = [], particles = [], trails = [];
+
+  // Ship: thrust-pulse steering with inertia and gentle drag.
+  var ship = { x: W / 2, y: H - 110, vx: 0, vy: 0, r: 22, netR: 46, angle: -Math.PI / 2, thrusting: 0 };
+  var aim = { x: W / 2, y: H - 220, active: false, dragging: false };
+
+  // ---- Procedural Web Audio: created only after user interaction ----
+  var audioCtx = null, master = null;
+  function ensureAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      master = audioCtx.createGain();
+      master.gain.value = 0.18;
+      master.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol, slideTo) {
+    if (!audioCtx || !master) return;
+    try {
+      var t = audioCtx.currentTime;
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, t);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+      g.gain.setValueAtTime(vol || 0.5, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g); g.connect(master);
+      o.start(t); o.stop(t + dur + 0.02);
+    } catch (e) {}
+  }
+  function sfxCatch() { beep(620, 0.16, 'sine', 0.6, 980); setTimeout(function(){ beep(980, 0.14, 'triangle', 0.5, 1400); }, 70); }
+  function sfxMiss() { beep(220, 0.35, 'sawtooth', 0.4, 70); }
+  function sfxThrust() { beep(180, 0.18, 'triangle', 0.45, 420); }
+  function sfxWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, 'triangle', 0.55); }, i * 140); }); }
+  function sfxOver() { [392, 330, 262, 196].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, 'sawtooth', 0.35); }, i * 150); }); }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+  function dist(ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); }
+
+  function resetWorld() {
+    caught = 0; score = 0; missed = 0; combo = 0; bestCombo = 0;
+    time = 0; spawnTimer = 50; spawnEvery = 95; shake = 0; flash = 0;
+    comets = []; particles = []; trails = [];
+    ship.x = W / 2; ship.y = H - 110; ship.vx = 0; ship.vy = 0; ship.angle = -Math.PI / 2;
+    stars = [];
+    for (var i = 0; i < 110; i++) stars.push({ x: Math.random() * W, y: Math.random() * H, r: rand(0.6, 2.1), tw: rand(0, 6.28) });
+    wells = [
+      { x: W * 0.28, y: H * 0.32, r: 90, pull: 0.045, phase: 0 },
+      { x: W * 0.72, y: H * 0.48, r: 100, pull: 0.05, phase: 2.1 },
+      { x: W * 0.50, y: H * 0.20, r: 70, pull: 0.035, phase: 4.2 }
+    ];
+    updateHUD('Flying');
+  }
+
+  function spawnComet() {
+    var kind = Math.random();
+    var type = 'normal', speed = rand(1.3, 2.1), pts = 100, color = '#9fd8ff', tail = '#5aaaff';
+    if (kind > 0.88) { type = 'golden'; speed = rand(2.3, 3.1); pts = 200; color = '#ffd166'; tail = '#ff9a00'; }
+    else if (kind > 0.74) { type = 'wild'; speed = rand(1.8, 2.6); pts = 150; color = '#ff7a7a'; tail = '#ff3a3a'; }
+    comets.push({
+      x: rand(50, W - 50), y: -20, vx: rand(-0.4, 0.4), vy: speed,
+      r: type === 'golden' ? 13 : 15, type: type, pts: pts, color: color, tail: tail,
+      spin: rand(0, 6.28), wobble: rand(0, 6.28)
+    });
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      var a = Math.random() * Math.PI * 2, s = rand(1, 4.5);
+      particles.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(18, 42), max: 42, color: color, r: rand(1.5, 4) });
+    }
+  }
+
+  function thrustToward(tx, ty, power) {
+    var dx = tx - ship.x, dy = ty - ship.y;
+    var d = Math.sqrt(dx * dx + dy * dy) || 1;
+    ship.vx += (dx / d) * power;
+    ship.vy += (dy / d) * power;
+    ship.angle = Math.atan2(dy, dx);
+    ship.thrusting = 10;
+    burst(ship.x - Math.cos(ship.angle) * 18, ship.y - Math.sin(ship.angle) * 18, '#8affc1', 8);
+    sfxThrust();
+  }
+
+  function thrustDir(dx, dy) {
+    ship.vx += dx * 3.4; ship.vy += dy * 3.4;
+    ship.angle = Math.atan2(dy, dx);
+    ship.thrusting = 10;
+    sfxThrust();
+  }
+
+  function updateHUD(statusText) {
+    caughtEl.textContent = caught;
+    scoreEl.textContent = score;
+    missedEl.textContent = missed;
+    statusEl.textContent = statusText || statusEl.textContent;
+    var speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+    shipEl.textContent = state === 'playing' ? (speed > 4 ? 'Boosting' : speed > 1 ? 'Drifting' : 'Steady') : (state === 'won' ? 'Victory' : state === 'over' ? 'Down' : 'Docked');
+    missPill.className = 'pill' + (missed >= 2 ? ' warn' : '');
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    overlay.style.display = 'flex';
+    cardTitle.textContent = won ? '🏆 You Caught Them All!' : '💥 Atmosphere Breach!';
+    cardText.innerHTML = won
+      ? 'Brilliant piloting! You caught <strong>20 comets</strong> with a best combo of <strong>' + bestCombo + '</strong> and a final score of <strong>' + score + '</strong>. The night sky is safe — for now.'
+      : 'Three comets slipped past your net and burned up below. You caught <strong>' + caught + '</strong> of 20, scoring <strong>' + score + '</strong>. Ready for another run?';
+    startBtn.textContent = '↻ Restart Instantly';
+    statusLine.textContent = won ? 'Victory! Press Restart to fly again.' : 'Game Over — press Restart to try again.';
+    statusEl.textContent = won ? 'You Win!' : 'Game Over';
+    if (won) sfxWin(); else sfxOver();
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetWorld();
+    state = 'playing';
+    overlay.style.display = 'none';
+    startBtn.textContent = '▶ Start Catching';
+    statusLine.textContent = 'Good luck, pilot!';
+    updateHUD('Flying');
+  }
+
+  // Prediction line: simulate ship drift + drag for the next thrust direction.
+  function predictionPoints() {
+    var pts = [];
+    var px = ship.x, py = ship.y, pvx = ship.vx, pvy = ship.vy;
+    var dx = aim.x - ship.x, dy = aim.y - ship.y;
+    var d = Math.sqrt(dx * dx + dy * dy) || 1;
+    pvx += (dx / d) * 3.2; pvy += (dy / d) * 3.2;
+    for (var i = 0; i < 26; i++) {
+      pvx *= 0.985; pvy *= 0.985;
+      px += pvx; py += pvy;
+      if (px < 24) { px = 24; pvx *= -0.4; }
+      if (px > W - 24) { px = W - 24; pvx *= -0.4; }
+      if (py < 70) { py = 70; pvy *= -0.4; }
+      if (py > H - 24) { py = H - 24; pvy *= -0.4; }
+      if (i % 2 === 0) pts.push({ x: px, y: py });
+    }
+    return pts;
+  }
+
+  function update() {
+    time++;
+    if (state !== 'playing') return;
+    spawnTimer--;
+    if (spawnTimer <= 0) {
+      spawnComet();
+      spawnTimer = Math.max(48, spawnEvery - caught * 2);
+      if (Math.random() < 0.25) spawnTimer = Math.max(40, spawnTimer - 18);
+    }
+    // Wells drift slowly so aim must adapt.
+    wells.forEach(function (w, i) {
+      w.x += Math.sin(time / 160 + w.phase) * 0.35;
+      w.y += Math.cos(time / 210 + w.phase) * 0.2;
+      w.x = clamp(w.x, 80, W - 80); w.y = clamp(w.y, 100, H - 220);
+    });
+    // Ship physics: inertia + drag, soft walls.
+    ship.vx *= 0.985; ship.vy *= 0.985;
+    ship.x += ship.vx; ship.y += ship.vy;
+    if (ship.x < 24) { ship.x = 24; ship.vx *= -0.45; }
+    if (ship.x > W - 24) { ship.x = W - 24; ship.vx *= -0.45; }
+    if (ship.y < 72) { ship.y = 72; ship.vy *= -0.45; }
+    if (ship.y > H - 24) { ship.y = H - 24; ship.vy *= -0.45; }
+    if (ship.thrusting > 0) ship.thrusting--;
+    trails.push({ x: ship.x, y: ship.y, life: 14 });
+    if (trails.length > 40) trails.shift();
+
+    // Comets: gravity, wells bend them, wild ones wobble.
+    for (var i = comets.length - 1; i >= 0; i--) {
+      var c = comets[i];
+      c.wobble += 0.06;
+      c.spin += 0.08;
+      c.vy += 0.012; // gentle gravity
+      wells.forEach(function (w) {
+        var d = dist(c.x, c.y, w.x, w.y);
+        if (d < w.r + 60 && d > 20) {
+          var pull = w.pull * (1 - d / (w.r + 60));
+          c.vx += ((w.x - c.x) / d) * pull;
+          c.vy += ((w.y - c.y) / d) * pull * 0.25;
+        }
+      });
+      if (c.type === 'wild') c.vx += Math.sin(c.wobble) * 0.05;
+      c.vx = clamp(c.vx, -2.2, 2.2);
+      c.x += c.vx; c.y += c.vy;
+      var netX = ship.x + Math.cos(ship.angle) * 8;
+      var netY = ship.y - 34;
+      // Net zone is the glowing arc above the ship.
+      if (dist(c.x, c.y, netX, netY) < ship.netR + c.r * 0.6) {
+        caught++; combo++; bestCombo = Math.max(bestCombo, combo);
+        var gained = c.pts + (combo >= 3 ? 50 : 0);
+        score += gained;
+        burst(c.x, c.y, c.color, 22);
+        flash = 8;
+        sfxCatch();
+        comets.splice(i, 1);
+        updateHUD('Caught! Combo x' + combo);
+        if (caught >= 20) { endGame(true); return; }
+        continue;
+      }
+      if (c.y > H - 18) {
+        missed++; combo = 0; shake = 12;
+        burst(c.x, H - 20, '#ff5a5a', 18);
+        sfxMiss();
+        comets.splice(i, 1);
+        updateHUD('Missed! Atmosphere hit');
+        if (missed >= 3) { endGame(false); return; }
+      }
+    }
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var p = particles[j];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.04; p.life--;
+      if (p.life <= 0) particles.splice(j, 1);
+    }
+    if (shake > 0) shake--;
+    if (flash > 0) flash--;
+    updateHUD();
+  }
+
+  function drawShip() {
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(ship.angle + Math.PI / 2);
+    // Hull
+    ctx.fillStyle = '#dfe6ff';
+    ctx.beginPath();
+    ctx.moveTo(0, -24); ctx.lineTo(16, 14); ctx.lineTo(8, 20); ctx.lineTo(-8, 20); ctx.lineTo(-16, 14);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5a4aff';
+    ctx.beginPath(); ctx.arc(0, -4, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(0, -4, 3.5, 0, Math.PI * 2); ctx.fill();
+    // Thruster flame
+    if (ship.thrusting > 0) {
+      ctx.fillStyle = 'rgba(138,255,193,0.9)';
+      ctx.beginPath(); ctx.moveTo(-7, 20); ctx.lineTo(0, 20 + ship.thrusting * 2.2); ctx.lineTo(7, 20); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    // Net zone above ship (world space, always upright)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(138,255,193,0.95)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath(); ctx.arc(ship.x, ship.y - 34, ship.netR, Math.PI, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(138,255,193,0.12)';
+    ctx.beginPath(); ctx.arc(ship.x, ship.y - 34, ship.netR, Math.PI, Math.PI * 2); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake) * 0.4, rand(-shake, shake) * 0.4);
+    ctx.clearRect(-20, -20, W + 40, H + 40);
+    // Stars
+    stars.forEach(function (s) {
+      ctx.globalAlpha = 0.5 + 0.5 * Math.sin(time / 30 + s.tw);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Gravity wells (visual only: they bend comets, no slingshot orbits)
+    wells.forEach(function (w) {
+      var grad = ctx.createRadialGradient(w.x, w.y, 4, w.x, w.y, w.r);
+      grad.addColorStop(0, 'rgba(154,92,255,0.55)');
+      grad.addColorStop(0.6, 'rgba(90,74,255,0.18)');
+      grad.addColorStop(1, 'rgba(90,74,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(w.x, w.y, w.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(200,170,255,0.6)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(w.x, w.y, 26 + Math.sin(time / 40 + w.phase) * 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#e6d8ff';
+      ctx.beginPath(); ctx.arc(w.x, w.y, 7, 0, Math.PI * 2); ctx.fill();
+    });
+    // Atmosphere danger line
+    ctx.fillStyle = 'rgba(255,90,90,0.16)';
+    ctx.fillRect(0, H - 22, W, 22);
+    ctx.fillStyle = '#ff8a8a';
+    ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ATMOSPHERE — DO NOT LET COMETS REACH HERE', W / 2, H - 7);
+    // Prediction line while playing and aiming
+    if (state === 'playing' && aim.active) {
+      var pts = predictionPoints();
+      ctx.strokeStyle = 'rgba(255,209,102,0.9)';
+      ctx.lineWidth = 2; ctx.setLineDash([4, 8]);
+      ctx.beginPath(); ctx.moveTo(ship.x, ship.y);
+      pts.forEach(function (p) { ctx.lineTo(p.x, p.y); });
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(aim.x, aim.y, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(aim.x, aim.y, 11, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Ship trail
+    trails.forEach(function (t) {
+      ctx.globalAlpha = t.life / 14 * 0.35;
+      ctx.fillStyle = '#8affc1';
+      ctx.beginPath(); ctx.arc(t.x, t.y, 5, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    drawShip();
+    // Comets with tails
+    comets.forEach(function (c) {
+      ctx.strokeStyle = c.tail; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(c.x, c.y);
+      ctx.lineTo(c.x - c.vx * 12, c.y - c.vy * 12); ctx.stroke();
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.spin);
+      ctx.fillStyle = c.color;
+      ctx.beginPath();
+      for (var k = 0; k < 8; k++) {
+        var a = k / 8 * Math.PI * 2;
+        var rr = c.r * (k % 2 === 0 ? 1 : 0.72);
+        var px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath(); ctx.arc(-4, -4, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(c.type === 'golden' ? '2x' : c.type === 'wild' ? '!' : '', c.x, c.y - c.r - 6);
+    });
+    // Particles
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Progress bar: comets to win
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(20, H - 48, W - 40, 10);
+    ctx.fillStyle = '#8affc1';
+    ctx.fillRect(20, H - 48, (W - 40) * caught / 20, 10);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui, sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('COMETS TO WIN: ' + caught + ' / 20', 20, H - 54);
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(138,255,193,' + (flash / 60) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.restore();
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0));
+    var cy = (evt.clientY !== undefined ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0));
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  // Mouse: move to aim, click to thrust.
+  canvas.addEventListener('mousemove', function (e) {
+    var p = canvasPos(e);
+    aim.x = p.x; aim.y = p.y; aim.active = true;
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    ensureAudio();
+    if (state !== 'playing') return;
+    var p = canvasPos(e);
+    aim.x = p.x; aim.y = p.y; aim.active = true;
+    thrustToward(p.x, p.y, 3.2);
+  });
+  canvas.addEventListener('mouseleave', function () { aim.active = false; });
+
+  // Touch: drag to aim, release to thrust toward release point.
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio();
+    e.preventDefault();
+    var p = canvasPos(e);
+    aim.x = p.x; aim.y = p.y; aim.active = true; aim.dragging = true;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var p = canvasPos(e);
+    aim.x = p.x; aim.y = p.y; aim.active = true;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) {
+    e.preventDefault();
+    if (state === 'playing' && aim.dragging) thrustToward(aim.x, aim.y, 3.2);
+    aim.dragging = false;
+  }, { passive: false });
+
+  // Keyboard: arrows + WASD thrust pulses, Space aims forward, Enter starts / restarts.
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    if (state !== 'playing') {
+      if (k === 'enter' || k === ' ') { e.preventDefault(); startGame(); }
+      return;
+    }
+    if (k === 'arrowleft' || k === 'a') { e.preventDefault(); thrustDir(-1, 0); }
+    else if (k === 'arrowright' || k === 'd') { e.preventDefault(); thrustDir(1, 0); }
+    else if (k === 'arrowup' || k === 'w') { e.preventDefault(); thrustDir(0, -1); }
+    else if (k === 'arrowdown' || k === 's') { e.preventDefault(); thrustDir(0, 1); }
+    else if (k === ' ') { e.preventDefault(); thrustToward(aim.x, aim.y, 3.2); }
+  });
+
+  startBtn.addEventListener('click', function () { startGame(); });
+  howBtn.addEventListener('click', function () {
+    ensureAudio();
+    statusLine.textContent = 'Aim, pulse, intercept! Catch 20 comets, miss fewer than 3. Press Start when ready.';
+    cardText.innerHTML = 'Move the mouse or drag to aim — the dotted line predicts your drift after a thrust pulse. Click, tap, or use Arrow keys / WASD to pulse. Fly so comets land in the green net above your ship. Gravity wells bend comet paths, so lead your target and watch golden comets for double points.';
+  });
+
+  resetWorld();
+  // Show title screen on load; gameplay starts only after Start is pressed.
+  overlay.style.display = 'flex';
+  updateHUD('Ready');
+  loop();
+})();
+</script>
+</body>
+</html>

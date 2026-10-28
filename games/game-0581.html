@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Harbor Hoist</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #0b1e2e; overflow: hidden; font-family: Arial, Helvetica, sans-serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 10px; }
+  h1 { color: #ffd166; font-size: 30px; letter-spacing: 2px; margin-bottom: 6px; text-shadow: 2px 2px 0 #000; }
+  #hud { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; color: #fff; font-weight: bold; }
+  #hud span { background: #14344d; border: 2px solid #2a7a9e; border-radius: 10px; padding: 6px 12px; font-size: 15px; }
+  #hud .lives { color: #ff6b6b; }
+  #stage { position: relative; width: min(92vw, 560px); height: min(68vh, 620px); }
+  canvas { width: 100%; height: 100%; display: block; background: linear-gradient(#7ec8e3, #cdeef7 55%, #2b6a8a 55%, #1d4e66); border: 4px solid #ffd166; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(5, 20, 32, 0.88); color: #fff; text-align: center; padding: 22px; border-radius: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffd166; font-size: 30px; }
+  .overlay p { line-height: 1.55; font-size: 16px; max-width: 420px; }
+  .overlay .small { font-size: 14px; color: #cfe8f5; }
+  button { cursor: pointer; background: #ffd166; color: #102a3d; border: none; border-radius: 12px; padding: 13px 26px; font-size: 19px; font-weight: bold; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #4ecdc4; box-shadow: 0 4px 0 #1d7a74; }
+  #controls { color: #cfe8f5; font-size: 13px; margin-top: 8px; text-align: center; line-height: 1.5; }
+  #msg { color: #ffd166; font-weight: bold; min-height: 22px; margin-top: 6px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9875; HARBOR HOIST &#9875;</h1>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Stacked: <b id="stacked">0</b> / 25</span>
+    <span class="lives">Lives: <b id="lives">&#10084;&#10084;&#10084;</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="560" height="620"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Harbor Hoist</h2>
+      <p><b>How to Play:</b> Slide the harbor crane left and right along the top rail. Drop a crate when it is lined up over the dock stack. Land it squarely to keep the tower standing!</p>
+      <p class="small">A crate that lands too far off-centre slides off the stack and costs a life. You have 3 lives. Stack <b>25 crates</b> to win the shift and fill the freighter.</p>
+      <p class="small">Controls: Arrow keys / A D to move, Space to drop. Mouse: move to aim, click to drop. Touch: drag to aim, tap to drop.</p>
+      <button id="startBtn">Start Hoisting</button>
+      <button id="howBtn" class="secondary">How to Play</button>
+      <p id="howText" class="small hidden" style="display:none;">Tip: watch the swinging hook and the ghost guide line. A perfect centre drop earns +25 bonus points. A near miss earns fewer points but still counts. Three dropped crates off the dock ends the game.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">Game Over</h2>
+      <p id="endText"></p>
+      <p class="small">Press Restart to run another shift at the harbor.</p>
+      <button id="restartBtn">Restart Instantly</button>
+    </div>
+  </div>
+  <div id="msg">Move the crane, then drop when you are lined up!</div>
+  <div id="controls">Keyboard: &larr; &rarr; / A D move &bull; Space drop &bull; R restart &bull; Mouse / Touch: aim + tap to drop</div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var stackedEl = document.getElementById('stacked');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, lives = 3, stacked = 0;
+  var craneX = W / 2, craneSpeed = 0, craneDir = 0;
+  var stack = []; // {x, y, w, h, color, label}
+  var falling = null; // {x, y, w, h, vy, color}
+  var sway = 0, swayDir = 1, particles = [], shake = 0, flash = 0;
+  var dockY = H - 58;
+  var crateColors = ['#e76f51', '#f4a261', '#2a9d8f', '#e9c46a', '#457b9d', '#9b5de5', '#f15bb5', '#00bbf9'];
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + dur);
+  }
+  function sndDrop() { beep(320, 0.12, 'triangle', 0.16); }
+  function sndLand(perfect) { beep(perfect ? 880 : 520, 0.18, 'sine', 0.2); if (perfect) setTimeout(function(){ beep(1100, 0.2, 'sine', 0.18); }, 90); }
+  function sndMiss() { beep(160, 0.35, 'sawtooth', 0.18); }
+  function sndWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, 'triangle', 0.2); }, i * 130); }); }
+  function sndLose() { [400, 300, 200, 130].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'sawtooth', 0.14); }, i * 130); }); }
+
+  function crateWidth() {
+    // Slightly narrower crates as the tower grows, for rising challenge.
+    return Math.max(58, 92 - stacked * 1.2);
+  }
+  function newCrate() {
+    var w = crateWidth();
+    falling = { x: craneX, y: 118, w: w, h: 34, vy: 0, color: crateColors[stacked % crateColors.length], swayPhase: Math.random() * 6 };
+  }
+  function reset() {
+    score = 0; lives = 3; stacked = 0; stack = []; falling = null;
+    craneX = W / 2; particles = []; shake = 0; flash = 0;
+    updateHUD('Playing'); msgEl.textContent = 'Move the crane, then drop when you are lined up!';
+  }
+  function startGame() {
+    audio(); reset(); state = 'playing';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    newCrate(); beep(660, 0.15, 'triangle', 0.18);
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    falling = null;
+    endTitle.textContent = won ? 'YOU WIN! Freighter Loaded!' : 'Game Over';
+    endText.textContent = won
+      ? 'You stacked all 25 crates without losing the tower. Final score: ' + score + '. Brilliant crane work!'
+      : 'The tower lost 3 crates over the side. You stacked ' + stacked + ' crates. Final score: ' + score + '.';
+    endScreen.classList.remove('hidden');
+    updateHUD(won ? 'WIN!' : 'Game Over');
+    if (won) sndWin(); else sndLose();
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    stackedEl.textContent = stacked;
+    livesEl.textContent = lives > 0 ? '\u2764'.repeat(lives) : 'none';
+    if (status) statusEl.textContent = status;
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 16; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 4 - 1, life: 28, color: color });
+    }
+  }
+  function loseLife(reason) {
+    lives--; shake = 10; sndMiss();
+    msgEl.textContent = reason;
+    updateHUD(lives > 0 ? 'Crate lost!' : 'Game Over');
+    if (lives <= 0) { endGame(false); return; }
+    setTimeout(function(){ if (state === 'playing') newCrate(); }, 450);
+  }
+  function landCrate() {
+    var topY = stack.length ? stack[stack.length - 1].y : dockY;
+    var targetY = topY - falling.h;
+    var topX = stack.length ? stack[stack.length - 1].x : W / 2;
+    var offset = Math.abs(falling.x - topX);
+    var maxOffset = falling.w * 0.52;
+    if (stack.length === 0) {
+      // First crate always lands on the wide dock.
+      stack.push({ x: falling.x, y: targetY, w: falling.w, h: falling.h, color: falling.color });
+      stacked++; score += 20; sndLand(true); burst(falling.x, targetY, falling.color);
+      msgEl.textContent = 'First crate down! Build from here.';
+    } else if (offset > maxOffset) {
+      burst(falling.x, targetY + 20, falling.color);
+      loseLife('Miss! That crate slid off the stack. Lives left: ' + lives);
+      falling = null; updateHUD(); return;
+    } else {
+      var perfect = offset < 10;
+      var near = offset < 24;
+      var pts = perfect ? 35 : (near ? 25 : 15);
+      score += pts;
+      stack.push({ x: falling.x, y: targetY, w: falling.w, h: falling.h, color: falling.color });
+      stacked++; sndLand(perfect); burst(falling.x, targetY, falling.color);
+      msgEl.textContent = perfect ? 'PERFECT drop! +' + pts + ' points.' : (near ? 'Solid drop! +' + pts + ' points.' : 'Wobbly, but it held! +' + pts + ' points.');
+    }
+    falling = null; updateHUD('Playing');
+    if (stacked >= 25) { endGame(true); return; }
+    setTimeout(function(){ if (state === 'playing') newCrate(); }, 220);
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#7ec8e3'; ctx.fillRect(0, 0, W, 340);
+    ctx.fillStyle = '#cdeef7'; ctx.fillRect(0, 340, W, 40);
+    ctx.fillStyle = '#2b6a8a'; ctx.fillRect(0, 380, W, 240);
+    // Clouds, distant cranes, sun
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(472, 62, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.ellipse(110, 70, 48, 16, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(280, 48, 40, 13, 0, 0, Math.PI * 2); ctx.fill();
+    // Water lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+    for (var y = 410; y < H; y += 34) { ctx.beginPath(); ctx.moveTo(20, y); ctx.lineTo(W - 20, y); ctx.stroke(); }
+    // Dock
+    ctx.fillStyle = '#8d5a2b'; ctx.fillRect(30, dockY, W - 60, 22);
+    ctx.fillStyle = '#5d3a1a'; ctx.fillRect(30, dockY + 22, W - 60, 36);
+    ctx.fillStyle = '#ffd166';
+    for (var x = 50; x < W - 40; x += 56) { ctx.fillRect(x, dockY + 4, 28, 4); }
+  }
+  function drawCrane() {
+    var hookY = falling ? falling.y - 14 : 118;
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    // Rail
+    ctx.fillStyle = '#102a3d'; ctx.fillRect(0, 22, W, 14);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(0, 36, W, 4);
+    // Crane body + cab
+    ctx.fillStyle = '#e63946'; ctx.fillRect(craneX - 52, 40, 104, 30);
+    ctx.fillStyle = '#102a3d'; ctx.fillRect(craneX + 8, 46, 28, 18);
+    ctx.fillStyle = '#a8dadc'; ctx.fillRect(craneX + 12, 49, 20, 12);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('HOIST', craneX - 14, 60);
+    // Cable + hook
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(craneX, 70); ctx.lineTo(craneX + sway, hookY); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(craneX + sway, hookY + 6, 8, 0, Math.PI * 2); ctx.fill();
+    // Guide line when a crate is ready
+    if (state === 'playing' && !falling) {
+      ctx.strokeStyle = 'rgba(255,209,102,0.7)'; ctx.setLineDash([8, 8]);
+      ctx.beginPath(); ctx.moveTo(craneX, 90); ctx.lineTo(craneX, dockY); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // Held crate
+    if (falling && falling.vy === 0) {
+      ctx.fillStyle = falling.color; ctx.fillRect(falling.x - falling.w / 2, falling.y, falling.w, falling.h);
+      ctx.strokeStyle = '#102a3d'; ctx.lineWidth = 2; ctx.strokeRect(falling.x - falling.w / 2, falling.y, falling.w, falling.h);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('CRATE', falling.x, falling.y + 22);
+    }
+    ctx.restore();
+  }
+  function drawStack() {
+    stack.forEach(function(c, i) {
+      ctx.fillStyle = c.color; ctx.fillRect(c.x - c.w / 2, c.y, c.w, c.h);
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 2; ctx.strokeRect(c.x - c.w / 2, c.y, c.w, c.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(String(i + 1), c.x, c.y + 21);
+      // Rope detail
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x, c.y + c.h); ctx.stroke();
+    });
+    if (falling && falling.vy > 0) {
+      ctx.fillStyle = falling.color; ctx.fillRect(falling.x - falling.w / 2, falling.y, falling.w, falling.h);
+      ctx.strokeStyle = '#102a3d'; ctx.lineWidth = 2; ctx.strokeRect(falling.x - falling.w / 2, falling.y, falling.w, falling.h);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText('CRATE', falling.x, falling.y + 22);
+    }
+    // Particles
+    particles.forEach(function(p) {
+      ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life / 28);
+      ctx.fillRect(p.x, p.y, 6, 6); ctx.globalAlpha = 1;
+    });
+    // Tower height marker
+    if (stack.length) {
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Tower height: ' + stacked + ' crates', 38, dockY - 8 - stack.length * 0);
+    }
+  }
+  function update() {
+    if (state === 'playing') {
+      sway += swayDir * 0.4; if (sway > 12 || sway < -12) swayDir *= -1;
+      if (craneDir !== 0) craneX += craneDir * 6;
+      craneX = Math.max(70, Math.min(W - 70, craneX));
+      if (falling && falling.vy === 0) { falling.x = craneX + sway * 0.4; }
+      if (falling && falling.vy > 0) {
+        falling.vy += 0.55; falling.y += falling.vy;
+        var topY = stack.length ? stack[stack.length - 1].y : dockY;
+        if (falling.y + falling.h >= topY) { falling.y = topY - falling.h; landCrate(); }
+        else if (falling.y > H) { falling = null; loseLife('Miss! Crate fell into the harbor.'); }
+      }
+      if (shake > 0) shake *= 0.88;
+      particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.vy += 0.2; p.life--; });
+      particles = particles.filter(function(p){ return p.life > 0; });
+    }
+  }
+  function loop() {
+    update();
+    ctx.clearRect(0, 0, W, H);
+    drawBackground(); drawStack(); drawCrane();
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and stack 25 crates!', W / 2, H - 78);
+    }
+    requestAnimationFrame(loop);
+  }
+  function drop() {
+    if (state !== 'playing' || !falling || falling.vy > 0) return;
+    falling.vy = 3; sndDrop(); msgEl.textContent = 'Crate away! Watch where it lands...';
+  }
+  function aimFromClientX(clientX) {
+    var r = canvas.getBoundingClientRect();
+    var x = (clientX - r.left) * (W / r.width);
+    craneX = Math.max(70, Math.min(W - 70, x));
+    if (falling && falling.vy === 0) falling.x = craneX;
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function() {
+    var t = document.getElementById('howText');
+    t.style.display = (t.style.display === 'none' ? 'block' : 'none');
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') craneDir = -1;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') craneDir = 1;
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      if (state === 'title') startGame();
+      else if (state === 'won' || state === 'over') startGame();
+      else drop();
+    }
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') startGame(); }
+  });
+  document.addEventListener('keyup', function(e) {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'A' || e.key === 'd' || e.key === 'D') craneDir = 0;
+  });
+  canvas.addEventListener('mousemove', function(e) { if (state === 'playing') aimFromClientX(e.clientX); });
+  canvas.addEventListener('mousedown', function(e) { if (state === 'playing') { aimFromClientX(e.clientX); drop(); } });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); if (state === 'playing') { aimFromClientX(e.touches[0].clientX); } }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); if (state === 'playing') aimFromClientX(e.touches[0].clientX); }, { passive: false });
+  canvas.addEventListener('touchend', function(e) { e.preventDefault(); if (state === 'playing') drop(); }, { passive: false });
+
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

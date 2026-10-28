@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glyph Grid</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #1b2340 0%, #0b0e1d 70%);
+    color: #eef1ff; font-family: Georgia, "Times New Roman", serif; padding: 12px; }
+  #wrap { width: min(96vw, 520px); text-align: center; }
+  h1 { font-size: 42px; margin: 6px 0 2px; letter-spacing: 3px; color: #ffd94d;
+    text-shadow: 0 0 18px rgba(255,217,77,.55); }
+  .tag { color: #aeb8e8; margin: 0 0 12px; font-style: italic; }
+  #hud { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 10px 0; }
+  .pill { background: #222b4d; border: 1px solid #46529a; border-radius: 999px; padding: 7px 14px;
+    font-size: 15px; min-width: 118px; }
+  .pill b { color: #ffd94d; font-size: 18px; }
+  #board { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; margin: 12px auto;
+    background: rgba(255,255,255,.06); border: 2px solid #46529a; border-radius: 14px; padding: 8px;
+    touch-action: manipulation; user-select: none; }
+  .cell { aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+    font-size: clamp(22px, 6.5vw, 36px); background: #1d2547; border-radius: 9px; cursor: pointer;
+    border: 2px solid transparent; transition: transform .12s, background .12s, border-color .12s; }
+  .cell:hover { background: #2a3566; }
+  .cell.sel { border-color: #ffd94d; transform: scale(1.12); background: #3a2f10;
+    box-shadow: 0 0 14px rgba(255,217,77,.6); }
+  .cell.cur { outline: 3px dashed #7dd3fc; outline-offset: -3px; }
+  .cell.pop { animation: pop .35s ease; }
+  @keyframes pop { 50% { transform: scale(1.35) rotate(12deg); opacity: .2; } }
+  .c0 { color: #ff6b81; } .c1 { color: #ffd94d; } .c2 { color: #6be8a0; }
+  .c3 { color: #7dd3fc; } .c4 { color: #d9a0ff; } .c5 { color: #ff9e57; }
+  button { font-family: inherit; font-size: 18px; padding: 11px 22px; border-radius: 999px; border: none;
+    background: #ffd94d; color: #1a1a2e; font-weight: bold; cursor: pointer; margin: 6px; }
+  button:hover { background: #ffe98a; } button:active { transform: scale(.96); }
+  .small { background: #2a3566; color: #eef1ff; border: 1px solid #46529a; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(5,7,18,.88); z-index: 10; padding: 16px; }
+  #card { background: #181f3d; border: 2px solid #46529a; border-radius: 18px; padding: 26px 22px;
+    max-width: 460px; width: 100%; }
+  #card h2 { color: #ffd94d; margin-top: 0; font-size: 30px; }
+  #card p, #card li { text-align: left; line-height: 1.55; color: #d7dcf5; }
+  #msg { min-height: 26px; font-weight: bold; color: #6be8a0; margin: 4px 0; }
+  #msg.bad { color: #ff6b81; }
+  #combo { min-height: 20px; color: #ffd94d; font-weight: bold; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>GLYPH GRID</h1>
+  <p class="tag">Ancient symbols await their match. Swap, cascade, conquer.</p>
+  <div id="hud">
+    <div class="pill">Score <b id="score">0</b></div>
+    <div class="pill">Target <b id="target">1500</b></div>
+    <div class="pill">Moves <b id="moves">30</b></div>
+    <div class="pill">Best <b id="best">0</b></div>
+  </div>
+  <div id="msg"></div>
+  <div id="combo"></div>
+  <div id="board" role="grid" aria-label="Glyph grid"></div>
+  <div>
+    <button id="restartBtn" class="small">Restart</button>
+    <button id="soundBtn" class="small">Sound: On</button>
+  </div>
+  <p style="color:#8d97c4;font-size:13px">Click a glyph, then an adjacent glyph to swap. Arrow keys move the cursor, Enter selects. Touch: tap twice to swap.</p>
+</div>
+
+<div id="overlay">
+  <div id="card">
+    <h2 id="cardTitle">Glyph Grid</h2>
+    <div id="howto">
+      <p><b>How to Play:</b></p>
+      <ul>
+        <li>Swap two <b>adjacent</b> glyphs to line up 3 or more of the same symbol in a row or column.</li>
+        <li>Matched glyphs vanish, new ones fall from above, and cascades multiply your score.</li>
+        <li>Each swap costs 1 move. You have <b>30 moves</b> to reach <b>1500 points</b>.</li>
+        <li>Reach the target and you win. Run out of moves, or get stuck with no possible match, and the game ends.</li>
+        <li>Keyboard: arrow keys move the glowing cursor, Enter or Space selects and swaps. Mouse and touch work too.</li>
+      </ul>
+    </div>
+    <p id="endText"></p>
+    <button id="startBtn">Start Game</button>
+    <button id="howBtn" class="small">How to Play</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var SIZE = 8, TYPES = 6, MOVES = 30, TARGET = 1500;
+  var GLYPHS = ["\u2726","\u25C6","\u25CF","\u25B2","\u2727","\u2660"];
+  var boardEl = document.getElementById("board");
+  var scoreEl = document.getElementById("score"), movesEl = document.getElementById("moves");
+  var msgEl = document.getElementById("msg"), comboEl = document.getElementById("combo");
+  var overlay = document.getElementById("overlay"), cardTitle = document.getElementById("cardTitle");
+  var endText = document.getElementById("endText"), howto = document.getElementById("howto");
+  var startBtn = document.getElementById("startBtn"), howBtn = document.getElementById("howBtn");
+  var restartBtn = document.getElementById("restartBtn"), soundBtn = document.getElementById("soundBtn");
+  var bestEl = document.getElementById("best");
+  var grid = [], score = 0, moves = MOVES, selected = null, cursor = 0, over = false;
+  var busy = false, soundOn = true, audio = null, popCells = [];
+  var best = 0;
+  try { best = parseInt(localStorage.getItem("glyphgrid_best") || "0", 10) || 0; } catch(e) {}
+  bestEl.textContent = best;
+
+  function ac(){
+    if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audio && audio.state === "suspended") { audio.resume(); }
+    return audio;
+  }
+  function tone(freq, dur, type, vol){
+    if (!soundOn) return;
+    var ctx = ac(); if (!ctx) return;
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type || "sine"; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (dur || 0.15));
+    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + (dur || 0.15));
+  }
+  function setMsg(t, bad){ msgEl.textContent = t; msgEl.className = bad ? "bad" : ""; }
+  function rnd(){ return Math.floor(Math.random() * TYPES); }
+  function idx(r, c){ return r * SIZE + c; }
+  function inBounds(r, c){ return r >= 0 && r < SIZE && c >= 0 && c < SIZE; }
+
+  function fillBoard(){
+    do {
+      for (var r = 0; r < SIZE; r++){
+        grid[r] = [];
+        for (var c = 0; c < SIZE; c++) grid[r][c] = rnd();
+      }
+    } while (findMatches().length > 0 || !hasPossibleMove());
+  }
+  function findMatches(){
+    var matched = {}, list = [];
+    function mark(r, c){ var k = r + "," + c; if (!matched[k]) { matched[k] = true; list.push([r, c]); } }
+    for (var r = 0; r < SIZE; r++){
+      var run = 1;
+      for (var c = 1; c <= SIZE; c++){
+        if (c < SIZE && grid[r][c] === grid[r][c-1]) run++;
+        else { if (run >= 3) for (var k = c - run; k < c; k++) mark(r, k); run = 1; }
+      }
+    }
+    for (var c2 = 0; c2 < SIZE; c2++){
+      var run2 = 1;
+      for (var r2 = 1; r2 <= SIZE; r2++){
+        if (r2 < SIZE && grid[r2][c2] === grid[r2-1][c2]) run2++;
+        else { if (run2 >= 3) for (var k2 = r2 - run2; k2 < r2; k2++) mark(k2, c2); run2 = 1; }
+      }
+    }
+    return list;
+  }
+  function hasPossibleMove(){
+    var dirs = [[0,1],[1,0]];
+    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++){
+      for (var d = 0; d < 2; d++){
+        var r2 = r + dirs[d][0], c2 = c + dirs[d][1];
+        if (!inBounds(r2, c2)) continue;
+        var t = grid[r][c]; grid[r][c] = grid[r2][c2]; grid[r2][c2] = t;
+        var ok = findMatches().length > 0;
+        grid[r2][c2] = grid[r][c]; grid[r][c] = t;
+        if (ok) return true;
+      }
+    }
+    return false;
+  }
+  function collapse(matches){
+    matches.forEach(function(p){ grid[p[0]][p[1]] = -1; });
+    for (var c = 0; c < SIZE; c++){
+      var col = [];
+      for (var r = SIZE - 1; r >= 0; r--) if (grid[r][c] !== -1) col.push(grid[r][c]);
+      while (col.length < SIZE) col.push(rnd());
+      for (var r2 = SIZE - 1; r2 >= 0; r2--) grid[r2][c] = col[SIZE - 1 - r2];
+    }
+  }
+  function render(){
+    boardEl.innerHTML = "";
+    for (var r = 0; r < SIZE; r++) for (var c = 0; c < SIZE; c++){
+      var d = document.createElement("div");
+      d.className = "cell c" + grid[r][c];
+      d.textContent = GLYPHS[grid[r][c]];
+      d.dataset.r = r; d.dataset.c = c;
+      if (selected && selected[0] === r && selected[1] === c) d.classList.add("sel");
+      if (idx(r, c) === cursor) d.classList.add("cur");
+      boardEl.appendChild(d);
+    }
+    scoreEl.textContent = score; movesEl.textContent = moves;
+  }
+  function updateBest(){
+    if (score > best){ best = score; bestEl.textContent = best;
+      try { localStorage.setItem("glyphgrid_best", String(best)); } catch(e) {} }
+  }
+  function endGame(win){
+    over = true; busy = false; updateBest();
+    cardTitle.textContent = win ? "You Win!" : "Game Over";
+    endText.textContent = win
+      ? "Brilliant! You reached " + score + " points with " + moves + " moves to spare."
+      : "Out of luck! Final score: " + score + " (target was " + TARGET + "). Try again, glyph master.";
+    howto.classList.add("hidden");
+    startBtn.textContent = "Play Again";
+    overlay.classList.remove("hidden");
+    tone(win ? 880 : 220, 0.4, "triangle", 0.15);
+    if (win) { tone(1108, 0.3, "sine", 0.12); }
+  }
+  function checkEnd(){
+    if (score >= TARGET) { endGame(true); return true; }
+    if (moves <= 0) { endGame(false); return true; }
+    if (!hasPossibleMove()) {
+      setMsg("No matches left!", true);
+      setTimeout(function(){ if (!over) endGame(false); }, 900);
+      return true;
+    }
+    return false;
+  }
+  function resolveCascade(depth){
+    var m = findMatches();
+    if (m.length === 0) { busy = false; render(); if (!checkEnd()) setMsg(""); return; }
+    var pts = m.length * 10 * depth;
+    score += pts;
+    comboEl.textContent = depth > 1 ? "Cascade x" + depth + "! +" + pts : "+" + pts + " points!";
+    popCells = m.slice();
+    render();
+    m.forEach(function(p){
+      var el = boardEl.children[idx(p[0], p[1])];
+      if (el) el.classList.add("pop");
+    });
+    tone(440 + depth * 110, 0.18, "sine", 0.12);
+    setTimeout(function(){
+      collapse(m); render(); comboEl.textContent = "";
+      setTimeout(function(){ resolveCascade(depth + 1); }, 120);
+    }, 300);
+  }
+  function trySwap(r1, c1, r2, c2){
+    if (over || busy) return;
+    if (!inBounds(r2, c2)) return;
+    if (Math.abs(r1 - r2) + Math.abs(c1 - c2) !== 1) return;
+    busy = true;
+    var t = grid[r1][c1]; grid[r1][c1] = grid[r2][c2]; grid[r2][c2] = t;
+    render();
+    if (findMatches().length === 0){
+      setMsg("No match — swapping back!", true);
+      tone(160, 0.15, "square", 0.08);
+      setTimeout(function(){
+        var t2 = grid[r1][c1]; grid[r1][c1] = grid[r2][c2]; grid[r2][c2] = t2;
+        render(); busy = false; setMsg("");
+      }, 320);
+      return;
+    }
+    moves--; setMsg("");
+    tone(660, 0.12, "sine", 0.1);
+    setTimeout(function(){ resolveCascade(1); }, 120);
+  }
+  function pick(r, c){
+    if (over || busy) return;
+    tone(520, 0.07, "sine", 0.07);
+    if (!selected) { selected = [r, c]; cursor = idx(r, c); render(); return; }
+    if (selected[0] === r && selected[1] === c) { selected = null; render(); return; }
+    var s = selected; selected = null;
+    trySwap(s[0], s[1], r, c);
+    render();
+  }
+  function startGame(){
+    ac(); tone(523, 0.15, "sine", 0.12);
+    score = 0; moves = MOVES; selected = null; cursor = 0; over = false; busy = false;
+    fillBoard(); render(); setMsg("Make 3+ in a line!"); comboEl.textContent = "";
+    overlay.classList.add("hidden");
+  }
+  boardEl.addEventListener("click", function(e){
+    var t = e.target.closest(".cell"); if (!t) return;
+    pick(parseInt(t.dataset.r, 10), parseInt(t.dataset.c, 10));
+  });
+  boardEl.addEventListener("touchstart", function(e){
+    var t = e.target.closest(".cell"); if (!t) return;
+    e.preventDefault();
+    pick(parseInt(t.dataset.r, 10), parseInt(t.dataset.c, 10));
+  }, { passive: false });
+  document.addEventListener("keydown", function(e){
+    if (!overlay.classList.contains("hidden")) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); startGame(); }
+      return;
+    }
+    if (over) return;
+    var r = Math.floor(cursor / SIZE), c = cursor % SIZE;
+    if (e.key === "ArrowUp" && r > 0) r--;
+    else if (e.key === "ArrowDown" && r < SIZE - 1) r++;
+    else if (e.key === "ArrowLeft" && c > 0) c--;
+    else if (e.key === "ArrowRight" && c < SIZE - 1) c++;
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(r, c); return; }
+    else return;
+    e.preventDefault(); cursor = idx(r, c); render();
+  });
+  startBtn.addEventListener("click", startGame);
+  howBtn.addEventListener("click", function(){
+    howto.classList.toggle("hidden");
+    howBtn.textContent = howto.classList.contains("hidden") ? "How to Play" : "Hide Help";
+  });
+  restartBtn.addEventListener("click", function(){
+    overlay.classList.remove("hidden");
+    cardTitle.textContent = "Glyph Grid";
+    endText.textContent = ""; howto.classList.remove("hidden");
+    startBtn.textContent = "Start Game";
+  });
+  soundBtn.addEventListener("click", function(){
+    soundOn = !soundOn;
+    soundBtn.textContent = "Sound: " + (soundOn ? "On" : "Off");
+    if (soundOn) tone(660, 0.1, "sine", 0.1);
+  });
+  var last = 0;
+  function loop(ts){
+    requestAnimationFrame(loop);
+    if (ts - last > 900) {
+      last = ts;
+      var h = document.querySelector("h1");
+      if (h) h.style.textShadow = "0 0 " + (14 + Math.floor(Math.random() * 10)) + "px rgba(255,217,77,.55)";
+    }
+  }
+  requestAnimationFrame(loop);
+  fillBoard(); render();
+})();
+</script>
+</body>
+</html>

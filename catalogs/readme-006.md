@@ -84,3 +84,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0578 | Fog Lantern Relay | Strategy / Beacon Relay Planning | 1-4 choose tools, Arrow Keys move cursor, Enter place/rotate, mouse/touch click grid | [Play](./../games/game-0578.html) |
 | 0579 | Glacier Chime Choir | Rhythm / Chime Sequence Memory | 1-6 play chimes, mouse click, touch tap chimes | [Play](./../games/game-0579.html) |
 | 0580 | Bamboo Bounce | Precision / Ricochet Aim | Mouse aim click fire, touch drag tap fire, Arrow Keys aim, Space fire | [Play](./../games/game-0580.html) |
+| 0581 | Harbor Hoist | Arcade / Crane Stacking Action | Arrow Keys/A/D move crane, Space drop, mouse/touch drag move | [Play](./../games/game-0581.html) |
+| 0582 | Glyph Grid | Puzzle / Symbol Match Logic | Arrow Keys select, Enter swap, mouse/touch tap swap | [Play](./../games/game-0582.html) |
+| 0583 | Alpine Apiary | Strategy / Beehive Management | Mouse/touch click hives and tasks, Arrow Keys select, Enter assign | [Play](./../games/game-0583.html) |
+| 0584 | Drumline Dunes | Rhythm / Marching Beat Timing | D/F/J/K hit lanes, mouse click, touch tap lanes | [Play](./../games/game-0584.html) |
+| 0585 | Comet Catcher | Precision / Gravity Steering Aim | Mouse/touch aim thrust, Arrow Keys steer, Space pulse | [Play](./../games/game-0585.html) |
+| 0586 | Jungle Jetpack | Arcade / Jetpack Dodge Flight | Hold Space/Up thrust, Arrow Keys steer, mouse/touch hold thrust | [Play](./../games/game-0586.html) |
+| 0587 | Rune Vault | Puzzle / Rune Deduction Logic | Arrow Keys select runes, Enter guess, mouse/touch tap runes | [Play](./../games/game-0587.html) |
+| 0588 | Harvest Haven | Strategy / Farm Season Planning | Mouse/touch click plots, Arrow Keys select, Enter plant/harvest | [Play](./../games/game-0588.html) |
+| 0589 | Metronome Meadow | Rhythm / Tempo Matching | Space tap beat, mouse click, touch tap | [Play](./../games/game-0589.html) |
+| 0590 | Polar Plunge | Precision / Ice Dive Aim | Arrow Keys aim/power, Space dive, mouse/touch drag aim | [Play](./../games/game-0590.html) |
