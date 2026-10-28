@@ -78,6 +78,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0268 | Port Captain | Strategy / Port Logistics | Mouse/touch click ships and docks, Arrow Keys select, Enter/Space assign | [Play](./../games/game-0268.html) |
 | 0269 | Songbird Serenade | Rhythm / Melody Timing | A/S/D/F/G pitches, mouse click pads, touch tap pads | [Play](./../games/game-0269.html) |
 | 0270 | Curling Clash | Precision / Curling Slide | Mouse/touch drag aim and release, Arrow Keys aim/power, Space sweep | [Play](./../games/game-0270.html) |
+| 0271 | Penguin Plunge | Arcade / Ice Slide Dodging | Arrow Keys / A-D steer, mouse move steer, touch drag | [Play](./../games/game-0271.html) |
+| 0272 | Mosaic Maker | Puzzle / Tile Pattern Matching | Mouse/touch click palette and cells, Arrow Keys move selection, Space place, 1-6 select colour, U undo | [Play](./../games/game-0272.html) |
+| 0273 | Lighthouse Keeper | Strategy / Coastal Rescue Management | Mouse move / touch drag aim beam, Arrow Keys / A-D rotate, Space boost, F refill oil, H foghorn | [Play](./../games/game-0273.html) |
+| 0274 | Flute Frenzy | Rhythm / Wind Melody Timing | D/F/J/K hit lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0274.html) |
+| 0275 | Slingshot Safari | Precision / Slingshot Launch | Mouse/touch drag aim and release, Arrow Keys aim/power, Space launch, R restart | [Play](./../games/game-0275.html) |
+| 0276 | Volcano Vault | Arcade / Lava Leap Platformer | Arrow Keys / WASD move and jump, Space/Up jump, mouse click halves, touch on-screen buttons and swipe up | [Play](./../games/game-0276.html) |
+| 0277 | Cipher Castle | Puzzle / Codebreaking Logic | Mouse/touch click symbols, Arrow Keys move selection, 1-6 select rune, Enter submit, Backspace clear | [Play](./../games/game-0277.html) |
+| 0278 | Zoo Zookeeper | Strategy / Animal Habitat Management | Mouse/touch click enclosures and buttons, Arrow Keys select, 1/2/3 Feed/Clean/Play, R restart | [Play](./../games/game-0278.html) |
+| 0279 | Banjo Bonanza | Rhythm / String Strumming Timing | A/S/D/F strum strings, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0279.html) |
+| 0280 | Horseshoe Hero | Precision / Horseshoe Toss | Mouse/touch drag aim and release, Arrow Keys aim/power, Space toss, R restart | [Play](./../games/game-0280.html) |
 
 ## Batch notes
 
@@ -88,4 +98,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 025: 10 games, produced in one cycle.
 - Batch 026: 10 games, produced in one cycle.
 - Batch 027: 10 games, produced in one cycle.
+- Batch 028: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

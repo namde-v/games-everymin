@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Horseshoe Hero — Precision Toss</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1b2a1a; color: #fff8e7; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 30px; letter-spacing: 1px; margin: 6px 0 2px; text-shadow: 2px 2px 0 #7a4a12; }
+  .tag { color: #ffd970; font-size: 13px; margin-bottom: 8px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 820px; margin-bottom: 8px; }
+  .pill { background: #2e4a2b; border: 2px solid #8a6b2f; border-radius: 999px; padding: 7px 13px; font-weight: bold; font-size: 14px; }
+  .pill b { color: #ffd970; }
+  #wrap { position: relative; width: 100%; max-width: 820px; }
+  canvas { display: block; width: 100%; height: auto; background: #6fae5a; border: 4px solid #5b3a17; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(20, 32, 18, 0.88); border-radius: 14px; padding: 22px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd970; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; margin-bottom: 10px; }
+  .overlay .big { font-size: 22px; font-weight: bold; color: #fff; }
+  button { background: #e8a020; color: #201304; border: 3px solid #fff2c2; border-radius: 12px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 8px; }
+  button:hover, button:focus { background: #ffd970; outline: none; }
+  .keys { font-size: 13px; color: #d9e8c8; line-height: 1.6; }
+  #msg { min-height: 26px; font-weight: bold; color: #fff3a0; text-align: center; margin-top: 8px; font-size: 17px; }
+  #last { color: #e8f0d8; font-size: 14px; min-height: 20px; text-align: center; }
+  .legend { font-size: 12px; color: #cfe3b8; margin-top: 6px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>🐴 Horseshoe Hero</h1>
+<div class="tag">Precision Horseshoe Toss &bull; 10 tosses &bull; Beat the target!</div>
+
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b> / <b id="target">120</b></div>
+  <div class="pill">Tosses left: <b id="left">10</b></div>
+  <div class="pill">Wind: <b id="wind">0</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+  <div class="pill">Toss: <b id="tossNo">1</b> / 10</div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="820" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Horseshoe Hero</h2>
+    <p><b>How to Play:</b> Drag back from the horseshoe like a slingshot, aim at the stake, and release to toss. The wind pushes your horseshoe sideways every round, so aim into it. Land a <b>Ringer</b> right on the stake for 30 points, close for 20, near for 10, or in the outer ring for 5.</p>
+    <p class="big">Score 120 points in 10 tosses to Win!</p>
+    <p class="keys">Mouse: drag back &amp; release &bull; Touch: drag &amp; release<br>Keyboard: Arrow Keys aim / power, Space toss, R restart</p>
+    <button id="startBtn" type="button">Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText" class="big"></p>
+    <p id="endDetail"></p>
+    <button id="restartBtn" type="button">Restart</button>
+    <p class="keys">Or press R to play again.</p>
+  </div>
+</div>
+
+<div id="msg">Drag back from the horseshoe, then release to toss!</div>
+<div id="last"></div>
+<div class="legend">Ringer (on stake) = 30 &bull; Leaner / close = 20 &bull; Near ring = 10 &bull; Outer ring = 5 &bull; Miss = 0</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 820, H = 520;
+  var stake = { x: 410, y: 150 };
+  var startPos = { x: 410, y: 455 };
+  var score = 0, tossIndex = 0, TARGET = 120, TOTAL = 10;
+  var state = 'title'; // title, aiming, flying, settling, over
+  var shoe = { x: startPos.x, y: startPos.y, vx: 0, vy: 0, rot: 0, scale: 1 };
+  var wind = 0, frames = 0, settleTimer = 0, lastScore = 0, lastLabel = '';
+  var dragging = false, dragStart = null, dragCur = null;
+  var kbAngle = -Math.PI / 2, kbPower = 55, usingKeyboard = false;
+  var trail = [];
+
+  // Procedural audio: created only after user interaction.
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function chime() { beep(523, 0.18, 'sine', 0.14); setTimeout(function () { beep(659, 0.18, 'sine', 0.14); }, 110); setTimeout(function () { beep(784, 0.28, 'sine', 0.14); }, 220); }
+
+  var scoreEl = document.getElementById('score'), leftEl = document.getElementById('left'),
+      windEl = document.getElementById('wind'), statusEl = document.getElementById('status'),
+      tossEl = document.getElementById('tossNo'), msgEl = document.getElementById('msg'),
+      lastEl = document.getElementById('last'), titleEl = document.getElementById('titleScreen'),
+      endEl = document.getElementById('endScreen'), endTitle = document.getElementById('endTitle'),
+      endText = document.getElementById('endText'), endDetail = document.getElementById('endDetail');
+
+  function newWind() {
+    wind = Math.round((Math.random() * 12 - 6) * 10) / 10;
+    var arrow = wind === 0 ? 'calm' : (wind > 0 ? 'blowing right' : 'blowing left');
+    windEl.textContent = (wind > 0 ? '+' : '') + wind + ' (' + arrow + ')';
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    leftEl.textContent = Math.max(0, TOTAL - tossIndex);
+    tossEl.textContent = Math.min(TOTAL, tossIndex + 1);
+    if (status) statusEl.textContent = status;
+  }
+  function resetRound() {
+    shoe.x = startPos.x; shoe.y = startPos.y; shoe.vx = 0; shoe.vy = 0; shoe.rot = 0; shoe.scale = 1;
+    trail = []; dragging = false; dragStart = null; dragCur = null;
+    kbAngle = -Math.PI / 2; kbPower = 55; usingKeyboard = false;
+    newWind(); state = 'aiming'; updateHUD('Aim & toss');
+    msgEl.textContent = 'Toss ' + (tossIndex + 1) + ' of 10 — drag back and release!';
+  }
+  function startGame() {
+    ensureAudio();
+    score = 0; tossIndex = 0; lastScore = 0; lastLabel = '';
+    titleEl.classList.add('hidden'); endEl.classList.add('hidden');
+    lastEl.textContent = '';
+    resetRound();
+  }
+  function endGame(won) {
+    state = 'over';
+    endTitle.textContent = won ? 'You Win! 🏆' : 'Game Over';
+    endText.textContent = 'Final score: ' + score + ' / ' + TARGET;
+    endDetail.textContent = won ? 'Brilliant tossing! You beat the target in ' + TOTAL + ' tosses.'
+      : 'Just short of the target. Aim into the wind and go for ringers next time!';
+    endEl.classList.remove('hidden');
+    updateHUD(won ? 'You Win!' : 'Game Over');
+    if (won) chime(); else beep(180, 0.4, 'triangle', 0.12);
+  }
+  function finishToss() {
+    var dx = shoe.x - stake.x, dy = shoe.y - stake.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var pts = 0, label = 'Miss';
+    if (dist < 24) { pts = 30; label = 'RINGER!'; }
+    else if (dist < 52) { pts = 20; label = 'Leaner!'; }
+    else if (dist < 88) { pts = 10; label = 'Near ring'; }
+    else if (dist < 135) { pts = 5; label = 'Outer ring'; }
+    score += pts; lastScore = pts; lastLabel = label;
+    msgEl.textContent = label + ' — +' + pts + ' points (distance ' + Math.round(dist) + ')';
+    lastEl.textContent = 'Toss ' + (tossIndex + 1) + ': ' + label + ' +' + pts + ' — Total ' + score;
+    if (pts >= 20) chime(); else if (pts > 0) beep(440, 0.15, 'sine', 0.12); else beep(160, 0.2, 'sawtooth', 0.07);
+    tossIndex++;
+    updateHUD('Settled');
+    state = 'settling'; settleTimer = 0;
+  }
+
+  function toss(vx, vy) {
+    if (state !== 'aiming') return;
+    shoe.vx = vx; shoe.vy = vy; trail = [];
+    state = 'flying'; frames = 0;
+    updateHUD('Flying...');
+    msgEl.textContent = 'Flying! Wind is pushing it...';
+    beep(300, 0.12, 'sine', 0.1);
+  }
+  function aimFromDrag() {
+    if (!dragStart || !dragCur) return null;
+    var vx = (dragStart.x - dragCur.x) * 0.16;
+    var vy = (dragStart.y - dragCur.y) * 0.16;
+    var mag = Math.sqrt(vx * vx + vy * vy);
+    if (mag > 17) { vx = vx / mag * 17; vy = vy / mag * 17; }
+    return { vx: vx, vy: vy, power: mag };
+  }
+
+  function drawShoe(x, y, rot, scale) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.scale(scale, scale);
+    ctx.lineWidth = 9; ctx.strokeStyle = '#c9ccd6'; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(0, 0, 17, Math.PI * 0.15, Math.PI * 1.85); ctx.stroke();
+    ctx.strokeStyle = '#8a8f9e'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0, 0, 17, Math.PI * 0.15, Math.PI * 1.85); ctx.stroke();
+    ctx.fillStyle = '#3a3f4d';
+    [[-14, -8], [14, -8], [-16, 8], [16, 8]].forEach(function (p) { ctx.beginPath(); ctx.arc(p[0], p[1], 2.5, 0, Math.PI * 2); ctx.fill(); });
+    ctx.restore();
+  }
+  function draw() {
+    // Pit: sandy court, grass surround, scoring rings around the stake.
+    ctx.fillStyle = '#6fae5a'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#d9b878'; ctx.fillRect(130, 40, 560, 250);
+    ctx.strokeStyle = '#8a6b2f'; ctx.lineWidth = 4; ctx.strokeRect(130, 40, 560, 250);
+    ctx.fillStyle = '#b8935a'; ctx.fillRect(130, 290, 560, 190);
+    var rings = [[135, 'rgba(255,255,255,0.35)'], [88, 'rgba(255,217,112,0.55)'], [52, 'rgba(255,160,60,0.65)'], [24, 'rgba(255,80,80,0.75)']];
+    rings.forEach(function (r) { ctx.fillStyle = r[1]; ctx.beginPath(); ctx.arc(stake.x, stake.y, r[0], 0, Math.PI * 2); ctx.fill(); });
+    // Stake.
+    ctx.fillStyle = '#5b3a17'; ctx.fillRect(stake.x - 4, stake.y - 34, 8, 40);
+    ctx.fillStyle = '#e8a020'; ctx.beginPath(); ctx.arc(stake.x, stake.y - 34, 6, 0, Math.PI * 2); ctx.fill();
+    // Wind indicator arrow at top.
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(300, 8, 220, 26);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('WIND ' + (wind > 0 ? '→' : (wind < 0 ? '←' : '•')) + ' ' + Math.abs(wind), 410, 27);
+    // Trail.
+    trail.forEach(function (p, i) { ctx.fillStyle = 'rgba(255,255,255,' + (0.15 + 0.5 * i / Math.max(1, trail.length)) + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
+    // Aim arrow while dragging or using keyboard.
+    if (state === 'aiming') {
+      var aim = dragging ? aimFromDrag() : { vx: Math.cos(kbAngle) * kbPower * 0.28, vy: Math.sin(kbAngle) * kbPower * 0.28, power: kbPower * 0.28 };
+      if (aim && aim.power > 1) {
+        ctx.strokeStyle = '#ff2d2d'; ctx.lineWidth = 4; ctx.beginPath();
+        ctx.moveTo(shoe.x, shoe.y); ctx.lineTo(shoe.x + aim.vx * 7, shoe.y + aim.vy * 7); ctx.stroke();
+        ctx.fillStyle = '#ff2d2d'; ctx.beginPath(); ctx.arc(shoe.x + aim.vx * 7, shoe.y + aim.vy * 7, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('Power ' + Math.round(aim.power * 6), shoe.x, shoe.y + 52);
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '13px Arial';
+      ctx.fillText('Drag back from the shoe, then release', 410, 505);
+    }
+    drawShoe(shoe.x, shoe.y, shoe.rot, shoe.scale);
+    // Result banner after settling.
+    if (state === 'settling') {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(230, 300, 360, 52);
+      ctx.fillStyle = '#ffd970'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(lastLabel + '  +' + lastScore, 410, 335);
+    }
+  }
+  function loop() {
+    requestAnimationFrame(loop);
+    if (state === 'flying') {
+      frames++;
+      trail.push({ x: shoe.x, y: shoe.y });
+      if (trail.length > 22) trail.shift();
+      shoe.vx += wind * 0.045; // wind pushes sideways each frame
+      shoe.vx *= 0.985; shoe.vy *= 0.985;
+      shoe.x += shoe.vx; shoe.y += shoe.vy; shoe.rot += 0.18;
+      var speed = Math.sqrt(shoe.vx * shoe.vx + shoe.vy * shoe.vy);
+      // Settle when slow, off the board, or after a long flight.
+      if (speed < 0.6 || frames > 220 || shoe.x < 20 || shoe.x > W - 20 || shoe.y < 20 || shoe.y > H - 20) {
+        shoe.x = Math.max(24, Math.min(W - 24, shoe.x));
+        shoe.y = Math.max(24, Math.min(H - 24, shoe.y));
+        // Bounce / settle animation: shrink slightly, then stop spinning.
+        shoe.scale = 0.92; shoe.rot = Math.PI * 0.5;
+        finishToss();
+      }
+    } else if (state === 'settling') {
+      settleTimer++;
+      if (settleTimer > 95) {
+        if (tossIndex >= TOTAL) { endGame(score >= TARGET); }
+        else { resetRound(); }
+      }
+    }
+    draw();
+  }
+
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (evt.clientX - r.left) * (W / r.width), y: (evt.clientY - r.top) * (H / r.height) };
+  }
+  function touchPos(t) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (t.clientX - r.left) * (W / r.width), y: (t.clientY - r.top) * (H / r.height) };
+  }
+  function onDown(pos) {
+    if (state !== 'aiming') return;
+    dragging = true; dragStart = pos; dragCur = pos; usingKeyboard = false;
+  }
+  function onMove(pos) { if (dragging) dragCur = pos; }
+  function onUp() {
+    if (!dragging || state !== 'aiming') { dragging = false; return; }
+    dragging = false;
+    var aim = aimFromDrag();
+    if (aim && aim.power > 3) { toss(aim.vx, aim.vy); }
+    else { msgEl.textContent = 'Drag farther back for more power!'; }
+  }
+
+  // Mouse controls.
+  canvas.addEventListener('mousedown', function (e) { onDown(canvasPos(e)); });
+  canvas.addEventListener('mousemove', function (e) { onMove(canvasPos(e)); });
+  canvas.addEventListener('mouseup', function () { onUp(); });
+  canvas.addEventListener('mouseleave', function () { if (dragging) onUp(); });
+  // Touch controls.
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (e.touches[0]) onDown(touchPos(e.touches[0])); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); if (e.touches[0]) onMove(touchPos(e.touches[0])); }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); onUp(); }, { passive: false });
+  // Keyboard controls.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'r' || e.key === 'R') {
+      if (state === 'over' || state === 'title') { startGame(); }
+      else { startGame(); }
+      return;
+    }
+    if (state === 'title' && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); startGame(); return; }
+    if (state === 'over' && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); startGame(); return; }
+    if (state !== 'aiming') return;
+    usingKeyboard = true;
+    if (e.key === 'ArrowLeft') { kbAngle -= 0.12; e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { kbAngle += 0.12; e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { kbPower = Math.min(100, kbPower + 5); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { kbPower = Math.max(15, kbPower - 5); e.preventDefault(); }
+    else if (e.key === ' ') {
+      e.preventDefault();
+      toss(Math.cos(kbAngle) * kbPower * 0.28, Math.sin(kbAngle) * kbPower * 0.28);
+    }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  updateHUD('Ready');
+  newWind();
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

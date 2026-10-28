@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Volcano Vault — Lava Leap Platformer</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#160a08; color:#fff; font-family:Arial, Helvetica, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; overflow:hidden; user-select:none; }
+  h1 { font-size:clamp(26px,5vw,44px); letter-spacing:2px; color:#ffb347; text-shadow:0 0 18px rgba(255,120,0,.8), 2px 2px 0 #7a1a00; margin:8px 0 2px; }
+  .tag { color:#ffd9a0; font-size:14px; margin-bottom:8px; }
+  #wrap { position:relative; width:min(96vw,480px); }
+  canvas { display:block; width:100%; height:640px; background:linear-gradient(#2b0f0a,#7a1f08 55%,#e64d00); border:3px solid #ffb347; border-radius:14px; box-shadow:0 0 30px rgba(255,100,0,.45); touch-action:none; }
+  #hud { position:absolute; top:8px; left:10px; right:10px; display:flex; justify-content:space-between; font-weight:bold; font-size:14px; text-shadow:1px 1px 2px #000; pointer-events:none; }
+  #hud span { background:rgba(0,0,0,.45); padding:4px 8px; border-radius:8px; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:rgba(10,2,0,.78); border-radius:11px; padding:24px; z-index:5; }
+  .screen.hidden { display:none; }
+  .screen h2 { font-size:32px; color:#ffb347; margin-bottom:10px; text-shadow:2px 2px 0 #7a1a00; }
+  .screen p { line-height:1.55; font-size:15px; max-width:360px; margin:6px 0; color:#ffe8cc; }
+  .big { font-size:22px; font-weight:bold; color:#fff; }
+  button { margin-top:14px; background:#ff6a00; color:#fff; border:2px solid #ffd166; border-radius:12px; padding:13px 26px; font-size:18px; font-weight:bold; cursor:pointer; box-shadow:0 4px 0 #8a2400; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #8a2400; }
+  button.secondary { background:#444; border-color:#aaa; box-shadow:0 4px 0 #222; }
+  .keys { font-size:13px; background:rgba(255,255,255,.1); border-radius:10px; padding:10px; margin-top:12px; }
+  #touch { display:flex; gap:10px; justify-content:center; margin-top:10px; width:min(96vw,480px); }
+  #touch button { flex:1; margin:0; padding:16px 0; font-size:22px; background:#333; border-color:#ffb347; }
+  #touch button.jump { background:#c22a00; flex:1.4; }
+  .hint { font-size:12px; color:#ccc; margin-top:8px; text-align:center; }
+  @media (max-width:520px){ canvas{height:560px;} }
+</style>
+</head>
+<body>
+<h1>🌋 VOLCANO VAULT</h1>
+<div class="tag">Climb the volcano. Grab the gems. Don't kiss the lava.</div>
+<div id="wrap">
+  <canvas id="game" width="480" height="640"></canvas>
+  <div id="hud">
+    <span id="score">Score: 0</span>
+    <span id="height">Height: 0m</span>
+    <span id="lives">❤️❤️❤️</span>
+    <span id="status">Ready</span>
+  </div>
+
+  <div id="titleScreen" class="screen">
+    <h2>🌋 VOLCANO VAULT</h2>
+    <p class="big">Reach the summit. Claim the vault.</p>
+    <p>Leap between rising rock platforms above a sea of lava. Collect gems, dodge lava bubbles, and climb <b>300 metres</b> to the summit.</p>
+    <div class="keys">
+      <b>How to Play</b><br>
+      ← → or A / D — Move &nbsp;•&nbsp; ↑ / Space / W — Jump<br>
+      Mouse — click left / right half to move, on-screen JUMP button to jump<br>
+      Touch — ◀ ▶ buttons, JUMP button, or swipe up to jump<br>
+      R — Restart &nbsp;•&nbsp; Falling in lava costs 1 life. You have 3 lives.
+    </div>
+    <button id="startBtn">▶ START CLIMB</button>
+    <p style="font-size:12px;color:#bbb;">Gems are worth 50 points. Every metre climbed is 1 point. Bubbles pop — don't touch them!</p>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <p id="endScore" class="big"></p>
+    <button id="restartBtn">↻ PLAY AGAIN</button>
+    <button id="menuBtn" class="secondary">Main Menu</button>
+  </div>
+</div>
+
+<div id="touch">
+  <button id="btnLeft" aria-label="Move left">◀</button>
+  <button id="btnJump" class="jump" aria-label="Jump">JUMP ⬆</button>
+  <button id="btnRight" aria-label="Move right">▶</button>
+</div>
+<div class="hint">Keyboard: Arrows / WASD + Space &nbsp;•&nbsp; R restarts &nbsp;•&nbsp; Click the canvas halves to steer on mouse</div>
+
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var heightEl = document.getElementById('height');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  // ---------- Audio: procedural, only after user interaction ----------
+  var audioCtx = null;
+  function ensureAudio(){
+    if(!audioCtx){
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ audioCtx = null; }
+    }
+    if(audioCtx && audioCtx.state === 'suspended'){ audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol){
+    if(!audioCtx) return;
+    try{
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    }catch(e){}
+  }
+  function sfx(name){
+    if(name==='jump') beep(420,0.18,'square',0.10);
+    else if(name==='gem'){ beep(880,0.10,'sine',0.14); setTimeout(function(){ beep(1320,0.16,'sine',0.14); },70); }
+    else if(name==='hurt'){ beep(160,0.35,'sawtooth',0.16); }
+    else if(name==='win'){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,0.25,'triangle',0.15); }, i*130); }); }
+    else if(name==='lose'){ [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ beep(f,0.25,'sawtooth',0.13); }, i*140); }); }
+  }
+
+  // ---------- Game state ----------
+  var state = 'title'; // title | playing | win | over
+  var player, platforms, gems, bubbles, particles;
+  var score, height, lives, maxHeight, cameraY, scrollSpeed;
+  var keys = {};
+  var touchLeft = false, touchRight = false;
+  var coyote = 0, jumpQueued = false;
+  var lastTime = 0, shake = 0;
+  var SUMMIT = 300; // metres to win
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function reset(){
+    score = 0; height = 0; lives = 3; maxHeight = 0; cameraY = 0; scrollSpeed = 0.35;
+    player = { x: W/2-14, y: H-120, w: 28, h: 34, vx: 0, vy: 0, onGround: false, face: 1 };
+    platforms = []; gems = []; bubbles = []; particles = [];
+    // Ground platform + a ladder of platforms upward (world Y goes negative upward)
+    platforms.push({ x: 0, y: H-70, w: W, h: 24, kind: 'base' });
+    var y = H - 160;
+    while(y > -1200){
+      var w = rand(70, 120);
+      platforms.push({ x: rand(10, W-w-10), y: y, w: w, h: 16, kind: (Math.random()<0.15?'crumble':'rock') });
+      if(Math.random() < 0.55) gems.push({ x: rand(20, W-30), y: y-34, taken: false, bob: rand(0,6) });
+      y -= rand(72, 96);
+    }
+    updateHUD('Climbing!');
+  }
+  function extendWorld(){
+    // Ensure platforms exist above the current camera view.
+    var top = Infinity;
+    platforms.forEach(function(p){ if(p.y < top) top = p.y; });
+    while(top > cameraY - 800){
+      var w = rand(65, 115);
+      var ny = top - rand(70, 95);
+      platforms.push({ x: rand(10, W-w-10), y: ny, w: w, h: 16, kind: (Math.random()<0.18?'crumble':'rock') });
+      if(Math.random() < 0.55) gems.push({ x: rand(20, W-30), y: ny-34, taken: false, bob: rand(0,6) });
+      top = ny;
+    }
+  }
+  function spawnBubble(){
+    // Bubbles rise from the lava at the bottom of the screen.
+    bubbles.push({ x: rand(20, W-30), y: H + 20, vy: rand(-1.4,-0.8), r: rand(10,18), wob: rand(0,6) });
+  }
+  function burst(x, y, color, n){
+    for(var i=0;i<(n||12);i++) particles.push({ x:x, y:y, vx:rand(-2.5,2.5), vy:rand(-4,0), life: rand(20,45), color: color });
+  }
+
+  function loseLife(reason){
+    lives--; sfx('hurt'); shake = 12;
+    burst(player.x+14, player.y+17, '#ff5500', 20);
+    if(lives <= 0){
+      state = 'over'; sfx('lose'); updateHUD('Game Over');
+      showEnd('💀 GAME OVER', reason + ' The volcano claims another treasure hunter.', score);
+      return;
+    }
+    // Respawn on a safe platform near the current camera position.
+    var safe = null;
+    platforms.forEach(function(p){ if(p.y > cameraY + 200 && p.y < cameraY + H-80 && p.kind !== 'crumble') safe = p; });
+    if(safe){ player.x = safe.x + safe.w/2 - 14; player.y = safe.y - 36; }
+    else { player.x = W/2-14; player.y = cameraY + H - 140; }
+    player.vx = 0; player.vy = 0;
+    updateHUD('Ouch! ' + lives + ' left');
+  }
+
+  function winGame(){
+    state = 'win'; sfx('win'); updateHUD('Summit!');
+    burst(player.x+14, player.y, '#ffd166', 40);
+    showEnd('🏆 SUMMIT REACHED!', 'You opened the Volcano Vault and claimed its golden treasure!', score);
+  }
+  function showEnd(title, text, finalScore){
+    endTitle.textContent = title;
+    endText.textContent = text;
+    endScore.textContent = 'Final Score: ' + finalScore + '  •  Height: ' + height + 'm  •  Gems: ' + Math.floor((finalScore - height)/50);
+    endScreen.classList.remove('hidden');
+  }
+  function updateHUD(status){
+    scoreEl.textContent = 'Score: ' + score;
+    heightEl.textContent = 'Height: ' + height + 'm';
+    livesEl.textContent = '❤️'.repeat(Math.max(0,lives)) + '🤍'.repeat(Math.max(0,3-lives));
+    if(status) statusEl.textContent = status;
+  }
+
+  function startGame(){
+    ensureAudio();
+    reset();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Input: keyboard ----------
+  document.addEventListener('keydown', function(e){
+    ensureAudio();
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
+    if(k === 'r' && state !== 'title') startGame();
+    if((k === ' ' || k === 'arrowup' || k === 'w') && state === 'title') startGame();
+    if(k === ' ' || k === 'arrowup' || k === 'w') jumpQueued = true;
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+
+  // ---------- Input: mouse ----------
+  canvas.addEventListener('mousedown', function(e){
+    ensureAudio();
+    if(state === 'title') return;
+    var r = canvas.getBoundingClientRect();
+    var x = (e.clientX - r.left) / r.width * W;
+    if(x < W/2){ keys['arrowleft'] = true; keys['arrowright'] = false; }
+    else { keys['arrowright'] = true; keys['arrowleft'] = false; }
+  });
+  canvas.addEventListener('mouseup', function(){ keys['arrowleft'] = false; keys['arrowright'] = false; });
+  canvas.addEventListener('mouseleave', function(){ keys['arrowleft'] = false; keys['arrowright'] = false; });
+  canvas.addEventListener('click', function(e){
+    if(state === 'title') return;
+    var r = canvas.getBoundingClientRect();
+    var y = (e.clientY - r.top) / r.height * H;
+    if(y < 120) jumpQueued = true; // click near top = jump
+  });
+
+  // ---------- Input: touch ----------
+  function bindTouch(id, down, up){
+    var el = document.getElementById(id);
+    el.addEventListener('touchstart', function(e){ e.preventDefault(); ensureAudio(); down(); }, { passive:false });
+    el.addEventListener('touchend', function(e){ e.preventDefault(); if(up) up(); }, { passive:false });
+    el.addEventListener('mousedown', function(){ ensureAudio(); down(); });
+    el.addEventListener('mouseup', function(){ if(up) up(); });
+  }
+  bindTouch('btnLeft', function(){ touchLeft = true; }, function(){ touchLeft = false; });
+  bindTouch('btnRight', function(){ touchRight = true; }, function(){ touchRight = false; });
+  bindTouch('btnJump', function(){ jumpQueued = true; }, null);
+  var touchStartY = null;
+  canvas.addEventListener('touchstart', function(e){
+    ensureAudio();
+    if(e.touches.length) touchStartY = e.touches[0].clientY;
+    if(state === 'playing' && e.touches.length){
+      var r = canvas.getBoundingClientRect();
+      var x = (e.touches[0].clientX - r.left) / r.width * W;
+      touchLeft = x < W/2; touchRight = x >= W/2;
+    }
+  }, { passive:true });
+  canvas.addEventListener('touchmove', function(e){
+    if(touchStartY !== null && e.touches.length){
+      if(touchStartY - e.touches[0].clientY > 40){ jumpQueued = true; touchStartY = e.touches[0].clientY; }
+    }
+  }, { passive:true });
+  canvas.addEventListener('touchend', function(){ touchLeft = false; touchRight = false; touchStartY = null; }, { passive:true });
+
+  // Buttons
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function(){
+    endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); state = 'title';
+  });
+
+  // ---------- Update ----------
+  function update(dt){
+    var left = keys['arrowleft'] || keys['a'] || touchLeft;
+    var right = keys['arrowright'] || keys['d'] || touchRight;
+    if(left && !right){ player.vx = -4.2; player.face = -1; }
+    else if(right && !left){ player.vx = 4.2; player.face = 1; }
+    else player.vx *= 0.75;
+
+    player.vy += 0.55; // gravity
+    if(player.vy > 14) player.vy = 14;
+
+    if(jumpQueued){
+      jumpQueued = false;
+      if(player.onGround || coyote > 0){
+        player.vy = -13.5; player.onGround = false; coyote = 0; sfx('jump');
+        burst(player.x+14, player.y+34, '#cccccc', 6);
+      }
+    }
+
+    var prevY = player.y;
+    player.x += player.vx;
+    player.y += player.vy;
+    if(player.x < 0) player.x = 0;
+    if(player.x > W - player.w) player.x = W - player.w;
+
+    player.onGround = false;
+    platforms.forEach(function(p, idx){
+      if(player.vy >= 0 && player.x + player.w > p.x && player.x < p.x + p.w &&
+         prevY + player.h <= p.y + 6 && player.y + player.h >= p.y){
+        player.y = p.y - player.h; player.vy = 0; player.onGround = true; coyote = 9;
+        if(p.kind === 'crumble' && !p.breaking){ p.breaking = 0; }
+      }
+    });
+    if(player.onGround) coyote = 9; else if(coyote > 0) coyote--;
+
+    // Crumble platforms break shortly after landing.
+    platforms.forEach(function(p){
+      if(p.breaking !== undefined){
+        p.breaking++;
+        if(p.breaking > 28) p.gone = true;
+      }
+    });
+    platforms = platforms.filter(function(p){ return !p.gone; });
+
+    // Camera scrolls up as the player climbs; lava rises slowly behind.
+    var targetCam = Math.min(cameraY, player.y - 180);
+    cameraY += (targetCam - cameraY) * 0.12;
+    if(player.y < cameraY + 140) cameraY = player.y - 140;
+    scrollSpeed = 0.35 + height * 0.001;
+    cameraY -= scrollSpeed * 0.25; // gentle auto-scroll pressure
+
+    var climbed = Math.max(0, Math.floor((H - 120 - player.y + cameraY) / 10));
+    // Height in metres: distance above the start line.
+    height = Math.max(maxHeight, Math.floor((-player.y + (H-120)) / 10) + Math.floor(-cameraY/10));
+    if(height > maxHeight){ score += (height - maxHeight); maxHeight = height; }
+    if(height >= SUMMIT){ winGame(); return; }
+
+    // Gems
+    gems.forEach(function(g){
+      if(!g.taken && Math.abs(player.x+14 - g.x) < 30 && Math.abs(player.y+17 - (g.y + Math.sin(g.bob)*3)) < 34){
+        g.taken = true; score += 50; sfx('gem'); burst(g.x, g.y, '#00e5ff', 12);
+      }
+      g.bob += 0.08;
+    });
+
+    // Lava bubbles
+    if(Math.random() < 0.02 + height*0.00005) spawnBubble();
+    bubbles.forEach(function(b){
+      b.y += b.vy; b.wob += 0.1; b.x += Math.sin(b.wob)*0.4;
+      if(Math.abs(player.x+14 - b.x) < b.r+12 && Math.abs(player.y+17 - (b.y - cameraY)) < b.r+14){
+        b.dead = true; loseLife('A lava bubble burst on you!');
+      }
+    });
+    bubbles = bubbles.filter(function(b){ return !b.dead && b.y > cameraY - 40; });
+
+    // Lava line: screen bottom in world terms rises with camera.
+    var lavaScreenY = H - 20 + (cameraY < 0 ? 0 : 0);
+    if(player.y - cameraY > H - 26){
+      loseLife('You fell into the lava!');
+      if(state !== 'playing') return;
+    }
+
+    particles.forEach(function(pt){ pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.15; pt.life--; });
+    particles = particles.filter(function(pt){ return pt.life > 0; });
+    if(shake > 0) shake--;
+
+    extendWorld();
+    updateHUD();
+  }
+
+  // ---------- Draw ----------
+  function draw(){
+    ctx.save();
+    if(shake > 0) ctx.translate(rand(-shake,shake)/2, rand(-shake,shake)/2);
+    // Sky / volcano backdrop
+    var grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'#1a0505'); grad.addColorStop(0.55,'#7a1f08'); grad.addColorStop(1,'#ff5a00');
+    ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+    // Distant volcano cone
+    ctx.fillStyle = '#2a0d06';
+    ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(W*0.32, 90); ctx.lineTo(W*0.68, 90); ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff6a00';
+    ctx.beginPath(); ctx.moveTo(W*0.42, 90); ctx.lineTo(W*0.5, 130); ctx.lineTo(W*0.58, 90); ctx.closePath(); ctx.fill();
+
+    ctx.save();
+    ctx.translate(0, -cameraY);
+
+    // Platforms
+    platforms.forEach(function(p){
+      var sy = p.y;
+      if(sy < cameraY - 40 || sy > cameraY + H + 40) return;
+      ctx.fillStyle = p.kind === 'base' ? '#5a3a28' : (p.kind === 'crumble' ? '#b08050' : '#6b4a33');
+      ctx.fillRect(p.x, sy, p.w, p.h);
+      ctx.fillStyle = p.kind === 'crumble' ? '#8a5a30' : '#8a5f3d';
+      ctx.fillRect(p.x, sy, p.w, 5);
+      if(p.kind === 'crumble'){ ctx.fillStyle = '#3a2415'; ctx.fillRect(p.x+8, sy+8, p.w-16, 2); }
+      ctx.fillStyle = 'rgba(255,180,80,.25)';
+      ctx.fillRect(p.x, sy + p.h - 3, p.w, 3);
+    });
+
+    // Gems
+    gems.forEach(function(g){
+      if(g.taken) return;
+      var gy = g.y + Math.sin(g.bob)*3;
+      if(gy < cameraY - 40 || gy > cameraY + H + 40) return;
+      ctx.save(); ctx.translate(g.x, gy); ctx.rotate(Math.PI/4);
+      ctx.fillStyle = '#00e5ff'; ctx.shadowColor = '#00e5ff'; ctx.shadowBlur = 12;
+      ctx.fillRect(-8,-8,16,16); ctx.restore();
+    });
+
+    // Bubbles
+    bubbles.forEach(function(b){
+      var by = b.y - cameraY;
+      ctx.beginPath(); ctx.arc(b.x, by, b.r, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,90,0,.75)'; ctx.fill();
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(b.x - b.r*0.3, by - b.r*0.3, b.r*0.3, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fill();
+    });
+
+    // Player: treasure hunter with hat and backpack
+    var px = player.x, py = player.y;
+    ctx.fillStyle = '#d9a066'; ctx.fillRect(px+4, py+8, 20, 18); // body
+    ctx.fillStyle = '#3a6ea5'; ctx.fillRect(px+4, py+22, 20, 10); // legs
+    ctx.fillStyle = '#f2c79b'; ctx.fillRect(px+6, py, 16, 10); // head
+    ctx.fillStyle = '#6b3f1d'; ctx.fillRect(px+2, py-2, 24, 5); // hat brim
+    ctx.fillStyle = '#6b3f1d'; ctx.fillRect(px+7, py-8, 14, 7); // hat top
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(px + (player.face>0?20:2), py+12, 6, 10); // backpack
+    ctx.fillStyle = '#000'; ctx.fillRect(px + (player.face>0?18:8), py+3, 3, 3); // eye
+
+    // Particles
+    particles.forEach(function(pt){
+      ctx.globalAlpha = Math.max(0, pt.life/45);
+      ctx.fillStyle = pt.color; ctx.fillRect(pt.x, pt.y - cameraY, 5, 5);
+    });
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Lava at the bottom of the screen, always threatening
+    var lavaY = H - 26;
+    ctx.fillStyle = '#ff3300';
+    ctx.beginPath(); ctx.moveTo(0, lavaY);
+    for(var x=0;x<=W;x+=24) ctx.lineTo(x, lavaY + Math.sin(x*0.08 + Date.now()*0.004)*4);
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffcc00';
+    for(var i=0;i<8;i++){
+      var bx = (i*61 + Math.floor(Date.now()/300)) % W;
+      ctx.beginPath(); ctx.arc(bx, lavaY + 10 + (i%3)*3, 4, 0, Math.PI*2); ctx.fill();
+    }
+    // Summit flag marker
+    if(height > SUMMIT - 60){
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('▲ SUMMIT AHEAD ▲', W/2, 36);
+    }
+    ctx.restore();
+  }
+
+  function loop(now){
+    if(state !== 'playing') { draw(); return; }
+    var dt = Math.min(50, now - lastTime); lastTime = now;
+    update(dt);
+    if(state === 'playing') draw();
+    else draw();
+    if(state === 'playing') requestAnimationFrame(loop);
+  }
+
+  reset();
+  draw();
+  updateHUD('Ready');
+})();
+</script>
+</body>
+</html>
