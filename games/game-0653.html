@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lighthouse Keeper Shifts</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1220; color: #e8eefc; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 24px; margin: 6px 0 4px; text-align: center; color: #ffd166; }
+  p.sub { font-size: 13px; color: #aebbd6; text-align: center; margin-bottom: 8px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; max-width: 860px; margin-bottom: 8px; }
+  .pill { background: #16233f; border: 1px solid #2c426e; border-radius: 20px; padding: 6px 11px; font-size: 13px; font-weight: bold; }
+  .pill.warn { background: #5a2b1e; border-color: #d64545; color: #ffd9d9; }
+  .pill.good { background: #143d2b; border-color: #2f9e6e; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#0d1b33, #12294f); border: 2px solid #3a5a94; border-radius: 10px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(5,10,22,0.88); border-radius: 10px; padding: 20px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #d7e0f2; }
+  .overlay .small { font-size: 13px; color: #9fb0cf; }
+  button { cursor: pointer; border: none; border-radius: 10px; padding: 12px 22px; font-size: 16px; font-weight: bold; background: #ffd166; color: #1a1200; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #294a7d; color: #fff; }
+  #actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; width: 100%; max-width: 860px; }
+  #actions button { flex: 1 1 150px; font-size: 14px; padding: 11px 10px; }
+  #actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+  #log { margin-top: 10px; min-height: 22px; font-size: 14px; color: #ffe08a; text-align: center; }
+  #keys { margin-top: 4px; font-size: 12px; color: #8fa3c4; text-align: center; }
+</style>
+</head>
+<body>
+<h1>🗼 Lighthouse Keeper Shifts</h1>
+<p class="sub">Keep the light burning, the lens clear, and the ships off the rocks — one precious action at a time.</p>
+
+<div id="hud">
+  <div class="pill" id="hScore">Score: 0</div>
+  <div class="pill" id="hShift">Night 1 / 5</div>
+  <div class="pill" id="hActions">Actions: 4</div>
+  <div class="pill" id="hFuel">Fuel: 100%</div>
+  <div class="pill" id="hLens">Lens: Clean</div>
+  <div class="pill" id="hShips">Ships Safe: 0</div>
+  <div class="pill" id="hLives">Beacon Strength: ❤❤❤</div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+
+  <div class="overlay" id="titleScreen">
+    <h2>Lighthouse Keeper Shifts</h2>
+    <p><strong>How to Play:</strong> Each night you have only <b>4 actions</b>. Spend them wisely: refuel the lamp, clean the lens, send a rescue signal, or sweep the sea to spot ships. A dim or dirty light lets ships wreck on the rocks — and wrecks cost beacon strength. Survive all <b>5 nights</b> and rescue at least <b>12 ships</b> to win.</p>
+    <p class="small">Keys: 1 = Refuel &nbsp; 2 = Clean Lens &nbsp; 3 = Rescue Signal &nbsp; 4 = Sweep Sea &nbsp; Enter = Next Night / Start<br>Mouse / touch: tap the action buttons, or click a ship in the sea to signal it.</p>
+    <button id="startBtn">Start Shift</button>
+  </div>
+
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p class="small" id="endStats"></p>
+    <button id="restartBtn">Restart Instantly</button>
+  </div>
+</div>
+
+<div id="actions">
+  <button id="btnFuel">⛽ 1 · Refuel Lamp</button>
+  <button id="btnLens">✨ 2 · Clean Lens</button>
+  <button id="btnSignal">📡 3 · Rescue Signal</button>
+  <button id="btnSweep">🔭 4 · Sweep Sea</button>
+  <button id="btnNight" class="secondary">🌙 End Night →</button>
+</div>
+<div id="log">Welcome, Keeper. The first night begins when you press Start.</div>
+<div id="keys">Tip: ships in distress flash red. Signal them before the night ends — but only a clean, fuelled light reaches far enough.</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+  var logEl = document.getElementById('log');
+
+  var hScore = document.getElementById('hScore');
+  var hShift = document.getElementById('hShift');
+  var hActions = document.getElementById('hActions');
+  var hFuel = document.getElementById('hFuel');
+  var hLens = document.getElementById('hLens');
+  var hShips = document.getElementById('hShips');
+  var hLives = document.getElementById('hLives');
+
+  var btnFuel = document.getElementById('btnFuel');
+  var btnLens = document.getElementById('btnLens');
+  var btnSignal = document.getElementById('btnSignal');
+  var btnSweep = document.getElementById('btnSweep');
+  var btnNight = document.getElementById('btnNight');
+
+  var state = null;
+  var audioCtx = null;
+  var beamAngle = -0.5;
+  var beamDir = 1;
+  var time = 0;
+  var particles = [];
+
+  function log(msg) { logEl.textContent = msg; }
+
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundAction() { beep(660, 0.15, 'triangle', 0.14); beep(880, 0.18, 'sine', 0.10); }
+  function soundRescue() { beep(523, 0.12, 'sine', 0.15); setTimeout(function(){ beep(659, 0.12, 'sine', 0.15); }, 110); setTimeout(function(){ beep(784, 0.25, 'sine', 0.15); }, 220); }
+  function soundCrash() { beep(140, 0.4, 'sawtooth', 0.18); }
+  function soundWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, 'triangle', 0.15); }, i * 160); }); }
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+
+  function newGame() {
+    state = {
+      playing: true, night: 1, totalNights: 5, score: 0,
+      actions: 4, fuel: 100, lens: 100, lives: 3,
+      rescued: 0, wrecked: 0, signalled: 0, swept: false,
+      ships: [], nightOver: false
+    };
+    spawnShips();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    log('Night 1: Sweep the sea, then act. You have 4 actions.');
+    updateHUD();
+  }
+
+  function spawnShips() {
+    state.ships = [];
+    var count = 3 + state.night; // nights get busier
+    for (var i = 0; i < count; i++) {
+      var distress = Math.random() < 0.55;
+      state.ships.push({
+        x: 120 + Math.random() * 620,
+        y: 300 + Math.random() * 130,
+        vx: (Math.random() < 0.5 ? -1 : 1) * (0.15 + Math.random() * 0.35),
+        distress: distress, spotted: false, rescued: false, wrecked: false,
+        danger: distress ? 0.55 + Math.random() * 0.45 : 0.15 + Math.random() * 0.25,
+        bob: Math.random() * 6.28
+      });
+    }
+  }
+
+  function lightPower() {
+    // 0..1 combining fuel and lens condition
+    return (state.fuel / 100) * 0.55 + (state.lens / 100) * 0.45;
+  }
+  function lensLabel() {
+    if (state.lens >= 70) return 'Clean';
+    if (state.lens >= 35) return 'Smudged';
+    return 'Grimy';
+  }
+
+  function updateHUD() {
+    hScore.textContent = 'Score: ' + state.score;
+    hShift.textContent = 'Night ' + state.night + ' / ' + state.totalNights;
+    hActions.textContent = 'Actions: ' + state.actions;
+    hFuel.textContent = 'Fuel: ' + Math.round(state.fuel) + '%';
+    hLens.textContent = 'Lens: ' + lensLabel() + ' (' + Math.round(state.lens) + '%)';
+    hShips.textContent = 'Ships Safe: ' + state.rescued;
+    hLives.textContent = 'Beacon Strength: ' + '❤'.repeat(state.lives) + '♡'.repeat(3 - state.lives);
+    hFuel.className = 'pill' + (state.fuel < 35 ? ' warn' : '');
+    hLens.className = 'pill' + (state.lens < 35 ? ' warn' : '');
+    hActions.className = 'pill' + (state.actions === 0 ? ' warn' : '');
+    var canAct = state.playing && state.actions > 0 && !state.nightOver;
+    btnFuel.disabled = !canAct;
+    btnLens.disabled = !canAct;
+    btnSignal.disabled = !canAct;
+    btnSweep.disabled = !canAct || state.swept;
+  }
+
+  function useAction() {
+    state.actions--;
+    state.fuel = Math.max(0, state.fuel - 6);
+    state.lens = Math.max(0, state.lens - 5);
+    updateHUD();
+  }
+
+  function doFuel() {
+    if (!state.playing || state.actions <= 0) return;
+    ensureAudio(); soundAction();
+    useAction();
+    state.fuel = Math.min(100, state.fuel + 45);
+    log('Lamp refuelled to ' + Math.round(state.fuel) + '%. The beam burns brighter.');
+    updateHUD();
+  }
+  function doLens() {
+    if (!state.playing || state.actions <= 0) return;
+    ensureAudio(); soundAction();
+    useAction();
+    state.lens = 100;
+    log('Lens polished spotless. The light now cuts through the dark.');
+    updateHUD();
+  }
+  function doSweep() {
+    if (!state.playing || state.actions <= 0 || state.swept) return;
+    ensureAudio(); soundAction();
+    useAction();
+    state.swept = true;
+    state.ships.forEach(function(s){ s.spotted = true; });
+    log('Sweep complete: every ship on the water is now marked. Distress ships flash red.');
+    updateHUD();
+  }
+  function doSignal() {
+    if (!state.playing || state.actions <= 0) return;
+    ensureAudio();
+    useAction();
+    var power = lightPower();
+    var targets = state.ships.filter(function(s){ return !s.rescued && !s.wrecked && s.distress; });
+    if (targets.length === 0) {
+      log('Signal sent, but no ship in distress answered. Try sweeping first.');
+      updateHUD(); return;
+    }
+    // Stronger light rescues more; weak light may fail on high-danger ships
+    var rescuedNow = 0;
+    targets.forEach(function(s) {
+      var chance = power * 1.15 - s.danger * 0.45;
+      if (Math.random() < Math.max(0.25, chance)) {
+        s.rescued = true; rescuedNow++;
+        state.rescued++; state.score += 100;
+        for (var i = 0; i < 14; i++) particles.push({ x: s.x, y: s.y - 10, vx: (Math.random()-0.5)*3, vy: -Math.random()*2.5, life: 40, color: '#ffd166' });
+      }
+    });
+    if (rescuedNow > 0) { soundRescue(); log('Rescue signal answered! ' + rescuedNow + ' ship(s) guided to safety (+' + (rescuedNow * 100) + ').'); }
+    else { soundCrash(); log('The signal was too weak in the murk — no ship could follow it. Refuel or clean the lens.'); }
+    updateHUD();
+  }
+
+  function signalShipAt(x, y) {
+    // Clicking / tapping a ship signals that ship directly (costs 1 action)
+    if (!state || !state.playing || state.actions <= 0) return;
+    var rect = canvas.getBoundingClientRect();
+    var cx = (x - rect.left) * (canvas.width / rect.width);
+    var cy = (y - rect.top) * (canvas.height / rect.height);
+    for (var i = 0; i < state.ships.length; i++) {
+      var s = state.ships[i];
+      if (s.rescued || s.wrecked) continue;
+      if (Math.abs(cx - s.x) < 40 && Math.abs(cy - s.y) < 26) {
+        ensureAudio(); useAction();
+        if (s.distress) {
+          var power = lightPower();
+          if (Math.random() < Math.max(0.3, power * 1.2 - s.danger * 0.4)) {
+            s.rescued = true; state.rescued++; state.score += 120; soundRescue();
+            log('Direct signal! That ship turns for safe water (+120).');
+          } else {
+            soundCrash(); log('That ship could not see your light clearly. Strengthen the beam first.');
+          }
+        } else {
+          state.score += 20; log('A passing ship acknowledges your light (+20).');
+        }
+        updateHUD(); return;
+      }
+    }
+  }
+
+  function endNight() {
+    if (!state.playing) return;
+    ensureAudio();
+    state.nightOver = true;
+    // Ships not rescued: danger resolves against light power
+    var power = lightPower();
+    var wreckedNow = 0, savedNow = 0;
+    state.ships.forEach(function(s) {
+      if (s.rescued || s.wrecked) return;
+      if (!s.distress) { s.rescued = true; state.rescued++; state.score += 30; savedNow++; return; }
+      if (Math.random() < power * 0.8) { s.rescued = true; state.rescued++; state.score += 50; savedNow++; }
+      else { s.wrecked = true; wreckedNow++; state.wrecked++; state.lives--; soundCrash(); }
+    });
+    state.score += 50; // survived the night bonus
+    if (wreckedNow > 0) log('Night ' + state.night + ' ends: ' + wreckedNow + ' ship(s) wrecked on the rocks! Beacon strength falls.');
+    else log('Night ' + state.night + ' ends with no wrecks. ' + savedNow + ' more ships made it home.');
+    updateHUD();
+
+    if (state.lives <= 0) { return gameOver(false); }
+    if (state.night >= state.totalNights) {
+      return gameOver(state.rescued >= 12);
+    }
+    // Next night
+    state.night++;
+    state.actions = 4;
+    state.fuel = Math.max(15, state.fuel - 15);
+    state.lens = Math.max(10, state.lens - 20);
+    state.swept = false;
+    state.nightOver = false;
+    spawnShips();
+    log('Night ' + state.night + ' begins. Fuel and lens have worn down — plan your 4 actions.');
+    updateHUD();
+  }
+
+  function gameOver(won) {
+    state.playing = false;
+    endTitle.textContent = won ? '🏆 You Kept the Coast Safe!' : '💥 The Light Failed';
+    endText.textContent = won
+      ? 'Five nights, a steady light, and ' + state.rescued + ' ships guided home. The coast remembers its keeper.'
+      : 'The beacon failed and the coast paid the price. ' + state.rescued + ' ships were saved, but the rocks claimed too many.';
+    endStats.textContent = 'Final score: ' + state.score + ' · Ships safe: ' + state.rescued + ' · Wrecked: ' + state.wrecked + ' · Nights survived: ' + state.night + ' / 5';
+    endScreen.classList.remove('hidden');
+    if (won) soundWin(); else soundCrash();
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!state) { requestAnimationFrame(draw); return; }
+    time += 0.016;
+    // Sky, stars, moon
+    ctx.fillStyle = '#0d1b33'; ctx.fillRect(0, 0, 860, 300);
+    ctx.fillStyle = '#ffe9a8';
+    for (var i = 0; i < 40; i++) {
+      var sx = (i * 137) % 860, sy = (i * 53) % 180;
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(time + i));
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(770, 55, 28, 0, Math.PI * 2); ctx.fillStyle = '#fdf3c4'; ctx.fill();
+    // Sea
+    ctx.fillStyle = '#123a5e'; ctx.fillRect(0, 300, 860, 220);
+    ctx.strokeStyle = 'rgba(120,180,230,0.35)'; ctx.lineWidth = 2;
+    for (var w = 0; w < 6; w++) {
+      ctx.beginPath();
+      for (var x = 0; x <= 860; x += 20) ctx.lineTo(x, 315 + w * 32 + Math.sin(time * 1.5 + x * 0.02 + w) * 5);
+      ctx.stroke();
+    }
+    // Rocks on the right
+    ctx.fillStyle = '#3d4658';
+    ctx.beginPath(); ctx.moveTo(860, 300); ctx.lineTo(800, 340); ctx.lineTo(830, 400); ctx.lineTo(860, 430); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5a657d'; ctx.font = 'bold 13px Arial'; ctx.fillText('⚠ ROCKS', 788, 330);
+
+    // Lighthouse (left)
+    var lx = 105, baseY = 300;
+    ctx.fillStyle = '#e8eefc';
+    ctx.beginPath(); ctx.moveTo(lx - 34, baseY); ctx.lineTo(lx - 20, 120); ctx.lineTo(lx + 20, 120); ctx.lineTo(lx + 34, baseY); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d64545'; ctx.fillRect(lx - 29, 245, 58, 22); ctx.fillRect(lx - 24, 175, 48, 22);
+    ctx.fillStyle = '#1a2438'; ctx.fillRect(lx - 8, 255, 16, 45);
+    // Lamp room + beam
+    var power = lightPower();
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(lx - 24, 92, 48, 30);
+    ctx.fillStyle = '#1a2438'; ctx.beginPath(); ctx.moveTo(lx - 28, 92); ctx.lineTo(lx, 68); ctx.lineTo(lx + 28, 92); ctx.closePath(); ctx.fill();
+    beamAngle = -0.35 + Math.sin(time * 0.7) * 0.55;
+    var beamLen = 300 + power * 420;
+    ctx.save();
+    ctx.translate(lx, 107);
+    ctx.rotate(beamAngle);
+    var grad = ctx.createLinearGradient(0, 0, beamLen, 0);
+    grad.addColorStop(0, 'rgba(255,209,102,' + (0.25 + power * 0.55) + ')');
+    grad.addColorStop(1, 'rgba(255,209,102,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(beamLen, -55); ctx.lineTo(beamLen, 55); ctx.lineTo(0, 12); ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // Ships
+    state.ships.forEach(function(s) {
+      if (s.wrecked) return;
+      var bobY = Math.sin(time * 2 + s.bob) * 3;
+      var y = s.y + bobY;
+      ctx.fillStyle = s.rescued ? '#2f9e6e' : (s.distress ? '#d64545' : '#c8d4ea');
+      ctx.beginPath(); ctx.moveTo(s.x - 26, y); ctx.lineTo(s.x + 26, y); ctx.lineTo(s.x + 18, y + 14); ctx.lineTo(s.x - 18, y + 14); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#1a2438'; ctx.fillRect(s.x - 4, y - 22, 4, 22);
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(s.x, y - 22, 18, 13);
+      if (s.distress && !s.rescued) {
+        if (Math.sin(time * 6) > 0) { ctx.fillStyle = '#ff5a5a'; ctx.font = 'bold 20px Arial'; ctx.fillText('!', s.x - 5, y - 30); }
+        if (s.spotted) { ctx.strokeStyle = '#ff8080'; ctx.strokeRect(s.x - 32, y - 40, 64, 58); }
+      }
+      if (s.rescued) { ctx.fillStyle = '#b8ffcf'; ctx.font = 'bold 14px Arial'; ctx.fillText('✓ SAFE', s.x - 22, y - 28); }
+      if (s.spotted && s.distress && !s.rescued) { ctx.fillStyle = '#ffd9d9'; ctx.font = 'bold 11px Arial'; ctx.fillText('DISTRESS', s.x - 26, y + 30); }
+    });
+
+    // Particles
+    particles = particles.filter(function(p){ return p.life > 0; });
+    particles.forEach(function(p) {
+      p.x += p.vx; p.y += p.vy; p.life--;
+      ctx.globalAlpha = Math.max(0, p.life / 40);
+      ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 4, 4);
+    });
+    ctx.globalAlpha = 1;
+
+    // Night banner
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, 860, 26);
+    ctx.fillStyle = '#e8eefc'; ctx.font = 'bold 14px Arial';
+    ctx.fillText('Night ' + state.night + '  ·  Beam power ' + Math.round(power * 100) + '%  ·  Click a ship to signal it directly', 12, 18);
+
+    requestAnimationFrame(draw);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function() { ensureAudio(); newGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function() { ensureAudio(); newGame(); });
+  btnFuel.addEventListener('click', doFuel);
+  btnLens.addEventListener('click', doLens);
+  btnSignal.addEventListener('click', doSignal);
+  btnSweep.addEventListener('click', doSweep);
+  btnNight.addEventListener('click', endNight);
+
+  canvas.addEventListener('click', function(e) { signalShipAt(e.clientX, e.clientY); });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (e.touches.length > 0) signalShipAt(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function(e) {
+    if (!state || !state.playing) {
+      if (e.key === 'Enter') { ensureAudio(); newGame(); }
+      return;
+    }
+    if (e.key === '1') doFuel();
+    else if (e.key === '2') doLens();
+    else if (e.key === '3') doSignal();
+    else if (e.key === '4') doSweep();
+    else if (e.key === 'Enter') endNight();
+  });
+  document.addEventListener('keyup', function(e) { /* key release tracked for accessibility */ });
+
+  state = { playing: false, night: 1, totalNights: 5, score: 0, actions: 4, fuel: 100, lens: 100, lives: 3, rescued: 0, wrecked: 0, ships: [], swept: false, nightOver: false };
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

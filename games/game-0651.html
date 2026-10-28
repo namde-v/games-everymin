@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Monsoon Rooftop Runner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1626; font-family: Arial, Helvetica, sans-serif; color: #fff; }
+  #wrap { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #101d33 0%, #1b345a 55%, #0b1626 100%); }
+  canvas { display: block; width: min(96vw, 960px); height: min(84vh, 560px); border: 3px solid #ffd166; border-radius: 14px; background: #16283f; touch-action: none; box-shadow: 0 12px 40px rgba(0,0,0,.55); }
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: min(96vw, 960px); display: flex; justify-content: space-between; gap: 8px; padding: 10px 14px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,209,102,.6); border-radius: 10px; font-weight: bold; font-size: 15px; z-index: 5; }
+  #hud span { white-space: nowrap; }
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(3,8,18,.72); z-index: 10; padding: 18px; }
+  .card { width: min(92vw, 620px); background: #12233c; border: 2px solid #ffd166; border-radius: 16px; padding: 26px; text-align: center; box-shadow: 0 18px 50px rgba(0,0,0,.6); }
+  .card h1 { font-size: clamp(28px, 6vw, 46px); line-height: 1.05; margin-bottom: 8px; color: #ffd166; }
+  .card h2 { font-size: 26px; margin-bottom: 10px; color: #ffd166; }
+  .card p { line-height: 1.55; margin: 10px 0; color: #e8eefc; }
+  .card ul { text-align: left; margin: 14px auto; max-width: 480px; line-height: 1.6; color: #dce7ff; }
+  button { cursor: pointer; border: 0; border-radius: 999px; padding: 14px 26px; font-size: 18px; font-weight: bold; color: #13203a; background: #ffd166; margin-top: 12px; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #e8eefc; }
+  .small { font-size: 13px; opacity: .85; }
+  .keys { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 12px 0; }
+  .keys b { background: #243b63; border: 1px solid #6f8fc7; padding: 6px 10px; border-radius: 7px; font-size: 13px; }
+  @media (max-width: 600px) { #hud { font-size: 12px; padding: 8px; } canvas { height: 78vh; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud" aria-label="Game status">
+    <span>Score: <b id="score">0</b></span>
+    <span>Coins: <b id="coins">0</b></span>
+    <span>Lives: <b id="lives">3</b></span>
+    <span>Speed: <b id="speed">1.0x</b></span>
+    <span id="status">Ready</span>
+  </div>
+  <canvas id="game" width="960" height="560"></canvas>
+  <div id="overlay">
+    <div class="card" id="card">
+      <h1>Monsoon Rooftop Runner</h1>
+      <p><strong>Arcade / Rooftop Sprint</strong> — Sprint across rain-slick rooftops while the monsoon rolls in. Leap the gaps, slide under storm debris, and grab every coin.</p>
+      <h2>How to Play</h2>
+      <ul>
+        <li><b>Jump:</b> Space, Arrow Up, W, click, or tap the top half of the screen.</li>
+        <li><b>Slide:</b> Arrow Down, S, or tap the bottom half of the screen.</li>
+        <li><b>Double jump:</b> Press jump again while airborne for one extra boost.</li>
+        <li>Avoid gaps, water towers, antennas, and flying debris. You have 3 lives.</li>
+        <li>Collect coins for bonus points. Survive 1,200 metres to win!</li>
+      </ul>
+      <div class="keys"><b>SPACE / W / ↑ Jump</b><b>↓ / S Slide</b><b>Click / Tap Control</b><b>R Restart</b></div>
+      <button id="startBtn" type="button">▶ Start Sprint</button>
+      <p class="small">Sound starts only after you press Start. Works completely offline.</p>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var coinsEl = document.getElementById('coins');
+  var livesEl = document.getElementById('lives');
+  var speedEl = document.getElementById('speed');
+  var statusEl = document.getElementById('status');
+  var overlay = document.getElementById('overlay');
+  var card = document.getElementById('card');
+  var startBtn = document.getElementById('startBtn');
+
+  var W = 960, H = 560, GROUND_Y = 452;
+  var state = 'title';
+  var score = 0, coins = 0, lives = 3, distance = 0, speed = 4.2, time = 0, last = 0;
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.08, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+
+  var player = { x: 130, y: GROUND_Y - 58, w: 44, h: 58, vy: 0, jumps: 0, sliding: false, slideT: 0, grounded: true };
+  var roofs = [], obstacles = [], pickups = [], rains = [], clouds = [];
+  for (var i = 0; i < 90; i++) rains.push({ x: Math.random()*W, y: Math.random()*H, l: 12 + Math.random()*18, s: 7 + Math.random()*7 });
+  for (var c = 0; c < 6; c++) clouds.push({ x: Math.random()*W, y: 20 + Math.random()*110, w: 100 + Math.random()*90, s: 0.3 + Math.random()*0.5 });
+
+  function makeRoof(x, w, top) {
+    return { x: x, w: w, top: top, h: GROUND_Y + 108 - top };
+  }
+  function reset() {
+    score = 0; coins = 0; lives = 3; distance = 0; speed = 4.2; time = 0;
+    player.y = GROUND_Y - 58; player.vy = 0; player.jumps = 0; player.sliding = false; player.grounded = true;
+    roofs = [makeRoof(-50, 520, GROUND_Y), makeRoof(500, 260, GROUND_Y - 12), makeRoof(820, 300, GROUND_Y + 8)];
+    obstacles = []; pickups = [];
+    obstacles.push({ x: 700, y: GROUND_Y - 44, w: 42, h: 44, kind: 'tower', roof: 1 });
+    pickups.push({ x: 580, y: GROUND_Y - 90, taken: false });
+    updateHud('Running — watch the gaps!');
+  }
+  function updateHud(msg) {
+    scoreEl.textContent = Math.floor(score);
+    coinsEl.textContent = coins;
+    livesEl.textContent = lives;
+    speedEl.textContent = (speed / 4.2).toFixed(1) + 'x';
+    if (msg) statusEl.textContent = msg;
+  }
+  function showEnd(title, text) {
+    state = 'over';
+    card.innerHTML = '<h2>' + title + '</h2><p>' + text + '</p><p><strong>Final score: ' + Math.floor(score) + '</strong> &nbsp; Coins: ' + coins + ' &nbsp; Distance: ' + Math.floor(distance) + ' m</p><button id="restartBtn" type="button">↻ Restart Instantly</button><p class="small">Press R, click Restart, or tap the button.</p>';
+    overlay.style.display = 'flex';
+    var rb = document.getElementById('restartBtn');
+    if (rb) rb.addEventListener('click', function() { startGame(); });
+  }
+  function startGame() {
+    audio(); reset(); state = 'playing'; overlay.style.display = 'none'; last = performance.now();
+    updateHud('Running — watch the gaps!'); beep(520, 0.15, 'triangle', 0.1);
+    requestAnimationFrame(loop);
+  }
+  function jump() {
+    if (state !== 'playing') return;
+    if (player.grounded || player.jumps < 2) {
+      player.vy = player.grounded ? -15.5 : -13.5;
+      player.grounded = false; player.jumps++; player.sliding = false;
+      beep(player.jumps === 2 ? 760 : 560, 0.12, 'square', 0.06);
+    }
+  }
+  function slide() {
+    if (state !== 'playing') return;
+    player.sliding = true; player.slideT = 0.55; beep(220, 0.1, 'sine', 0.06);
+  }
+  function hit() {
+    lives--; beep(150, 0.3, 'sawtooth', 0.1); updateHud('Ouch! Lives left: ' + lives);
+    player.x = 130; player.y = GROUND_Y - 58; player.vy = 0; player.jumps = 0; player.sliding = false; player.grounded = true;
+    obstacles = obstacles.filter(function(o) { return o.x < 120 || o.x > 300; });
+    if (lives <= 0) { showEnd('⛈️ Stormed Out — Game Over', 'The monsoon caught up with you. Shake it off and sprint again!'); }
+  }
+  function collide(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+  function spawnAhead() {
+    var far = roofs.length ? roofs[roofs.length - 1].x + roofs[roofs.length - 1].w : W;
+    while (far < W + 900) {
+      var gap = 55 + Math.random() * 105;
+      var w = 220 + Math.random() * 260;
+      var top = GROUND_Y - 25 + Math.random() * 35;
+      var nx = far + gap;
+      roofs.push(makeRoof(nx, w, top));
+      if (Math.random() < 0.72) {
+        var kinds = ['tower', 'antenna', 'debris'];
+        var kind = kinds[Math.floor(Math.random() * kinds.length)];
+        var oh = kind === 'debris' ? 34 : 48;
+        obstacles.push({ x: nx + 70 + Math.random() * Math.max(40, w - 170), y: top - oh, w: 40, h: oh, kind: kind });
+      }
+      if (Math.random() < 0.8) pickups.push({ x: nx + 45 + Math.random() * Math.max(30, w - 110), y: top - 78, taken: false });
+      far = nx + w;
+    }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#16283f'); grad.addColorStop(0.7, '#223a5c'); grad.addColorStop(1, '#0b1626');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(180,205,255,0.16)';
+    clouds.forEach(function(cl) { ctx.beginPath(); ctx.ellipse(cl.x, cl.y, cl.w/2, 22, 0, 0, Math.PI*2); ctx.fill(); });
+    ctx.fillStyle = '#f4d35e';
+    ctx.beginPath(); ctx.arc(850, 62, 26, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Distance: ' + Math.floor(distance) + ' m  /  1200 m', 22, 36);
+    ctx.fillStyle = '#6d8ec7';
+    ctx.fillRect(22, 48, 260, 10); ctx.fillStyle = '#ffd166';
+    ctx.fillRect(22, 48, Math.min(260, distance / 1200 * 260), 10);
+    roofs.forEach(function(r) {
+      ctx.fillStyle = '#2b3f5f'; ctx.fillRect(r.x, r.top, r.w, r.h);
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(r.x, r.top, r.w, 7);
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      for (var x = r.x + 18; x < r.x + r.w - 10; x += 42) ctx.fillRect(x, r.top + 18, 18, 8);
+      ctx.fillStyle = '#8fa8cc'; ctx.fillRect(r.x + 12, r.top - 26, 26, 26); ctx.fillRect(r.x + r.w - 44, r.top - 18, 20, 18);
+    });
+    pickups.forEach(function(p) {
+      if (p.taken) return;
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(p.x, p.y + Math.sin(time*5 + p.x)*4, 13, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#7a5510'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center'; ctx.fillText('¢', p.x, p.y + 5 + Math.sin(time*5 + p.x)*4);
+    });
+    obstacles.forEach(function(o) {
+      if (o.kind === 'debris') { ctx.fillStyle = '#ff6b6b'; ctx.save(); ctx.translate(o.x + 20, o.y + 17); ctx.rotate(0.45); ctx.fillRect(-22, -10, 44, 20); ctx.restore(); }
+      else if (o.kind === 'antenna') { ctx.fillStyle = '#d9e6ff'; ctx.fillRect(o.x + 18, o.y, 4, o.h); ctx.fillStyle = '#ff5d5d'; ctx.beginPath(); ctx.arc(o.x + 20, o.y, 7, 0, Math.PI*2); ctx.fill(); }
+      else { ctx.fillStyle = '#7aa7ff'; ctx.fillRect(o.x, o.y, o.w, o.h); ctx.fillStyle = '#274a86'; ctx.fillRect(o.x + 6, o.y + 8, o.w - 12, 10); ctx.fillRect(o.x + 6, o.y + 24, o.w - 12, 10); }
+    });
+    var ph = player.sliding ? 34 : 58;
+    ctx.fillStyle = '#ff4d6d'; ctx.fillRect(player.x, player.y + (58 - ph), player.w, ph);
+    ctx.fillStyle = '#13203a'; ctx.fillRect(player.x + 8, player.y + (58 - ph) + 8, 28, 12);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(player.x + 4, player.y + (58 - ph) + 24, player.w - 8, 6);
+    ctx.fillStyle = '#0f223f'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(player.sliding ? 'SLIDING!' : 'RUNNER', player.x + 22, player.y - 10);
+    ctx.strokeStyle = 'rgba(170,210,255,0.75)'; ctx.lineWidth = 1.5; ctx.beginPath();
+    rains.forEach(function(r) { ctx.moveTo(r.x, r.y); ctx.lineTo(r.x - 5, r.y + r.l); });
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.font = '13px Arial'; ctx.textAlign = 'right';
+    ctx.fillText('Tip: double-jump wide gaps • slide under red debris', W - 16, H - 14);
+  }
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(0.033, (now - last) / 1000 || 0.016); last = now; time += dt;
+    speed = Math.min(9.5, 4.2 + distance * 0.0022);
+    distance += speed * dt * 8; score += dt * (10 + speed);
+    var move = speed * dt * 60;
+    roofs.forEach(function(r) { r.x -= move; });
+    obstacles.forEach(function(o) { o.x -= move; });
+    pickups.forEach(function(p) { p.x -= move; });
+    clouds.forEach(function(c) { c.x -= c.s; if (c.x < -150) { c.x = W + 50; } });
+    rains.forEach(function(r) { r.y += r.s * 2; r.x -= 2; if (r.y > H) { r.y = -20; r.x = Math.random()*W; } });
+    roofs = roofs.filter(function(r) { return r.x + r.w > -50; });
+    obstacles = obstacles.filter(function(o) { return o.x + o.w > -50; });
+    pickups = pickups.filter(function(p) { return p.x > -50; });
+    spawnAhead();
+    player.vy += 0.85; player.y += player.vy;
+    if (player.slideT > 0) { player.slideT -= dt; if (player.slideT <= 0) player.sliding = false; }
+    var box = { x: player.x, y: player.y + (player.sliding ? 24 : 0), w: player.w, h: player.sliding ? 34 : 58 };
+    var onRoof = false;
+    roofs.forEach(function(r) {
+      if (player.x + player.w > r.x + 4 && player.x < r.x + r.w - 4 && player.vy >= 0 && player.y + 58 >= r.top && player.y + 58 <= r.top + 28) {
+        player.y = r.top - 58; player.vy = 0; player.jumps = 0; player.grounded = true; onRoof = true;
+      }
+    });
+    if (!onRoof && player.y < GROUND_Y - 58 + 120) { /* airborne above roof line */ }
+    if (!onRoof) {
+      var supported = roofs.some(function(r) { return player.x + player.w > r.x && player.x < r.x + r.w && Math.abs((player.y + 58) - r.top) < 3; });
+      if (!supported) player.grounded = false;
+    }
+    if (player.y > H + 80) { hit(); if (state === 'playing') { player.y = GROUND_Y - 58; } }
+    obstacles.forEach(function(o) {
+      if (o.x + o.w > 0 && o.x < W && collide(box, o)) { hit(); }
+    });
+    pickups.forEach(function(p) {
+      if (!p.taken && Math.abs(p.x - (player.x + 22)) < 34 && Math.abs(p.y - (player.y + 28)) < 46) { p.taken = true; coins++; score += 50; beep(880, 0.12, 'sine', 0.09); }
+    });
+    updateHud(distance >= 1100 ? 'Almost there — finish line ahead!' : null);
+    draw();
+    if (distance >= 1200) {
+      state = 'over'; updateHud('Finished!');
+      showEnd('🏆 You Beat the Monsoon!', 'You crossed 1,200 metres of storm-slick rooftops. Brilliant sprinting!');
+      return;
+    }
+    requestAnimationFrame(loop);
+  }
+  startBtn.addEventListener('click', startGame);
+  document.addEventListener('keydown', function(e) {
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); if (state === 'title' || state === 'over') startGame(); else jump(); }
+    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); slide(); }
+    if (e.key === 'r' || e.key === 'R') { if (state === 'over') startGame(); }
+  });
+  canvas.addEventListener('mousedown', function(e) {
+    if (state !== 'playing') return;
+    var rect = canvas.getBoundingClientRect();
+    var y = e.clientY - rect.top;
+    if (y < rect.height / 2) jump(); else slide();
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (state !== 'playing') return;
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    var y = t.clientY - rect.top;
+    if (y < rect.height / 2) jump(); else slide();
+  }, { passive: false });
+  document.addEventListener('touchstart', function(e) {
+    if (state === 'playing') return;
+    if (e.target && (e.target.id === 'startBtn' || e.target.id === 'restartBtn')) return;
+  });
+  reset(); draw(); updateHud('Ready');
+})();
+</script>
+</body>
+</html>

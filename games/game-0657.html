@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cartographer's Map Match</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a2b1e; color: #f5eeda; font-family: Georgia, serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 26px; margin: 8px 0 2px; text-align: center; color: #ffd97a; text-shadow: 1px 1px 0 #000; }
+  p.sub { font-size: 13px; color: #cfe3c8; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 6px 0; width: 100%; max-width: 560px; }
+  .stat { background: #2c422e; border: 2px solid #8a6b3a; border-radius: 10px; padding: 6px 12px; font-size: 15px; min-width: 105px; text-align: center; }
+  .stat b { color: #ffd97a; }
+  #wrap { position: relative; width: 100%; max-width: 560px; }
+  canvas { width: 100%; height: auto; aspect-ratio: 1 / 1.15; background: #e8d9a8; border: 4px solid #6b4f22; border-radius: 12px; display: block; touch-action: none; cursor: pointer; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  button { background: #d9a441; color: #231a08; border: 2px solid #fff2c2; border-radius: 10px; padding: 10px 16px; font-size: 16px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffcf5e; }
+  button.secondary { background: #3a5a3f; color: #fff; }
+  .overlay { position: absolute; inset: 0; background: rgba(15,26,15,0.94); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; z-index: 5; }
+  .overlay h2 { font-size: 30px; color: #ffd97a; margin-bottom: 10px; }
+  .overlay p { font-size: 15px; line-height: 1.55; max-width: 420px; margin-bottom: 10px; }
+  .overlay ul { text-align: left; font-size: 14px; line-height: 1.6; max-width: 420px; margin: 0 0 14px 18px; }
+  .hidden { display: none !important; }
+  #msg { min-height: 22px; font-size: 15px; margin-top: 8px; text-align: center; color: #ffe9a8; }
+  #handLabel { text-align: center; font-size: 14px; margin-top: 6px; color: #cfe3c8; }
+</style>
+</head>
+<body>
+<h1>🗺️ Cartographer's Map Match</h1>
+<p class="sub">Place rotated map tiles to link every city by trade route.</p>
+<div id="hud">
+  <div class="stat">Score: <b id="score">0</b></div>
+  <div class="stat">Moves: <b id="moves">25</b></div>
+  <div class="stat">Placed: <b id="placed">0</b>/16</div>
+  <div class="stat">Status: <b id="status">Ready</b></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="560" height="640"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Cartographer's Map Match</h2>
+    <p>Four cities wait on an old parchment map. Rotate each map tile, lay it on the grid, and stitch their trade routes together.</p>
+    <ul>
+      <li><b>Goal:</b> Connect all four cities into one route network to win.</li>
+      <li><b>Good placement:</b> A tile touching a city or another route scores +50.</li>
+      <li><b>Wrong placement:</b> A tile touching nothing costs 1 move.</li>
+      <li><b>Limit:</b> You have 25 moves. Fill the map wisely.</li>
+      <li><b>Controls:</b> Tap / click a tile, then tap a grid cell. Press R to rotate, Arrow keys to move the cursor, Enter to place.</li>
+    </ul>
+    <button id="startBtn">▶ Start Expedition</button>
+    <p style="margin-top:12px;font-size:13px;">How to Play: Select the tile at the bottom, rotate it until its roads point where you need them, then place it. Roads must line up with neighbours to count as connected.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Victory!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<div id="handLabel">Current tile — click it or press R to rotate</div>
+<div id="msg">Press Start to begin your expedition.</div>
+<div id="controls">
+  <button id="rotateBtn" class="secondary">↻ Rotate Tile (R)</button>
+  <button id="newTileBtn" class="secondary">New Tile (N)</button>
+  <button id="soundBtn" class="secondary">Sound: On</button>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var movesEl = document.getElementById('moves');
+  var placedEl = document.getElementById('placed');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var GRID = 4, CELL = 110, OX = 40, OY = 30, HAND_Y = 520;
+  var score = 0, moves = 25, placed = 0, started = false, over = false, soundOn = true;
+  var board = [], cities = [], current = null, cursor = {x: 0, y: 0}, selected = true;
+  var audioCtx = null;
+
+  // Directions: 0=N 1=E 2=S 3=W ; tile types are bit masks
+  var TILE_TYPES = [
+    { name: 'Straight', mask: 5 },   // N+S
+    { name: 'Corner', mask: 3 },     // N+E
+    { name: 'Crossroads', mask: 15 },// all
+    { name: 'T-Junction', mask: 7 }, // N+E+S
+    { name: 'Bend', mask: 6 },       // E+S
+    { name: 'Fork', mask: 11 },      // N+E+W
+    { name: 'Elbow', mask: 9 },      // N+W
+    { name: 'Straight E-W', mask: 10 }
+  ];
+
+  function rotateMask(mask, times) {
+    var m = mask;
+    for (var i = 0; i < times; i++) {
+      var nm = 0;
+      if (m & 1) nm |= 2;
+      if (m & 2) nm |= 4;
+      if (m & 4) nm |= 8;
+      if (m & 8) nm |= 1;
+      m = nm;
+    }
+    return m;
+  }
+  function hasDir(mask, d) { return (mask & (1 << d)) !== 0; }
+  function opposite(d) { return (d + 2) % 4; }
+
+  function newTile() {
+    var t = TILE_TYPES[Math.floor(Math.random() * TILE_TYPES.length)];
+    var rot = Math.floor(Math.random() * 4);
+    return { base: t.mask, name: t.name, rot: rot, mask: rotateMask(t.mask, rot) };
+  }
+  function rotateCurrent() {
+    if (!current) return;
+    current.rot = (current.rot + 1) % 4;
+    current.mask = rotateMask(current.base, current.rot);
+    beep(520, 0.06);
+    updateHUD('Rotated: ' + current.name);
+  }
+
+  function resetGame() {
+    score = 0; moves = 25; placed = 0; over = false; started = true;
+    board = [];
+    for (var y = 0; y < GRID; y++) {
+      var row = [];
+      for (var x = 0; x < GRID; x++) row.push(null);
+      board.push(row);
+    }
+    // Four cities on the parchment: corners with fixed outgoing roads
+    cities = [
+      { x: 0, y: 0, name: 'Port Alen', color: '#1f6fb2', mask: 6 },   // E+S
+      { x: 3, y: 0, name: 'Dunmere', color: '#c0392b', mask: 12 },   // S+W
+      { x: 0, y: 3, name: 'Kestrel', color: '#27864a', mask: 3 },    // N+E
+      { x: 3, y: 3, name: 'Solhaven', color: '#8e44ad', mask: 9 }    // N+W
+    ];
+    cities.forEach(function(c) { board[c.y][c.x] = { city: c, mask: c.mask, isCity: true }; });
+    current = newTile();
+    cursor = { x: 1, y: 1 };
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Place your first tile!');
+    msgEl.textContent = 'Connect all four cities. Good links score +50.';
+  }
+
+  function neighbours(x, y) {
+    var out = [];
+    var dirs = [[0,-1,0],[1,0,1],[0,1,2],[-1,0,3]];
+    dirs.forEach(function(d) {
+      var nx = x + d[0], ny = y + d[1];
+      if (nx >= 0 && nx < GRID && ny >= 0 && ny < GRID && board[ny][nx]) {
+        out.push({ x: nx, y: ny, dir: d[2], tile: board[ny][nx] });
+      }
+    });
+    return out;
+  }
+
+  function placeTile(x, y) {
+    if (!started || over) return;
+    if (x < 0 || x >= GRID || y < 0 || y >= GRID) return;
+    if (board[y][x]) { msgEl.textContent = 'That square already has a tile or city.'; beep(180, 0.1); return; }
+    var nb = neighbours(x, y);
+    var linked = 0;
+    nb.forEach(function(n) {
+      if (hasDir(current.mask, n.dir) && hasDir(n.tile.mask, opposite(n.dir))) linked++;
+    });
+    board[y][x] = { mask: current.mask, name: current.name, isCity: false };
+    placed++;
+    if (linked > 0) {
+      var gain = 50 * linked;
+      score += gain;
+      msgEl.textContent = 'Trade route linked! +' + gain + ' points.';
+      beep(760, 0.12); setTimeout(function(){ beep(980, 0.12); }, 90);
+    } else {
+      moves--;
+      msgEl.textContent = 'No connection — that placement cost 1 move.';
+      beep(220, 0.15);
+    }
+    current = newTile();
+    updateHUD(linked > 0 ? 'Connected!' : 'No link');
+    if (checkWin()) { endGame(true); return; }
+    if (moves <= 0 || placed >= 16) { endGame(false); }
+  }
+
+  function checkWin() {
+    // BFS from first city following matching roads only
+    var seen = {}, q = [{x: cities[0].x, y: cities[0].y}], found = 0;
+    var cityKey = {};
+    cities.forEach(function(c){ cityKey[c.x + ',' + c.y] = true; });
+    while (q.length) {
+      var p = q.shift(), key = p.x + ',' + p.y;
+      if (seen[key]) continue; seen[key] = true;
+      if (cityKey[key]) found++;
+      var tile = board[p.y][p.x]; if (!tile) continue;
+      var dirs = [[0,-1,0],[1,0,1],[0,1,2],[-1,0,3]];
+      dirs.forEach(function(d) {
+        if (!hasDir(tile.mask, d[2])) return;
+        var nx = p.x + d[0], ny = p.y + d[1];
+        if (nx < 0 || nx >= GRID || ny < 0 || ny >= GRID) return;
+        var nt = board[ny][nx]; if (!nt) return;
+        if (hasDir(nt.mask, opposite(d[2]))) q.push({x: nx, y: ny});
+      });
+    }
+    return found >= 4;
+  }
+
+  function endGame(win) {
+    over = true;
+    statusEl.textContent = win ? 'Victory' : 'Game Over';
+    endTitle.textContent = win ? '🏆 Route Complete!' : '🗺️ Expedition Ended';
+    endText.textContent = win
+      ? 'All four cities are linked by trade routes! Final score: ' + score + ' in ' + (25 - moves) + ' moves used.'
+      : 'Out of moves or the map is full without linking every city. Final score: ' + score + '. Try a new expedition!';
+    endScreen.classList.remove('hidden');
+    if (win) { beep(660, 0.15); setTimeout(function(){ beep(880, 0.15); }, 140); setTimeout(function(){ beep(1100, 0.25); }, 280); }
+    else beep(160, 0.3);
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    movesEl.textContent = moves;
+    placedEl.textContent = placed;
+    if (status) statusEl.textContent = status;
+  }
+
+  function beep(freq, dur) {
+    if (!soundOn || !started) return;
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'triangle'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+
+  function drawTile(cx, cy, size, mask, isCity, city) {
+    var half = size / 2;
+    ctx.fillStyle = isCity ? '#fdf3c4' : '#f7ead0';
+    ctx.strokeStyle = '#6b4f22'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(cx - half, cy - half, size, size, 10); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = '#8a5a1e'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    var dirs = [[0,-1,0],[1,0,1],[0,1,2],[-1,0,3]];
+    dirs.forEach(function(d) {
+      if (hasDir(mask, d[2])) {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + d[0] * half, cy + d[1] * half);
+        ctx.stroke();
+      }
+    });
+    ctx.fillStyle = '#3b2a12';
+    ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2); ctx.fill();
+    if (isCity && city) {
+      ctx.fillStyle = city.color;
+      ctx.beginPath(); ctx.arc(cx, cy, 17, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('★', cx, cy + 1);
+      ctx.fillStyle = '#231a08'; ctx.font = 'bold 11px Georgia';
+      ctx.fillText(city.name, cx, cy + half - 8);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#e8d9a8'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#2c422e'; ctx.font = 'bold 17px Georgia'; ctx.textAlign = 'left';
+    ctx.fillText('Old Trade Map — connect ★ Port Alen, Dunmere, Kestrel & Solhaven', 20, 20);
+    for (var y = 0; y < GRID; y++) {
+      for (var x = 0; x < GRID; x++) {
+        var cx = OX + x * CELL + CELL / 2, cy = OY + y * CELL + CELL / 2;
+        var t = board[y] ? board[y][x] : null;
+        if (t) drawTile(cx, cy, 96, t.mask, t.isCity, t.city || null);
+        else {
+          ctx.fillStyle = 'rgba(255,255,255,0.35)';
+          ctx.strokeStyle = '#9a7f4a'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.roundRect(cx - 48, cy - 48, 96, 96, 10); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = '#7a6238'; ctx.font = '13px Georgia'; ctx.textAlign = 'center';
+          ctx.fillText('empty', cx, cy);
+        }
+        if (started && !over && cursor.x === x && cursor.y === y && !t) {
+          ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 4;
+          ctx.beginPath(); ctx.roundRect(cx - 52, cy - 52, 104, 104, 12); ctx.stroke();
+        }
+      }
+    }
+    // Hand area
+    ctx.fillStyle = '#2c422e'; ctx.fillRect(0, HAND_Y, canvas.width, 120);
+    ctx.fillStyle = '#ffd97a'; ctx.font = 'bold 16px Georgia'; ctx.textAlign = 'left';
+    ctx.fillText('Your tile:', 20, HAND_Y + 28);
+    if (current) {
+      drawTile(110, HAND_Y + 62, 84, current.mask, false, null);
+      ctx.fillStyle = '#fff'; ctx.font = '15px Georgia';
+      ctx.fillText(current.name + ' — tap it to rotate, then tap an empty square.', 170, HAND_Y + 58);
+      ctx.fillStyle = '#cfe3c8'; ctx.font = '13px Georgia';
+      ctx.fillText('Keys: Arrows move cursor • Enter places • R rotates • N new tile', 170, HAND_Y + 82);
+    }
+    requestAnimationFrame(draw);
+  }
+
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var clientX = (evt.touches && evt.touches[0]) ? evt.touches[0].clientX : evt.clientX;
+    var clientY = (evt.touches && evt.touches[0]) ? evt.touches[0].clientY : evt.clientY;
+    return { x: (clientX - r.left) * canvas.width / r.width, y: (clientY - r.top) * canvas.height / r.height };
+  }
+  function onCanvasTap(evt) {
+    if (!started || over) return;
+    evt.preventDefault();
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    var p = canvasPos(evt);
+    if (p.y >= HAND_Y) { rotateCurrent(); return; }
+    var gx = Math.floor((p.x - OX) / CELL), gy = Math.floor((p.y - OY) / CELL);
+    if (gx >= 0 && gx < GRID && gy >= 0 && gy < GRID) { cursor.x = gx; cursor.y = gy; placeTile(gx, gy); }
+  }
+
+  canvas.addEventListener('click', onCanvasTap);
+  canvas.addEventListener('touchstart', onCanvasTap, { passive: false });
+  document.addEventListener('keydown', function(e) {
+    if (!started || over) {
+      if (e.key === 'Enter') { document.getElementById('startBtn').click(); }
+      return;
+    }
+    if (e.key === 'ArrowLeft') cursor.x = Math.max(0, cursor.x - 1);
+    else if (e.key === 'ArrowRight') cursor.x = Math.min(GRID - 1, cursor.x + 1);
+    else if (e.key === 'ArrowUp') cursor.y = Math.max(0, cursor.y - 1);
+    else if (e.key === 'ArrowDown') cursor.y = Math.min(GRID - 1, cursor.y + 1);
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); placeTile(cursor.x, cursor.y); }
+    else if (e.key === 'r' || e.key === 'R') rotateCurrent();
+    else if (e.key === 'n' || e.key === 'N') { if (moves > 0) { moves--; current = newTile(); updateHUD('New tile'); } }
+  });
+  document.getElementById('startBtn').addEventListener('click', function() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    resetGame(); beep(660, 0.12);
+  });
+  document.getElementById('restartBtn').addEventListener('click', function() { resetGame(); });
+  document.getElementById('rotateBtn').addEventListener('click', rotateCurrent);
+  document.getElementById('newTileBtn').addEventListener('click', function() {
+    if (!started || over || moves <= 0) return;
+    moves--; current = newTile(); updateHUD('New tile'); beep(440, 0.08);
+  });
+  document.getElementById('soundBtn').addEventListener('click', function(e) {
+    soundOn = !soundOn; e.target.textContent = 'Sound: ' + (soundOn ? 'On' : 'Off');
+  });
+  document.addEventListener('touchstart', function() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  }, { passive: true });
+
+  // Initial empty board for title backdrop
+  resetGame(); started = false; over = false;
+  titleScreen.classList.remove('hidden');
+  statusEl.textContent = 'Ready';
+  msgEl.textContent = 'Press Start to begin your expedition.';
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

@@ -54,3 +54,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0648 | Desert Oasis Caravan | Strategy / Caravan Route Management | Mouse/touch choose route and stops, Keys select | [Play](./../games/game-0648.html) |
 | 0649 | Flamenco Clap Circle | Rhythm / Handclap Pattern Timing | Space/click/tap clap patterns, Arrow Keys select | [Play](./../games/game-0649.html) |
 | 0650 | Ice Sculptor Chisel | Precision / Ice Sculpting Timing | Space/click/tap timed chisel, mouse/touch aim | [Play](./../games/game-0650.html) |
+| 0651 | Monsoon Rooftop Runner | Arcade / Rooftop Sprint | Arrow Keys/Space jump and slide, mouse/touch tap | [Play](./../games/game-0651.html) |
+| 0652 | Sundial Shadow Puzzle | Puzzle / Shadow Alignment Logic | Mouse/touch rotate dials, Arrow Keys select, Enter confirm | [Play](./../games/game-0652.html) |
+| 0653 | Lighthouse Keeper Shifts | Strategy / Lighthouse Duty Management | Mouse/touch assign tasks, Keys select shift | [Play](./../games/game-0653.html) |
+| 0654 | Steelpan Island Beats | Rhythm / Steelpan Timing | Keys tap drums on beat, mouse/touch tap drums | [Play](./../games/game-0654.html) |
+| 0655 | Falconry Flight Trial | Precision / Falcon Dive Aiming | Mouse/touch aim and release dive, Arrow Keys adjust | [Play](./../games/game-0655.html) |
+| 0656 | Avalanche Snowboarder | Arcade / Snowboard Descent | Arrow Keys/WASD carve, mouse/touch steer | [Play](./../games/game-0656.html) |
+| 0657 | Cartographer's Map Match | Puzzle / Map Piece Logic | Mouse/touch place and rotate tiles, Arrow Keys select | [Play](./../games/game-0657.html) |
+| 0658 | Vineyard Harvest Planner | Strategy / Vineyard Season Management | Mouse/touch manage plots, Keys select grape | [Play](./../games/game-0658.html) |
+| 0659 | Carnival Samba Parade | Rhythm / Samba Parade Timing | Keys tap parade cues on beat, mouse/touch tap cues | [Play](./../games/game-0659.html) |
+| 0660 | Clockmaker Gear Calibration | Precision / Gear Timing Calibration | Space/click/tap stop gears, Arrow Keys select | [Play](./../games/game-0660.html) |

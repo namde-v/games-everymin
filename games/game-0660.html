@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Clockmaker Gear Calibration</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; background: #14100a; font-family: Georgia, 'Times New Roman', serif; color: #f3e6c8; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; padding: 10px; }
+  h1 { font-size: clamp(20px, 4vw, 34px); letter-spacing: 2px; text-align: center; color: #ffd978; text-shadow: 0 2px 0 #000; }
+  .sub { font-size: 13px; color: #cbb98f; text-align: center; max-width: 760px; line-height: 1.4; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 780px; }
+  .pill { background: #2a2113; border: 1px solid #8a6d2f; border-radius: 999px; padding: 7px 12px; font-size: 14px; min-width: 110px; text-align: center; }
+  .pill b { color: #ffd978; }
+  #canvasBox { position: relative; width: min(96vw, 780px); aspect-ratio: 13 / 8; background: #1d1710; border: 2px solid #8a6d2f; border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.6); overflow: hidden; }
+  canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; background: rgba(10,7,3,.88); padding: 20px; }
+  #overlay.hidden { display: none; }
+  #overlay h2 { font-size: clamp(24px, 5vw, 40px); color: #ffd978; }
+  #overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #e8dcc0; }
+  #overlay .small { font-size: 13px; color: #cbb98f; }
+  button { background: #d9a441; color: #241a05; border: none; border-radius: 10px; padding: 13px 22px; font-size: 17px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #7a5410; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #7a5410; }
+  button.secondary { background: #3d3320; color: #f3e6c8; box-shadow: 0 4px 0 #171008; }
+  #controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  #msg { min-height: 22px; font-size: 15px; font-weight: bold; color: #ffd978; text-align: center; }
+  #bar { width: min(96vw, 780px); height: 12px; background: #2a2113; border-radius: 999px; overflow: hidden; border: 1px solid #5a4620; }
+  #barFill { height: 100%; width: 0%; background: linear-gradient(90deg, #d9a441, #ffe08a); transition: width .25s; }
+  .keys { font-size: 12px; color: #b8a67e; text-align: center; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>⚙️ CLOCKMAKER GEAR CALIBRATION</h1>
+  <p class="sub">Stop each spinning gear exactly on its golden alignment mark, then mesh it into the clockwork. Precision earns brass bonuses — sloppy stops wear out your attempts.</p>
+  <div id="hud">
+    <div class="pill">Score: <b id="score">0</b></div>
+    <div class="pill">Attempts: <b id="lives">5</b></div>
+    <div class="pill">Gear: <b id="gear">1 / 8</b></div>
+    <div class="pill">Status: <b id="status">Ready</b></div>
+    <div class="pill">Best Stop: <b id="best">—</b></div>
+  </div>
+  <div id="bar"><div id="barFill"></div></div>
+  <div id="canvasBox">
+    <canvas id="game" width="780" height="480"></canvas>
+    <div id="overlay">
+      <h2 id="ovTitle">Clockmaker Gear Calibration</h2>
+      <p id="ovText"><b>How to Play:</b> A gear spins on the left. A golden notch marks the target angle. Press STOP (or Space / tap) when the red tooth lines up with the golden mark. Within 6° is a PERFECT mesh (+250), within 15° is GOOD (+120), within 30° is LOOSE (+50). Miss by more than 30° and you lose an attempt. Mesh all 8 gears before your attempts run out to wind the clock and win.</p>
+      <p class="small">Keyboard: Space / Enter = Stop &amp; Start &nbsp;•&nbsp; Mouse: click STOP &nbsp;•&nbsp; Touch: tap the canvas or STOP button. Later gears spin faster and reverse direction.</p>
+      <button id="startBtn">Start Calibration</button>
+      <button id="howBtn" class="secondary">How to Play</button>
+    </div>
+  </div>
+  <div id="msg">Press Start, then stop each gear on the golden mark.</div>
+  <div id="controls">
+    <button id="stopBtn">⏸ STOP GEAR</button>
+    <button id="restartBtn" class="secondary">↻ Restart</button>
+  </div>
+  <p class="keys">Space / Enter / Click / Tap to stop the gear. Calibrate carefully — every degree counts.</p>
+</div>
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var ovTitle = document.getElementById('ovTitle');
+  var ovText = document.getElementById('ovText');
+  var startBtn = document.getElementById('startBtn');
+  var howBtn = document.getElementById('howBtn');
+  var stopBtn = document.getElementById('stopBtn');
+  var restartBtn = document.getElementById('restartBtn');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var gearEl = document.getElementById('gear');
+  var statusEl = document.getElementById('status');
+  var bestEl = document.getElementById('best');
+  var msgEl = document.getElementById('msg');
+  var barFill = document.getElementById('barFill');
+
+  var TOTAL = 8;
+  var state = 'title'; // title, playing, stopped, won, lost
+  var score = 0, attempts = 5, gearIndex = 0, bestErr = null;
+  var angle = 0, target = 0, speed = 1.6, direction = 1, spinOn = false;
+  var flash = 0, flashText = '', flashColor = '#ffd978', settle = 0, settledAngle = 0;
+  var meshed = []; // errors per meshed gear
+  var lastTime = 0, wobble = 0;
+
+  // Procedural Web Audio, created only after user interaction
+  var audioCtx = null;
+  function ensureAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo){
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function clickSound(){ tone(880, 0.08, 'square', 0.07); }
+  function perfectSound(){ tone(523, 0.12, 'sine', 0.14); setTimeout(function(){ tone(784, 0.16, 'sine', 0.14); }, 90); setTimeout(function(){ tone(1047, 0.22, 'sine', 0.14); }, 180); }
+  function goodSound(){ tone(660, 0.12, 'triangle', 0.12); setTimeout(function(){ tone(880, 0.15, 'triangle', 0.12); }, 100); }
+  function badSound(){ tone(180, 0.3, 'sawtooth', 0.1, 90); }
+  function winSound(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.3, 'sine', 0.14); }, i*130); }); }
+
+  function randTarget(){ return Math.random() * Math.PI * 2; }
+  function setupGear(){
+    gearIndex = Math.min(gearIndex, TOTAL - 1);
+    target = randTarget();
+    // Later gears are faster; odd gears reverse direction for variety
+    speed = 1.4 + gearIndex * 0.55;
+    direction = (gearIndex % 2 === 0) ? 1 : -1;
+    angle = Math.random() * Math.PI * 2;
+    spinOn = true; settle = 0; flash = 0;
+    statusEl.textContent = 'Spinning';
+    msgEl.textContent = 'Gear ' + (gearIndex + 1) + ' spinning — stop it on the golden mark!';
+    updateHUD();
+  }
+  function updateHUD(){
+    scoreEl.textContent = score;
+    livesEl.textContent = attempts;
+    gearEl.textContent = (Math.min(gearIndex + 1, TOTAL)) + ' / ' + TOTAL;
+    bestEl.textContent = bestErr === null ? '—' : bestErr.toFixed(1) + '°';
+    barFill.style.width = (meshed.length / TOTAL * 100) + '%';
+  }
+  function normDiff(a, b){
+    var d = Math.abs(a - b) % (Math.PI * 2);
+    if (d > Math.PI) d = Math.PI * 2 - d;
+    return d * 180 / Math.PI;
+  }
+  function startGame(){
+    ensureAudio(); clickSound();
+    score = 0; attempts = 5; gearIndex = 0; meshed = []; bestErr = null;
+    state = 'playing'; overlay.classList.add('hidden');
+    setupGear(); updateHUD();
+  }
+  function showEnd(won){
+    state = won ? 'won' : 'lost';
+    spinOn = false;
+    statusEl.textContent = won ? 'Clock Wound!' : 'Calibration Failed';
+    overlay.classList.remove('hidden');
+    ovTitle.textContent = won ? '🏆 CLOCK WOUND — YOU WIN!' : '💥 CLOCK JAMMED — GAME OVER';
+    ovText.innerHTML = won
+      ? 'All 8 gears meshed perfectly into the clockwork! Final score: <b>' + score + '</b>. Best stop error: <b>' + (bestErr === null ? '—' : bestErr.toFixed(1) + '°') + '</b>. The old clock ticks again thanks to your steady hand.'
+      : 'Your attempts ran out with ' + meshed.length + ' of 8 gears meshed. Final score: <b>' + score + '</b>. Press Restart and calibrate more carefully.';
+    startBtn.textContent = 'Play Again';
+    if (won) winSound();
+    msgEl.textContent = won ? 'The clock is wound and ticking!' : 'Game over — try again.';
+  }
+  function stopGear(){
+    if (state !== 'playing' || !spinOn) return;
+    ensureAudio();
+    spinOn = false; settle = 1; settledAngle = angle;
+    var err = normDiff(angle, target);
+    if (bestErr === null || err < bestErr) bestErr = err;
+    var gained = 0, label = '', color = '';
+    if (err <= 6) { gained = 250; label = 'PERFECT MESH! +' + gained + '  (' + err.toFixed(1) + '° off)'; color = '#7dff9a'; perfectSound(); }
+    else if (err <= 15) { gained = 120; label = 'GOOD MESH +' + gained + '  (' + err.toFixed(1) + '° off)'; color = '#ffd978'; goodSound(); }
+    else if (err <= 30) { gained = 50; label = 'LOOSE FIT +' + gained + '  (' + err.toFixed(1) + '° off)'; color = '#ffb066'; goodSound(); }
+    else { gained = 0; label = 'MISALIGNED — attempt lost! (' + err.toFixed(1) + '° off)'; color = '#ff6b6b'; badSound(); }
+    flash = 1; flashText = label; flashColor = color;
+    msgEl.textContent = label; msgEl.style.color = color;
+    if (gained > 0) {
+      score += gained; meshed.push(err);
+      statusEl.textContent = 'Meshed';
+      setTimeout(function(){
+        if (state !== 'playing') return;
+        if (meshed.length >= TOTAL) { updateHUD(); showEnd(true); return; }
+        gearIndex++; setupGear(); msgEl.style.color = '#ffd978';
+      }, 1100);
+    } else {
+      attempts--; statusEl.textContent = 'Slipped';
+      setTimeout(function(){
+        if (state !== 'playing') return;
+        if (attempts <= 0) { updateHUD(); showEnd(false); return; }
+        // Retry the same gear with a fresh target
+        setupGear(); msgEl.style.color = '#ffd978';
+      }, 1100);
+    }
+    updateHUD();
+  }
+  function drawGear(cx, cy, r, teeth, rot, bodyColor, toothColor){
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot);
+    ctx.fillStyle = toothColor;
+    for (var i = 0; i < teeth; i++) {
+      var a = (i / teeth) * Math.PI * 2;
+      ctx.save(); ctx.rotate(a);
+      ctx.fillRect(r - 6, -9, 22, 18);
+      ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fillStyle = bodyColor; ctx.fill();
+    ctx.lineWidth = 4; ctx.strokeStyle = '#0d0903'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2); ctx.fillStyle = '#241a05'; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.18, 0, Math.PI * 2); ctx.fillStyle = '#d9a441'; ctx.fill();
+    // Red marker tooth at angle 0 (the tooth to align)
+    ctx.fillStyle = '#ff3b30';
+    ctx.fillRect(r - 2, -7, 30, 14);
+    ctx.beginPath(); ctx.arc(r + 30, 0, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function draw(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Workshop backdrop
+    ctx.fillStyle = '#1d1710'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = 'rgba(217,164,65,0.18)'; ctx.lineWidth = 1;
+    for (var gx = 0; gx < canvas.width; gx += 52) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, canvas.height); ctx.stroke(); }
+    for (var gy = 0; gy < canvas.height; gy += 52) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(canvas.width, gy); ctx.stroke(); }
+
+    // Meshed gears assembly on the right (mini clockwork)
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(500, 40, 240, 400);
+    ctx.strokeStyle = '#8a6d2f'; ctx.lineWidth = 2; ctx.strokeRect(500, 40, 240, 400);
+    ctx.fillStyle = '#ffd978'; ctx.font = 'bold 16px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('CLOCKWORK ASSEMBLY', 620, 68);
+    ctx.font = '13px Georgia'; ctx.fillStyle = '#cbb98f';
+    ctx.fillText(meshed.length + ' / ' + TOTAL + ' gears meshed', 620, 88);
+    var positions = [[560,140],[660,140],[560,240],[660,240],[560,340],[660,340],[610,190],[610,290]];
+    for (var i = 0; i < TOTAL; i++) {
+      var p = positions[i];
+      if (i < meshed.length) {
+        drawGear(p[0], p[1], 34, 12, meshed[i] * 0.02 + i, '#c9922e', '#8a6d2f');
+        ctx.fillStyle = '#7dff9a'; ctx.font = 'bold 12px Georgia';
+        ctx.fillText('✓', p[0], p[1] + 4);
+      } else {
+        ctx.beginPath(); ctx.arc(p[0], p[1], 34, 0, Math.PI * 2);
+        ctx.strokeStyle = '#5a4620'; ctx.lineWidth = 2; ctx.setLineDash([6,6]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = '#8a7a55'; ctx.font = '20px Georgia'; ctx.fillText('?', p[0], p[1] + 7);
+      }
+    }
+    ctx.restore();
+
+    // Main spinning gear area
+    var cx = 260, cy = 240;
+    // Target ring and golden mark
+    ctx.save(); ctx.translate(cx, cy);
+    ctx.beginPath(); ctx.arc(0, 0, 168, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,217,120,0.35)'; ctx.lineWidth = 3; ctx.setLineDash([10,8]); ctx.stroke(); ctx.setLineDash([]);
+    // Golden target marker
+    ctx.save(); ctx.rotate(target);
+    ctx.fillStyle = '#ffd978'; ctx.shadowColor = '#ffd978'; ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.moveTo(168, -14); ctx.lineTo(196, 0); ctx.lineTo(168, 14); ctx.closePath(); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.font = 'bold 13px Georgia'; ctx.textAlign = 'center'; ctx.fillStyle = '#ffd978';
+    ctx.fillText('TARGET', 205, 5);
+    ctx.restore();
+    // Direction arrow hint
+    ctx.fillStyle = '#cbb98f'; ctx.font = '13px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText(direction === 1 ? 'Spinning clockwise ↻' : 'Spinning counter-clockwise ↺', 0, -195);
+    ctx.restore();
+
+    var displayAngle = spinOn ? angle : settledAngle;
+    drawGear(cx, cy, 138, 16, displayAngle, '#c9922e', '#a67c2e');
+
+    // Centre readout
+    ctx.fillStyle = '#f3e6c8'; ctx.font = 'bold 15px Georgia'; ctx.textAlign = 'center';
+    if (state === 'title') ctx.fillText('Press Start to begin', cx, cy + 190);
+    else if (state === 'playing' && spinOn) ctx.fillText('STOP when red tooth meets gold!', cx, cy + 190);
+    else if (state === 'playing') ctx.fillText('Gear stopped — judging fit…', cx, cy + 190);
+
+    // Flash banner
+    if (flash > 0) {
+      ctx.globalAlpha = Math.min(1, flash);
+      ctx.fillStyle = flashColor; ctx.font = 'bold 22px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText(flashText, 390, 452);
+      ctx.globalAlpha = 1;
+    }
+    // Attempt pips
+    ctx.textAlign = 'left'; ctx.font = 'bold 15px Georgia'; ctx.fillStyle = '#cbb98f';
+    ctx.fillText('Attempts:', 24, 32);
+    for (var k = 0; k < 5; k++) {
+      ctx.beginPath(); ctx.arc(112 + k * 26, 27, 9, 0, Math.PI * 2);
+      ctx.fillStyle = k < attempts ? '#ff3b30' : '#3a2f1c'; ctx.fill();
+    }
+    ctx.fillStyle = '#cbb98f'; ctx.fillText('Score ' + score, 24, 458);
+    ctx.fillText('Gear ' + (gearIndex + 1) + ' of ' + TOTAL, 300, 458);
+  }
+  function loop(ts){
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(50, ts - lastTime); lastTime = ts;
+    if (spinOn && state === 'playing') {
+      angle += direction * speed * (dt / 16.7) * 0.045;
+      wobble += dt * 0.001;
+    }
+    if (flash > 0) flash -= dt / 1400;
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function showHow(){
+    ensureAudio();
+    overlay.classList.remove('hidden');
+    ovTitle.textContent = 'How to Play';
+    ovText.innerHTML = 'Watch the big brass gear spin. Its <b>red tooth</b> must line up with the <b>golden target mark</b> on the ring. Press STOP, Space, Enter, click, or tap at the exact moment they meet. Perfect stops (within 6°) score 250 points. You have 5 attempts to mesh all 8 gears — later gears spin faster and change direction. Win by meshing all 8; lose if your attempts run out.';
+    startBtn.textContent = state === 'title' ? 'Start Calibration' : 'Continue';
+    if (state === 'title') { startBtn.textContent = 'Start Calibration'; }
+  }
+  startBtn.addEventListener('click', function(){
+    if (state === 'title' || state === 'won' || state === 'lost') startGame();
+    else overlay.classList.add('hidden');
+  });
+  howBtn.addEventListener('click', showHow);
+  stopBtn.addEventListener('click', function(){ ensureAudio(); stopGear(); });
+  restartBtn.addEventListener('click', function(){ ensureAudio(); startGame(); });
+  canvas.addEventListener('click', function(){ ensureAudio(); if (state === 'playing') stopGear(); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); ensureAudio(); if (state === 'playing') stopGear(); }, { passive: false });
+  document.addEventListener('keydown', function(e){
+    if (e.code === 'Space' || e.code === 'Enter') {
+      e.preventDefault(); ensureAudio();
+      if (state === 'title' || state === 'won' || state === 'lost') startGame();
+      else if (state === 'playing') stopGear();
+    }
+  });
+  document.addEventListener('touchstart', function(){ ensureAudio(); }, { passive: true });
+})();
+</script>
+</body>
+</html>

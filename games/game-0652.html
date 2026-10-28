@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sundial Shadow Puzzle</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a140d; color: #f5e9c8; font-family: Georgia, serif; display: flex; justify-content: center; min-height: 100vh; padding: 12px; }
+  #wrap { width: 100%; max-width: 680px; text-align: center; }
+  h1 { font-size: 30px; color: #ffd977; margin: 8px 0 4px; text-shadow: 0 2px 0 #000; }
+  p.sub { color: #d8c69a; margin-bottom: 10px; font-size: 14px; }
+  #hud { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; background: #2e2415; border: 2px solid #8a6d2f; border-radius: 10px; padding: 8px 10px; font-weight: bold; font-size: 14px; }
+  #hud span { white-space: nowrap; }
+  canvas { width: 100%; max-width: 640px; height: auto; background: #f7e7b8; border: 3px solid #8a6d2f; border-radius: 12px; margin-top: 10px; touch-action: none; display: block; }
+  .btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+  button { background: #e8a33d; color: #241a08; border: none; border-radius: 999px; padding: 11px 18px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 3px 0 #7a4d00; }
+  button:active { transform: translateY(2px); box-shadow: none; }
+  button.secondary { background: #5f7d8a; color: #fff; box-shadow: 0 3px 0 #2c4550; }
+  #msg { min-height: 26px; margin-top: 8px; font-weight: bold; color: #ffd977; }
+  .panel { background: #2e2415; border: 2px solid #8a6d2f; border-radius: 12px; padding: 14px; text-align: left; line-height: 1.55; font-size: 15px; }
+  .panel h2 { color: #ffd977; margin-bottom: 6px; }
+  .panel li { margin-left: 20px; margin-bottom: 4px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9728; Sundial Shadow Puzzle</h1>
+  <p class="sub">Rotate the gnomons. Bend the light of time onto every golden marker.</p>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Lives: <b id="lives">3</b></span>
+    <span>Level: <b id="level">1 / 5</b></span>
+    <span>Moves left: <b id="moves">12</b></span>
+    <span>Status: <b id="status">Title</b></span>
+  </div>
+
+  <div id="titleScreen" class="panel" style="margin-top:12px;">
+    <h2>How to Play</h2>
+    <ul>
+      <li>Each level shows a stone sundial court with 3 gnomons and golden target markers.</li>
+      <li>Every gnomon casts a long shadow in the direction it points. Rotate a gnomon until its shadow touches a target.</li>
+      <li>Light ALL targets in the level before you run out of moves to advance.</li>
+      <li>Tap / click a gnomon to select it, then use Rotate buttons. Clicking a gnomon directly turns it 15&deg; clockwise.</li>
+      <li>Keyboard: 1 / 2 / 3 select a gnomon, Left / Right rotate, Space rotates the selected gnomon, Enter starts or restarts.</li>
+      <li>Touch: tap a gnomon to select it, tap Rotate buttons to turn it. Every rotation costs 1 move.</li>
+      <li>You have 3 lives. Running out of moves on a level costs a life and resets that level.</li>
+    </ul>
+    <div class="btns"><button id="startBtn">Start Game</button></div>
+    <p style="margin-top:10px;color:#d8c69a;">Clear all 5 levels to win. Good luck, keeper of shadows!</p>
+  </div>
+
+  <canvas id="game" width="640" height="520" class="hidden"></canvas>
+  <div id="msg"></div>
+  <div class="btns hidden" id="controls">
+    <button id="sel1">Gnomon 1</button>
+    <button id="sel2">Gnomon 2</button>
+    <button id="sel3">Gnomon 3</button>
+    <button id="rotL" class="secondary">&#8630; Rotate -15&deg;</button>
+    <button id="rotR">&#8631; Rotate +15&deg;</button>
+    <button id="resetBtn" class="secondary">Restart</button>
+  </div>
+  <div id="endScreen" class="panel hidden" style="margin-top:12px;text-align:center;">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <div class="btns"><button id="restartBtn">Play Again</button></div>
+  </div>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var movesEl = document.getElementById('moves');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var controls = document.getElementById('controls');
+
+  var audioCtx = null;
+  function beep(freq, dur){
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+
+  // Levels: gnomons {x,y,angleDeg}, targets {x,y}
+  var levels = [
+    { moves: 12, gnomons: [{x:150,y:150,a:0},{x:480,y:170,a:90},{x:310,y:370,a:180}], targets: [{x:290,y:150},{x:480,y:330},{x:170,y:370}] },
+    { moves: 12, gnomons: [{x:130,y:260,a:45},{x:340,y:130,a:135},{x:500,y:360,a:270}], targets: [{x:250,y:380},{x:460,y:250},{x:340,y:290}] },
+    { moves: 14, gnomons: [{x:180,y:140,a:200},{x:460,y:140,a:20},{x:320,y:390,a:90}], targets: [{x:320,y:140},{x:460,y:300},{x:180,y:390}] },
+    { moves: 14, gnomons: [{x:150,y:380,a:0},{x:320,y:180,a:300},{x:500,y:380,a:150}], targets: [{x:290,y:380},{x:460,y:180},{x:320,y:340}] },
+    { moves: 16, gnomons: [{x:170,y:170,a:80},{x:470,y:200,a:190},{x:320,y:400,a:10}], targets: [{x:330,y:170},{x:470,y:360},{x:470,y:400}] }
+  ];
+
+  var state = 'title'; // title, playing, win, over
+  var levelIdx = 0, score = 0, lives = 3, movesLeft = 12, selected = 0;
+
+  function current(){ return levels[levelIdx]; }
+  function setStatus(s){ statusEl.textContent = s; }
+  function updateHUD(){
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    levelEl.textContent = (Math.min(levelIdx+1,5)) + ' / 5';
+    movesEl.textContent = movesLeft;
+  }
+  function distPointToSegment(px,py,x1,y1,x2,y2){
+    var dx = x2-x1, dy = y2-y1;
+    var len2 = dx*dx + dy*dy;
+    var t = len2 ? Math.max(0, Math.min(1, ((px-x1)*dx + (py-y1)*dy) / len2)) : 0;
+    var cx = x1 + t*dx, cy = y1 + t*dy;
+    return Math.sqrt((px-cx)*(px-cx) + (py-cy)*(py-cy));
+  }
+  function shadowEnd(g){
+    var rad = g.a * Math.PI / 180;
+    return { x: g.x + Math.cos(rad)*165, y: g.y + Math.sin(rad)*165 };
+  }
+  function targetLit(t){
+    var gs = current().gnomons;
+    for (var i=0;i<gs.length;i++){
+      var e = shadowEnd(gs[i]);
+      if (distPointToSegment(t.x,t.y,gs[i].x,gs[i].y,e.x,e.y) < 20) return true;
+    }
+    return false;
+  }
+  function allLit(){
+    var ts = current().targets;
+    for (var i=0;i<ts.length;i++) if (!targetLit(ts[i])) return false;
+    return true;
+  }
+  function loadLevel(){
+    movesLeft = current().moves;
+    selected = 0;
+    setStatus('Playing');
+    msgEl.textContent = 'Level ' + (levelIdx+1) + ': align every shadow onto a golden marker.';
+    updateHUD();
+  }
+  function startGame(){
+    beep(523, 0.18);
+    score = 0; lives = 3; levelIdx = 0; state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    canvas.classList.remove('hidden');
+    controls.classList.remove('hidden');
+    loadLevel();
+  }
+  function rotateSelected(delta){
+    if (state !== 'playing') return;
+    var g = current().gnomons[selected];
+    g.a = (g.a + delta + 360) % 360;
+    movesLeft--;
+    beep(delta > 0 ? 440 : 330, 0.12);
+    updateHUD();
+    checkOutcome();
+  }
+  function checkOutcome(){
+    if (allLit()){
+      var bonus = 100 + movesLeft * 10;
+      score += bonus;
+      beep(880, 0.25);
+      if (levelIdx >= levels.length - 1){
+        state = 'win'; setStatus('You Win!');
+        msgEl.textContent = 'All shadows aligned! Final score: ' + score;
+        showEnd('You Win!', 'The sundial court glows golden. You aligned all 5 shadow patterns. Final score: ' + score + '.');
+      } else {
+        levelIdx++;
+        msgEl.textContent = 'Level cleared! Bonus +' + bonus + '. Next pattern...';
+        setTimeout(function(){ if (state === 'playing') loadLevel(); }, 900);
+      }
+      updateHUD();
+      return;
+    }
+    if (movesLeft <= 0){
+      lives--;
+      beep(160, 0.3);
+      if (lives <= 0){
+        state = 'over'; setStatus('Game Over');
+        msgEl.textContent = 'Out of lives. Final score: ' + score;
+        showEnd('Game Over', 'The sun has set on this attempt. Final score: ' + score + '. Try again to master the shadows.');
+      } else {
+        msgEl.textContent = 'Out of moves! A life is lost. The level resets.';
+        // Reset this level's angles to a fresh pattern start
+        var fresh = JSON.parse(JSON.stringify(levels[levelIdx]));
+        // Keep targets, scramble starting angles deterministically by level
+        levels[levelIdx].gnomons.forEach(function(g,i){ g.a = (i*70 + levelIdx*40) % 360; });
+        setTimeout(function(){ if (state === 'playing') loadLevel(); }, 900);
+      }
+      updateHUD();
+    }
+  }
+  function showEnd(title, text){
+    document.getElementById('endTitle').textContent = title;
+    document.getElementById('endText').textContent = text;
+    endScreen.classList.remove('hidden');
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,640,520);
+    // Stone court
+    ctx.fillStyle = '#f7e7b8'; ctx.fillRect(0,0,640,520);
+    ctx.strokeStyle = '#c9a86a'; ctx.lineWidth = 1;
+    for (var gx=0; gx<=640; gx+=80){ ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,520); ctx.stroke(); }
+    for (var gy=0; gy<=520; gy+=80){ ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(640,gy); ctx.stroke(); }
+    // Sun compass in corner
+    ctx.fillStyle = '#ffd977'; ctx.beginPath(); ctx.arc(560,60,26,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#b8860b'; ctx.stroke();
+    ctx.fillStyle = '#7a4d00'; ctx.font = 'bold 13px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('SUN', 560, 64);
+
+    if (state === 'title'){
+      ctx.fillStyle = '#3a2c12'; ctx.font = 'bold 26px Georgia';
+      ctx.fillText('Press Start to begin', 320, 260);
+      requestAnimationFrame(draw); return;
+    }
+    var lvl = current();
+    // Shadows first (under gnomons, over court)
+    lvl.gnomons.forEach(function(g,i){
+      var e = shadowEnd(g);
+      var grad = ctx.createLinearGradient(g.x,g.y,e.x,e.y);
+      grad.addColorStop(0,'rgba(60,45,20,0.55)'); grad.addColorStop(1,'rgba(60,45,20,0.05)');
+      ctx.strokeStyle = grad; ctx.lineWidth = 22; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(g.x,g.y); ctx.lineTo(e.x,e.y); ctx.stroke();
+    });
+    // Targets
+    lvl.targets.forEach(function(t){
+      var lit = targetLit(t);
+      ctx.fillStyle = lit ? '#2e9e4f' : '#d4a017';
+      ctx.strokeStyle = '#7a4d00'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(t.x,t.y,18,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Georgia';
+      ctx.fillText(lit ? '\u2713' : '\u2605', t.x, t.y+6);
+    });
+    // Gnomons
+    lvl.gnomons.forEach(function(g,i){
+      var isSel = (i === selected && state === 'playing');
+      ctx.fillStyle = isSel ? '#e8a33d' : '#5b4632';
+      ctx.strokeStyle = isSel ? '#ff0000' : '#241a08'; ctx.lineWidth = isSel ? 4 : 2;
+      ctx.beginPath(); ctx.arc(g.x,g.y,26,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      // Pointer showing direction
+      var rad = g.a * Math.PI / 180;
+      ctx.strokeStyle = '#ffd977'; ctx.lineWidth = 4; ctx.beginPath();
+      ctx.moveTo(g.x,g.y); ctx.lineTo(g.x + Math.cos(rad)*22, g.y + Math.sin(rad)*22); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Georgia';
+      ctx.fillText(String(i+1), g.x, g.y+5);
+      if (isSel){
+        ctx.strokeStyle = '#ff0000'; ctx.setLineDash([6,5]); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(g.x,g.y,34,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+      }
+    });
+    ctx.fillStyle = '#3a2c12'; ctx.font = 'bold 15px Georgia'; ctx.textAlign = 'left';
+    ctx.fillText('Selected: Gnomon ' + (selected+1) + '  |  Angle: ' + current().gnomons[selected].a + ' deg', 16, 500);
+    ctx.textAlign = 'center';
+    requestAnimationFrame(draw);
+  }
+
+  function canvasPos(e){
+    var r = canvas.getBoundingClientRect();
+    var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX - r.left) * (640 / r.width), y: (clientY - r.top) * (520 / r.height) };
+  }
+  function handleCanvasTap(e){
+    if (state !== 'playing') return;
+    e.preventDefault();
+    var p = canvasPos(e);
+    var gs = current().gnomons;
+    for (var i=0;i<gs.length;i++){
+      var d = Math.sqrt((p.x-gs[i].x)*(p.x-gs[i].x) + (p.y-gs[i].y)*(p.y-gs[i].y));
+      if (d < 38){ selected = i; beep(600, 0.1); updateHUD(); return; }
+    }
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('resetBtn').addEventListener('click', function(){ beep(440,0.12); startGame(); });
+  document.getElementById('sel1').addEventListener('click', function(){ selected=0; beep(600,0.08); });
+  document.getElementById('sel2').addEventListener('click', function(){ selected=1; beep(600,0.08); });
+  document.getElementById('sel3').addEventListener('click', function(){ selected=2; beep(600,0.08); });
+  document.getElementById('rotL').addEventListener('click', function(){ rotateSelected(-15); });
+  document.getElementById('rotR').addEventListener('click', function(){ rotateSelected(15); });
+  canvas.addEventListener('click', handleCanvasTap);
+  canvas.addEventListener('touchstart', handleCanvasTap, { passive: false });
+  canvas.addEventListener('mousedown', function(e){ if (state==='playing') beep(700,0.05); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' && (state === 'title' || state === 'win' || state === 'over')){ startGame(); return; }
+    if (state !== 'playing') return;
+    if (e.key === '1') selected = 0;
+    else if (e.key === '2') selected = 1;
+    else if (e.key === '3') selected = 2;
+    else if (e.key === 'ArrowLeft'){ e.preventDefault(); rotateSelected(-15); }
+    else if (e.key === 'ArrowRight'){ e.preventDefault(); rotateSelected(15); }
+    else if (e.key === ' '){ e.preventDefault(); rotateSelected(15); }
+  });
+  document.addEventListener('touchstart', function(){}, { passive: true });
+
+  updateHUD();
+  setStatus('Title');
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

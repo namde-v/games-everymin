@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Vineyard Harvest Planner</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #1d2b18; color: #fff8e6; font-family: Verdana, Geneva, sans-serif; overflow: hidden; }
+  #wrap { max-width: 980px; margin: 0 auto; padding: 10px; }
+  h1 { margin: 4px 0 8px; font-size: 26px; text-align: center; color: #ffe08a; }
+  #hud { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 8px; }
+  .pill { background: #3a4f2c; border: 1px solid #8aa96a; border-radius: 20px; padding: 5px 10px; font-size: 13px; }
+  .pill b { color: #ffe08a; }
+  #game { display: block; width: 100%; height: 520px; background: #6a8f4e; border: 3px solid #d9b36a; border-radius: 14px; touch-action: none; }
+  #bar { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; }
+  button { border: 0; border-radius: 10px; padding: 10px 13px; font-weight: bold; cursor: pointer; background: #ffe08a; color: #24331d; }
+  button:hover { filter: brightness(1.08); }
+  button.alt { background: #a8d8ff; }
+  button.danger { background: #ff9a8a; }
+  #msg { min-height: 22px; text-align: center; font-size: 14px; margin-top: 6px; color: #fff2b8; }
+  #help { font-size: 13px; line-height: 1.5; background: rgba(0,0,0,.28); border-radius: 10px; padding: 10px 12px; margin-top: 8px; }
+  kbd { background: #fff; color: #222; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🍇 Vineyard Harvest Planner</h1>
+  <div id="hud">
+    <span class="pill">Money: <b id="money">$120</b></span>
+    <span class="pill">Income: <b id="income">$0</b> / $420</span>
+    <span class="pill">Season: <b id="season">Spring</b></span>
+    <span class="pill">Day: <b id="day">1</b> / 24</span>
+    <span class="pill">Weather: <b id="weather">Sunny</b></span>
+    <span class="pill">Lives / Seasons left: <b id="lives">3</b></span>
+    <span class="pill">Selected: <b id="sel">Merlot — $18</b></span>
+  </div>
+  <canvas id="game" width="940" height="520"></canvas>
+  <div id="bar">
+    <button id="bMerlot">Plant Merlot $18</button>
+    <button id="bChard" class="alt">Plant Chardonnay $14</button>
+    <button id="bSyrah" class="alt">Plant Syrah $24</button>
+    <button id="bWater">Water Plot $5</button>
+    <button id="bHarvest" class="danger">Harvest Ripe Plot</button>
+    <button id="bNext">Next Day ▶</button>
+    <button id="bRestart">Restart</button>
+  </div>
+  <div id="msg">Welcome, vineyard manager! Start a season, plant wisely, and reach $420 income.</div>
+  <div id="help"><b>How to Play:</b> Click or tap a field plot, then choose a grape to plant. Watered vines grow faster; dry or stormy weather can damage unwatered vines. Harvest only when a vine is ripe (golden) for full value, or early for half value. Earn $420 income in 24 days to win. Lose a season if money falls below $0 and you have no ripe harvest. Keys: <kbd>1</kbd> Merlot, <kbd>2</kbd> Chardonnay, <kbd>3</kbd> Syrah, <kbd>W</kbd> water, <kbd>H</kbd> harvest, <kbd>N</kbd> next day, <kbd>R</kbd> restart, <kbd>Enter</kbd> start.</div>
+</div>
+<script>
+(function(){
+  var cv = document.getElementById('game');
+  var ctx = cv.getContext('2d');
+  var moneyEl = document.getElementById('money');
+  var incomeEl = document.getElementById('income');
+  var seasonEl = document.getElementById('season');
+  var dayEl = document.getElementById('day');
+  var weatherEl = document.getElementById('weather');
+  var livesEl = document.getElementById('lives');
+  var selEl = document.getElementById('sel');
+  var msgEl = document.getElementById('msg');
+
+  var audioCtx = null;
+  function beep(freq, dur){
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+
+  var state = 'title';
+  var money, income, day, lives, selected, plots, weather, selectedPlot, anim;
+  var varieties = {
+    merlot: { name: 'Merlot', cost: 18, value: 52, grow: 5, color: '#6a1f4d' },
+    chard: { name: 'Chardonnay', cost: 14, value: 38, grow: 4, color: '#d8c35a' },
+    syrah: { name: 'Syrah', cost: 24, value: 68, grow: 6, color: '#30145c' }
+  };
+  var weatherList = ['Sunny','Sunny','Cloudy','Rainy','Hot','Stormy'];
+  var seasonNames = ['Spring','Spring','Summer','Summer','Autumn','Autumn'];
+
+  function seasonFor(d){
+    if (d <= 6) return 'Spring';
+    if (d <= 14) return 'Summer';
+    return 'Autumn';
+  }
+  function reset(){
+    money = 120; income = 0; day = 1; lives = 3;
+    selected = 'merlot'; selectedPlot = -1;
+    weather = 'Sunny';
+    plots = [];
+    for (var i = 0; i < 12; i++) plots.push({ kind: null, growth: 0, watered: false, ripe: false });
+    state = 'title'; anim = 0;
+    updateHud(); setMsg('Press Start or Enter. Plant, water, harvest, and reach $420 before day 24.');
+  }
+  function setMsg(t){ msgEl.textContent = t; }
+  function updateHud(){
+    moneyEl.textContent = '$' + money;
+    incomeEl.textContent = '$' + income;
+    seasonEl.textContent = seasonFor(day);
+    dayEl.textContent = day;
+    weatherEl.textContent = weather;
+    livesEl.textContent = lives;
+    selEl.textContent = varieties[selected].name + ' — $' + varieties[selected].cost;
+  }
+  function plant(){
+    if (state !== 'play') return;
+    if (selectedPlot < 0) { setMsg('Select a field plot first.'); return; }
+    var p = plots[selectedPlot];
+    if (p.kind) { setMsg('That plot is already planted. Harvest it first.'); return; }
+    var v = varieties[selected];
+    if (money < v.cost) { setMsg('Not enough money to plant ' + v.name + '.'); beep(140, 0.2); return; }
+    money -= v.cost; p.kind = selected; p.growth = 0; p.watered = false; p.ripe = false;
+    setMsg('Planted ' + v.name + ' in plot ' + (selectedPlot + 1) + '. Water it to speed growth.');
+    beep(520, 0.15); updateHud();
+  }
+  function water(){
+    if (state !== 'play' || selectedPlot < 0) { setMsg('Select a planted plot to water.'); return; }
+    var p = plots[selectedPlot];
+    if (!p.kind) { setMsg('Plant something in this plot first.'); return; }
+    if (p.watered) { setMsg('This plot is already watered today.'); return; }
+    if (money < 5) { setMsg('Not enough money for water.'); return; }
+    money -= 5; p.watered = true; p.growth += 1;
+    if (p.growth >= varieties[p.kind].grow) p.ripe = true;
+    setMsg('Watered plot ' + (selectedPlot + 1) + '. Growth boosted!');
+    beep(660, 0.12); updateHud();
+  }
+  function harvest(){
+    if (state !== 'play' || selectedPlot < 0) { setMsg('Select a planted plot to harvest.'); return; }
+    var p = plots[selectedPlot];
+    if (!p.kind) { setMsg('Nothing to harvest here.'); return; }
+    var v = varieties[p.kind];
+    var value = p.ripe ? v.value : Math.floor(v.value / 2);
+    income += value; money += value;
+    setMsg('Harvested ' + v.name + ' for $' + value + (p.ripe ? ' — perfect ripeness!' : ' — early harvest, half value.'));
+    p.kind = null; p.growth = 0; p.watered = false; p.ripe = false;
+    beep(880, 0.2); updateHud(); checkEnd();
+  }
+  function nextDay(){
+    if (state !== 'play') return;
+    day += 1;
+    weather = weatherList[Math.floor(Math.random() * weatherList.length)];
+    plots.forEach(function(p){
+      if (!p.kind) return;
+      var gain = 1;
+      if (p.watered) gain = 2;
+      if (weather === 'Rainy') gain += 1;
+      if (weather === 'Hot' && !p.watered) gain = 0;
+      if (weather === 'Stormy' && !p.watered && Math.random() < 0.45) {
+        p.kind = null; p.growth = 0; p.ripe = false; p.watered = false;
+        setMsg('A storm damaged an unwatered vine. Water protects your crop!');
+        return;
+      }
+      p.growth += gain;
+      p.watered = false;
+      if (p.growth >= varieties[p.kind].grow) p.ripe = true;
+    });
+    setMsg('Day ' + day + ': ' + weather + ' in ' + seasonFor(day) + '. Tend your vines!');
+    beep(440, 0.12); updateHud(); checkEnd();
+  }
+  function checkEnd(){
+    if (income >= 420) { state = 'win'; setMsg('YOU WIN! Your vineyard earned $' + income + '. Press Restart to play again.'); beep(990, 0.4); return; }
+    if (day >= 24 && income < 420) { state = 'over'; setMsg('GAME OVER — the season ended at $' + income + ' income. Press Restart to try again.'); beep(180, 0.4); return; }
+    if (money < 0) {
+      var hasCrop = plots.some(function(p){ return p.kind; });
+      if (!hasCrop) {
+        lives -= 1;
+        if (lives <= 0) { state = 'over'; setMsg('GAME OVER — out of seasons. Press Restart.'); }
+        else { money = 60; setMsg('Season lost! You get $60 and one more chance. Seasons left: ' + lives); }
+        updateHud();
+      }
+    }
+  }
+  function plotRect(i){
+    var col = i % 4, row = Math.floor(i / 4);
+    return { x: 30 + col * 222, y: 92 + row * 118, w: 200, h: 100 };
+  }
+  function draw(){
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = '#6a8f4e'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = '#fff8e6'; ctx.font = 'bold 28px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('Vineyard Harvest Planner', 470, 42);
+    ctx.font = '15px Verdana'; ctx.fillStyle = '#eef6d8';
+    ctx.fillText('Goal: $420 income  •  Day ' + day + ' of 24  •  ' + weather, 470, 70);
+    plots.forEach(function(p, i){
+      var r = plotRect(i);
+      ctx.fillStyle = p.watered ? '#7a5b2e' : '#8a6a3a';
+      ctx.strokeStyle = (i === selectedPlot) ? '#ffe08a' : '#3a2b16';
+      ctx.lineWidth = (i === selectedPlot) ? 5 : 2;
+      ctx.beginPath(); ctx.roundRect(r.x, r.y, r.w, r.h, 12); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff8e6'; ctx.font = 'bold 14px Verdana'; ctx.textAlign = 'left';
+      ctx.fillText('Plot ' + (i + 1), r.x + 12, r.y + 22);
+      if (!p.kind) {
+        ctx.font = '13px Verdana'; ctx.fillStyle = '#e8d9ae';
+        ctx.fillText('Empty field — tap to select', r.x + 12, r.y + 52);
+      } else {
+        var v = varieties[p.kind];
+        ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(r.x + 34, r.y + 58, 16, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Verdana';
+        ctx.fillText(v.name, r.x + 58, r.y + 50);
+        ctx.fillStyle = p.ripe ? '#ffe08a' : '#eef6d8'; ctx.font = '13px Verdana';
+        ctx.fillText(p.ripe ? 'RIPE — harvest now!' : 'Growing: ' + Math.min(p.growth, v.grow) + '/' + v.grow + (p.watered ? ' 💧' : ''), r.x + 58, r.y + 70);
+      }
+    });
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(20,30,15,0.86)'; ctx.fillRect(110, 90, 720, 340);
+      ctx.fillStyle = '#ffe08a'; ctx.font = 'bold 34px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('Vineyard Harvest Planner', 470, 160);
+      ctx.fillStyle = '#fff'; ctx.font = '17px Verdana';
+      ctx.fillText('Plant grapes, water vines, and sell harvests.', 470, 200);
+      ctx.fillText('Reach $420 income before day 24 ends.', 470, 230);
+      ctx.fillStyle = '#ffe08a'; ctx.fillRect(360, 260, 220, 54);
+      ctx.fillStyle = '#24331d'; ctx.font = 'bold 20px Verdana';
+      ctx.fillText('START SEASON', 470, 295);
+      ctx.fillStyle = '#fff'; ctx.font = '14px Verdana';
+      ctx.fillText('Click START, or press Enter. Full How-to-Play is below.', 470, 350);
+      ctx.fillText('Mouse, touch, and keyboard all work.', 470, 380);
+    }
+    if (state === 'win' || state === 'over') {
+      ctx.fillStyle = 'rgba(20,30,15,0.88)'; ctx.fillRect(110, 120, 720, 280);
+      ctx.fillStyle = state === 'win' ? '#ffe08a' : '#ff9a8a';
+      ctx.font = 'bold 38px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(state === 'win' ? '🏆 VINEYARD SUCCESS!' : '🍂 SEASON OVER', 470, 210);
+      ctx.fillStyle = '#fff'; ctx.font = '18px Verdana';
+      ctx.fillText('Final income: $' + income + '  •  Money: $' + money, 470, 255);
+      ctx.fillText('Press Restart to play a new season.', 470, 290);
+      ctx.fillStyle = '#ffe08a'; ctx.fillRect(360, 315, 220, 50);
+      ctx.fillStyle = '#24331d'; ctx.font = 'bold 18px Verdana';
+      ctx.fillText('RESTART', 470, 347);
+    }
+  }
+  function loop(){ anim += 1; draw(); requestAnimationFrame(loop); }
+  function pickFromEvent(e){
+    var rect = cv.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (cv.width / rect.width);
+    var y = (e.clientY - rect.top) * (cv.height / rect.height);
+    if (state === 'title' && x >= 360 && x <= 580 && y >= 260 && y <= 314) { state = 'play'; beep(700, 0.2); setMsg('Season started! Select a plot and plant your first vines.'); return; }
+    if ((state === 'win' || state === 'over') && x >= 360 && x <= 580 && y >= 315 && y <= 365) { reset(); state = 'play'; setMsg('New season started!'); return; }
+    if (state !== 'play') return;
+    for (var i = 0; i < plots.length; i++) {
+      var r = plotRect(i);
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+        selectedPlot = i; beep(500, 0.08); setMsg('Selected plot ' + (i + 1) + '. Plant, water, or harvest it.'); updateHud(); return;
+      }
+    }
+  }
+  cv.addEventListener('click', pickFromEvent);
+  cv.addEventListener('touchstart', function(e){ e.preventDefault(); if (e.touches && e.touches[0]) pickFromEvent(e.touches[0]); }, { passive: false });
+  cv.addEventListener('mousemove', function(e){});
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    if (k === 'enter' && state === 'title') { state = 'play'; beep(700, 0.2); setMsg('Season started!'); return; }
+    if (k === 'r') { reset(); state = 'play'; return; }
+    if (state !== 'play') return;
+    if (k === '1') { selected = 'merlot'; updateHud(); }
+    if (k === '2') { selected = 'chard'; updateHud(); }
+    if (k === '3') { selected = 'syrah'; updateHud(); }
+    if (k === 'w') water();
+    if (k === 'h') harvest();
+    if (k === 'n') nextDay();
+    if (k === 'arrowright' && selectedPlot < 11) { selectedPlot += 1; updateHud(); }
+    if (k === 'arrowleft' && selectedPlot > 0) { selectedPlot -= 1; updateHud(); }
+  });
+  document.getElementById('bMerlot').addEventListener('click', function(){ selected = 'merlot'; updateHud(); plant(); });
+  document.getElementById('bChard').addEventListener('click', function(){ selected = 'chard'; updateHud(); plant(); });
+  document.getElementById('bSyrah').addEventListener('click', function(){ selected = 'syrah'; updateHud(); plant(); });
+  document.getElementById('bWater').addEventListener('click', water);
+  document.getElementById('bHarvest').addEventListener('click', harvest);
+  document.getElementById('bNext').addEventListener('click', nextDay);
+  document.getElementById('bRestart').addEventListener('click', function(){ reset(); state = 'play'; setMsg('New season started!'); });
+  reset();
+  loop();
+})();
+</script>
+</body>
+</html>
