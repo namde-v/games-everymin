@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Kelp Keeper</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #02131f;
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; font-family: "Trebuchet MS", Verdana, sans-serif;
+    color: #eafcff; overflow: hidden;
+  }
+  #wrap { position: relative; width: 800px; max-width: 98vw; }
+  canvas {
+    display: block; width: 100%; height: auto; aspect-ratio: 800 / 500;
+    background: linear-gradient(#0a4a6e, #06334f 55%, #04283f);
+    border: 3px solid #3fd6e0; border-radius: 14px;
+    box-shadow: 0 0 40px rgba(63, 214, 224, 0.35);
+    touch-action: none;
+  }
+  #hud {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; background: rgba(6, 50, 74, 0.95);
+    border: 2px solid #3fd6e0; border-radius: 10px; margin-bottom: 8px;
+    font-weight: bold; font-size: 15px; flex-wrap: wrap; gap: 8px;
+  }
+  #airWrap { display: flex; align-items: center; gap: 6px; }
+  #airBarOuter { width: 180px; height: 16px; background: #123; border: 1px solid #3fd6e0; border-radius: 8px; overflow: hidden; }
+  #airBar { height: 100%; width: 100%; background: linear-gradient(90deg, #35e0a1, #3fd6e0); transition: width 0.2s; }
+  .screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center;
+    background: rgba(2, 25, 40, 0.88); border-radius: 14px; padding: 24px;
+  }
+  .hidden { display: none !important; }
+  h1 { font-size: 52px; color: #6ff2ff; text-shadow: 0 0 18px #2fd4e8, 0 4px 0 #0b5f73; letter-spacing: 2px; }
+  h2 { font-size: 40px; color: #ffd75e; text-shadow: 0 0 14px rgba(255, 215, 94, 0.6); }
+  p { max-width: 560px; line-height: 1.55; margin: 8px 0; font-size: 16px; color: #d9f7ff; }
+  .howto {
+    background: rgba(255, 255, 255, 0.08); border: 1px solid #3fd6e0;
+    border-radius: 10px; padding: 12px 18px; margin: 12px 0; text-align: left; font-size: 15px; line-height: 1.6;
+  }
+  .howto b { color: #6ff2ff; }
+  button {
+    margin-top: 14px; padding: 14px 40px; font-size: 22px; font-weight: bold;
+    color: #03202e; background: #ffd75e; border: none; border-radius: 999px;
+    cursor: pointer; box-shadow: 0 4px 0 #b88a12, 0 0 24px rgba(255, 215, 94, 0.5);
+  }
+  button:hover { background: #ffe488; transform: translateY(-1px); }
+  button:active { transform: translateY(2px); box-shadow: 0 1px 0 #b88a12; }
+  .big { font-size: 22px; font-weight: bold; }
+  #muteBtn { padding: 6px 14px; font-size: 13px; margin: 0; }
+  @media (max-width: 600px) {
+    h1 { font-size: 36px; } h2 { font-size: 30px; }
+    #hud { font-size: 13px; } #airBarOuter { width: 110px; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span id="scoreEl">Pearls: 0 / 100</span>
+    <span id="livesEl">Lives: 3</span>
+    <span id="statusEl">Status: Ready</span>
+    <span id="airWrap">Air <span id="airBarOuter"><span id="airBar"></span></span> <span id="airNum">100%</span></span>
+    <button id="muteBtn" type="button">Sound: On</button>
+  </div>
+  <canvas id="game" width="800" height="500"></canvas>
+
+  <div id="titleScreen" class="screen">
+    <h1>KELP KEEPER</h1>
+    <p>Swim the reef, gather the pearls, and keep your air tank full. The deep gets hungrier the longer you stay down!</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      &bull; <b>Move:</b> Arrow keys / WASD, mouse (diver follows pointer), or drag on touch screens.<br>
+      &bull; <b>Collect:</b> Pearls (+10 points, +1 pearl). Bubbles refill your air.<br>
+      &bull; <b>Avoid:</b> Jellyfish sting you (lose a life) and sharks are deadly (lose a life and clear nearby threats).<br>
+      &bull; <b>Win:</b> Collect 100 pearls. <b>Lose:</b> Run out of lives or air.<br>
+      &bull; Air drains slowly and faster at depth; grab bubbles and stay shallow to breathe easier.
+    </div>
+    <button id="startBtn" type="button">Start Dive</button>
+    <p style="font-size:13px; opacity:0.8;">Space or Enter also starts. P pauses.</p>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p class="big" id="endScore"></p>
+    <p id="endMsg"></p>
+    <button id="restartBtn" type="button">Dive Again</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById("scoreEl");
+  var livesEl = document.getElementById("livesEl");
+  var statusEl = document.getElementById("statusEl");
+  var airBar = document.getElementById("airBar");
+  var airNum = document.getElementById("airNum");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endScore = document.getElementById("endScore");
+  var endMsg = document.getElementById("endMsg");
+
+  var state = "title"; // title | playing | paused | win | over
+  var pearls = 0, score = 0, lives = 3, air = 100;
+  var elapsed = 0, lastTime = 0, spawnTimer = 0, difficulty = 1;
+  var keys = {};
+  var pointer = { x: W / 2, y: H / 2, active: false };
+  var muted = false;
+  var audioCtx = null;
+
+  var player = { x: W / 2, y: H / 2, r: 20, vx: 0, vy: 0, invuln: 0, dir: 1 };
+  var pearlsArr = [], jellies = [], sharks = [], bubbles = [], particles = [], kelps = [], fishes = [];
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  // ---------- Audio (procedural, created only after user interaction) ----------
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (muted || !audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || "sine"; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (kind === "pearl") tone(880, 0.25, "sine", 0.18, 1320);
+    else if (kind === "bubble") tone(500, 0.3, "sine", 0.14, 900);
+    else if (kind === "hurt") tone(220, 0.35, "sawtooth", 0.2, 90);
+    else if (kind === "win") { tone(523, 0.3, "triangle", 0.2); setTimeout(function () { tone(659, 0.3, "triangle", 0.2); }, 180); setTimeout(function () { tone(784, 0.5, "triangle", 0.2); }, 360); }
+    else if (kind === "lose") tone(300, 0.6, "sawtooth", 0.18, 80);
+  }
+
+  // ---------- World setup ----------
+  function buildScenery() {
+    kelps = [];
+    for (var i = 0; i < 14; i++) {
+      kelps.push({ x: rand(20, W - 20), base: H - rand(0, 30), h: rand(60, 150), sway: rand(0, 6.28), speed: rand(0.5, 1.5), col: Math.random() < 0.5 ? "#2fae6b" : "#37c47a" });
+    }
+    fishes = [];
+    for (var j = 0; j < 10; j++) {
+      fishes.push({ x: rand(0, W), y: rand(40, H - 80), vx: rand(20, 60) * (Math.random() < 0.5 ? -1 : 1), col: ["#ff8a5c", "#ffd75e", "#ff5c8a", "#6ff2ff"][j % 4], size: rand(6, 12) });
+    }
+  }
+  function spawnPearl() {
+    pearlsArr.push({ x: rand(30, W - 30), y: rand(50, H - 90), r: 9, bob: rand(0, 6.28), taken: false });
+  }
+  function spawnJelly() {
+    jellies.push({ x: Math.random() < 0.5 ? -30 : W + 30, y: rand(50, H - 60), vx: rand(25, 55) * (Math.random() < 0.5 ? -1 : 1), vy: rand(-15, 15), r: 16, ph: rand(0, 6.28) });
+  }
+  function spawnShark() {
+    sharks.push({ x: -80, y: rand(80, H - 120), vx: rand(60, 95), r: 30, tail: 0 });
+  }
+  function spawnBubble() {
+    bubbles.push({ x: rand(40, W - 40), y: H + 20, r: rand(10, 16), vy: rand(-50, -30) });
+  }
+  function burst(x, y, col, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: rand(-90, 90), vy: rand(-90, 90), life: rand(0.3, 0.8), max: 0.8, col: col, r: rand(2, 5) });
+    }
+  }
+
+  function reset() {
+    pearls = 0; score = 0; lives = 3; air = 100;
+    elapsed = 0; spawnTimer = 0; difficulty = 1;
+    player.x = W / 2; player.y = H / 2; player.vx = 0; player.vy = 0; player.invuln = 0;
+    pearlsArr = []; jellies = []; sharks = []; bubbles = []; particles = [];
+    for (var i = 0; i < 6; i++) spawnPearl();
+    buildScenery();
+    updateHUD("Diving!");
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = "Pearls: " + pearls + " / 100  |  Score: " + score;
+    livesEl.textContent = "Lives: " + lives;
+    if (status) statusEl.textContent = "Status: " + status;
+    var a = Math.max(0, Math.round(air));
+    airBar.style.width = a + "%";
+    airNum.textContent = a + "%";
+    airBar.style.background = a > 40 ? "linear-gradient(90deg,#35e0a1,#3fd6e0)" : "linear-gradient(90deg,#ff5c5c,#ff9a5c)";
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+  function endGame(win) {
+    state = win ? "win" : "over";
+    sfx(win ? "win" : "lose");
+    endTitle.textContent = win ? "You Win! Reef Saved!" : "Game Over";
+    endScore.textContent = "Pearls: " + pearls + " / 100   |   Score: " + score;
+    endMsg.textContent = win
+      ? "You gathered every pearl and kept the reef safe. Legendary keeper!"
+      : (lives <= 0 ? "The reef's creatures got the better of you this time." : "Your air ran out deep below. Surface and try again!");
+    endScreen.classList.remove("hidden");
+    updateHUD(win ? "Victory!" : "Game Over");
+  }
+
+  // ---------- Update ----------
+  function update(dt) {
+    elapsed += dt;
+    difficulty = 1 + elapsed / 45;
+
+    // Player movement: keys + pointer
+    var speed = 230;
+    var ax = 0, ay = 0;
+    if (keys["ArrowLeft"] || keys["a"] || keys["A"]) ax -= 1;
+    if (keys["ArrowRight"] || keys["d"] || keys["D"]) ax += 1;
+    if (keys["ArrowUp"] || keys["w"] || keys["W"]) ay -= 1;
+    if (keys["ArrowDown"] || keys["s"] || keys["S"]) ay += 1;
+    if (pointer.active) {
+      var dx = pointer.x - player.x, dy = pointer.y - player.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 8) { ax = dx / d; ay = dy / d; }
+    }
+    if (ax !== 0 || ay !== 0) {
+      var len = Math.sqrt(ax * ax + ay * ay);
+      player.vx = (ax / len) * speed;
+      player.vy = (ay / len) * speed;
+      if (ax !== 0) player.dir = ax > 0 ? 1 : -1;
+    } else {
+      player.vx *= 0.85; player.vy *= 0.85;
+    }
+    player.x = Math.max(22, Math.min(W - 22, player.x + player.vx * dt));
+    player.y = Math.max(30, Math.min(H - 46, player.y + player.vy * dt));
+    if (player.invuln > 0) player.invuln -= dt;
+
+    // Air: drains slowly, faster with depth and time
+    var depthFactor = 0.6 + (player.y / H) * 1.1;
+    air -= dt * (1.1 * depthFactor + elapsed * 0.004);
+    if (air <= 0) { air = 0; updateHUD("Out of air!"); endGame(false); return; }
+
+    // Spawning
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnTimer = rand(0.7, 1.4) / Math.min(difficulty, 3);
+      var roll = Math.random();
+      if (roll < 0.45) spawnPearl();
+      else if (roll < 0.8) spawnJelly();
+      else if (roll < 0.9) spawnBubble();
+      else if (elapsed > 20) spawnShark();
+      else spawnPearl();
+    }
+    if (pearlsArr.length < 4) spawnPearl();
+
+    // Pearls
+    for (var i = pearlsArr.length - 1; i >= 0; i--) {
+      var p = pearlsArr[i]; p.bob += dt * 3;
+      if (dist(player, p) < player.r + p.r + 4) {
+        pearls++; score += 10;
+        burst(p.x, p.y, "#ffe9a8", 12); sfx("pearl");
+        pearlsArr.splice(i, 1);
+        if (pearls >= 100) { updateHUD("Victory!"); endGame(true); return; }
+      }
+    }
+    // Bubbles refill air
+    for (var j = bubbles.length - 1; j >= 0; j--) {
+      var b = bubbles[j]; b.y += b.vy * dt;
+      if (dist(player, b) < player.r + b.r) {
+        air = Math.min(100, air + 30); burst(b.x, b.y, "#aef3ff", 8); sfx("bubble");
+        bubbles.splice(j, 1); updateHUD("Air refilled!");
+      } else if (b.y < -30) bubbles.splice(j, 1);
+    }
+    // Jellyfish
+    for (var k = jellies.length - 1; k >= 0; k--) {
+      var jl = jellies[k];
+      jl.x += jl.vx * dt * difficulty; jl.y += Math.sin(elapsed * 3 + jl.ph) * 20 * dt + jl.vy * dt;
+      if (jl.x < -50 || jl.x > W + 50) { jellies.splice(k, 1); continue; }
+      if (player.invuln <= 0 && dist(player, jl) < player.r + jl.r) {
+        lives--; player.invuln = 1.5; burst(player.x, player.y, "#ff5c8a", 16); sfx("hurt");
+        jellies.splice(k, 1);
+        if (lives <= 0) { updateHUD("Stung out!"); endGame(false); return; }
+        updateHUD("Stung! Lives left: " + lives);
+      }
+    }
+    // Sharks
+    for (var s = sharks.length - 1; s >= 0; s--) {
+      var sh = sharks[s]; sh.x += sh.vx * dt; sh.tail += dt * 10;
+      if (sh.x > W + 100) { sharks.splice(s, 1); continue; }
+      if (player.invuln <= 0 && dist(player, sh) < player.r + sh.r - 4) {
+        lives--; player.invuln = 2; burst(player.x, player.y, "#ff5c5c", 22); sfx("hurt");
+        sharks.splice(s, 1); jellies.length = 0;
+        if (lives <= 0) { updateHUD("Shark attack!"); endGame(false); return; }
+        updateHUD("Shark! Lives left: " + lives);
+      }
+    }
+    // Particles + scenery
+    for (var q = particles.length - 1; q >= 0; q--) {
+      var pt = particles[q]; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(q, 1);
+    }
+    for (var f = 0; f < fishes.length; f++) {
+      var fish = fishes[f]; fish.x += fish.vx * dt;
+      if (fish.x > W + 20) fish.x = -20;
+      if (fish.x < -20) fish.x = W + 20;
+    }
+    updateHUD();
+  }
+
+  // ---------- Draw ----------
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Light rays
+    ctx.save();
+    ctx.globalAlpha = 0.08; ctx.fillStyle = "#bfeeff";
+    for (var r = 0; r < 5; r++) {
+      ctx.beginPath();
+      var x0 = 60 + r * 160 + Math.sin(elapsed * 0.4 + r) * 20;
+      ctx.moveTo(x0, 0); ctx.lineTo(x0 + 90, 0); ctx.lineTo(x0 + 190, H); ctx.lineTo(x0 + 60, H);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    // Sandy floor
+    ctx.fillStyle = "#e8d28a";
+    ctx.beginPath(); ctx.ellipse(W / 2, H + 30, W * 0.62, 70, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#d9bf6e";
+    ctx.beginPath(); ctx.ellipse(W / 2, H + 44, W * 0.5, 46, 0, 0, Math.PI * 2); ctx.fill();
+    // Kelp
+    for (var k = 0; k < kelps.length; k++) {
+      var kp = kelps[k];
+      ctx.strokeStyle = kp.col; ctx.lineWidth = 7; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(kp.x, kp.base);
+      var sway = Math.sin(elapsed * kp.speed + kp.sway) * 16;
+      ctx.quadraticCurveTo(kp.x + sway, kp.base - kp.h / 2, kp.x + sway * 1.6, kp.base - kp.h);
+      ctx.stroke();
+    }
+    // Background fish
+    for (var f = 0; f < fishes.length; f++) {
+      var fish = fishes[f]; ctx.fillStyle = fish.col;
+      ctx.beginPath(); ctx.ellipse(fish.x, fish.y, fish.size, fish.size * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      var dir = fish.vx > 0 ? 1 : -1;
+      ctx.moveTo(fish.x - dir * fish.size, fish.y);
+      ctx.lineTo(fish.x - dir * fish.size * 1.9, fish.y - fish.size * 0.6);
+      ctx.lineTo(fish.x - dir * fish.size * 1.9, fish.y + fish.size * 0.6);
+      ctx.closePath(); ctx.fill();
+    }
+    // Pearls
+    for (var i = 0; i < pearlsArr.length; i++) {
+      var p = pearlsArr[i];
+      var py = p.y + Math.sin(p.bob) * 4;
+      ctx.fillStyle = "rgba(255,233,168,0.25)";
+      ctx.beginPath(); ctx.arc(p.x, py, p.r + 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff3c4";
+      ctx.beginPath(); ctx.arc(p.x, py, p.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.arc(p.x - 3, py - 3, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    // Air bubbles
+    for (var j = 0; j < bubbles.length; j++) {
+      var b = bubbles[j];
+      ctx.strokeStyle = "rgba(174,243,255,0.9)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.beginPath(); ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.25, 0, Math.PI * 2); ctx.fill();
+    }
+    // Jellyfish
+    for (var m = 0; m < jellies.length; m++) {
+      var jl = jellies[m];
+      var pulse = 1 + Math.sin(elapsed * 6 + jl.ph) * 0.15;
+      ctx.fillStyle = "rgba(255,92,138,0.9)";
+      ctx.beginPath(); ctx.arc(jl.x, jl.y, jl.r * pulse, Math.PI, 0); ctx.fill();
+      ctx.strokeStyle = "rgba(255,150,180,0.8)"; ctx.lineWidth = 2;
+      for (var t = 0; t < 4; t++) {
+        ctx.beginPath();
+        var tx = jl.x - jl.r * 0.6 + t * jl.r * 0.4;
+        ctx.moveTo(tx, jl.y);
+        ctx.quadraticCurveTo(tx + Math.sin(elapsed * 5 + t) * 6, jl.y + 16, tx, jl.y + 26);
+        ctx.stroke();
+      }
+    }
+    // Sharks
+    for (var s = 0; s < sharks.length; s++) {
+      var sh = sharks[s];
+      ctx.fillStyle = "#7d92a8";
+      ctx.beginPath(); ctx.ellipse(sh.x, sh.y, sh.r * 1.5, sh.r * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(sh.x + sh.r * 1.3, sh.y); ctx.lineTo(sh.x + sh.r * 2.1, sh.y - 12); ctx.lineTo(sh.x + sh.r * 2.1, sh.y + 12); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(sh.x - sh.r * 1.5, sh.y);
+      ctx.lineTo(sh.x - sh.r * 2.1, sh.y - 12 + Math.sin(sh.tail) * 8);
+      ctx.lineTo(sh.x - sh.r * 2.1, sh.y + 12 + Math.sin(sh.tail) * 8);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#10222f";
+      ctx.beginPath(); ctx.arc(sh.x + sh.r * 0.9, sh.y - 5, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    // Diver (blink while invulnerable)
+    if (player.invuln <= 0 || Math.floor(elapsed * 12) % 2 === 0) {
+      ctx.save();
+      ctx.translate(player.x, player.y); ctx.scale(player.dir, 1);
+      // Tank
+      ctx.fillStyle = "#c0c8d0"; ctx.fillRect(-16, -14, 10, 26);
+      ctx.fillStyle = "#ff5c5c"; ctx.fillRect(-16, -14, 10, 5);
+      // Body
+      ctx.fillStyle = "#1d6f8e";
+      ctx.beginPath(); ctx.ellipse(0, 0, 20, 13, 0, 0, Math.PI * 2); ctx.fill();
+      // Head + mask
+      ctx.fillStyle = "#f2c49b";
+      ctx.beginPath(); ctx.arc(14, -2, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#3fd6e0"; ctx.fillRect(10, -6, 12, 7);
+      // Fins
+      ctx.fillStyle = "#ffd75e";
+      ctx.beginPath(); ctx.moveTo(-18, 2); ctx.lineTo(-30, -4 + Math.sin(elapsed * 10) * 4); ctx.lineTo(-30, 8); ctx.closePath(); ctx.fill();
+      // Bubbles from diver
+      ctx.strokeStyle = "rgba(174,243,255,0.7)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(18, -14 - ((elapsed * 30) % 20), 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+    // Particles
+    for (var q = 0; q < particles.length; q++) {
+      var pt = particles[q];
+      ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+      ctx.fillStyle = pt.col;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Pause overlay text
+    if (state === "paused") {
+      ctx.fillStyle = "rgba(2,25,40,0.6)"; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#ffffff"; ctx.font = "bold 34px Verdana"; ctx.textAlign = "center";
+      ctx.fillText("PAUSED — press P to resume", W / 2, H / 2);
+    }
+  }
+
+  function loop(now) {
+    if (state !== "playing" && state !== "paused") return;
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    if (state === "playing") update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Controls ----------
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX - rect.left) * (W / rect.width);
+    var cy = (evt.clientY - rect.top) * (H / rect.height);
+    return { x: cx, y: cy };
+  }
+  document.addEventListener("keydown", function (e) {
+    keys[e.key] = true;
+    if ((e.key === " " || e.key === "Enter") && (state === "title" || state === "win" || state === "over")) {
+      e.preventDefault(); startGame();
+    }
+    if ((e.key === "p" || e.key === "P") && state === "playing") { state = "paused"; updateHUD("Paused"); }
+    else if ((e.key === "p" || e.key === "P") && state === "paused") { state = "playing"; lastTime = performance.now(); updateHUD("Diving!"); }
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].indexOf(e.key) !== -1) e.preventDefault();
+  });
+  document.addEventListener("keyup", function (e) { keys[e.key] = false; });
+  canvas.addEventListener("mousemove", function (e) {
+    var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y;
+  });
+  canvas.addEventListener("mousedown", function (e) {
+    ensureAudio();
+    var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true;
+  });
+  document.addEventListener("mouseup", function () { pointer.active = false; });
+  canvas.addEventListener("touchstart", function (e) {
+    ensureAudio(); e.preventDefault();
+    var t = e.touches[0]; var p = canvasPos(t);
+    pointer.x = p.x; pointer.y = p.y; pointer.active = true;
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) {
+    e.preventDefault();
+    var t = e.touches[0]; var p = canvasPos(t);
+    pointer.x = p.x; pointer.y = p.y;
+  }, { passive: false });
+  canvas.addEventListener("touchend", function (e) { e.preventDefault(); pointer.active = false; }, { passive: false });
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  document.getElementById("muteBtn").addEventListener("click", function () {
+    muted = !muted;
+    this.textContent = muted ? "Sound: Off" : "Sound: On";
+  });
+
+  // Idle attract scene behind the title screen
+  buildScenery();
+  draw();
+})();
+</script>
+</body>
+</html>

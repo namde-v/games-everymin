@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ricochet Range</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1020; font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #eaf2ff; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; gap: 8px; }
+  h1 { font-size: clamp(22px, 5vw, 38px); letter-spacing: 2px; text-transform: uppercase; color: #ffd166; text-shadow: 0 0 14px rgba(255,209,102,.5); text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: min(96vw, 760px); }
+  .pill { background: #16213e; border: 1px solid #2d4a7a; border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 700; }
+  .pill span { color: #7df9c8; }
+  #stage { position: relative; width: min(96vw, 760px); aspect-ratio: 760 / 520; max-height: 62vh; }
+  canvas { width: 100%; height: 100%; display: block; background: radial-gradient(circle at 50% 20%, #1b2a4a, #0b1020 70%); border: 2px solid #2d4a7a; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(5, 10, 24, 0.88); border-radius: 14px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: clamp(24px, 5vw, 36px); color: #ffd166; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #cfe0ff; }
+  .howto { background: #121e38; border: 1px solid #2d4a7a; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; max-width: 520px; }
+  .howto b { color: #7df9c8; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 13px 30px; font-size: 17px; font-weight: 800; background: #ffd166; color: #1a1200; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  button.secondary { background: #2d4a7a; color: #fff; box-shadow: 0 4px 0 #16213e; }
+  #hint { font-size: 13px; color: #9db4d8; text-align: center; }
+  #powerBar { width: min(96vw, 760px); height: 14px; background: #16213e; border: 1px solid #2d4a7a; border-radius: 999px; overflow: hidden; }
+  #powerFill { height: 100%; width: 0%; background: linear-gradient(90deg, #7df9c8, #ffd166, #ff5d5d); transition: width .05s linear; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#127919; Ricochet Range</h1>
+  <div id="hud">
+    <div class="pill">Score: <span id="score">0</span></div>
+    <div class="pill">Shots: <span id="shots">0</span></div>
+    <div class="pill">Targets: <span id="targets">0</span></div>
+    <div class="pill">Range: <span id="range">1 / 5</span></div>
+    <div class="pill">Status: <span id="status">Ready</span></div>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="760" height="520"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Ricochet Range</h2>
+      <p>One ball. Four walls. A room full of targets. Bend every shot off the walls and clear the range before your shots run out.</p>
+      <div class="howto">
+        <b>How to Play</b><br>
+        &#8226; <b>Drag</b> from the launcher (mouse or finger) to aim &#8212; longer drag = more power.<br>
+        &#8226; <b>Release</b> to fire. The ball ricochets off walls and obstacles.<br>
+        &#8226; Hit <b>every target</b> to clear the range. Fewer shots = bonus points.<br>
+        &#8226; <b>Keyboard:</b> Arrow keys aim, hold Space to charge, release Space to fire. R restarts.<br>
+        &#8226; Bonus points for every wall bounce before a hit. Clear all 5 ranges to win!
+      </div>
+      <button id="startBtn">Start Game</button>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">Play Again</button>
+    </div>
+  </div>
+  <div id="powerBar"><div id="powerFill"></div></div>
+  <div id="hint">Drag from the launcher to aim &amp; set power, then release to fire &nbsp;|&nbsp; Arrows + Space work too &nbsp;|&nbsp; R = restart</div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById("score");
+  var shotsEl = document.getElementById("shots");
+  var targetsEl = document.getElementById("targets");
+  var rangeEl = document.getElementById("range");
+  var statusEl = document.getElementById("status");
+  var powerFill = document.getElementById("powerFill");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+
+  // ---- Audio (procedural, created only after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || "sine";
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (name === "bounce") tone(220, 0.08, "square", 0.08);
+    else if (name === "hit") { tone(660, 0.15, "sine", 0.2); tone(990, 0.2, "sine", 0.15); }
+    else if (name === "fire") tone(180, 0.25, "sawtooth", 0.12);
+    else if (name === "win") { tone(523, 0.2, "sine", 0.2); setTimeout(function(){ tone(659, 0.2, "sine", 0.2); }, 150); setTimeout(function(){ tone(784, 0.35, "sine", 0.22); }, 300); }
+    else if (name === "lose") { tone(300, 0.3, "sawtooth", 0.15); setTimeout(function(){ tone(200, 0.45, "sawtooth", 0.15); }, 200); }
+  }
+
+  // ---- Game state ----
+  var TOTAL_RANGES = 5;
+  var state = "title"; // title | aiming | flying | rangeClear | won | lost
+  var rangeNum = 1;
+  var score = 0;
+  var shotsLeft = 0;
+  var targets = [];
+  var obstacles = [];
+  var ball = null;
+  var launcher = { x: W / 2, y: H - 40 };
+  var aim = { active: false, sx: 0, sy: 0, cx: 0, cy: 0, power: 0, angle: -Math.PI / 2 };
+  var particles = [];
+  var trail = [];
+  var keys = {};
+  var keyAimAngle = -Math.PI / 2;
+  var keyPower = 0;
+  var charging = false;
+  var message = "";
+  var messageTimer = 0;
+
+  function buildRange(n) {
+    targets = [];
+    obstacles = [];
+    var i, t;
+    var count = 3 + n; // 4..8 targets
+    // Obstacle bars get trickier each range
+    if (n >= 2) obstacles.push({ x: W * 0.25, y: H * 0.42, w: 14, h: 130 });
+    if (n >= 3) obstacles.push({ x: W * 0.72, y: H * 0.30, w: 14, h: 130 });
+    if (n >= 4) obstacles.push({ x: W * 0.45, y: H * 0.60, w: 170, h: 14 });
+    if (n >= 5) obstacles.push({ x: W * 0.15, y: H * 0.22, w: 14, h: 110 });
+    var spots = [
+      { x: 110, y: 90 }, { x: 300, y: 70 }, { x: 480, y: 90 }, { x: 650, y: 80 },
+      { x: 200, y: 210 }, { x: 560, y: 200 }, { x: 380, y: 140 }, { x: 90, y: 300 }
+    ];
+    // Shuffle-ish deterministic rotation so layouts differ per range
+    var offset = (n - 1) % spots.length;
+    for (i = 0; i < count; i++) {
+      t = spots[(offset + i * 2) % spots.length];
+      // Nudge duplicates apart
+      targets.push({ x: t.x + (i % 2) * 24, y: t.y + (i % 3) * 12, r: 22, alive: true, pulse: Math.random() * 6 });
+    }
+    shotsLeft = count + 3; // limited shots: targets + 3 spare
+    ball = null;
+    trail = [];
+    aim.active = false; aim.power = 0;
+    state = "aiming";
+    setStatus("Aim and fire!");
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; rangeNum = 1;
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    buildRange(rangeNum);
+    updateHUD();
+  }
+
+  function setStatus(s) { statusEl.textContent = s; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    shotsEl.textContent = shotsLeft;
+    targetsEl.textContent = targets.filter(function (t) { return t.alive; }).length;
+    rangeEl.textContent = rangeNum + " / " + TOTAL_RANGES;
+  }
+
+  function showEnd(win) {
+    state = win ? "won" : "lost";
+    endTitle.textContent = win ? "Range Master! You Win!" : "Out of Shots — Game Over";
+    endText.textContent = win
+      ? "You cleared all " + TOTAL_RANGES + " ranges with a final score of " + score + ". Brilliant bouncing!"
+      : "Targets remain on range " + rangeNum + " and you are out of shots. Final score: " + score + ". Try again!";
+    endScreen.classList.remove("hidden");
+    setStatus(win ? "You Win!" : "Game Over");
+    sfx(win ? "win" : "lose");
+  }
+
+  function nextRange() {
+    if (rangeNum >= TOTAL_RANGES) { showEnd(true); return; }
+    rangeNum++;
+    message = "Range " + rangeNum + "!";
+    messageTimer = 120;
+    buildRange(rangeNum);
+    updateHUD();
+  }
+
+  function fire(angle, power) {
+    if (state !== "aiming" || shotsLeft <= 0) return;
+    shotsLeft--;
+    var speed = 3 + power * 9;
+    ball = { x: launcher.x, y: launcher.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r: 9, bounces: 0, alive: true };
+    trail = [];
+    state = "flying";
+    setStatus("Ball flying...");
+    powerFill.style.width = "0%";
+    sfx("fire");
+    updateHUD();
+  }
+
+  function spawnParticles(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 30, color: color });
+    }
+  }
+
+  function update() {
+    if (messageTimer > 0) messageTimer--;
+    // Particles
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.life--;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    // Keyboard charging
+    if (state === "aiming" && charging) {
+      keyPower = Math.min(1, keyPower + 0.012);
+      powerFill.style.width = Math.round(keyPower * 100) + "%";
+    }
+    if (state !== "flying" || !ball) return;
+    ball.x += ball.vx; ball.y += ball.vy;
+    ball.vx *= 0.995; ball.vy *= 0.995;
+    trail.push({ x: ball.x, y: ball.y });
+    if (trail.length > 40) trail.shift();
+    // Wall bounces
+    if (ball.x - ball.r < 4) { ball.x = 4 + ball.r; ball.vx = Math.abs(ball.vx); ball.bounces++; sfx("bounce"); }
+    if (ball.x + ball.r > W - 4) { ball.x = W - 4 - ball.r; ball.vx = -Math.abs(ball.vx); ball.bounces++; sfx("bounce"); }
+    if (ball.y - ball.r < 4) { ball.y = 4 + ball.r; ball.vy = Math.abs(ball.vy); ball.bounces++; sfx("bounce"); }
+    if (ball.y + ball.r > H - 4) { ball.y = H - 4 - ball.r; ball.vy = -Math.abs(ball.vy); ball.bounces++; sfx("bounce"); }
+    // Obstacle bounces (axis-aligned rectangles)
+    for (var o = 0; o < obstacles.length; o++) {
+      var ob = obstacles[o];
+      var nx = Math.max(ob.x, Math.min(ball.x, ob.x + ob.w));
+      var ny = Math.max(ob.y, Math.min(ball.y, ob.y + ob.h));
+      var dx = ball.x - nx, dy = ball.y - ny;
+      if (dx * dx + dy * dy < ball.r * ball.r) {
+        if (Math.abs(dx) > Math.abs(dy)) ball.vx = -ball.vx; else ball.vy = -ball.vy;
+        ball.bounces++; sfx("bounce");
+        ball.x += ball.vx * 2; ball.y += ball.vy * 2;
+      }
+    }
+    // Target hits
+    for (var t = 0; t < targets.length; t++) {
+      var tg = targets[t];
+      if (!tg.alive) continue;
+      var ddx = ball.x - tg.x, ddy = ball.y - tg.y;
+      if (ddx * ddx + ddy * ddy < (ball.r + tg.r) * (ball.r + tg.r)) {
+        tg.alive = false;
+        var gained = 100 + ball.bounces * 50;
+        score += gained;
+        spawnParticles(tg.x, tg.y, "#ffd166", 22);
+        message = "+" + gained + "  (" + ball.bounces + " bounce" + (ball.bounces === 1 ? "" : "s") + ")";
+        messageTimer = 90;
+        sfx("hit");
+      }
+    }
+    // Ball slows to a stop or leaves play: end of shot
+    var speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+    if (speed < 0.6) {
+      ball = null;
+      var remaining = targets.filter(function (t) { return t.alive; }).length;
+      updateHUD();
+      if (remaining === 0) {
+        score += shotsLeft * 50; // leftover-shot bonus
+        message = "Range cleared! +" + (shotsLeft * 50) + " bonus";
+        messageTimer = 140;
+        setStatus("Range cleared!");
+        updateHUD();
+        setTimeout(function () { if (state === "flying") { /* guard */ } nextRange(); }, 1200);
+        state = "rangeClear";
+      } else if (shotsLeft <= 0) {
+        showEnd(false);
+      } else {
+        state = "aiming";
+        setStatus("Aim and fire!");
+      }
+    }
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Floor guide
+    ctx.fillStyle = "#101a33";
+    ctx.fillRect(0, H - 20, W, 20);
+    // Obstacles
+    ctx.fillStyle = "#3d5a99";
+    for (var o = 0; o < obstacles.length; o++) {
+      var ob = obstacles[o];
+      ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+      ctx.strokeStyle = "#7ea2e0";
+      ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+    }
+    // Targets
+    for (var t = 0; t < targets.length; t++) {
+      var tg = targets[t];
+      if (!tg.alive) continue;
+      var pulse = 1 + Math.sin(Date.now() / 300 + tg.pulse) * 0.08;
+      ctx.beginPath();
+      ctx.arc(tg.x, tg.y, tg.r * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = "#ff5d5d";
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(tg.x, tg.y, tg.r * 0.55 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(tg.x, tg.y, tg.r * 0.25 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = "#ff5d5d";
+      ctx.fill();
+    }
+    // Launcher
+    ctx.beginPath();
+    ctx.arc(launcher.x, launcher.y, 20, 0, Math.PI * 2);
+    ctx.fillStyle = "#16213e";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#ffd166";
+    ctx.stroke();
+    ctx.fillStyle = "#ffd166";
+    ctx.font = "bold 14px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("O", launcher.x, launcher.y + 5);
+    // Aim line + power
+    if (state === "aiming" && (aim.active || charging)) {
+      var ang = charging ? keyAimAngle : aim.angle;
+      var pow = charging ? keyPower : aim.power;
+      var ex = launcher.x + Math.cos(ang) * (60 + pow * 160);
+      var ey = launcher.y + Math.sin(ang) * (60 + pow * 160);
+      ctx.beginPath();
+      ctx.moveTo(launcher.x, launcher.y);
+      ctx.lineTo(ex, ey);
+      ctx.strokeStyle = "rgba(255, 209, 102, 0.9)";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 8]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(ex, ey, 8, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffd166";
+      ctx.fill();
+    }
+    // Trail
+    ctx.strokeStyle = "rgba(125, 249, 200, 0.6)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (var i = 0; i < trail.length; i++) {
+      if (i === 0) ctx.moveTo(trail[i].x, trail[i].y); else ctx.lineTo(trail[i].x, trail[i].y);
+    }
+    ctx.stroke();
+    // Ball
+    if (ball) {
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+      ctx.fillStyle = "#7df9c8";
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+    }
+    // Particles
+    for (var p = 0; p < particles.length; p++) {
+      var pt = particles[p];
+      ctx.globalAlpha = Math.max(0, pt.life / 30);
+      ctx.fillStyle = pt.color;
+      ctx.fillRect(pt.x - 3, pt.y - 3, 6, 6);
+    }
+    ctx.globalAlpha = 1;
+    // Message
+    if (messageTimer > 0 && message) {
+      ctx.font = "bold 26px Arial";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffd166";
+      ctx.fillText(message, W / 2, 40);
+    }
+    if (state === "title") {
+      ctx.font = "bold 20px Arial";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#9db4d8";
+      ctx.fillText("Press Start to enter the range", W / 2, H / 2 + 120);
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Pointer helpers ----
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var clientX, clientY;
+    if (evt.touches && evt.touches.length) { clientX = evt.touches[0].clientX; clientY = evt.touches[0].clientY; }
+    else { clientX = evt.clientX; clientY = evt.clientY; }
+    return {
+      x: (clientX - rect.left) * (W / rect.width),
+      y: (clientY - rect.top) * (H / rect.height)
+    };
+  }
+  function pointerDown(evt) {
+    if (state !== "aiming") return;
+    var pos = canvasPos(evt);
+    aim.active = true;
+    aim.sx = pos.x; aim.sy = pos.y; aim.cx = pos.x; aim.cy = pos.y;
+    evt.preventDefault();
+  }
+  function pointerMove(evt) {
+    if (!aim.active || state !== "aiming") return;
+    var pos = canvasPos(evt);
+    aim.cx = pos.x; aim.cy = pos.y;
+    // Drag direction: pull back from launcher, fire opposite (slingshot style),
+    // but also allow direct aiming: use vector from drag start to current.
+    var dx = aim.cx - aim.sx, dy = aim.cy - aim.sy;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    aim.power = Math.min(1, dist / 220);
+    // Aim from launcher toward the drag point's opposite is confusing; instead
+    // aim directly: angle from launcher to current pointer, power by drag length.
+    var lax = pos.x - launcher.x, lay = pos.y - launcher.y;
+    aim.angle = Math.atan2(lay, lax);
+    powerFill.style.width = Math.round(aim.power * 100) + "%";
+    evt.preventDefault();
+  }
+  function pointerUp(evt) {
+    if (!aim.active || state !== "aiming") { aim.active = false; return; }
+    aim.active = false;
+    if (aim.power > 0.08) fire(aim.angle, aim.power);
+    else powerFill.style.width = "0%";
+    evt.preventDefault();
+  }
+
+  // ---- Event listeners: mouse, touch, keyboard ----
+  canvas.addEventListener("mousedown", pointerDown);
+  canvas.addEventListener("mousemove", pointerMove);
+  canvas.addEventListener("mouseup", pointerUp);
+  canvas.addEventListener("mouseleave", function () { aim.active = false; });
+  canvas.addEventListener("touchstart", pointerDown, { passive: false });
+  canvas.addEventListener("touchmove", pointerMove, { passive: false });
+  canvas.addEventListener("touchend", pointerUp, { passive: false });
+  canvas.addEventListener("touchcancel", function () { aim.active = false; });
+
+  document.addEventListener("keydown", function (evt) {
+    keys[evt.key] = true;
+    if (evt.key === "r" || evt.key === "R") { if (state !== "title") startGame(); return; }
+    if (state !== "aiming") return;
+    if (evt.key === "ArrowLeft") keyAimAngle -= 0.08;
+    if (evt.key === "ArrowRight") keyAimAngle += 0.08;
+    if (evt.key === "ArrowUp") keyAimAngle -= 0.05;
+    if (evt.key === "ArrowDown") keyAimAngle += 0.05;
+    if (evt.key === " " && !charging) { charging = true; keyPower = 0.1; evt.preventDefault(); }
+  });
+  document.addEventListener("keyup", function (evt) {
+    keys[evt.key] = false;
+    if (evt.key === " " && charging) {
+      charging = false;
+      if (state === "aiming") fire(keyAimAngle, keyPower);
+      keyPower = 0;
+    }
+  });
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+
+  // Initial demo range behind the title screen
+  buildRange(1);
+  state = "title";
+  setStatus("Ready");
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 110
-- **Latest game:** 0110 — Canyon Catapult
+- **Total games:** 120
+- **Latest game:** 0120 — Ricochet Range
 - **Current volume:** 002 (Games 0101 to 0200)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -14,7 +14,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | Volume | Games | Catalog |
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
-| 002 | 0101–0200 (10 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
+| 002 | 0101–0200 (20 so far) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -28,20 +28,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 011
+## Latest batch — Batch 012
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0101 | Ember Escort | Arcade / Flame Escort | [Play](./games/game-0101.html) |
-| 0102 | Locksmith's Ledger | Puzzle / Tumbler Lock Logic | [Play](./games/game-0102.html) |
-| 0103 | Beacon Builder | Strategy / Lighthouse Network | [Play](./games/game-0103.html) |
-| 0104 | Drumline Dynamo | Rhythm / Marching Beat | [Play](./games/game-0104.html) |
-| 0105 | Anchor Aim | Precision / Pendulum Drop | [Play](./games/game-0105.html) |
-| 0106 | Spore Sprinter | Arcade / Forest Runner | [Play](./games/game-0106.html) |
-| 0107 | Circuit Courier | Puzzle / Circuit Routing | [Play](./games/game-0107.html) |
-| 0108 | Oasis Overseer | Strategy / Desert Water Management | [Play](./games/game-0108.html) |
-| 0109 | Starlight Sonata | Rhythm / Falling-Note Piano | [Play](./games/game-0109.html) |
-| 0110 | Canyon Catapult | Precision / Trajectory Launch | [Play](./games/game-0110.html) |
+| 0111 | Kelp Keeper | Arcade / Underwater Collector | [Play](./games/game-0111.html) |
+| 0112 | Mirror Maze | Puzzle / Laser Reflection | [Play](./games/game-0112.html) |
+| 0113 | Vineyard Vintner | Strategy / Harvest Management | [Play](./games/game-0113.html) |
+| 0114 | Beat Bazaar | Rhythm / Percussion Market | [Play](./games/game-0114.html) |
+| 0115 | Comet Catcher | Precision / Orbital Timing | [Play](./games/game-0115.html) |
+| 0116 | Storm Surfer | Arcade / Wave Rider | [Play](./games/game-0116.html) |
+| 0117 | Rune Riddle | Puzzle / Rune Sequence | [Play](./games/game-0117.html) |
+| 0118 | Harbor Master | Strategy / Port Logistics | [Play](./games/game-0118.html) |
+| 0119 | Echo Ensemble | Rhythm / Melody Memory | [Play](./games/game-0119.html) |
+| 0120 | Ricochet Range | Precision / Bouncing Target Shot | [Play](./games/game-0120.html) |
 
 ## Quality standard
 

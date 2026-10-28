@@ -14,8 +14,19 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0108 | Oasis Overseer | Strategy / Desert Water Management | Click/tap plots, 1-4 assign water, N next day | [Play](./../games/game-0108.html) |
 | 0109 | Starlight Sonata | Rhythm / Falling-Note Piano | 1-5 / A/S/D/F/G keys, mouse click, touch tap | [Play](./../games/game-0109.html) |
 | 0110 | Canyon Catapult | Precision / Trajectory Launch | Arrow Keys angle/power, mouse/touch drag, Space launch | [Play](./../games/game-0110.html) |
+| 0111 | Kelp Keeper | Arcade / Underwater Collector | Arrow Keys / WASD swim, mouse / touch steer | [Play](./../games/game-0111.html) |
+| 0112 | Mirror Maze | Puzzle / Laser Reflection | Click/tap mirrors rotate, Arrow Keys select | [Play](./../games/game-0112.html) |
+| 0113 | Vineyard Vintner | Strategy / Harvest Management | Click/tap plots, 1-4 actions, mouse/touch | [Play](./../games/game-0113.html) |
+| 0114 | Beat Bazaar | Rhythm / Percussion Market | D/F/J/K, mouse click lanes, touch tap lanes | [Play](./../games/game-0114.html) |
+| 0115 | Comet Catcher | Precision / Orbital Timing | Space / click / tap catch | [Play](./../games/game-0115.html) |
+| 0116 | Storm Surfer | Arcade / Wave Rider | Arrow Keys / WASD surf, Space jump, touch tap | [Play](./../games/game-0116.html) |
+| 0117 | Rune Riddle | Puzzle / Rune Sequence | Click/tap runes, Arrow Keys, Enter confirm | [Play](./../games/game-0117.html) |
+| 0118 | Harbor Master | Strategy / Port Logistics | Click/tap ships and docks, 1-3 assign, mouse/touch | [Play](./../games/game-0118.html) |
+| 0119 | Echo Ensemble | Rhythm / Melody Memory | Click/tap instruments, 1-4 keys, touch tap | [Play](./../games/game-0119.html) |
+| 0120 | Ricochet Range | Precision / Bouncing Target Shot | Mouse/touch drag aim, Space fire, Arrow Keys | [Play](./../games/game-0120.html) |
 
 ## Batch notes
 
 - Batch 011: 10 games, produced in one cycle. Volume 002 opened at game 0101.
+- Batch 012: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

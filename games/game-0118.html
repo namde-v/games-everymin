@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Harbor Master</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #0b1d2a; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; overflow-x: hidden; }
+  #wrap { max-width: 980px; margin: 0 auto; padding: 12px; }
+  h1 { text-align: center; margin: 6px 0 2px; font-size: 34px; letter-spacing: 1px; color: #ffd166; text-shadow: 2px 2px 0 #123; }
+  .sub { text-align: center; color: #9fd8ef; margin-bottom: 10px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; }
+  .pill { background: #12384d; border: 2px solid #2a6b8a; border-radius: 20px; padding: 7px 13px; font-weight: bold; font-size: 15px; }
+  .pill span { color: #ffd166; }
+  #status { text-align: center; min-height: 24px; font-weight: bold; color: #ffe08a; margin-bottom: 8px; }
+  #sea { position: relative; height: 210px; background: linear-gradient(180deg, #1b6b8a 0%, #155a78 45%, #0f4258 100%); border: 3px solid #2a6b8a; border-radius: 14px; overflow: hidden; }
+  .wave { position: absolute; bottom: 8px; left: 0; right: 0; height: 18px; opacity: .35; background: repeating-linear-gradient(90deg, transparent 0 26px, #dff6ff 26px 34px); animation: drift 3s linear infinite; }
+  @keyframes drift { from { transform: translateX(0); } to { transform: translateX(-52px); } }
+  .dock { position: absolute; bottom: 0; width: 30%; height: 150px; background: #7a5230; border: 3px solid #5a3a20; border-top: 10px solid #c89b6a; border-radius: 8px 8px 0 0; cursor: pointer; padding: 8px; }
+  .dock:nth-child(2) { left: 2%; } .dock:nth-child(3) { left: 35%; } .dock:nth-child(4) { left: 68%; }
+  .dock.sel { outline: 4px solid #ffd166; }
+  .dock .dname { font-weight: bold; font-size: 14px; }
+  .dock .ship { margin-top: 6px; background: #12384d; border-radius: 8px; padding: 7px; font-size: 13px; line-height: 1.4; }
+  .bar { height: 12px; background: #0b1d2a; border-radius: 6px; overflow: hidden; margin-top: 5px; }
+  .bar i { display: block; height: 100%; background: #4ecdc4; }
+  .bar.dead i { background: #ff6b6b; }
+  button { background: #ffd166; color: #12222e; border: 0; border-radius: 10px; padding: 10px 16px; font-weight: bold; font-size: 16px; cursor: pointer; margin: 4px; }
+  button:hover { filter: brightness(1.1); }
+  button.secondary { background: #2a6b8a; color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .panel { background: #12384d; border: 2px solid #2a6b8a; border-radius: 12px; padding: 12px; margin-top: 10px; }
+  .panel h2, .panel h3 { margin: 4px 0 8px; color: #ffd166; }
+  #queue { display: flex; flex-wrap: wrap; gap: 8px; }
+  .shipcard { background: #0f2c3d; border: 2px solid #2a6b8a; border-radius: 10px; padding: 9px 11px; min-width: 170px; cursor: pointer; font-size: 14px; line-height: 1.45; }
+  .shipcard.sel { border-color: #ffd166; background: #1c4a63; }
+  .shipcard.late { border-color: #ff6b6b; }
+  .cargo { font-size: 22px; }
+  #controls { text-align: center; }
+  #overlay { position: fixed; inset: 0; background: rgba(4, 18, 28, .93); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+  #overlay .box { max-width: 640px; background: #12384d; border: 3px solid #ffd166; border-radius: 16px; padding: 22px; text-align: center; }
+  #overlay h2 { color: #ffd166; font-size: 32px; margin: 0 0 8px; }
+  #overlay p, #overlay li { text-align: left; line-height: 1.55; }
+  #howto { text-align: left; background: #0f2c3d; border-radius: 10px; padding: 10px 16px; margin: 12px 0; }
+  .big { font-size: 20px; font-weight: bold; }
+  #log { font-size: 13px; color: #bfe6f5; min-height: 18px; text-align: center; margin-top: 6px; }
+  canvas#fx { display: block; width: 100%; height: 54px; background: #0f2c3d; border-radius: 10px; margin-top: 10px; }
+  @media (max-width: 600px) { .dock { font-size: 12px; } .shipcard { min-width: 140px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9875; HARBOR MASTER</h1>
+  <div class="sub">Run the port. Dock ships, beat deadlines, hit the profit target before your shift ends.</div>
+
+  <div id="hud">
+    <div class="pill">Profit: $<span id="money">0</span> / $6000</div>
+    <div class="pill">Reputation: <span id="rep">100</span></div>
+    <div class="pill">Shift: <span id="time">180</span>s</div>
+    <div class="pill">Served: <span id="served">0</span></div>
+    <div class="pill">Crane boost: <span id="boosts">3</span> left</div>
+  </div>
+  <div id="status">Press Start to begin your shift.</div>
+
+  <div id="sea">
+    <div class="wave"></div>
+    <div class="dock" data-dock="0"><div class="dname">DOCK A</div><div class="ship">Empty — click a ship, then this dock</div><button class="secondary boostBtn" data-dock="0">Boost crane</button></div>
+    <div class="dock" data-dock="1"><div class="dname">DOCK B</div><div class="ship">Empty — click a ship, then this dock</div><button class="secondary boostBtn" data-dock="1">Boost crane</button></div>
+    <div class="dock" data-dock="2"><div class="dname">DOCK C</div><div class="ship">Empty — click a ship, then this dock</div><button class="secondary boostBtn" data-dock="2">Boost crane</button></div>
+  </div>
+
+  <div class="panel">
+    <h3>Incoming Ships — click one to select it, then click a free dock</h3>
+    <div id="queue"><em>No ships yet. Start the shift!</em></div>
+    <div id="controls">
+      <button id="assignBtn">Assign Selected to Free Dock</button>
+      <button id="boostBtn" class="secondary">Boost Selected Dock (costs 1)</button>
+      <button id="soundBtn" class="secondary">Sound: On</button>
+    </div>
+    <canvas id="fx" width="940" height="54"></canvas>
+    <div id="log">Tip: urgent red-bordered ships pay a bonus if served fast, but cost reputation if they sail away late.</div>
+  </div>
+
+  <div class="panel">
+    <h3>How to Play</h3>
+    <p>Ships arrive carrying Grain, Electronics, Oil, Cars or Medicine. Each has a fee, a cargo size (loading time), and a deadline. Dock a ship before its deadline, let the crane load it, and collect the fee. A ship that waits too long — in queue or at a dock — leaves angry and costs 15 reputation. Use a crane boost to load a docked ship twice as fast. Reach <b>$6000 profit</b> before the 180-second shift ends to win. If reputation hits 0, the port closes and you lose.</p>
+    <p><b>Mouse / Touch:</b> tap a ship card, then tap a dock. <b>Keyboard:</b> Up/Down or 1–5 to pick a ship, A/B/C to pick a dock, Enter to assign, Space to boost the selected dock, R to restart after the game ends.</p>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="box">
+    <h2>&#9875; HARBOR MASTER</h2>
+    <p class="big">Strategy / Port Logistics</p>
+    <p>You are the harbor master for one busy shift. Ships are lining up, deadlines are ticking, and only three docks stand between order and chaos.</p>
+    <div id="howto">
+      <h3>How to Play</h3>
+      <ul>
+        <li>Select an incoming ship, then assign it to a free dock.</li>
+        <li>Watch its loading bar and its deadline countdown.</li>
+        <li>Collect the fee when loading finishes. Serve urgent ships first.</li>
+        <li>Spend a crane boost to load twice as fast — you only have 3.</li>
+        <li>Win at $6000 profit before 180 seconds. Lose if reputation hits 0.</li>
+      </ul>
+      <p><b>Controls:</b> Mouse, touch, or keyboard (1–5 select ship, A/B/C select dock, Enter assign, Space boost).</p>
+    </div>
+    <button id="startBtn">Start Shift</button>
+    <button id="howBtn" class="secondary">How to Play (below)</button>
+    <p style="text-align:center; color:#9fd8ef;">No downloads, no network — the whole port runs in this page.</p>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+  var money = 0, rep = 100, served = 0, boosts = 3, timeLeft = 180;
+  var running = false, gameOver = false, selectedShip = -1, selectedDock = -1;
+  var ships = [], docks = [null, null, null], nextId = 1, spawnTimer = 0, last = 0, elapsed = 0;
+  var soundOn = true, audioCtx = null;
+  var CARGOS = [
+    { name: 'Grain', icon: '\u{1F33E}', fee: 420, load: 11 },
+    { name: 'Electronics', icon: '\u{1F4BB}', fee: 760, load: 15 },
+    { name: 'Oil', icon: '\u{1F6E2}', fee: 640, load: 13 },
+    { name: 'Cars', icon: '\u{1F697}', fee: 880, load: 17 },
+    { name: 'Medicine', icon: '\u{1F48A}', fee: 950, load: 14 }
+  ];
+  var NAMES = ['SS Aurora', 'MV Kelp', 'SS Tempest', 'MV Coral', 'SS Beacon', 'MV Gull', 'SS Harbor Light', 'MV Tide Runner', 'SS North Star', 'MV Pelican'];
+  function $(id) { return document.getElementById(id); }
+  function rand(n) { return Math.floor(Math.random() * n); }
+  function pick(a) { return a[rand(a.length)]; }
+
+  function beep(freq, dur, type) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function setStatus(t) { $('status').textContent = t; }
+  function updateHUD() {
+    $('money').textContent = money; $('rep').textContent = rep;
+    $('time').textContent = Math.max(0, Math.ceil(timeLeft));
+    $('served').textContent = served; $('boosts').textContent = boosts;
+  }
+  function log(t) { $('log').textContent = t; }
+
+  function spawnShip() {
+    var c = pick(CARGOS);
+    var urgent = Math.random() < 0.3;
+    var deadline = urgent ? 28 : 48;
+    ships.push({ id: nextId++, name: pick(NAMES), cargo: c, fee: c.fee + (urgent ? 150 : 0),
+      deadline: deadline, urgent: urgent, progress: 0, boosted: false });
+    if (ships.length > 5) { var lost = ships.shift(); loseRep(15, lost.name + ' left unserved'); }
+    renderQueue();
+  }
+  function loseRep(n, why) {
+    rep = Math.max(0, rep - n); log(why + ' — reputation -' + n);
+    beep(140, 0.3, 'sawtooth'); updateHUD();
+    if (rep <= 0) endGame(false, 'The port authority shut you down. Reputation hit zero.');
+  }
+  function renderQueue() {
+    var q = $('queue');
+    if (!ships.length) { q.innerHTML = '<em>All clear — more ships on the way.</em>'; return; }
+    q.innerHTML = '';
+    ships.forEach(function(s, i) {
+      var d = document.createElement('div');
+      d.className = 'shipcard' + (i === selectedShip ? ' sel' : '') + (s.urgent ? ' late' : '');
+      d.innerHTML = '<div class="cargo">' + s.cargo.icon + ' ' + s.name + '</div>' +
+        '<div>' + s.cargo.name + ' — fee $' + s.fee + '</div>' +
+        '<div>Deadline: ' + Math.ceil(s.deadline) + 's' + (s.urgent ? ' — URGENT (+$150)' : '') + '</div>';
+      d.addEventListener('click', function() { selectShip(i); });
+      d.addEventListener('touchstart', function(e) { e.preventDefault(); selectShip(i); }, { passive: false });
+      q.appendChild(d);
+    });
+  }
+  function selectShip(i) { selectedShip = i; beep(520, 0.08); renderQueue(); setStatus(ships[i] ? 'Selected ' + ships[i].name + ' — now click a free dock.' : ''); }
+  function renderDocks() {
+    document.querySelectorAll('.dock').forEach(function(el, i) {
+      el.classList.toggle('sel', i === selectedDock);
+      var box = el.querySelector('.ship');
+      var s = docks[i];
+      if (!s) { box.innerHTML = 'Empty — click a ship, then this dock'; return; }
+      var pct = Math.round(s.progress / s.cargo.load * 100);
+      box.innerHTML = '<b>' + s.name + '</b><br>' + s.cargo.icon + ' ' + s.cargo.name + ' — $' + s.fee +
+        '<br>Loading: ' + pct + '% &nbsp; Deadline: ' + Math.ceil(s.deadline) + 's' +
+        (s.boosted ? ' &nbsp; BOOSTED' : '') +
+        '<div class="bar' + (s.deadline < 12 ? ' dead' : '') + '"><i style="width:' + pct + '%"></i></div>';
+    });
+  }
+  function assignSelected() {
+    if (selectedShip < 0 || !ships[selectedShip]) { setStatus('Pick a ship first.'); return; }
+    var free = docks.indexOf(null);
+    if (free === -1) { setStatus('All docks full! Wait for a ship to finish loading.'); beep(180, 0.2, 'square'); return; }
+    var s = ships.splice(selectedShip, 1)[0];
+    docks[free] = s; selectedShip = -1; selectedDock = free;
+    setStatus(s.name + ' docked at Dock ' + 'ABC'[free] + '. Crane loading started.');
+    beep(660, 0.12); renderQueue(); renderDocks();
+  }
+  function assignToDock(i) {
+    if (selectedShip >= 0 && ships[selectedShip]) {
+      if (docks[i]) { setStatus('That dock is busy. Pick a free dock.'); return; }
+      var s = ships.splice(selectedShip, 1)[0]; docks[i] = s; selectedShip = -1; selectedDock = i;
+      setStatus(s.name + ' docked at Dock ' + 'ABC'[i] + '.'); beep(660, 0.12);
+    } else { selectedDock = i; setStatus('Dock ' + 'ABC'[i] + (docks[i] ? ' is loading ' + docks[i].name + '.' : ' is empty. Select a ship first.')); }
+    renderQueue(); renderDocks();
+  }
+  function boostDock() {
+    var i = selectedDock; if (i < 0) i = docks.findIndex(Boolean);
+    if (i < 0 || !docks[i]) { setStatus('No docked ship to boost.'); return; }
+    if (boosts <= 0) { setStatus('No crane boosts left.'); return; }
+    if (docks[i].boosted) { setStatus('That crane is already boosted.'); return; }
+    boosts--; docks[i].boosted = true; setStatus('Crane boost on Dock ' + 'ABC'[i] + ' — loading twice as fast!');
+    beep(880, 0.15); updateHUD(); renderDocks();
+  }
+  function endGame(win, msg) {
+    if (gameOver) return; gameOver = true; running = false;
+    var ov = $('overlay'); ov.style.display = 'flex';
+    ov.querySelector('.box').innerHTML = '<h2>' + (win ? '&#127942; SHIFT COMPLETE — YOU WIN!' : '&#9940; GAME OVER') + '</h2>' +
+      '<p class="big">' + msg + '</p>' +
+      '<p>Final profit: $' + money + ' &nbsp;|&nbsp; Ships served: ' + served + ' &nbsp;|&nbsp; Reputation: ' + rep + '</p>' +
+      '<button id="restartBtn">Restart Shift</button>';
+    $('restartBtn').addEventListener('click', resetGame);
+    $('restartBtn').addEventListener('touchstart', function(e) { e.preventDefault(); resetGame(); }, { passive: false });
+    beep(win ? 880 : 160, 0.5, win ? 'triangle' : 'sawtooth');
+  }
+  function resetGame() {
+    money = 0; rep = 100; served = 0; boosts = 3; timeLeft = 180;
+    ships = []; docks = [null, null, null]; selectedShip = -1; selectedDock = -1; gameOver = false;
+    $('overlay').style.display = 'none'; updateHUD(); renderQueue(); renderDocks();
+    startShift();
+  }
+  function startShift() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    running = true; last = performance.now(); elapsed = 0; spawnTimer = 0;
+    spawnShip(); spawnShip(); updateHUD(); setStatus('Shift started! Dock ships before their deadlines.');
+    beep(523, 0.15); setTimeout(function() { beep(659, 0.15); }, 140);
+    // restore overlay box for a later game-over (it gets replaced on end)
+    var box = document.querySelector('#overlay .box');
+    if (!box.querySelector('#startBtn')) {
+      box.innerHTML = '<h2>&#9875; HARBOR MASTER</h2><p class="big">Strategy / Port Logistics</p>' +
+        '<div id="howto"><h3>How to Play</h3><ul><li>Select a ship, then assign it to a free dock.</li>' +
+        '<li>Collect the fee when loading finishes. Serve urgent ships first.</li>' +
+        '<li>Win at $6000 before 180 seconds. Lose if reputation hits 0.</li></ul></div>' +
+        '<button id="startBtn">Start Shift</button>';
+      $('startBtn').addEventListener('click', resetGame);
+    }
+  }
+  function tick(now) {
+    requestAnimationFrame(tick);
+    drawFx();
+    if (!running || gameOver) return;
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    timeLeft -= dt; elapsed += dt; spawnTimer += dt;
+    if (spawnTimer > 9 && ships.length < 5) { spawnTimer = 0; spawnShip(); }
+    ships.forEach(function(s) { s.deadline -= dt; });
+    for (var i = ships.length - 1; i >= 0; i--) {
+      if (ships[i].deadline <= 0) { var lost = ships.splice(i, 1)[0]; loseRep(15, lost.name + ' sailed away late'); if (selectedShip >= ships.length) selectedShip = -1; }
+    }
+    docks.forEach(function(s, i) {
+      if (!s) return; s.deadline -= dt; s.progress += dt * (s.boosted ? 2 : 1);
+      if (s.deadline <= 0) { docks[i] = null; loseRep(15, s.name + ' left the dock unfinished'); }
+      else if (s.progress >= s.cargo.load) {
+        docks[i] = null; money += s.fee; served++;
+        log(s.name + ' loaded! +$' + s.fee); beep(784, 0.18);
+        if (money >= 6000) { updateHUD(); endGame(true, 'You smashed the $6000 profit target with time to spare. The harbor runs like clockwork.'); }
+      }
+    });
+    if (timeLeft <= 0 && !gameOver) {
+      if (money >= 6000) endGame(true, 'Target reached as the shift ended.');
+      else endGame(false, 'Shift over with $' + money + ' — short of the $6000 target.');
+    }
+    updateHUD(); renderQueue(); renderDocks();
+  }
+  function drawFx() {
+    var c = $('fx'); if (!c) return; var x = c.getContext('2d');
+    x.clearRect(0, 0, c.width, c.height);
+    x.fillStyle = '#1b6b8a'; x.fillRect(0, 0, c.width, c.height);
+    x.strokeStyle = '#4ecdc4'; x.lineWidth = 2; x.beginPath();
+    for (var px = 0; px <= c.width; px += 8) {
+      var y = 27 + Math.sin(px / 40 + performance.now() / 500) * 10;
+      px === 0 ? x.moveTo(px, y) : x.lineTo(px, y);
+    }
+    x.stroke();
+    x.fillStyle = '#ffd166'; x.font = '13px Arial';
+    x.fillText('PORT ACTIVITY  |  Ships waiting: ' + ships.length + '  |  Docks busy: ' + docks.filter(Boolean).length + '/3', 10, 48);
+  }
+
+  document.querySelectorAll('.dock').forEach(function(el) {
+    var i = +el.getAttribute('data-dock');
+    el.addEventListener('click', function() { assignToDock(i); });
+    el.addEventListener('touchstart', function(e) { e.preventDefault(); assignToDock(i); }, { passive: false });
+  });
+  document.querySelectorAll('.boostBtn').forEach(function(el) {
+    el.addEventListener('click', function(e) { e.stopPropagation(); selectedDock = +el.getAttribute('data-dock'); boostDock(); });
+  });
+  $('assignBtn').addEventListener('click', assignSelected);
+  $('boostBtn').addEventListener('click', boostDock);
+  $('soundBtn').addEventListener('click', function() { soundOn = !soundOn; this.textContent = 'Sound: ' + (soundOn ? 'On' : 'Off'); });
+  $('startBtn').addEventListener('click', function() { $('overlay').style.display = 'none'; startShift(); });
+  $('howBtn').addEventListener('click', function() { $('overlay').style.display = 'none'; window.scrollTo(0, document.body.scrollHeight); });
+  document.addEventListener('keydown', function(e) {
+    if (gameOver && (e.key === 'r' || e.key === 'R')) { resetGame(); return; }
+    if (!running || gameOver) return;
+    if (e.key >= '1' && e.key <= '5') { var idx = +e.key - 1; if (ships[idx]) selectShip(idx); }
+    else if (e.key === 'ArrowDown') { if (ships.length) selectShip(Math.min(ships.length - 1, selectedShip + 1)); }
+    else if (e.key === 'ArrowUp') { if (ships.length) selectShip(Math.max(0, selectedShip - 1)); }
+    else if (e.key === 'a' || e.key === 'A') assignToDock(0);
+    else if (e.key === 'b' || e.key === 'B') assignToDock(1);
+    else if (e.key === 'c' || e.key === 'C') assignToDock(2);
+    else if (e.key === 'Enter') assignSelected();
+    else if (e.key === ' ') { e.preventDefault(); boostDock(); }
+  });
+  document.addEventListener('mousedown', function() { /* mouse control active via clicks */ });
+  document.addEventListener('touchstart', function() { /* touch control active via taps */ }, { passive: true });
+  updateHUD(); renderQueue(); renderDocks();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
