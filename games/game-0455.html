@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tempest Surfer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #062a3a; color: #fff; font-family: Arial, Helvetica, sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { margin: 10px 0 2px; font-size: 30px; letter-spacing: 1px; text-shadow: 2px 2px 0 #0b6b8a; }
+  .tag { color: #aee9ff; font-size: 13px; margin-bottom: 8px; }
+  #hud { width: min(900px, 96vw); display: flex; justify-content: space-between; gap: 8px; background: #0b4a63; border: 2px solid #35c5e8; border-radius: 10px; padding: 8px 12px; font-weight: bold; font-size: 15px; flex-wrap: wrap; }
+  #hud span { white-space: nowrap; }
+  #wrap { position: relative; width: min(900px, 96vw); margin-top: 8px; }
+  canvas { display: block; width: 100%; height: 520px; background: linear-gradient(#7dd3fc, #0ea5b7 45%, #075985); border: 3px solid #35c5e8; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(2, 30, 45, 0.82); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; }
+  .overlay p { max-width: 620px; line-height: 1.5; font-size: 15px; color: #e0f7ff; }
+  .howto { background: rgba(255,255,255,0.12); border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  button { background: #facc15; color: #082f3d; border: none; border-radius: 999px; padding: 13px 30px; font-size: 19px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #a16207; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #a16207; }
+  button.secondary { background: #38bdf8; box-shadow: 0 4px 0 #075985; }
+  #controlsHint { margin-top: 8px; color: #bfefff; font-size: 13px; text-align: center; padding: 0 10px 10px; }
+  #momentumWrap { width: min(900px, 96vw); margin-top: 8px; background: #123; border-radius: 999px; height: 14px; overflow: hidden; border: 1px solid #35c5e8; }
+  #momentumBar { height: 100%; width: 30%; background: linear-gradient(90deg, #facc15, #fb923c, #ef4444); transition: width 0.15s; }
+</style>
+</head>
+<body>
+<h1>🌊 Tempest Surfer</h1>
+<div class="tag">Action / Wave-Surfing Rescue — Ride the storm, save every swimmer!</div>
+<div id="hud">
+  <span>Score: <span id="score">0</span></span>
+  <span>Rescued: <span id="rescued">0</span> / 12</span>
+  <span>Lives: <span id="lives">❤️❤️❤️</span></span>
+  <span>Status: <span id="status">Ready</span></span>
+  <span>Momentum: <span id="momText">Balanced</span></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="900" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🌊 Tempest Surfer</h2>
+    <p>A storm surge has stranded swimmers across a reef of rocks and sharks. Ride the waves, leap from crest to crest, and bring everyone home safely!</p>
+    <div class="howto">
+      <strong>How to Play:</strong><br>
+      ← → or A / D — Steer the surfboard and build momentum<br>
+      ↑ / W / Space — Jump between wave crests (hold for a higher leap)<br>
+      Mouse click / tap — Jump &nbsp;|&nbsp; Drag / move — Steer toward the pointer<br>
+      🏊 Touch a swimmer to rescue them &nbsp;|&nbsp; 🪨🦈 Rocks and sharks cost a life<br>
+      Land on a wave crest for a momentum boost and bonus points. Rescue 12 swimmers to win!
+    </div>
+    <button id="startBtn">▶ Start Surfing</button>
+    <p>Press Enter or Space to start. Sound begins only after you press Start.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+    <p>Or press R / Enter to play again.</p>
+  </div>
+</div>
+<div id="momentumWrap"><div id="momentumBar"></div></div>
+<div id="controlsHint">Keyboard: Arrows / WASD / Space &nbsp;•&nbsp; Mouse: click to jump, move to steer &nbsp;•&nbsp; Touch: tap to jump, drag to steer</div>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var rescuedEl = document.getElementById('rescued');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var momText = document.getElementById('momText');
+  var momBar = document.getElementById('momentumBar');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, rescued = 0, lives = 3;
+  var time = 0, spawnTimer = 0, distance = 0;
+  var keys = {};
+  var pointerX = null, pointerDown = false;
+
+  // Player: surfer riding a moving wave surface
+  var player = { x: 170, y: 300, vy: 0, onWave: true, jumping: false, momentum: 50, tilt: 0, invuln: 0 };
+
+  var items = []; // swimmers, rocks, sharks
+  var particles = [];
+  var clouds = [];
+  for (var i = 0; i < 6; i++) clouds.push({ x: Math.random() * W, y: 20 + Math.random() * 90, s: 0.6 + Math.random() * 0.9, v: 8 + Math.random() * 18 });
+
+  // --- Procedural Web Audio (created only after user interaction) ---
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundJump() { beep(300, 0.22, 'sine', 0.14, 700); }
+  function soundRescue() { beep(660, 0.12, 'triangle', 0.16); setTimeout(function(){ beep(880, 0.16, 'triangle', 0.16); }, 90); }
+  function soundHit() { beep(180, 0.35, 'sawtooth', 0.18, 60); }
+  function soundWin() { [523,659,784,1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.16); }, i * 130); }); }
+  function soundLose() { [400,300,200,120].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'sawtooth', 0.12); }, i * 140); }); }
+
+  function waveY(x, t) {
+    // Rolling wave surface: two sines give crests and troughs to surf and jump between
+    return 330 + Math.sin((x + t * 2.2) * 0.014) * 42 + Math.sin((x + t * 1.1) * 0.006) * 28;
+  }
+  function crestBonus(y, wy) { return Math.abs(y - wy) < 26; }
+
+  function spawnItem() {
+    var r = Math.random();
+    var kind = r < 0.45 ? 'swimmer' : (r < 0.72 ? 'rock' : 'shark');
+    var y = waveY(W + 60, time) - (kind === 'swimmer' ? 18 : 6);
+    items.push({ kind: kind, x: W + 60, y: y, bob: Math.random() * 6.28, wobble: 0 });
+  }
+
+  function resetGame() {
+    score = 0; rescued = 0; lives = 3; time = 0; distance = 0; spawnTimer = 0;
+    items = []; particles = [];
+    player.x = 170; player.vy = 0; player.momentum = 50; player.onWave = true; player.invuln = 0;
+    updateHUD('Surfing!');
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    rescuedEl.textContent = rescued;
+    livesEl.textContent = '❤️'.repeat(Math.max(0, lives)) || '—';
+    if (status) statusEl.textContent = status;
+    var m = Math.round(player.momentum);
+    momBar.style.width = m + '%';
+    momText.textContent = m > 75 ? 'Full Speed!' : (m > 45 ? 'Balanced' : 'Slow — ride a crest!');
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 220, vy: -Math.random() * 180, life: 0.6 + Math.random() * 0.4, color: color });
+    }
+  }
+
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? '🏆 You Win! All Swimmers Saved!' : '💥 Game Over — The Storm Wins';
+    endText.textContent = win
+      ? 'You rescued all 12 swimmers with a final score of ' + score + '. Legendary surfing!'
+      : 'You rescued ' + rescued + ' of 12 swimmers and scored ' + score + '. Brave effort — try again!';
+    endScreen.classList.remove('hidden');
+    updateHUD(win ? 'Victory!' : 'Game Over');
+    if (win) soundWin(); else soundLose();
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    time += dt * 60;
+    distance += dt * 140;
+
+    // Steering: keyboard, mouse position, and touch drag all feed the same target
+    var steer = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) steer -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) steer += 1;
+    if (pointerX !== null) {
+      var rect = canvas.getBoundingClientRect();
+      var px = (pointerX - rect.left) * (W / rect.width);
+      if (Math.abs(px - player.x) > 18) steer += (px > player.x ? 0.7 : -0.7);
+    }
+    player.x += steer * 190 * dt;
+    if (player.x < 50) player.x = 50;
+    if (player.x > W - 50) player.x = W - 50;
+    player.tilt = steer * 0.28;
+
+    // Wave surface under the player
+    var wy = waveY(player.x, time);
+    if (player.onWave) {
+      player.y = wy - 34;
+      // Momentum: steering with the wave and riding crests builds it; stalling drains it
+      if (Math.abs(steer) > 0.1) player.momentum += 9 * dt;
+      else player.momentum -= 4 * dt;
+      if (crestBonus(player.y + 34, wy)) player.momentum += 14 * dt;
+      player.momentum = Math.max(8, Math.min(100, player.momentum));
+    } else {
+      player.vy += 900 * dt;
+      player.y += player.vy * dt;
+      if (player.y >= wy - 34) {
+        player.y = wy - 34;
+        player.onWave = true;
+        var crest = Math.sin((player.x + time * 2.2) * 0.014) > 0.45;
+        if (crest) { score += 25; burst(player.x, player.y + 20, '#facc15', 12); beep(900, 0.12, 'sine', 0.10, 1200); updateHUD('Crest landing! +25'); }
+        else updateHUD('Surfing!');
+      }
+    }
+    if (player.invuln > 0) player.invuln -= dt;
+
+    // Spawn and scroll hazards / swimmers
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnItem(); spawnTimer = 0.9 + Math.random() * 0.9; }
+    var speed = 150 + Math.min(140, distance * 0.02) + player.momentum * 0.5;
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      it.x -= speed * dt;
+      it.bob += dt * 3;
+      it.y = waveY(it.x, time) - (it.kind === 'swimmer' ? 16 + Math.sin(it.bob) * 5 : 4);
+      if (it.kind === 'shark') it.y -= 4;
+      // Collision with player (forgiving box)
+      if (player.invuln <= 0 && Math.abs(it.x - player.x) < 42 && Math.abs(it.y - player.y) < 48) {
+        if (it.kind === 'swimmer') {
+          rescued++; score += 100 + Math.round(player.momentum);
+          burst(it.x, it.y, '#4ade80', 18); soundRescue();
+          updateHUD('Swimmer rescued! +' + (100 + Math.round(player.momentum)));
+          items.splice(i, 1);
+          if (rescued >= 12) { endGame(true); return; }
+          continue;
+        } else {
+          lives--; burst(player.x, player.y, '#ef4444', 20); soundHit();
+          player.invuln = 1.6;
+          updateHUD(lives > 0 ? 'Ouch! Watch out!' : 'Game Over');
+          items.splice(i, 1);
+          if (lives <= 0) { endGame(false); return; }
+          continue;
+        }
+      }
+      if (it.x < -60) items.splice(i, 1);
+    }
+
+    // Ambient score for distance survived
+    score += Math.round(dt * 3);
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var p = particles[j];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt;
+      if (p.life <= 0) particles.splice(j, 1);
+    }
+    for (var c = 0; c < clouds.length; c++) {
+      clouds[c].x -= clouds[c].v * dt;
+      if (clouds[c].x < -90) { clouds[c].x = W + 60; clouds[c].y = 20 + Math.random() * 90; }
+    }
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky, sun, clouds
+    var sky = ctx.createLinearGradient(0, 0, 0, 300);
+    sky.addColorStop(0, '#7dd3fc'); sky.addColorStop(1, '#38bdf8');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, 340);
+    ctx.fillStyle = '#fde68a'; ctx.beginPath(); ctx.arc(810, 70, 36, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    clouds.forEach(function(cl) {
+      ctx.beginPath();
+      ctx.arc(cl.x, cl.y, 26 * cl.s, 0, Math.PI * 2);
+      ctx.arc(cl.x + 28 * cl.s, cl.y + 4, 20 * cl.s, 0, Math.PI * 2);
+      ctx.arc(cl.x - 28 * cl.s, cl.y + 5, 18 * cl.s, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // Sea
+    ctx.fillStyle = '#0e7490'; ctx.fillRect(0, 300, W, 220);
+    ctx.fillStyle = '#0284c7';
+    ctx.beginPath(); ctx.moveTo(0, H);
+    for (var x = 0; x <= W; x += 12) ctx.lineTo(x, waveY(x, time));
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    // Wave highlight
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 3; ctx.beginPath();
+    for (var x2 = 0; x2 <= W; x2 += 12) { var wy2 = waveY(x2, time); if (x2 === 0) ctx.moveTo(x2, wy2); else ctx.lineTo(x2, wy2); }
+    ctx.stroke();
+    // Items
+    items.forEach(function(it) {
+      if (it.kind === 'swimmer') {
+        ctx.font = '34px serif'; ctx.fillText('🏊', it.x - 17, it.y + 12);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('HELP!', it.x - 18, it.y - 26);
+      } else if (it.kind === 'rock') {
+        ctx.fillStyle = '#475569'; ctx.beginPath();
+        ctx.moveTo(it.x - 22, it.y + 18); ctx.lineTo(it.x - 8, it.y - 16); ctx.lineTo(it.x + 14, it.y - 10); ctx.lineTo(it.x + 24, it.y + 18); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#94a3b8'; ctx.font = '20px serif'; ctx.fillText('🪨', it.x - 11, it.y + 6);
+      } else {
+        ctx.font = '38px serif'; ctx.fillText('🦈', it.x - 19, it.y + 14);
+        ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.arc(it.x, it.y + 24, 26, 0, Math.PI); ctx.fill();
+      }
+    });
+    // Particles
+    particles.forEach(function(p) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 6, 6);
+      ctx.globalAlpha = 1;
+    });
+    // Surfer + board
+    if (state !== 'title' || true) {
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      ctx.rotate(player.tilt + (player.onWave ? Math.cos((player.x + time * 2.2) * 0.014) * 0.12 : 0));
+      if (player.invuln > 0 && Math.floor(time / 6) % 2 === 0) ctx.globalAlpha = 0.45;
+      ctx.fillStyle = '#f97316';
+      ctx.beginPath(); ctx.ellipse(0, 26, 44, 9, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#facc15'; ctx.fillRect(-34, 22, 68, 4);
+      // Surfer figure
+      ctx.fillStyle = '#fde68a'; ctx.beginPath(); ctx.arc(0, -6, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#0ea5e9'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(0, 4); ctx.lineTo(-4, 18); ctx.stroke();
+      ctx.strokeStyle = '#fde68a'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(-12, 0); ctx.moveTo(0, 8); ctx.lineTo(12, 2); ctx.stroke();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Ride the waves — rescue 12 swimmers to win!', W / 2, 490);
+      ctx.textAlign = 'left';
+    }
+    if (state === 'playing') {
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Arial';
+      ctx.fillText('Momentum ' + Math.round(player.momentum) + '% — crest landings pay +25', 14, 30);
+    }
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function doJump() {
+    if (state !== 'playing') return;
+    if (player.onWave) {
+      player.onWave = false;
+      player.vy = -520 - player.momentum * 1.2;
+      player.jumping = true;
+      soundJump();
+      updateHUD('Jumping between crests!');
+    }
+  }
+
+  // --- Controls: keyboard, mouse, touch ---
+  document.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+      e.preventDefault();
+      if (state === 'title') { ensureAudio(); resetGame(); }
+      else if (state === 'win' || state === 'over') { ensureAudio(); resetGame(); }
+      else doJump();
+    }
+    if (e.key === 'Enter') {
+      if (state === 'title' || state === 'win' || state === 'over') { ensureAudio(); resetGame(); }
+    }
+    if ((e.key === 'r' || e.key === 'R') && (state === 'win' || state === 'over')) { ensureAudio(); resetGame(); }
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+
+  canvas.addEventListener('mousedown', function(e) { pointerX = e.clientX; pointerDown = true; ensureAudio(); doJump(); });
+  canvas.addEventListener('mousemove', function(e) { if (pointerDown || true) pointerX = e.clientX; });
+  document.addEventListener('mouseup', function() { pointerDown = false; pointerX = null; });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault(); ensureAudio();
+    var t = e.touches[0]; pointerX = t.clientX; doJump();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault(); var t = e.touches[0]; pointerX = t.clientX;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e) { e.preventDefault(); pointerX = null; }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', function() { ensureAudio(); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function() { ensureAudio(); resetGame(); });
+
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

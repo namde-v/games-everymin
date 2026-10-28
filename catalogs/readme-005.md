@@ -60,6 +60,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0449 | Nova Nomad | Strategy / Space Trade Route Planning | Mouse/touch click stations to plot route, Space launch | [Play](./../games/game-0449.html) |
 | 0450 | Onyx Oracle | Puzzle / Rune Deduction Logic | Mouse/touch click cells, Arrow Keys select, Space mark | [Play](./../games/game-0450.html) |
 
+| 0451 | Prism Pilot | Arcade / Light-Beam Mirror Dodging | Arrow Keys/WASD move, mouse/touch drag steer, Space fire | [Play](./../games/game-0451.html) |
+| 0452 | Quartz Quest | Puzzle / Gem Vein Tracing | Mouse/touch drag trace, Arrow Keys move | [Play](./../games/game-0452.html) |
+| 0453 | River Ranger | Strategy / Watershed Flow Management | Mouse/touch click gates/dam, Keys 1-5 gates, D dam | [Play](./../games/game-0453.html) |
+| 0454 | Solar Scribe | Rhythm / Sunbeam Beat Tracing | Keys D/F/J/K, mouse/touch tap lanes | [Play](./../games/game-0454.html) |
+| 0455 | Tempest Surfer | Action / Wave-Surfing Rescue | Arrow Keys/A-D steer, Space jump, mouse/touch drag | [Play](./../games/game-0455.html) |
+| 0456 | Umbra Unlocker | Puzzle / Shadow Lock Decoding | Mouse/touch click dials, Arrow Keys select, Space confirm | [Play](./../games/game-0456.html) |
+| 0457 | Vapor Voyager | Strategy / Airship Trade Expedition | Mouse/touch click islands, Keys 1-6 select, Enter/F fly | [Play](./../games/game-0457.html) |
+| 0458 | Willow Whisperer | Rhythm / Wind-Chime Precision | Hold/release chime keys, mouse/touch hold chimes | [Play](./../games/game-0458.html) |
+| 0459 | Xenon Xplorer | Arcade / Gravity-Slingshot Orbit | Mouse/touch drag aim and release, Arrow Keys nudge | [Play](./../games/game-0459.html) |
+| 0460 | Summit Skier | Action / Avalanche Slope Runner | Space/Arrow Up/W jump, mouse/touch tap jump | [Play](./../games/game-0460.html) |
+
 ## Batch notes
 
 - Batch 041: 10 games, produced in one cycle (0401–0410). Volume 005 opened at game 0401.
@@ -67,3 +78,4 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 043: 10 games, produced in one cycle (0421–0430).
 - Batch 044: 10 games, produced in one cycle (0431–0440).
 - Batch 045: 10 games, produced in one cycle (0441–0450).
+- Batch 046: 10 games, produced in one cycle (0451–0460).

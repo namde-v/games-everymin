@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Prism Pilot</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050510; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #7df9ff; text-shadow: 0 0 14px #00e5ff; margin: 6px 0 4px; text-align: center; }
+  p.sub { color: #a9c6e8; font-size: 14px; margin-bottom: 8px; text-align: center; }
+  #wrap { position: relative; width: min(96vw, 860px); }
+  canvas { display: block; width: 100%; height: auto; background: #0a0a22; border: 3px solid #22d3ee; border-radius: 12px; box-shadow: 0 0 24px rgba(34,211,238,.45); touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; width: min(96vw, 860px); margin: 8px 0; font-weight: bold; font-size: 16px; }
+  #hud span { background: #141438; border: 1px solid #334; padding: 7px 12px; border-radius: 8px; flex: 1; text-align: center; }
+  #hud #status { color: #ffe066; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(3,3,18,.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; color: #7df9ff; }
+  .overlay p { max-width: 620px; line-height: 1.55; color: #dbeafe; font-size: 15px; }
+  .overlay ul { text-align: left; color: #dbeafe; line-height: 1.6; font-size: 14px; max-width: 620px; }
+  button { background: #22d3ee; color: #04121a; border: none; padding: 13px 26px; font-size: 18px; font-weight: bold; border-radius: 10px; cursor: pointer; box-shadow: 0 0 16px rgba(34,211,238,.7); }
+  button:hover, button:active { background: #a5f3fc; transform: scale(1.03); }
+  button.secondary { background: #facc15; }
+  #controls-note { color: #94a3b8; font-size: 13px; text-align: center; max-width: 860px; line-height: 1.5; margin-top: 4px; }
+  kbd { background: #1e293b; border: 1px solid #475569; border-bottom-width: 3px; border-radius: 5px; padding: 1px 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>PRISM PILOT</h1>
+<p class="sub">Pilot a light orb. Bend your beam off mirrors. Dodge the prisms.</p>
+
+<div id="hud">
+  <span>Score: <b id="score">0</b> / 1500</span>
+  <span>Lives: <b id="lives">♥♥♥</b></span>
+  <span id="status">Title</span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>PRISM PILOT</h2>
+    <p><strong>How to Play:</strong> You are the glowing light orb. Fly through the corridor, fire your beam, and bounce it off the silver mirrors to strike the golden targets hiding around corners.</p>
+    <ul>
+      <li><strong>Move:</strong> Arrow keys / WASD, or drag with mouse / touch</li>
+      <li><strong>Aim &amp; Fire:</strong> Move the mouse to aim, click or press <kbd>Space</kbd> to fire</li>
+      <li><strong>Rotate mirrors:</strong> Click a mirror, or press <kbd>Q</kbd> / <kbd>E</kbd> to rotate the nearest mirror</li>
+      <li><strong>Score:</strong> +100 per target hit. Reach <strong>1500 points to WIN</strong></li>
+      <li><strong>Danger:</strong> Touching a moving prism costs 1 life. You have 3 lives — 0 lives is Game Over</li>
+    </ul>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Sound is procedural and starts only after you press Start.</p>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <h2>🏆 YOU WIN!</h2>
+    <p>You reached 1500 points and mastered every mirror in the corridor. Brilliant piloting, Prism Pilot!</p>
+    <p>Final Score: <b id="winScore">1500</b></p>
+    <button id="winRestartBtn">↻ Play Again</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <h2>💥 GAME OVER</h2>
+    <p>The prisms overwhelmed your light orb. Your beam fades — but pilots always fly again.</p>
+    <p>Final Score: <b id="overScore">0</b></p>
+    <button id="overRestartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+
+<p id="controls-note">Keyboard: WASD / Arrows move &nbsp;•&nbsp; Space fire &nbsp;•&nbsp; Q / E rotate nearest mirror &nbsp;•&nbsp; R rotate all mirrors<br>Mouse: move to aim, click to fire (click a mirror to rotate it) &nbsp;•&nbsp; Touch: drag to move, tap to fire</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, lives = 3;
+  var keys = {};
+  var aim = { x: W - 100, y: H / 2 };
+  var mouse = { x: W / 2, y: H / 2, down: false };
+  var touchActive = false, touchX = 0, touchY = 0, touchStartTime = 0;
+  var beam = null, beamTimer = 0;
+  var invuln = 0, shake = 0, time = 0;
+  var lastTime = 0;
+
+  var player = { x: 90, y: H / 2, r: 14, vx: 0, vy: 0, speed: 270 };
+
+  // Mirrors: line segments that reflect the beam. Angle in radians.
+  var mirrors = [
+    { x: 300, y: 150, len: 110, angle: Math.PI / 4 },
+    { x: 540, y: 400, len: 110, angle: -Math.PI / 4 },
+    { x: 640, y: 150, len: 100, angle: Math.PI / 4 },
+    { x: 380, y: 430, len: 100, angle: Math.PI / 6 }
+  ];
+
+  var targets = [];
+  var prisms = [];
+
+  function rand(min, max) { return min + Math.random() * (max - min); }
+  function dist(ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); }
+
+  function spawnTargets(n) {
+    for (var i = 0; i < n; i++) {
+      targets.push({ x: rand(180, W - 50), y: rand(60, H - 60), r: 18, pulse: rand(0, 6), alive: true });
+    }
+  }
+
+  function spawnPrisms() {
+    prisms = [];
+    var spots = [
+      { x: 260, y: 300, vx: 90, vy: 70 }, { x: 480, y: 200, vx: -80, vy: 100 },
+      { x: 700, y: 330, vx: 70, vy: -90 }, { x: 420, y: 90, vx: -110, vy: 60 },
+      { x: 620, y: 480, vx: 100, vy: -70 }
+    ];
+    for (var i = 0; i < spots.length; i++) {
+      prisms.push({ x: spots[i].x, y: spots[i].y, vx: spots[i].vx, vy: spots[i].vy, r: 22, rot: rand(0, 6), spin: rand(-2, 2) });
+    }
+  }
+
+  // ---------- Procedural Web Audio (created only after user interaction) ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundFire() { beep(880, 0.12, 'sawtooth', 0.07); }
+  function soundHit() { beep(660, 0.15, 'sine', 0.14); setTimeout(function () { beep(990, 0.18, 'sine', 0.12); }, 70); }
+  function soundHurt() { beep(160, 0.35, 'square', 0.14); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.3, 'triangle', 0.14); }, i * 130); }); }
+
+  // ---------- Beam / reflection math ----------
+  function mirrorEndpoints(m) {
+    var dx = Math.cos(m.angle) * m.len / 2, dy = Math.sin(m.angle) * m.len / 2;
+    return { x1: m.x - dx, y1: m.y - dy, x2: m.x + dx, y2: m.y + dy };
+  }
+  function segIntersect(p, d, a, b) {
+    // Ray p + t*d vs segment a-b. Returns t or null.
+    var ex = b.x - a.x, ey = b.y - a.y;
+    var denom = d.x * ey - d.y * ex;
+    if (Math.abs(denom) < 0.0001) return null;
+    var sx = a.x - p.x, sy = a.y - p.y;
+    var t = (sx * ey - sy * ex) / denom;
+    var u = (sx * d.y - sy * d.x) / denom;
+    if (t > 1 && u >= 0 && u <= 1) return t;
+    return null;
+  }
+  function pointSegDist(px, py, x1, y1, x2, y2) {
+    var dx = x2 - x1, dy = y2 - y1;
+    var len2 = dx * dx + dy * dy || 1;
+    var t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2));
+    return dist(px, py, x1 + dx * t, y1 + dy * t);
+  }
+  function computeBeam() {
+    var segs = [];
+    var p = { x: player.x, y: player.y };
+    var dir = { x: aim.x - player.x, y: aim.y - player.y };
+    var len = Math.sqrt(dir.x * dir.x + dir.y * dir.y) || 1;
+    dir.x /= len; dir.y /= len;
+    for (var bounce = 0; bounce < 5; bounce++) {
+      var best = null, bestMirror = null;
+      for (var i = 0; i < mirrors.length; i++) {
+        var e = mirrorEndpoints(mirrors[i]);
+        var t = segIntersect(p, dir, { x: e.x1, y: e.y1 }, { x: e.x2, y: e.y2 });
+        if (t !== null && (!best || t < best)) { best = t; bestMirror = mirrors[i]; }
+      }
+      var end;
+      if (bestMirror && best < 900) {
+        end = { x: p.x + dir.x * best, y: p.y + dir.y * best };
+        segs.push({ x1: p.x, y1: p.y, x2: end.x, y2: end.y });
+        // Reflect direction across mirror normal.
+        var nx = -Math.sin(bestMirror.angle), ny = Math.cos(bestMirror.angle);
+        var dot = dir.x * nx + dir.y * ny;
+        dir = { x: dir.x - 2 * dot * nx, y: dir.y - 2 * dot * ny };
+        p = { x: end.x + dir.x * 2, y: end.y + dir.y * 2 };
+      } else {
+        end = { x: p.x + dir.x * 520, y: p.y + dir.y * 520 };
+        if (end.x < 0) end.x = 0; if (end.x > W) end.x = W;
+        if (end.y < 0) end.y = 0; if (end.y > H) end.y = H;
+        segs.push({ x1: p.x, y1: p.y, x2: end.x, y2: end.y });
+        break;
+      }
+    }
+    // Hit targets along any beam segment.
+    for (var j = 0; j < targets.length; j++) {
+      var tg = targets[j];
+      if (!tg.alive) continue;
+      for (var s = 0; s < segs.length; s++) {
+        if (pointSegDist(tg.x, tg.y, segs[s].x1, segs[s].y1, segs[s].x2, segs[s].y2) < tg.r + 4) {
+          tg.alive = false; score += 100; soundHit(); shake = 6;
+          break;
+        }
+      }
+    }
+    targets = targets.filter(function (t) { return t.alive; });
+    if (targets.length < 3) spawnTargets(4);
+    beam = segs; beamTimer = 0.35;
+    updateHUD();
+    checkEnd();
+  }
+  function fireBeam() {
+    if (state !== 'playing') return;
+    ensureAudio(); soundFire(); computeBeam();
+  }
+  function rotateNearest(dir) {
+    var best = null, bestD = 1e9;
+    for (var i = 0; i < mirrors.length; i++) {
+      var d = dist(player.x, player.y, mirrors[i].x, mirrors[i].y);
+      if (d < bestD) { bestD = d; best = mirrors[i]; }
+    }
+    if (best) { best.angle += dir * Math.PI / 4; beep(440, 0.08, 'triangle', 0.08); }
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives > 0 ? '♥'.repeat(lives) : '—';
+    statusEl.textContent = state === 'playing' ? 'Flying…' : state === 'win' ? 'YOU WIN!' : state === 'over' ? 'Game Over' : 'Title';
+  }
+  function checkEnd() {
+    if (score >= 1500) {
+      state = 'win'; document.getElementById('winScore').textContent = score;
+      winScreen.classList.remove('hidden'); soundWin(); updateHUD();
+    } else if (lives <= 0) {
+      state = 'over'; document.getElementById('overScore').textContent = score;
+      overScreen.classList.remove('hidden'); soundHurt(); updateHUD();
+    }
+  }
+  function resetGame() {
+    score = 0; lives = 3; invuln = 0; beam = null;
+    player.x = 90; player.y = H / 2; player.vx = 0; player.vy = 0;
+    mirrors = [
+      { x: 300, y: 150, len: 110, angle: Math.PI / 4 },
+      { x: 540, y: 400, len: 110, angle: -Math.PI / 4 },
+      { x: 640, y: 150, len: 100, angle: Math.PI / 4 },
+      { x: 380, y: 430, len: 100, angle: Math.PI / 6 }
+    ];
+    targets = []; spawnTargets(6); spawnPrisms();
+    state = 'playing';
+    titleScreen.classList.add('hidden'); winScreen.classList.add('hidden'); overScreen.classList.add('hidden');
+    updateHUD();
+  }
+  function startGame() { ensureAudio(); resetGame(); }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+
+  // ---------- Input: keyboard, mouse, touch ----------
+  document.addEventListener('keydown', function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); fireBeam(); }
+    if (e.key.toLowerCase() === 'q') rotateNearest(-1);
+    if (e.key.toLowerCase() === 'e') rotateNearest(1);
+    if (e.key.toLowerCase() === 'r') { mirrors.forEach(function (m) { m.angle += Math.PI / 4; }); }
+    if (e.key === 'Enter' && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (evt.clientX - r.left) * (W / r.width), y: (evt.clientY - r.top) * (H / r.height) };
+  }
+  canvas.addEventListener('mousemove', function (e) { var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y; aim.x = p.x; aim.y = p.y; });
+  canvas.addEventListener('mousedown', function (e) {
+    if (state !== 'playing') return;
+    var p = canvasPos(e);
+    // Clicking a mirror rotates it instead of firing.
+    for (var i = 0; i < mirrors.length; i++) {
+      if (dist(p.x, p.y, mirrors[i].x, mirrors[i].y) < 55) { mirrors[i].angle += Math.PI / 4; beep(440, 0.08, 'triangle', 0.08); return; }
+    }
+    aim.x = p.x; aim.y = p.y; fireBeam();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state !== 'playing') return;
+    var t = e.touches[0]; var p = canvasPos(t);
+    touchActive = true; touchX = p.x; touchY = p.y; touchStartTime = Date.now();
+    aim.x = p.x; aim.y = p.y;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0]; var p = canvasPos(t);
+    touchX = p.x; touchY = p.y; touchActive = true;
+    aim.x = p.x; aim.y = p.y;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) {
+    e.preventDefault();
+    touchActive = false;
+    // A quick tap fires; a long drag just moves.
+    if (Date.now() - touchStartTime < 300) fireBeam();
+  }, { passive: false });
+
+  // ---------- Update ----------
+  function update(dt) {
+    if (state !== 'playing') return;
+    time += dt;
+    var mx = 0, my = 0;
+    if (keys['arrowleft'] || keys['a']) mx -= 1;
+    if (keys['arrowright'] || keys['d']) mx += 1;
+    if (keys['arrowup'] || keys['w']) my -= 1;
+    if (keys['arrowdown'] || keys['s']) my += 1;
+    if (touchActive) {
+      var dx = touchX - player.x, dy = touchY - player.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 12) { mx = dx / d; my = dy / d; }
+    } else if (mouse.down) {
+      var mdx = mouse.x - player.x, mdy = mouse.y - player.y;
+      var md = Math.sqrt(mdx * mdx + mdy * mdy);
+      if (md > 20) { mx = mdx / md; my = mdy / md; }
+    }
+    var ml = Math.sqrt(mx * mx + my * my) || 1;
+    player.x += (mx / ml) * player.speed * dt * (mx || my ? 1 : 0);
+    player.y += (my / ml) * player.speed * dt * (mx || my ? 1 : 0);
+    player.x = Math.max(20, Math.min(W - 20, player.x));
+    player.y = Math.max(20, Math.min(H - 20, player.y));
+    if (beamTimer > 0) beamTimer -= dt; else beam = null;
+    if (invuln > 0) invuln -= dt;
+    if (shake > 0) shake -= dt * 20;
+
+    for (var i = 0; i < prisms.length; i++) {
+      var pr = prisms[i];
+      pr.x += pr.vx * dt; pr.y += pr.vy * dt; pr.rot += pr.spin * dt;
+      if (pr.x < 30 || pr.x > W - 30) pr.vx *= -1;
+      if (pr.y < 30 || pr.y > H - 30) pr.vy *= -1;
+      if (invuln <= 0 && dist(player.x, player.y, pr.x, pr.y) < player.r + pr.r - 4) {
+        lives -= 1; invuln = 1.6; shake = 10; soundHurt();
+        player.x = 90; player.y = H / 2;
+        updateHUD(); checkEnd();
+      }
+    }
+    for (var j = 0; j < targets.length; j++) targets[j].pulse += dt * 4;
+  }
+
+  // ---------- Draw ----------
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake), rand(-shake, shake));
+    ctx.fillStyle = '#0a0a22'; ctx.fillRect(-20, -20, W + 40, H + 40);
+    // Corridor walls
+    ctx.strokeStyle = '#164e63'; ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, W - 16, H - 16);
+    ctx.strokeStyle = 'rgba(34,211,238,.25)'; ctx.lineWidth = 1;
+    for (var gx = 60; gx < W; gx += 60) { ctx.beginPath(); ctx.moveTo(gx, 10); ctx.lineTo(gx, H - 10); ctx.stroke(); }
+    for (var gy = 60; gy < H; gy += 60) { ctx.beginPath(); ctx.moveTo(10, gy); ctx.lineTo(W - 10, gy); ctx.stroke(); }
+
+    // Mirrors
+    mirrors.forEach(function (m) {
+      var e = mirrorEndpoints(m);
+      ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+      ctx.strokeStyle = '#7df9ff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+      ctx.fillStyle = '#0ea5e9'; ctx.beginPath(); ctx.arc(m.x, m.y, 6, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // Targets
+    targets.forEach(function (t) {
+      var r = t.r + Math.sin(t.pulse) * 3;
+      ctx.fillStyle = '#facc15'; ctx.shadowColor = '#facc15'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#78350f';
+      ctx.beginPath(); ctx.arc(t.x, t.y, r * 0.45, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // Prisms (triangles)
+    prisms.forEach(function (pr) {
+      ctx.save(); ctx.translate(pr.x, pr.y); ctx.rotate(pr.rot);
+      ctx.fillStyle = '#f472b6'; ctx.shadowColor = '#f472b6'; ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.moveTo(0, -pr.r); ctx.lineTo(pr.r, pr.r * 0.8); ctx.lineTo(-pr.r, pr.r * 0.8); ctx.closePath(); ctx.fill();
+      ctx.restore(); ctx.shadowBlur = 0;
+    });
+
+    // Beam
+    if (beam) {
+      ctx.strokeStyle = '#7df9ff'; ctx.lineWidth = 4; ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 16;
+      ctx.lineCap = 'round';
+      beam.forEach(function (s) { ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke(); });
+      ctx.shadowBlur = 0;
+    }
+
+    // Player orb (blinks while invulnerable)
+    if (!(invuln > 0 && Math.floor(time * 12) % 2 === 0)) {
+      ctx.fillStyle = '#67e8f9'; ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 24;
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(player.x, player.y, 6, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Aim hint
+    if (state === 'playing') {
+      ctx.strokeStyle = 'rgba(125,249,255,.5)'; ctx.lineWidth = 1; ctx.setLineDash([4, 6]);
+      ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(aim.x, aim.y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = '16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start above to fly. Bounce your beam off mirrors to hit golden targets!', W / 2, H - 24);
+    }
+  }
+
+  function loop(ts) {
+    var dt = Math.min(0.05, (ts - lastTime) / 1000 || 0.016);
+    lastTime = ts;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  spawnTargets(6); spawnPrisms(); updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

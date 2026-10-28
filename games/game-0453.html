@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>River Ranger</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0b2233;color:#eaf6ff;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+  h1{margin:6px 0 2px;font-size:28px;letter-spacing:1px}
+  p.sub{margin:0 0 10px;color:#9fd8ff}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:760px;margin-bottom:8px}
+  .pill{background:#123a52;border:1px solid #2b7aa8;border-radius:20px;padding:6px 12px;font-weight:bold;font-size:14px}
+  .pill.warn{background:#5a2a12;border-color:#e07a3f}
+  .pill.good{background:#123f2a;border-color:#4cc07a}
+  #wrap{position:relative;width:100%;max-width:760px}
+  canvas{display:block;width:100%;height:auto;background:#7ec8e3;border:3px solid #2b7aa8;border-radius:12px;touch-action:none;cursor:pointer}
+  .overlay{position:absolute;inset:0;background:rgba(4,25,40,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:32px;margin:0 0 8px}
+  .overlay p{max-width:560px;line-height:1.55;color:#d6efff}
+  .overlay ul{text-align:left;line-height:1.6;color:#d6efff;max-width:560px}
+  button{margin-top:12px;background:#ffb703;color:#10222f;border:0;border-radius:10px;padding:13px 26px;font-size:18px;font-weight:bold;cursor:pointer}
+  button:hover{background:#ffd166}
+  button.secondary{background:#2b7aa8;color:#fff}
+  #controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px;max-width:760px}
+  #controls button{margin:0;padding:10px 14px;font-size:14px}
+  #msg{min-height:22px;margin-top:8px;font-weight:bold;color:#ffd166;text-align:center}
+  .legend{font-size:13px;color:#9fd8ff;margin-top:6px;text-align:center}
+</style>
+</head>
+<body>
+<h1>🌊 River Ranger</h1>
+<p class="sub">Strategy / Watershed Flow Management — Game 0453</p>
+<div id="hud">
+  <div class="pill" id="scorePill">Score: 0</div>
+  <div class="pill" id="seasonPill">Season: 1 / 5</div>
+  <div class="pill" id="seasonTime">Season time: 30s</div>
+  <div class="pill good" id="farmsPill">Farms supplied: 0 / 5</div>
+  <div class="pill warn" id="townsPill">Towns safe: 3 / 3</div>
+  <div class="pill" id="flowPill">River flow: 0</div>
+  <div class="pill" id="damPill">Dam: RELEASE</div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="760" height="520"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>🌊 River Ranger</h2>
+    <p><b>You are the River Ranger.</b> Rain fills the reservoir, the river runs past five farms, then past three towns. Open farm gates to water crops, but do not let the downstream flow flood the towns.</p>
+    <ul>
+      <li><b>How to Play:</b> Click a farm gate (or press keys 1–5) to open / close it. Click the dam (or press D) to HOLD or RELEASE water.</li>
+      <li>Each farm needs its blue supply bar to reach full before the season ends. Supply all 5 farms for 5 seasons to win.</li>
+      <li>Watch the reservoir: HOLD too long and it overflows. RELEASE too much and the river floods a town.</li>
+      <li>Rain storms raise inflow — react fast! A flooded town is lost. Lose 3 towns and the game is over.</li>
+      <li>Controls: Mouse click, touch tap, keys 1–5 for gates, D for dam, P to pause.</li>
+    </ul>
+    <button id="startBtn">▶ Start Game</button>
+    <button class="secondary" id="howBtn">How to Play</button>
+    <p id="howText" style="display:none">Tip: keep 2–3 gates open at a time. Close gates when a farm is full so more water reaches the next farm. Use HOLD during storms, then RELEASE slowly when the sky clears.</p>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+<div id="msg">Press Start, then manage the river!</div>
+<div id="controls">
+  <button id="gateBtn">Toggle Selected Gate</button>
+  <button id="damBtn">Toggle Dam (D)</button>
+  <button id="pauseBtn">Pause (P)</button>
+  <button id="soundBtn">Sound: ON</button>
+</div>
+<p class="legend">Click a gate on the river map, or tap the farm rows. Keyboard: 1–5 gates • D dam • P pause • R restart after game over / win.</p>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var title=document.getElementById('titleScreen');
+  var endScreen=document.getElementById('endScreen');
+  var endTitle=document.getElementById('endTitle');
+  var endText=document.getElementById('endText');
+  var msg=document.getElementById('msg');
+  var scorePill=document.getElementById('scorePill');
+  var seasonPill=document.getElementById('seasonPill');
+  var seasonTime=document.getElementById('seasonTime');
+  var farmsPill=document.getElementById('farmsPill');
+  var townsPill=document.getElementById('townsPill');
+  var flowPill=document.getElementById('flowPill');
+  var damPill=document.getElementById('damPill');
+
+  var state='title', score=0, season=1, seasonsWon=0, seasonTimer=30, paused=false;
+  var townsSafe=3, floods=0, selected=0, soundOn=true, lastTime=0, anim=0;
+  var reservoir=45, inflow=12, rain=0, rainTimer=0, floodTimer=0, overflowTimer=0;
+  var audioCtx=null;
+
+  var farms=[];
+  var farmNames=['Sunny Acres','Willow Field','Barley Bend','Pumpkin Patch','Golden Grove'];
+  for(var i=0;i<5;i++){
+    farms.push({name:farmNames[i], y:70+i*72, gate:true, supply:0, demand:100, done:false, x:330});
+  }
+  var towns=[{name:'Riverton',flooded:false},{name:'Millford',flooded:false},{name:'Harbor Town',flooded:false}];
+
+  function ensureAudio(){
+    if(!audioCtx){
+      try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+    }
+    if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+  }
+  function beep(freq,dur,type,vol){
+    if(!soundOn||!audioCtx) return;
+    try{
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type||'sine'; o.frequency.value=freq;
+      g.gain.setValueAtTime(vol||0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function reset(){
+    score=0; season=1; seasonsWon=0; seasonTimer=30; townsSafe=3; floods=0; selected=0;
+    reservoir=45; inflow=12; rain=0; rainTimer=6; floodTimer=0; overflowTimer=0; paused=false;
+    farms.forEach(function(f){ f.gate=true; f.supply=0; f.done=false; });
+    towns.forEach(function(t){ t.flooded=false; });
+    msg.textContent='Season 1: open gates to water all farms!';
+  }
+  function startGame(){
+    ensureAudio(); reset(); state='playing';
+    title.classList.add('hidden'); endScreen.classList.add('hidden');
+    beep(520,0.18,'triangle',0.15); setTimeout(function(){beep(660,0.18,'triangle',0.15);},120);
+  }
+  function endGame(win){
+    state=win?'win':'over'; cancelAnimationFrame(anim);
+    endScreen.classList.remove('hidden');
+    endTitle.textContent=win?'🏆 You Win, River Ranger!':'💧 Game Over — Towns Flooded';
+    endText.textContent=win
+      ? 'You supplied all 5 farms for 5 seasons! Final score: '+score+'. The watershed is safe thanks to you.'
+      : 'Three towns flooded. Final score: '+score+'. Seasons won: '+seasonsWon+' / 5. Try a steadier hand on the dam.';
+    if(win){ beep(523,0.2,'sine',0.15); setTimeout(function(){beep(659,0.2,'sine',0.15);},150); setTimeout(function(){beep(784,0.35,'sine',0.15);},300); }
+    else { beep(180,0.4,'sawtooth',0.12); }
+  }
+  function toggleGate(i){
+    if(state!=='playing') return;
+    farms[i].gate=!farms[i].gate; selected=i;
+    msg.textContent=farms[i].name+' gate '+(farms[i].gate?'OPEN':'CLOSED')+'.';
+    beep(farms[i].gate?700:420,0.1,'square',0.08);
+  }
+  function toggleDam(){
+    if(state!=='playing') return;
+    damHold=!damHold;
+    msg.textContent=damHold?'Dam HOLDING — reservoir rising, river easing.':'Dam RELEASING — river flow rising!';
+    beep(damHold?340:560,0.14,'triangle',0.12);
+  }
+  var damHold=false;
+  function floodTown(reason){
+    for(var i=0;i<towns.length;i++){
+      if(!towns[i].flooded){ towns[i].flooded=true; townsSafe--; floods++; break; }
+    }
+    msg.textContent='⚠ FLOOD! '+towns[Math.max(0,3-townsSafe-1)].name+' flooded — '+reason+' Towns safe: '+townsSafe;
+    beep(140,0.5,'sawtooth',0.16);
+    if(townsSafe<=0){ endGame(false); }
+  }
+  function endSeason(){
+    var allDone=farms.every(function(f){return f.done;});
+    if(allDone){
+      seasonsWon++; score+=250;
+      msg.textContent='Season complete! All farms supplied. Seasons won: '+seasonsWon+' / 5 (+250)';
+      beep(880,0.2,'sine',0.14);
+    } else {
+      var n=farms.filter(function(f){return f.done;}).length;
+      msg.textContent='Season ended: only '+n+' / 5 farms supplied. Try again next season — no town lost.';
+      beep(300,0.25,'triangle',0.1);
+    }
+    if(seasonsWon>=5){ updateHUD(); endGame(true); return; }
+    season++; seasonTimer=30;
+    farms.forEach(function(f){ f.supply=0; f.done=false; });
+    reservoir=Math.min(70,reservoir+8);
+  }
+  function updateHUD(){
+    scorePill.textContent='Score: '+score;
+    seasonPill.textContent='Season: '+season+' / 5  •  Won: '+seasonsWon+' / 5';
+    seasonTime.textContent='Season time: '+Math.ceil(seasonTimer)+'s'+(rain>0?'  🌧 Storm!':'');
+    var done=farms.filter(function(f){return f.done;}).length;
+    farmsPill.textContent='Farms supplied: '+done+' / 5';
+    townsPill.textContent='Towns safe: '+townsSafe+' / 3';
+    var flow=Math.round(damHold?inflow*0.35:inflow);
+    flowPill.textContent='River flow: '+flow+(rain>0?' (+storm)':'');
+    damPill.textContent='Dam: '+(damHold?'HOLD':'RELEASE');
+  }
+  function draw(){
+    ctx.clearRect(0,0,760,520);
+    // Sky, hills, reservoir
+    ctx.fillStyle='#7ec8e3'; ctx.fillRect(0,0,760,520);
+    ctx.fillStyle='#5aa65a'; ctx.fillRect(0,0,760,60);
+    ctx.fillStyle='#2f6da8'; ctx.fillRect(30,18,180,42);
+    ctx.fillStyle='#123a52'; ctx.font='bold 14px Arial'; ctx.fillText('RESERVOIR '+Math.round(reservoir)+'%',40,42);
+    ctx.fillStyle='#1b7a3d'; ctx.fillRect(30,52,180,8);
+    ctx.fillStyle='#ffd166'; ctx.fillRect(30,52,180*Math.min(1,reservoir/100),8);
+    ctx.fillStyle='#8a5a2b'; ctx.fillRect(210,18,28,42);
+    ctx.fillStyle='#fff'; ctx.font='bold 12px Arial'; ctx.fillText('DAM',238,42);
+    if(rain>0){ ctx.fillStyle='#334155'; ctx.font='bold 16px Arial'; ctx.fillText('🌧 STORM: inflow +'+rain,420,40); }
+    // River
+    ctx.fillStyle='#2f8fd0'; ctx.fillRect(250,60,90,420);
+    ctx.fillStyle='#9fd8ff';
+    for(var w=0;w<8;w++){ ctx.fillRect(258,70+w*52,74,6); }
+    // Farms, gates, channels
+    farms.forEach(function(f,i){
+      var isSel=(i===selected);
+      ctx.fillStyle=isSel?'#fff3bf':'#e8f5d8';
+      ctx.strokeStyle=isSel?'#ffb703':'#2f6da8'; ctx.lineWidth=isSel?3:1;
+      ctx.beginPath(); ctx.rect(430, f.y-18, 260, 56); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#123a52'; ctx.font='bold 14px Arial';
+      ctx.fillText((i+1)+'. '+f.name,440,f.y+2);
+      ctx.fillStyle='#888'; ctx.fillRect(440,f.y+10,180,12);
+      ctx.fillStyle=f.done?'#2fae6a':'#2f8fd0'; ctx.fillRect(440,f.y+10,180*Math.min(1,f.supply/f.demand),12);
+      ctx.fillStyle='#123a52'; ctx.font='12px Arial'; ctx.fillText(f.done?'✓ SUPPLIED':Math.round(f.supply)+'%  '+(f.gate?'GATE OPEN':'GATE CLOSED'),440,f.y+36);
+      // Gate on river edge
+      ctx.fillStyle=f.gate?'#2fae6a':'#c0392b';
+      ctx.beginPath(); ctx.rect(340, f.y-8, 42, 28); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font='bold 11px Arial'; ctx.fillText(f.gate?'OPEN':'SHUT',342,f.y+10);
+      // Channel line
+      ctx.strokeStyle=f.gate?'#2fae6a':'#999'; ctx.lineWidth=4;
+      ctx.beginPath(); ctx.moveTo(382,f.y+6); ctx.lineTo(430,f.y+6); ctx.stroke();
+    });
+    // Towns downstream
+    ctx.fillStyle='#123a52'; ctx.font='bold 14px Arial'; ctx.fillText('↓ DOWNSTREAM TOWNS ↓',250,492);
+    towns.forEach(function(t,i){
+      var x=270+i*130;
+      ctx.fillStyle=t.flooded?'#7fb3d5':'#fff';
+      ctx.strokeStyle=t.flooded?'#2f8fd0':'#123a52'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.rect(x,500,110,0); ctx.fill(); ctx.stroke();
+      ctx.fillStyle=t.flooded?'#123a52':'#123a52';
+      ctx.font='bold 12px Arial'; ctx.fillText(t.flooded?'💧 '+t.name+' (FLOODED)':'🏠 '+t.name,250,0);
+      // Draw town boxes above label area inside canvas bottom strip
+      ctx.fillStyle=t.flooded?'#a8d4f0':'#ffe9a8';
+      ctx.fillRect(x,470,110,20);
+      ctx.fillStyle='#123a52'; ctx.font='11px Arial';
+      ctx.fillText(t.flooded?'FLOODED':t.name, x+4, 484);
+    });
+    if(state==='title'){ ctx.fillStyle='rgba(0,0,0,0.15)'; ctx.fillRect(0,0,760,520); }
+  }
+  function loop(ts){
+    if(state!=='playing'){ draw(); return; }
+    if(!paused){
+      var dt=Math.min(0.05,(ts-lastTime)/1000||0.016); lastTime=ts;
+      rainTimer-=dt;
+      if(rainTimer<=0){ rain=(Math.random()<0.55)?8+Math.floor(Math.random()*10):0; rainTimer=7+Math.random()*8; if(rain>0) msg.textContent='🌧 Storm! Inflow surging — consider HOLDING the dam.'; }
+      inflow=12+rain;
+      var release=damHold?inflow*0.35:inflow;
+      reservoir+= (inflow-release)*dt*0.55;
+      if(reservoir>=100){ reservoir=100; overflowTimer+=dt; if(overflowTimer>2){ overflowTimer=0; floodTown('dam overflow'); } }
+      else overflowTimer=0;
+      if(reservoir<5) reservoir=5;
+      // Farms receive water
+      var openCount=farms.filter(function(f){return f.gate;}).length;
+      farms.forEach(function(f){
+        if(f.gate && !f.done){
+          var share=openCount>0? (release/openCount):0;
+          f.supply+=share*dt*1.15;
+          if(f.supply>=f.demand){ f.done=true; score+=100; beep(920,0.15,'sine',0.12); msg.textContent=f.name+' fully supplied! +100'; }
+        }
+      });
+      // Downstream flow vs town capacity: capacity 20
+      var downstream=release - openCount*2.2;
+      if(downstream>20){ floodTimer+=dt; if(floodTimer>2.5){ floodTimer=0; floodTown('river flow too high'); } }
+      else floodTimer=Math.max(0,floodTimer-dt);
+      seasonTimer-=dt;
+      if(seasonTimer<=0){ endSeason(); }
+      if(state==='playing'){ score+=dt*0; }
+    }
+    updateHUD(); draw();
+    if(state==='playing') anim=requestAnimationFrame(loop);
+  }
+  function canvasPos(evt){
+    var r=canvas.getBoundingClientRect();
+    var x=(evt.clientX-r.left)*(canvas.width/r.width);
+    var y=(evt.clientY-r.top)*(canvas.height/r.height);
+    return {x:x,y:y};
+  }
+  function handleTap(evt){
+    if(state!=='playing') return;
+    evt.preventDefault();
+    var p=canvasPos(evt.touches?evt.touches[0]:evt);
+    if(p.x>=210&&p.x<=275&&p.y>=18&&p.y<=60){ toggleDam(); return; }
+    for(var i=0;i<farms.length;i++){
+      if(p.x>=330&&p.x<=700&&p.y>=farms[i].y-20&&p.y<=farms[i].y+40){ toggleGate(i); return; }
+    }
+  }
+  document.getElementById('startBtn').addEventListener('click',function(){ startGame(); lastTime=performance.now(); anim=requestAnimationFrame(loop); });
+  document.getElementById('restartBtn').addEventListener('click',function(){ startGame(); lastTime=performance.now(); anim=requestAnimationFrame(loop); });
+  document.getElementById('howBtn').addEventListener('click',function(){ var t=document.getElementById('howText'); t.style.display=t.style.display==='none'?'block':'none'; });
+  document.getElementById('gateBtn').addEventListener('click',function(){ ensureAudio(); toggleGate(selected); });
+  document.getElementById('damBtn').addEventListener('click',function(){ ensureAudio(); toggleDam(); });
+  document.getElementById('pauseBtn').addEventListener('click',function(){ if(state==='playing'){ paused=!paused; this.textContent=paused?'Resume (P)':'Pause (P)'; } });
+  document.getElementById('soundBtn').addEventListener('click',function(){ soundOn=!soundOn; this.textContent=soundOn?'Sound: ON':'Sound: OFF'; ensureAudio(); });
+  canvas.addEventListener('click',handleTap);
+  canvas.addEventListener('touchstart',handleTap,{passive:false});
+  document.addEventListener('keydown',function(e){
+    if(e.key>='1'&&e.key<='5'){ ensureAudio(); toggleGate(parseInt(e.key,10)-1); }
+    else if(e.key==='d'||e.key==='D'){ ensureAudio(); toggleDam(); }
+    else if(e.key==='p'||e.key==='P'){ if(state==='playing') paused=!paused; }
+    else if(e.key==='r'||e.key==='R'){ if(state==='win'||state==='over'){ startGame(); lastTime=performance.now(); anim=requestAnimationFrame(loop); } }
+  });
+  document.addEventListener('touchstart',function(){ ensureAudio(); },{passive:true});
+  updateHUD(); draw();
+})();
+</script>
+</body>
+</html>

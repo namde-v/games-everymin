@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Summit Skier</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e33; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 30px; margin-bottom: 8px; text-align: center; text-shadow: 0 2px 0 #123; }
+  #wrap { position: relative; width: 100%; max-width: 900px; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#7ec8f7, #eaf7ff); border: 4px solid #fff; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: #122a4a; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-weight: bold; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  .screen { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(8, 25, 48, 0.86); border-radius: 12px; padding: 20px; }
+  .screen.show { display: flex; }
+  .screen h2 { font-size: 34px; margin-bottom: 10px; }
+  .screen p { max-width: 620px; line-height: 1.55; margin: 6px 0; font-size: 16px; }
+  .big { font-size: 22px; font-weight: bold; color: #ffe066; }
+  button { margin-top: 16px; padding: 13px 26px; font-size: 18px; font-weight: bold; border: none; border-radius: 999px; background: #ffcf3f; color: #1a2b00; cursor: pointer; }
+  button:hover, button:focus { background: #fff; outline: 3px solid #7ec8f7; }
+  .keys { background: rgba(255,255,255,0.12); border-radius: 8px; padding: 10px 14px; margin-top: 12px; }
+  #hint { text-align: center; margin-top: 8px; color: #cfe6ff; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>⛷️ Summit Skier</h1>
+<div id="wrap">
+  <div id="hud">
+    <span id="hudScore">Score: 0</span>
+    <span id="hudLives">Lives: ❤️❤️❤️</span>
+    <span id="hudDist">Distance: 0 / 2000 m</span>
+    <span id="hudStatus">Status: Ready</span>
+  </div>
+  <canvas id="game" width="900" height="500"></canvas>
+  <div id="titleScreen" class="screen show">
+    <h2>⛷️ Summit Skier</h2>
+    <p class="big">Outrun the avalanche to the village!</p>
+    <p><strong>How to Play:</strong> You are skiing down a mountain while a huge avalanche chases you. Jump over icy crevasses, dodge pine trees, and grab glowing snow crystals for bonus points.</p>
+    <div class="keys">
+      <p>⌨️ <strong>Jump:</strong> Space / Arrow Up / W &nbsp;•&nbsp; <strong>Tuck (faster):</strong> Arrow Down / S</p>
+      <p>🖱️ <strong>Mouse:</strong> Click to jump &nbsp;•&nbsp; 📱 <strong>Touch:</strong> Tap the screen to jump</p>
+      <p>🏁 <strong>Win:</strong> Reach the village at 2000 m &nbsp;•&nbsp; 💥 <strong>Game Over:</strong> The avalanche catches you or you lose all 3 lives</p>
+    </div>
+    <button id="startBtn" type="button">▶ Start Skiing</button>
+  </div>
+  <div id="winScreen" class="screen">
+    <h2>🏆 You Made It!</h2>
+    <p class="big" id="winText">You reached the village!</p>
+    <p>The avalanche rumbles to a stop behind you. The villagers cheer as you ski safely into town with your crystals sparkling.</p>
+    <button id="winRestartBtn" type="button">↻ Play Again</button>
+  </div>
+  <div id="overScreen" class="screen">
+    <h2>🌨️ Avalanche!</h2>
+    <p class="big" id="overText">The avalanche caught you!</p>
+    <p>Shake off the snow, grab your skis, and try the slope again. Jump earlier over crevasses and watch the trees!</p>
+    <button id="overRestartBtn" type="button">↻ Try Again</button>
+  </div>
+</div>
+<p id="hint">Tip: Tucking (Down key) makes you faster — but watch for trees! Crystals are worth 50 points.</p>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudDist = document.getElementById('hudDist');
+  var hudStatus = document.getElementById('hudStatus');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  var W = 900, H = 500, GROUND = 410;
+  var state = 'title'; // title, playing, win, over
+  var score = 0, lives = 3, distance = 0, avalancheGap = 320;
+  var speed = 260, player, obstacles, crystals, particles, snowflakes, spawnTimer, crystalTimer, time, invuln;
+
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    if (kind === 'jump') beep(420, 0.16, 'triangle', 0.14);
+    else if (kind === 'crystal') { beep(880, 0.12, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.14, 'sine', 0.12); }, 60); }
+    else if (kind === 'hit') { beep(140, 0.3, 'sawtooth', 0.16); }
+    else if (kind === 'win') { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,0.25,'triangle',0.14); }, i*130); }); }
+    else if (kind === 'lose') { [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ beep(f,0.22,'sawtooth',0.12); }, i*120); }); }
+  }
+
+  function reset() {
+    score = 0; lives = 3; distance = 0; avalancheGap = 320;
+    speed = 260; time = 0; invuln = 0; spawnTimer = 0.7; crystalTimer = 1.1;
+    player = { x: 130, y: GROUND - 52, w: 44, h: 52, vy: 0, onGround: true, tuck: false };
+    obstacles = []; crystals = []; particles = [];
+    snowflakes = [];
+    for (var i = 0; i < 90; i++) snowflakes.push({ x: Math.random()*W, y: Math.random()*H, s: 1 + Math.random()*3, v: 20 + Math.random()*50 });
+    updateHUD('Skiing!');
+  }
+  function updateHUD(status) {
+    hudScore.textContent = 'Score: ' + Math.floor(score);
+    var hearts = '';
+    for (var i = 0; i < 3; i++) hearts += (i < lives) ? '❤️' : '🤍';
+    hudLives.textContent = 'Lives: ' + hearts;
+    hudDist.textContent = 'Distance: ' + Math.floor(distance) + ' / 2000 m';
+    if (status) hudStatus.textContent = 'Status: ' + status;
+  }
+  function showScreen(which) {
+    titleScreen.classList.remove('show');
+    winScreen.classList.remove('show');
+    overScreen.classList.remove('show');
+    if (which) which.classList.add('show');
+  }
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = 'playing';
+    showScreen(null);
+    updateHUD('Skiing!');
+    beep(523, 0.15, 'triangle', 0.13);
+  }
+  function endWin() {
+    state = 'win';
+    document.getElementById('winText').textContent = 'You reached the village! Final score: ' + Math.floor(score) + ' — ' + Math.floor(distance) + ' m skied.';
+    updateHUD('Victory!');
+    showScreen(winScreen);
+    sfx('win');
+  }
+  function endOver(reason) {
+    state = 'over';
+    document.getElementById('overText').textContent = reason || 'The avalanche caught you!';
+    updateHUD('Game Over');
+    showScreen(overScreen);
+    sfx('lose');
+  }
+  function jump() {
+    if (state !== 'playing') return;
+    if (player.onGround) {
+      player.vy = -620;
+      player.onGround = false;
+      sfx('jump');
+      for (var i = 0; i < 8; i++) particles.push({ x: player.x + 20, y: player.y + 48, vx: -40 - Math.random()*60, vy: -20 - Math.random()*60, life: 0.4 });
+    }
+  }
+  function loseLife(reason) {
+    if (invuln > 0 || state !== 'playing') return;
+    lives--; invuln = 1.6; avalancheGap -= 110; sfx('hit');
+    for (var i = 0; i < 16; i++) particles.push({ x: player.x + 22, y: player.y + 24, vx: (Math.random()-0.5)*300, vy: -Math.random()*260, life: 0.6 });
+    if (lives <= 0) { endOver('Out of lives — the mountain wins this time!'); return; }
+    if (avalancheGap <= 0) { endOver('The avalanche caught you!'); return; }
+    updateHUD('Ouch! Avalanche closing in!');
+  }
+
+  function spawnObstacle() {
+    var kind = Math.random();
+    if (kind < 0.55) {
+      obstacles.push({ type: 'tree', x: W + 20, w: 42, h: 78, passed: false });
+    } else if (kind < 0.82) {
+      obstacles.push({ type: 'rock', x: W + 20, w: 46, h: 34, passed: false });
+    } else {
+      obstacles.push({ type: 'crevasse', x: W + 20, w: 95, h: 10, passed: false });
+    }
+  }
+
+  function update(dt) {
+    time += dt;
+    if (invuln > 0) invuln -= dt;
+    // Speed grows with distance; tuck adds speed but avalanche also creeps closer over time.
+    var base = 260 + Math.min(280, distance * 0.22);
+    speed = player.tuck ? base + 110 : base;
+    distance += speed * dt * 0.12;
+    score += dt * 10 * (player.tuck ? 1.4 : 1);
+    avalancheGap -= dt * 4;
+    if (avalancheGap <= 0) { endOver('The avalanche caught you!'); return; }
+
+    // Player physics
+    player.vy += 1500 * dt;
+    player.y += player.vy * dt;
+    if (player.y >= GROUND - player.h) { player.y = GROUND - player.h; player.vy = 0; player.onGround = true; }
+
+    // Spawning
+    spawnTimer -= dt; crystalTimer -= dt;
+    if (spawnTimer <= 0) { spawnObstacle(); spawnTimer = 0.9 + Math.random() * 0.7 - Math.min(0.35, distance * 0.0001); }
+    if (crystalTimer <= 0) {
+      crystals.push({ x: W + 20, y: GROUND - 90 - Math.random() * 110, taken: false });
+      crystalTimer = 1.2 + Math.random() * 1.2;
+    }
+
+    // Obstacles
+    for (var i = obstacles.length - 1; i >= 0; i--) {
+      var o = obstacles[i];
+      o.x -= speed * dt;
+      if (o.x + o.w < -20) { obstacles.splice(i, 1); continue; }
+      var px1 = player.x + 6, px2 = player.x + player.w - 6, py1 = player.y + 6, py2 = player.y + player.h;
+      var ox1 = o.x, ox2 = o.x + o.w;
+      var overlapX = px2 > ox1 && px1 < ox2;
+      if (o.type === 'crevasse') {
+        // Falling in: player on ground and centred over the gap.
+        var centre = player.x + player.w / 2;
+        if (player.onGround && centre > ox1 + 8 && centre < ox2 - 8) {
+          loseLife('You fell into a crevasse!');
+          obstacles.splice(i, 1);
+          player.y = GROUND - player.h; player.vy = 0;
+          continue;
+        }
+      } else {
+        var oy1 = (o.type === 'tree') ? GROUND - o.h : GROUND - o.h;
+        if (overlapX && py2 > oy1 && invuln <= 0) { loseLife('You crashed into a ' + o.type + '!'); obstacles.splice(i, 1); continue; }
+      }
+      if (!o.passed && ox2 < player.x) { o.passed = true; score += 15; }
+    }
+    // Crystals
+    for (var j = crystals.length - 1; j >= 0; j--) {
+      var c = crystals[j];
+      c.x -= speed * dt;
+      if (c.x < -20) { crystals.splice(j, 1); continue; }
+      if (!c.taken && Math.abs(c.x + 14 - (player.x + 22)) < 38 && Math.abs(c.y + 14 - (player.y + 26)) < 44) {
+        c.taken = true; score += 50; sfx('crystal'); crystals.splice(j, 1);
+      }
+    }
+    // Particles and snow
+    for (var k = particles.length - 1; k >= 0; k--) {
+      var p = particles[k]; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+      if (p.life <= 0) particles.splice(k, 1);
+    }
+    snowflakes.forEach(function(s){ s.y += s.v * dt; s.x -= speed * dt * 0.05; if (s.y > H) { s.y = -5; s.x = Math.random()*W; } if (s.x < 0) s.x = W; });
+    if (distance >= 2000) { distance = 2000; endWin(); return; }
+    updateHUD(avalancheGap < 120 ? 'Avalanche close!' : (player.tuck ? 'Tucking — fast!' : 'Skiing!'));
+  }
+
+  function drawTree(x, baseY, h) {
+    ctx.fillStyle = '#7a4a21'; ctx.fillRect(x + 14, baseY - 22, 14, 22);
+    ctx.fillStyle = '#1e7a34';
+    ctx.beginPath(); ctx.moveTo(x + 21, baseY - h); ctx.lineTo(x, baseY - 22); ctx.lineTo(x + 42, baseY - 22); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 21, baseY - h + 18); ctx.lineTo(x + 4, baseY - 32); ctx.lineTo(x + 38, baseY - 32); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(x + 21, baseY - h); ctx.lineTo(x + 12, baseY - h + 12); ctx.lineTo(x + 30, baseY - h + 12); ctx.closePath(); ctx.fill();
+  }
+  function draw() {
+    // Sky and mountains
+    var sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#6ec1f5'); sky.addColorStop(0.6, '#cdeeff'); sky.addColorStop(1, '#ffffff');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#8fa8c8';
+    ctx.beginPath(); ctx.moveTo(0, 300); ctx.lineTo(180, 120); ctx.lineTo(360, 300); ctx.lineTo(540, 100); ctx.lineTo(720, 300); ctx.lineTo(900, 160); ctx.lineTo(900, 340); ctx.lineTo(0, 340); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(180, 120); ctx.lineTo(150, 165); ctx.lineTo(180, 152); ctx.lineTo(210, 165); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(540, 100); ctx.lineTo(510, 148); ctx.lineTo(540, 134); ctx.lineTo(570, 148); ctx.closePath(); ctx.fill();
+    // Slope
+    ctx.fillStyle = '#eef8ff'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#d8ecfa'; ctx.fillRect(0, GROUND, W, 8);
+    ctx.strokeStyle = '#bcd9ef'; ctx.lineWidth = 2;
+    for (var sx = -((time * speed) % 60); sx < W; sx += 60) { ctx.beginPath(); ctx.moveTo(sx, GROUND + 24); ctx.lineTo(sx + 30, GROUND + 52); ctx.stroke(); }
+    // Village flag at far end as distance grows
+    if (distance > 1700) {
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(820, GROUND - 110, 6, 110);
+      ctx.fillStyle = '#ffcf3f'; ctx.beginPath(); ctx.moveTo(826, GROUND - 110); ctx.lineTo(876, GROUND - 96); ctx.lineTo(826, GROUND - 82); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#333'; ctx.font = 'bold 16px Arial'; ctx.fillText('VILLAGE', 800, GROUND - 122);
+    }
+    // Crevasses, trees, rocks, crystals
+    obstacles.forEach(function(o) {
+      if (o.type === 'crevasse') {
+        ctx.fillStyle = '#0b2a4a'; ctx.fillRect(o.x, GROUND, o.w, H - GROUND);
+        ctx.fillStyle = '#7ec8f7'; ctx.fillRect(o.x, GROUND, o.w, 6);
+        ctx.fillStyle = '#bfe8ff'; ctx.font = 'bold 13px Arial'; ctx.fillText('!', o.x + o.w/2 - 4, GROUND + 34);
+      } else if (o.type === 'tree') drawTree(o.x, GROUND, o.h);
+      else { ctx.fillStyle = '#6b7280'; ctx.beginPath(); ctx.moveTo(o.x, GROUND); ctx.lineTo(o.x + 10, GROUND - o.h); ctx.lineTo(o.x + 32, GROUND - o.h - 6); ctx.lineTo(o.x + o.w, GROUND); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#e5e7eb'; ctx.beginPath(); ctx.arc(o.x + 22, GROUND - o.h, 7, 0, Math.PI * 2); ctx.fill(); }
+    });
+    crystals.forEach(function(c) {
+      ctx.save(); ctx.translate(c.x + 14, c.y + 14); ctx.rotate(Math.sin(time * 4 + c.x * 0.01) * 0.3);
+      ctx.fillStyle = '#22d3ee'; ctx.beginPath();
+      ctx.moveTo(0, -16); ctx.lineTo(11, 0); ctx.lineTo(0, 16); ctx.lineTo(-11, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(5, 0); ctx.lineTo(0, 8); ctx.lineTo(-5, 0); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+    // Avalanche wall on the left, sized by avalancheGap
+    var wallW = Math.max(30, 330 - avalancheGap);
+    var grad = ctx.createLinearGradient(0, 0, wallW, 0);
+    grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#cfe8ff');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(wallW, 40); ctx.lineTo(wallW - 30, 180); ctx.lineTo(wallW + 20, 300); ctx.lineTo(wallW - 10, GROUND); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#1e3a5f'; ctx.font = 'bold 15px Arial'; ctx.save(); ctx.translate(18, 220); ctx.rotate(-Math.PI/2); ctx.fillText('AVALANCHE', 0, 0); ctx.restore();
+    // Player skier
+    ctx.save();
+    if (invuln > 0 && Math.floor(time * 12) % 2 === 0) ctx.globalAlpha = 0.45;
+    ctx.translate(player.x, player.y);
+    if (!player.onGround) ctx.rotate(0.15);
+    // Skis
+    ctx.fillStyle = '#e11d48'; ctx.fillRect(-4, player.h - 4, 56, 6);
+    ctx.fillStyle = '#111827'; ctx.fillRect(-4, player.h - 4, 56, 2);
+    // Body: jacket, head, hat
+    ctx.fillStyle = '#2563eb'; ctx.fillRect(12, 12, 22, 26);
+    ctx.fillStyle = '#f59e0b'; ctx.fillRect(10, 20, 26, 6);
+    ctx.fillStyle = '#fde68a'; ctx.beginPath(); ctx.arc(23, 6, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#dc2626'; ctx.fillRect(12, -4, 22, 8);
+    ctx.fillStyle = '#111827'; ctx.fillRect(20, 4, 6, 3);
+    // Poles
+    ctx.strokeStyle = '#111827'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(34, 26); ctx.lineTo(48, 48); ctx.moveTo(12, 26); ctx.lineTo(2, 48); ctx.stroke();
+    ctx.restore();
+    // Particles
+    particles.forEach(function(p){ ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); });
+    // Snowflakes
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    snowflakes.forEach(function(s){ ctx.beginPath(); ctx.arc(s.x, s.y, s.s, 0, Math.PI*2); ctx.fill(); });
+    // Progress bar
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(20, 16, W - 40, 14);
+    ctx.fillStyle = '#22c55e'; ctx.fillRect(20, 16, (W - 40) * Math.min(1, distance / 2000), 14);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.fillText('🏁 Village ' + Math.floor(distance) + ' / 2000 m   •   Avalanche gap: ' + Math.max(0, Math.floor(avalancheGap)) + ' m', 24, 12);
+  }
+
+  var last = 0;
+  function loop(ts) {
+    if (!last) last = ts;
+    var dt = Math.min(0.033, (ts - last) / 1000);
+    last = ts;
+    if (state === 'playing') update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, touch
+  document.addEventListener('keydown', function(e) {
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); ensureAudio(); if (state === 'playing') jump(); }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { if (player) player.tuck = true; }
+    if (e.code === 'Enter' && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function(e) {
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { if (player) player.tuck = false; }
+  });
+  canvas.addEventListener('mousedown', function(e) { e.preventDefault(); ensureAudio(); if (state === 'playing') jump(); });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); ensureAudio(); if (state === 'playing') jump(); }, { passive: false });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
