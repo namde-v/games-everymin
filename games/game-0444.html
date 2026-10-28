@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Harbor Herald</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06121f; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+  h1 { font-size: 28px; letter-spacing: 2px; margin: 10px 0 4px; text-align: center; }
+  p.sub { color: #9fc8e8; font-size: 14px; text-align: center; margin-bottom: 8px; }
+  #wrap { position: relative; width: min(96vw, 880px); }
+  canvas { display: block; width: 100%; height: 520px; background: #071a2e; border: 2px solid #2a6a9e; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; padding: 8px 4px; font-weight: bold; font-size: 15px; }
+  #hud span { background: #0f2a44; padding: 6px 10px; border-radius: 8px; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(3, 14, 26, 0.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay h2 { font-size: 32px; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; color: #d6ecff; }
+  button { margin-top: 14px; padding: 13px 26px; font-size: 18px; font-weight: bold; border: none; border-radius: 10px; background: #ffbf3f; color: #1a1200; cursor: pointer; }
+  button:hover { background: #ffd76a; }
+  button.secondary { background: #2a6a9e; color: #fff; }
+  .keys { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; justify-content: center; }
+  .key { background: #14324f; border: 2px solid #4aa3d8; border-radius: 10px; padding: 10px 14px; min-width: 110px; }
+  .key b { display: block; font-size: 20px; }
+  #feedback { min-height: 26px; font-size: 20px; font-weight: bold; color: #ffe066; }
+  #drums { display: flex; gap: 12px; justify-content: center; margin-top: 10px; }
+  .drum { width: 108px; height: 64px; border-radius: 12px; border: 2px solid #7ec8ff; background: #123a5c; color: #fff; font-weight: bold; cursor: pointer; user-select: none; }
+  .drum.active { background: #ffbf3f; color: #111; transform: scale(1.06); }
+  @media (max-width: 600px) { canvas { height: 430px; } .drum { width: 30%; } }
+</style>
+</head>
+<body>
+<h1>⚓ HARBOR HERALD ⚓</h1>
+<p class="sub">Drum the signal rhythms. Guide every ship safely into harbor.</p>
+<div id="wrap">
+  <div id="hud">
+    <span id="score">Score: 0</span>
+    <span id="lives">Lives: ❤️❤️❤️</span>
+    <span id="level">Ship 1 / 8 &nbsp;•&nbsp; Status: Waiting</span>
+  </div>
+  <canvas id="game" width="880" height="520"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>Harbor Herald</h2>
+    <p><b>How to Play:</b> A lighthouse flashes a signal rhythm for each ship. Watch and listen, then drum the same pattern back before the ship reaches the rocks.</p>
+    <p>Signals use three drums: <b>Low (A / left)</b>, <b>Mid (S / middle)</b>, <b>High (D / right)</b>. Tap the drums, press A / S / D, or use the number keys 1 / 2 / 3.</p>
+    <p>Match the whole pattern to guide the ship home. A wrong drum or a missed signal sends it off course and costs a life. Guide all 8 ships to win.</p>
+    <button id="startBtn">▶ Start Game</button>
+    <div class="keys">
+      <div class="key"><b>🔵 A</b>Low Drum</div>
+      <div class="key"><b>🟢 S</b>Mid Drum</div>
+      <div class="key"><b>🟡 D</b>High Drum</div>
+    </div>
+  </div>
+  <div class="overlay" id="endScreen" style="display:none">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="finalScore"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+  <div id="feedback"></div>
+  <div id="drums">
+    <button class="drum" data-drum="0">🔵 LOW<br>A / 1</button>
+    <button class="drum" data-drum="1">🟢 MID<br>S / 2</button>
+    <button class="drum" data-drum="2">🟡 HIGH<br>D / 3</button>
+  </div>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var feedbackEl = document.getElementById('feedback');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var drumEls = document.querySelectorAll('.drum');
+
+  var audioCtx = null;
+  var state = 'title';
+  var score = 0, lives = 3, shipIndex = 0, totalShips = 8;
+  var pattern = [], playerInput = [], showing = false, showStep = 0, showTimer = 0;
+  var shipX = -80, shipY = 300, shipDrift = 0, flash = -1, flashTimer = 0, messageTimer = 0;
+  var waves = [], stars = [], particles = [];
+  var freqs = [130, 196, 294];
+  var drumNames = ['LOW', 'MID', 'HIGH'];
+  var drumColors = ['#4aa3ff', '#3ddc84', '#ffcf3f'];
+
+  for (var i = 0; i < 60; i++) stars.push({x: Math.random()*880, y: Math.random()*180, r: Math.random()*1.8+0.5, tw: Math.random()*Math.PI*2});
+  for (var w = 0; w < 26; w++) waves.push({x: Math.random()*880, y: 330 + Math.random()*170, s: 0.4 + Math.random()*1.1, p: Math.random()*Math.PI*2});
+
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function playDrum(idx, loud) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freqs[idx], t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, freqs[idx]*0.55), t + 0.28);
+    gain.gain.setValueAtTime(loud ? 0.5 : 0.32, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + 0.35);
+  }
+  function playWin() {
+    if (!audioCtx) return;
+    [0,1,2,1,2].forEach(function(d, i) { setTimeout(function(){ playDrum(d, true); }, i*170); });
+  }
+  function playFail() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime, osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+    osc.type = 'sawtooth'; osc.frequency.setValueAtTime(180, t); osc.frequency.linearRampToValueAtTime(70, t+0.5);
+    g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.55);
+    osc.connect(g); g.connect(audioCtx.destination); osc.start(t); osc.stop(t+0.6);
+  }
+
+  function newPattern() {
+    var len = 3 + Math.floor(shipIndex / 2);
+    if (len > 6) len = 6;
+    pattern = [];
+    for (var i = 0; i < len; i++) pattern.push(Math.floor(Math.random()*3));
+    playerInput = [];
+    showing = true; showStep = 0; showTimer = 40;
+    shipX = -80; shipDrift = 0;
+    setStatus('Watch the lighthouse signal!');
+    feedbackEl.textContent = 'Watch the lighthouse…';
+  }
+  function setStatus(s) { levelEl.textContent = 'Ship ' + (shipIndex+1) + ' / ' + totalShips + '  •  Status: ' + s; }
+  function updateHUD() {
+    scoreEl.textContent = 'Score: ' + score;
+    livesEl.textContent = 'Lives: ' + '❤️'.repeat(Math.max(0,lives));
+    if (state === 'playing') setStatus(showing ? 'Watch the signal' : 'Your turn — drum it back!');
+  }
+  function flashDrum(idx) {
+    flash = idx; flashTimer = 18;
+    drumEls[idx].classList.add('active');
+    setTimeout(function(){ drumEls[idx].classList.remove('active'); }, 260);
+  }
+  function failShip(reason) {
+    lives--; playFail();
+    feedbackEl.textContent = reason;
+    shipDrift = 60;
+    for (var i = 0; i < 24; i++) particles.push({x: shipX+60, y: shipY, vx: (Math.random()-0.5)*4, vy: -Math.random()*3, life: 40});
+    updateHUD();
+    if (lives <= 0) return endGame(false);
+    setTimeout(nextShip, 1100);
+  }
+  function nextShip() {
+    shipIndex++;
+    if (shipIndex >= totalShips) return endGame(true);
+    newPattern(); updateHUD();
+  }
+  function endGame(won) {
+    state = 'over';
+    document.getElementById('endTitle').textContent = won ? '🏆 Harbor Saved!' : '💥 Game Over';
+    document.getElementById('endText').textContent = won
+      ? 'Every ship reached the harbor safely. You are a legendary Harbor Herald!'
+      : 'Too many ships went off course. The harbor needs you to try again.';
+    document.getElementById('finalScore').textContent = 'Final Score: ' + score + '  •  Ships guided home: ' + (won ? totalShips : shipIndex) + ' / ' + totalShips;
+    if (won) playWin();
+    endScreen.style.display = 'flex';
+    updateHUD();
+  }
+  function startGame() {
+    ensureAudio();
+    score = 0; lives = 3; shipIndex = 0;
+    state = 'playing';
+    titleScreen.style.display = 'none';
+    endScreen.style.display = 'none';
+    newPattern(); updateHUD();
+  }
+  function handleDrum(idx) {
+    if (state !== 'playing' || showing) return;
+    ensureAudio(); playDrum(idx, true); flashDrum(idx);
+    playerInput.push(idx);
+    var pos = playerInput.length - 1;
+    if (playerInput[pos] !== pattern[pos]) {
+      feedbackEl.textContent = 'Wrong drum! Expected ' + drumNames[pattern[pos]] + '.';
+      return failShip('Wrong rhythm — the ship veered toward the rocks!');
+    }
+    if (playerInput.length === pattern.length) {
+      var gained = 100 + pattern.length * 40;
+      score += gained;
+      feedbackEl.textContent = 'Perfect signal! +' + gained + ' points — ship is home!';
+      shipX = 760;
+      for (var i = 0; i < 30; i++) particles.push({x: 760, y: 300, vx: (Math.random()-0.5)*5, vy: -Math.random()*4, life: 50});
+      updateHUD();
+      setTimeout(nextShip, 1200);
+    } else {
+      feedbackEl.textContent = 'Good! ' + playerInput.length + ' / ' + pattern.length + ' beats matched.';
+    }
+    updateHUD();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  drumEls.forEach(function(el) {
+    el.addEventListener('click', function(){ handleDrum(parseInt(el.getAttribute('data-drum'), 10)); });
+    el.addEventListener('touchstart', function(e){ e.preventDefault(); handleDrum(parseInt(el.getAttribute('data-drum'), 10)); }, {passive: false});
+  });
+  canvas.addEventListener('click', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / rect.width * 880;
+    var idx = x < 293 ? 0 : (x < 586 ? 1 : 2);
+    handleDrum(idx);
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var t = e.touches[0], rect = canvas.getBoundingClientRect();
+    var x = (t.clientX - rect.left) / rect.width * 880;
+    handleDrum(x < 293 ? 0 : (x < 586 ? 1 : 2));
+  }, {passive: false});
+  document.addEventListener('keydown', function(e) {
+    var k = e.key.toLowerCase();
+    if (k === 'a' || k === '1') handleDrum(0);
+    else if (k === 's' || k === '2') handleDrum(1);
+    else if (k === 'd' || k === '3') handleDrum(2);
+    else if (k === 'enter' && (state === 'title' || state === 'over')) startGame();
+  });
+  document.addEventListener('mousemove', function(){});
+  window.addEventListener('mousedown', function(){});
+
+  function drawLighthouse() {
+    ctx.fillStyle = '#e8e8e8';
+    ctx.fillRect(770, 110, 34, 150);
+    ctx.fillStyle = '#d33'; ctx.fillRect(770, 130, 34, 18); ctx.fillRect(770, 170, 34, 18); ctx.fillRect(770, 210, 34, 18);
+    ctx.fillStyle = '#ffe066';
+    ctx.beginPath(); ctx.arc(787, 100, 18, 0, Math.PI*2); ctx.fill();
+    if (flash >= 0) {
+      ctx.fillStyle = drumColors[flash];
+      ctx.beginPath(); ctx.arc(787, 100, 28, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 0.22; ctx.fillStyle = drumColors[flash];
+      ctx.beginPath(); ctx.moveTo(787, 100); ctx.lineTo(120, 40); ctx.lineTo(120, 190); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = '#222'; ctx.fillRect(775, 78, 24, 12);
+  }
+  function drawShip() {
+    var x = shipX, y = shipY + Math.sin(Date.now()/300)*3 + shipDrift;
+    ctx.fillStyle = '#5b3a1e'; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x+110, y); ctx.lineTo(x+90, y+28); ctx.lineTo(x+20, y+28); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#dfeeff'; ctx.fillRect(x+42, y-52, 26, 52);
+    ctx.fillStyle = '#ffbf3f'; ctx.fillRect(x+42, y-58, 26, 8);
+    ctx.fillStyle = '#ffe066';
+    [x+15, x+55, x+90].forEach(function(px){ ctx.beginPath(); ctx.arc(px, y+8, 6, 0, Math.PI*2); ctx.fill(); });
+  }
+  function draw() {
+    ctx.clearRect(0, 0, 880, 520);
+    var grad = ctx.createLinearGradient(0, 0, 0, 520);
+    grad.addColorStop(0, '#06121f'); grad.addColorStop(0.55, '#0a2a44'); grad.addColorStop(1, '#0b3a5c');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, 880, 520);
+    stars.forEach(function(s){ ctx.globalAlpha = 0.5 + 0.5*Math.sin(Date.now()/700 + s.tw); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#8a5a2b'; ctx.beginPath(); ctx.moveTo(750, 260); ctx.lineTo(880, 260); ctx.lineTo(880, 330); ctx.lineTo(750, 330); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#123'; ctx.fillRect(0, 320, 880, 200);
+    waves.forEach(function(w){ w.x += w.s; if (w.x > 890) w.x = -10; ctx.strokeStyle = 'rgba(120,200,255,0.45)'; ctx.beginPath(); ctx.moveTo(w.x, w.y + Math.sin(Date.now()/500 + w.p)*4); ctx.lineTo(w.x+28, w.y + Math.sin(Date.now()/500 + w.p)*4); ctx.stroke(); });
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial';
+    ctx.fillText('SIGNAL PATTERN:', 20, 36);
+    pattern.forEach(function(d, i){
+      var px = 200 + i*52;
+      ctx.fillStyle = (showing && i < showStep) || (!showing && i < playerInput.length) ? drumColors[d] : '#33506e';
+      ctx.beginPath(); ctx.arc(px, 30, 18, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#06121f'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(drumNames[d][0], px, 36); ctx.textAlign = 'left';
+    });
+    drawLighthouse();
+    drawShip();
+    particles.forEach(function(p){ ctx.fillStyle = '#ffd76a'; ctx.fillRect(p.x, p.y, 5, 5); });
+    ctx.fillStyle = '#cfeaff'; ctx.font = '14px Arial';
+    ctx.fillText('Tap the drums, press A / S / D, or tap the sea to signal.', 20, 500);
+    ctx.fillText('Harbor →', 700, 300);
+  }
+  function loop() {
+    if (flashTimer > 0) { flashTimer--; if (flashTimer === 0) flash = -1; }
+    if (state === 'playing' && showing) {
+      showTimer--;
+      if (showTimer <= 0) {
+        if (showStep < pattern.length) {
+          var d = pattern[showStep];
+          flashDrum(d); playDrum(d, false);
+          showStep++; showTimer = 42;
+        } else { showing = false; setStatus('Your turn — drum it back!'); feedbackEl.textContent = 'Your turn! Drum the pattern back.'; }
+      }
+    }
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    if (state === 'playing' && !showing && shipX < 380) shipX += 0.25;
+    draw();
+    requestAnimationFrame(loop);
+  }
+  updateHUD(); setStatus('Waiting'); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

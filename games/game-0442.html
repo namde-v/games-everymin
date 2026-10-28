@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frost Falcon - Dive-Bomb Fishing</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e2d; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 28px; letter-spacing: 2px; margin: 6px 0 2px; text-shadow: 0 2px 0 #123; }
+  p.tag { color: #9fd8ff; font-size: 14px; margin-bottom: 10px; }
+  #wrap { position: relative; width: 900px; max-width: 98vw; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#7ec8e8, #d9f2ff); border: 4px solid #eaf6ff; border-radius: 12px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; background: #122f44; border: 2px solid #3b6b8a; border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; font-weight: bold; }
+  #hud span { font-size: 15px; }
+  #hud .good { color: #7dff9a; }
+  #hud .warn { color: #ffd166; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(6, 28, 44, 0.88); border-radius: 10px; padding: 24px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 38px; margin-bottom: 8px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; color: #d6ecff; }
+  .overlay .big { font-size: 20px; color: #ffd166; font-weight: bold; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: bold; background: #ffb703; color: #1a2a33; margin-top: 14px; box-shadow: 0 4px 0 #9a6b00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #4ecdc4; box-shadow: 0 4px 0 #1f7a74; }
+  #controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  #controls button { margin-top: 0; padding: 10px 18px; font-size: 15px; }
+  .keys { background: #0f2536; border-radius: 8px; padding: 10px 12px; margin-top: 10px; font-size: 13px; line-height: 1.6; color: #bfe3ff; max-width: 900px; }
+</style>
+</head>
+<body>
+<h1>❄️ FROST FALCON 🦅</h1>
+<p class="tag">Dive-bomb fishing above a frozen lake. Time your dive. Chain your catches.</p>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Fish: <b id="fish">0</b> / 15</span>
+    <span>Combo: <b id="combo" class="good">x1</b></span>
+    <span>Lives: <b id="lives">❤️❤️❤️</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🦅 FROST FALCON</h2>
+    <p class="big">Dive. Snatch. Soar. Don't get clipped by an eagle.</p>
+    <p><b>How to Play:</b> Your falcon circles above a frozen lake. Steer left and right, then dive at exactly the right moment to snatch a fish through an ice hole. A clean catch builds your combo — a missed dive breaks it. Eagles patrol the sky and wind gusts shove you sideways, so watch the sky as well as the ice.</p>
+    <p>🐟 Catch <b>15 fish</b> to win. You have <b>3 lives</b>. Hitting an eagle or diving into solid ice costs a life. Bonus points for combos and for catching the rare golden fish.</p>
+    <p>⌨️ Arrow keys / A D to steer &nbsp;•&nbsp; Space to dive &nbsp;•&nbsp; 🖱️ Move mouse to steer, click to dive &nbsp;•&nbsp; 👆 Drag to steer, tap to dive</p>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<div id="controls">
+  <button id="diveBtn">⬇ DIVE</button>
+  <button id="leftBtn">◀ Left</button>
+  <button id="rightBtn">Right ▶</button>
+  <button id="muteBtn" class="secondary">🔊 Sound: On</button>
+</div>
+<div class="keys">Goal: 15 fish wins. Golden fish = 150 points. Normal fish = 50 points x combo multiplier. Eagle hit = -1 life. Missed dive (solid ice) = combo reset only. Wind gusts push you — correct fast or you will miss the hole.</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var fishEl = document.getElementById('fish');
+  var comboEl = document.getElementById('combo');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  var state = 'title'; // title | playing | over
+  var score = 0, fishCaught = 0, combo = 0, lives = 3;
+  var targetFish = 15;
+  var soundOn = true, audioCtx = null;
+
+  var falcon = { x: 450, y: 130, vx: 0, diving: false, diveY: 0, wing: 0, flash: 0 };
+  var keys = {};
+  var mouseX = null;
+  var holes = [];
+  var eagles = [];
+  var gusts = [];
+  var particles = [];
+  var messages = [];
+  var frame = 0;
+  var lastTime = 0;
+  var gustTimer = 0;
+  var eagleTimer = 0;
+  var wind = 0;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function catchSound() { beep(880, 0.12, 'sine', 0.2); setTimeout(function(){ beep(1320, 0.18, 'sine', 0.2); }, 80); }
+  function missSound() { beep(180, 0.25, 'sawtooth', 0.12); }
+  function hurtSound() { beep(140, 0.4, 'square', 0.18); setTimeout(function(){ beep(90, 0.4, 'square', 0.15); }, 120); }
+  function winSound() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, 'triangle', 0.2); }, i * 140); }); }
+
+  function resetGame() {
+    score = 0; fishCaught = 0; combo = 0; lives = 3;
+    falcon.x = 450; falcon.y = 130; falcon.vx = 0; falcon.diving = false; falcon.flash = 0;
+    holes = []; eagles = []; gusts = []; particles = []; messages = [];
+    wind = 0; frame = 0; gustTimer = 240; eagleTimer = 180;
+    // Seven ice holes spread across the frozen lake
+    for (var i = 0; i < 7; i++) {
+      holes.push({ x: 80 + i * 125, fish: null, timer: 60 + Math.random() * 180, splash: 0 });
+    }
+    updateHUD('Flying — watch the holes!');
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    fishEl.textContent = fishCaught;
+    comboEl.textContent = 'x' + Math.max(1, combo);
+    comboEl.className = combo >= 3 ? 'good' : 'warn';
+    livesEl.textContent = '❤️'.repeat(Math.max(0, lives)) + '🤍'.repeat(Math.max(0, 3 - lives));
+    if (status) statusEl.textContent = status;
+  }
+  function showMessage(text, x, y, color) {
+    messages.push({ text: text, x: x, y: y, life: 90, color: color || '#ffffff' });
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: -Math.random() * 4 - 1, life: 40 + Math.random() * 30, color: color });
+    }
+  }
+  function spawnFish(hole) {
+    var golden = Math.random() < 0.14;
+    hole.fish = { golden: golden, timer: 170 + Math.random() * 140, bob: Math.random() * 6 };
+  }
+  function startDive() {
+    if (state !== 'playing' || falcon.diving) return;
+    initAudio();
+    falcon.diving = true;
+    beep(520, 0.18, 'sine', 0.14);
+    updateHUD('Diving!');
+  }
+  function loseLife(reason) {
+    if (falcon.flash > 0) return;
+    lives--; falcon.flash = 90; combo = 0; hurtSound();
+    burst(falcon.x, falcon.y, '#ff5d5d', 22);
+    showMessage(reason, falcon.x, falcon.y - 30, '#ff8080');
+    updateHUD(reason);
+    if (lives <= 0) endGame(false);
+  }
+  function endGame(won) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endTitle.textContent = '🏆 YOU WIN! Master of the Frozen Lake!';
+      endText.textContent = 'The falcon returns to the cliffs with a full catch. Every dive counted, every combo paid off.';
+      winSound();
+    } else {
+      endTitle.textContent = '💔 Game Over';
+      endText.textContent = 'The falcon is grounded. The lake keeps its fish — for now. Try again and time those dives.';
+    }
+    endScore.textContent = 'Final Score: ' + score + '  •  Fish caught: ' + fishCaught + ' / ' + targetFish + '  •  Best combo: x' + Math.max(1, combo);
+    updateHUD(won ? 'Victory!' : 'Game Over');
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Flying — watch the holes!');
+    beep(660, 0.15, 'triangle', 0.18);
+  }
+
+  function update() {
+    frame++;
+    falcon.wing += 0.35;
+    if (falcon.flash > 0) falcon.flash--;
+    // Steering
+    var speed = 6.2;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) falcon.vx = -speed;
+    else if (keys['ArrowRight'] || keys['d'] || keys['D']) falcon.vx = speed;
+    else if (mouseX !== null && state === 'playing' && !falcon.diving) {
+      var diff = mouseX - falcon.x;
+      falcon.vx = Math.max(-speed, Math.min(speed, diff * 0.12));
+    } else if (!falcon.diving) { falcon.vx *= 0.82; }
+    falcon.x += falcon.vx + wind;
+    if (falcon.x < 30) falcon.x = 30;
+    if (falcon.x > W - 30) falcon.x = W - 30;
+
+    // Wind gusts: build, push, fade
+    gustTimer--;
+    if (gustTimer <= 0) {
+      var dir = Math.random() < 0.5 ? -1 : 1;
+      gusts.push({ x: dir > 0 ? -60 : W + 60, dir: dir, life: 200, strength: 1.4 + Math.random() * 1.2 });
+      gustTimer = 300 + Math.random() * 260;
+      showMessage(dir > 0 ? '💨 Gust from the west!' : '💨 Gust from the east!', W / 2, 90, '#cfeeff');
+    }
+    wind = 0;
+    for (var gi = gusts.length - 1; gi >= 0; gi--) {
+      var g = gusts[gi];
+      g.x += g.dir * 5; g.life--;
+      if (Math.abs(g.x - falcon.x) < 90 && falcon.y < 260) wind += g.dir * g.strength;
+      if (g.life <= 0 || g.x < -120 || g.x > W + 120) gusts.splice(gi, 1);
+    }
+
+    // Fish in holes
+    for (var hi = 0; hi < holes.length; hi++) {
+      var hole = holes[hi];
+      if (hole.splash > 0) hole.splash--;
+      if (!hole.fish) {
+        hole.timer--;
+        if (hole.timer <= 0) spawnFish(hole);
+      } else {
+        hole.fish.timer--; hole.fish.bob += 0.15;
+        if (hole.fish.timer <= 0) hole.fish = null, hole.timer = 80 + Math.random() * 160;
+      }
+    }
+
+    // Eagles patrol
+    eagleTimer--;
+    if (eagleTimer <= 0) {
+      var fromLeft = Math.random() < 0.5;
+      eagles.push({ x: fromLeft ? -50 : W + 50, y: 90 + Math.random() * 130, dir: fromLeft ? 1 : -1, wing: 0 });
+      eagleTimer = 260 + Math.random() * 280;
+    }
+    for (var ei = eagles.length - 1; ei >= 0; ei--) {
+      var e = eagles[ei]; e.x += e.dir * 3.4; e.wing += 0.3;
+      if (e.x < -80 || e.x > W + 80) { eagles.splice(ei, 1); continue; }
+      if (state === 'playing' && falcon.flash <= 0) {
+        var dx = e.x - falcon.x, dy = e.y - falcon.y;
+        if (dx * dx + dy * dy < 2600) { loseLife('Eagle strike!'); }
+      }
+    }
+
+    // Dive physics: plunge, resolve, climb back
+    if (falcon.diving) {
+      falcon.y += 14;
+      if (falcon.y >= 430) {
+        falcon.y = 430;
+        // Resolve at the lake surface
+        var caught = null, holeHit = null;
+        for (var k = 0; k < holes.length; k++) {
+          if (Math.abs(holes[k].x - falcon.x) < 46) { holeHit = holes[k]; break; }
+        }
+        if (holeHit && holeHit.fish) {
+          var f = holeHit.fish;
+          combo++;
+          var pts = (f.golden ? 150 : 50) * Math.max(1, combo);
+          score += pts; fishCaught++;
+          holeHit.fish = null; holeHit.timer = 100 + Math.random() * 160; holeHit.splash = 26;
+          burst(falcon.x, 430, f.golden ? '#ffd166' : '#4ecdc4', 26);
+          showMessage('+' + pts + (f.golden ? ' GOLDEN!' : '') + '  Combo x' + Math.max(1, combo), falcon.x, 390, f.golden ? '#ffd166' : '#7dff9a');
+          catchSound();
+          updateHUD(f.golden ? 'Golden catch!' : 'Caught! Combo x' + Math.max(1, combo));
+          if (fishCaught >= targetFish) { falcon.diving = false; falcon.y = 130; endGame(true); return; }
+        } else if (holeHit) {
+          combo = 0; missSound(); showMessage('Empty hole...', falcon.x, 390, '#cfeeff'); updateHUD('Missed — combo reset');
+        } else {
+          combo = 0; missSound(); burst(falcon.x, 430, '#ffffff', 12);
+          showMessage('Solid ice! Ouch.', falcon.x, 390, '#cfeeff'); updateHUD('Solid ice — combo reset');
+        }
+        falcon.diving = false;
+      }
+    } else {
+      // Gentle circling altitude when flying
+      var targetY = 120 + Math.sin(frame * 0.03) * 22;
+      falcon.y += (targetY - falcon.y) * 0.08;
+    }
+
+    for (var pi = particles.length - 1; pi >= 0; pi--) {
+      var p = particles[pi]; p.x += p.vx; p.y += p.vy; p.vy += 0.18; p.life--;
+      if (p.life <= 0) particles.splice(pi, 1);
+    }
+    for (var mi = messages.length - 1; mi >= 0; mi--) {
+      messages[mi].y -= 0.7; messages[mi].life--;
+      if (messages[mi].life <= 0) messages.splice(mi, 1);
+    }
+  }
+
+  function drawFalcon(x, y, diving, flash) {
+    ctx.save(); ctx.translate(x, y);
+    if (diving) ctx.rotate(0.7);
+    var flap = Math.sin(falcon.wing) * 10;
+    ctx.fillStyle = flash > 0 && Math.floor(frame / 6) % 2 === 0 ? '#ffdddd' : '#5b3a1e';
+    ctx.beginPath(); ctx.moveTo(-34, -flap); ctx.lineTo(-6, 0); ctx.lineTo(-34, flap + 8); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(34, -flap); ctx.lineTo(6, 0); ctx.lineTo(34, flap + 8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#f4f4f4'; ctx.beginPath(); ctx.ellipse(0, 0, 16, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffb703'; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(26, -3); ctx.lineTo(14, 5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(8, -3, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function draw() {
+    // Sky
+    var sky = ctx.createLinearGradient(0, 0, 0, 380);
+    sky.addColorStop(0, '#6fc3ec'); sky.addColorStop(1, '#dff4ff');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, 380);
+    // Sun, clouds, mountains
+    ctx.fillStyle = '#fff3b0'; ctx.beginPath(); ctx.arc(800, 60, 34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    [[120, 70], [300, 50], [560, 80]].forEach(function(c) {
+      ctx.beginPath(); ctx.ellipse(c[0], c[1], 52, 18, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = '#3d5a73'; ctx.beginPath(); ctx.moveTo(0, 380); ctx.lineTo(140, 230); ctx.lineTo(280, 380); ctx.lineTo(430, 250); ctx.lineTo(600, 380); ctx.lineTo(760, 240); ctx.lineTo(900, 380); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    [[140, 230], [430, 250], [760, 240]].forEach(function(p) { ctx.beginPath(); ctx.moveTo(p[0] - 26, p[1] + 26); ctx.lineTo(p[0], p[1]); ctx.lineTo(p[0] + 26, p[1] + 26); ctx.closePath(); ctx.fill(); });
+    // Frozen lake
+    ctx.fillStyle = '#bfe9ff'; ctx.fillRect(0, 380, W, 180);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    for (var s = 0; s < 22; s++) { ctx.fillRect((s * 97) % W, 400 + (s * 37) % 130, 46, 4); }
+    // Holes and fish
+    holes.forEach(function(hole) {
+      ctx.fillStyle = '#0b3a54'; ctx.beginPath(); ctx.ellipse(hole.x, 452, 44, 16, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7fd4ff'; ctx.beginPath(); ctx.ellipse(hole.x, 452, 36, 11, 0, 0, Math.PI * 2); ctx.fill();
+      if (hole.fish) {
+        var fy = 452 + Math.sin(hole.fish.bob) * 3;
+        ctx.fillStyle = hole.fish.golden ? '#ffd166' : '#ff6b6b';
+        ctx.beginPath(); ctx.ellipse(hole.x, fy, 18, 9, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(hole.x - 18, fy); ctx.lineTo(hole.x - 30, fy - 7); ctx.lineTo(hole.x - 30, fy + 7); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(hole.x + 10, fy - 2, 2, 0, Math.PI * 2); ctx.fill();
+        if (hole.fish.golden) { ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.fillText('✦', hole.x - 5, fy - 16); }
+      }
+      if (hole.splash > 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        for (var d = 0; d < 6; d++) ctx.fillRect(hole.x - 30 + d * 12, 430 - Math.random() * 8, 4, 10);
+      }
+    });
+    // Gust ribbons
+    gusts.forEach(function(g) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(g.x - 40, 150); ctx.lineTo(g.x + 40, 150); ctx.moveTo(g.x - 30, 180); ctx.lineTo(g.x + 50, 180); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial'; ctx.fillText(g.dir > 0 ? '→' : '←', g.x - 8, 135);
+    });
+    // Eagles
+    eagles.forEach(function(e) {
+      ctx.save(); ctx.translate(e.x, e.y);
+      var flap = Math.sin(e.wing) * 9;
+      ctx.fillStyle = '#2b2b2b';
+      ctx.beginPath(); ctx.moveTo(-30, -flap); ctx.lineTo(0, 0); ctx.lineTo(-30, flap + 6); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(30, -flap); ctx.lineTo(0, 0); ctx.lineTo(30, flap + 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#f4f4f4'; ctx.beginPath(); ctx.ellipse(0, 0, 13, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    });
+    // Falcon dive line
+    if (falcon.diving) { ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.setLineDash([8, 8]); ctx.beginPath(); ctx.moveTo(falcon.x, falcon.y); ctx.lineTo(falcon.x, 430); ctx.stroke(); ctx.setLineDash([]); }
+    drawFalcon(falcon.x, falcon.y, falcon.diving, falcon.flash);
+    // Particles and messages
+    particles.forEach(function(p) { ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 5, 5); });
+    messages.forEach(function(m) { ctx.fillStyle = m.color; ctx.font = 'bold 17px Arial'; ctx.textAlign = 'center'; ctx.fillText(m.text, m.x, m.y); ctx.textAlign = 'left'; });
+    // Aim hint while flying
+    if (state === 'playing' && !falcon.diving) {
+      ctx.strokeStyle = 'rgba(255,183,3,0.65)'; ctx.setLineDash([5, 6]);
+      ctx.beginPath(); ctx.moveTo(falcon.x, falcon.y + 14); ctx.lineTo(falcon.x, 430); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  function loop(t) {
+    requestAnimationFrame(loop);
+    if (state === 'playing') update();
+    draw();
+  }
+
+  // Controls: keyboard
+  document.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      if (state === 'title') startGame();
+      else if (state === 'over') startGame();
+      else startDive();
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+  // Controls: mouse
+  canvas.addEventListener('mousemove', function(e) {
+    var r = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - r.left) * (W / r.width);
+  });
+  canvas.addEventListener('mousedown', function(e) {
+    e.preventDefault(); initAudio();
+    if (state === 'playing') startDive();
+  });
+  canvas.addEventListener('click', function() { initAudio(); });
+  // Controls: touch
+  var touchStartX = 0, touchStartY = 0, touchStartT = 0, touchMoved = false;
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault(); initAudio();
+    var t = e.touches[0];
+    var r = canvas.getBoundingClientRect();
+    touchStartX = (t.clientX - r.left) * (W / r.width);
+    touchStartY = t.clientY; touchStartT = Date.now(); touchMoved = false;
+    mouseX = touchStartX;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    var r = canvas.getBoundingClientRect();
+    var x = (t.clientX - r.left) * (W / r.width);
+    if (Math.abs(x - touchStartX) > 14) touchMoved = true;
+    mouseX = x;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    if (state === 'playing' && !touchMoved && Date.now() - touchStartT < 400) startDive();
+  }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('diveBtn').addEventListener('click', function() { initAudio(); startDive(); });
+  document.getElementById('leftBtn').addEventListener('click', function() { falcon.x = Math.max(30, falcon.x - 46); mouseX = falcon.x; });
+  document.getElementById('rightBtn').addEventListener('click', function() { falcon.x = Math.min(W - 30, falcon.x + 46); mouseX = falcon.x; });
+  document.getElementById('muteBtn').addEventListener('click', function(e) {
+    soundOn = !soundOn;
+    e.target.textContent = soundOn ? '🔊 Sound: On' : '🔇 Sound: Off';
+    if (soundOn) initAudio();
+  });
+
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

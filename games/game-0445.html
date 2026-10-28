@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Iron Inkmaster</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #14100c; color: #f3e9d2; font-family: Georgia, 'Times New Roman', serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 3px; color: #e8b64c; text-shadow: 0 0 14px rgba(232,182,76,.6); margin: 6px 0 2px; text-align: center; }
+  .sub { color: #b8a888; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 620px; margin-bottom: 8px; }
+  .pill { background: #241d14; border: 1px solid #6b5222; border-radius: 20px; padding: 6px 12px; font-size: 14px; }
+  .pill b { color: #e8b64c; }
+  #wrap { position: relative; width: 100%; max-width: 620px; }
+  canvas { display: block; width: 100%; height: auto; background: #f7ead0; border: 4px solid #6b5222; border-radius: 10px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(20,16,12,.88); border-radius: 10px; text-align: center; padding: 20px; }
+  .overlay h2 { color: #e8b64c; font-size: 28px; letter-spacing: 2px; }
+  .overlay p { max-width: 440px; line-height: 1.55; font-size: 15px; color: #e8ddc4; }
+  button { background: #e8b64c; color: #1a1409; border: none; border-radius: 8px; padding: 12px 26px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffd76a; }
+  button.secondary { background: #3a2f1d; color: #f3e9d2; border: 1px solid #6b5222; }
+  #msg { min-height: 22px; font-size: 14px; color: #ffd76a; text-align: center; margin-top: 8px; }
+  .keys { font-size: 12px; color: #b8a888; text-align: center; margin-top: 4px; max-width: 620px; line-height: 1.5; }
+  .bar { width: 100%; max-width: 620px; height: 14px; background: #241d14; border: 1px solid #6b5222; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
+  #inkbar { height: 100%; width: 100%; background: linear-gradient(90deg, #2b6cb0, #63b3ed); transition: width .2s; }
+</style>
+</head>
+<body>
+<h1>IRON INKMASTER</h1>
+<div class="sub">Trace the ancient glyphs before your ink dries.</div>
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Lives: <b id="lives">3</b></div>
+  <div class="pill">Glyph: <b id="level">1 / 10</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+</div>
+<div class="bar"><div id="inkbar"></div></div>
+<div id="wrap">
+  <canvas id="game" width="620" height="460"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>IRON INKMASTER</h2>
+    <p><b>How to Play:</b> A glowing glyph appears on the parchment. Trace over it as accurately as you can. Drag with your mouse or finger to draw. On a keyboard, move the brush with the Arrow keys and hold Space to lay down ink.</p>
+    <p>Stay close to the glowing line for high accuracy. Shaky, jerky strokes spill ink and drain your inkwell faster. Finish each glyph before the ink dries. You have 3 lives. Complete all 10 glyphs to win.</p>
+    <button id="startBtn">Start</button>
+    <button class="secondary" id="howBtn">How to Play</button>
+    <p id="howText" style="display:none;">Tip: slow, steady strokes beat fast scribbles. Lift and restart a stroke any time by releasing and pressing again. Press R to restart after a game ends.</p>
+  </div>
+  <div class="overlay" id="endScreen" style="display:none;">
+    <h2 id="endTitle">Victory</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<div id="msg"></div>
+<div class="keys">Mouse / touch: drag to trace &nbsp;|&nbsp; Keyboard: Arrow keys move, hold Space to ink &nbsp;|&nbsp; R: restart &nbsp;|&nbsp; Enter: start</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var inkbar = document.getElementById('inkbar');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+
+  // Audio: procedural only, created after user interaction.
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+
+  // Glyphs: each is a list of strokes; each stroke a list of [x,y] points.
+  function glyph(name, strokes) { return { name: name, strokes: strokes }; }
+  var GLYPHS = [
+    glyph('Rune of Dawn', [[[110,330],[180,120],[250,330],[250,120],[320,330]]]),
+    glyph('Twin Peaks', [[[90,320],[190,130],[290,320],[390,130],[490,320]]]),
+    glyph('Iron Spiral', [[[310,230],[400,230],[430,290],[370,350],[250,350],[200,270],[260,190],[350,200]]]),
+    glyph('The Crossing', [[[310,90],[310,370]], [[140,230],[480,230]]]),
+    glyph('Sealed Box', [[[150,130],[470,130],[470,330],[150,330],[150,130]]]),
+    glyph('Star of Five', [[[310,95],[365,230],[500,235],[390,315],[430,440],[310,360],[190,440],[230,315],[120,235],[255,230],[310,95]]]),
+    glyph('Wave Sigil', [[[90,300],[180,180],[270,300],[360,180],[450,300],[530,220]]]),
+    glyph('The Eye', [[[120,230],[310,120],[500,230],[310,340],[120,230]], [[270,230],[350,230]]]),
+    glyph('Broken Arrow', [[[120,340],[300,160],[470,340]], [[300,160],[300,90]]]),
+    glyph('Crown Mark', [[[130,320],[130,170],[230,250],[310,140],[390,250],[490,170],[490,320]]])
+  ];
+
+  var state = 'title'; // title | playing | over | won
+  var level = 0, score = 0, lives = 3;
+  var ink = 100, inkDrain = 0;
+  var brush = { x: 160, y: 340 };
+  var drawing = false, keyInking = false;
+  var trace = [];       // points drawn this attempt
+  var lastPt = null, lastTime = 0, shakiness = 0;
+  var coverage = 0, glyphDone = false, flash = 0, flashMsg = '';
+  var keys = {};
+
+  function currentGlyph() { return GLYPHS[level]; }
+
+  function distToSegment(px, py, ax, ay, bx, by) {
+    var dx = bx - ax, dy = by - ay;
+    var len2 = dx * dx + dy * dy;
+    var t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+    var cx = ax + t * dx, cy = ay + t * dy;
+    return Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+  }
+  function distToGlyph(x, y) {
+    var best = 9999, g = currentGlyph();
+    for (var s = 0; s < g.strokes.length; s++) {
+      var st = g.strokes[s];
+      for (var i = 0; i < st.length - 1; i++) {
+        var d = distToSegment(x, y, st[i][0], st[i][1], st[i + 1][0], st[i + 1][1]);
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+  function glyphLength() {
+    var total = 0, g = currentGlyph();
+    for (var s = 0; s < g.strokes.length; s++) {
+      var st = g.strokes[s];
+      for (var i = 0; i < st.length - 1; i++) {
+        total += Math.hypot(st[i + 1][0] - st[i][0], st[i + 1][1] - st[i][1]);
+      }
+    }
+    return total;
+  }
+  // Coverage: fraction of target length that has a nearby traced point.
+  function computeCoverage() {
+    var g = currentGlyph(), covered = 0, total = 0;
+    for (var s = 0; s < g.strokes.length; s++) {
+      var st = g.strokes[s];
+      for (var i = 0; i < st.length - 1; i++) {
+        var ax = st[i][0], ay = st[i][1], bx = st[i + 1][0], by = st[i + 1][1];
+        var segLen = Math.hypot(bx - ax, by - ay);
+        var steps = Math.max(1, Math.floor(segLen / 8));
+        for (var k = 0; k <= steps; k++) {
+          var t = k / steps, sx = ax + (bx - ax) * t, sy = ay + (by - ay) * t;
+          total++;
+          for (var p = 0; p < trace.length; p++) {
+            if (Math.hypot(trace[p].x - sx, trace[p].y - sy) < 26) { covered++; break; }
+          }
+        }
+      }
+    }
+    return total ? covered / total : 0;
+  }
+  function accuracy() {
+    if (!trace.length) return 0;
+    var sum = 0;
+    for (var i = 0; i < trace.length; i++) sum += distToGlyph(trace[i].x, trace[i].y);
+    var avg = sum / trace.length;
+    return Math.max(0, Math.min(100, 100 - avg * 2.2));
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    levelEl.textContent = (Math.min(level + 1, GLYPHS.length)) + ' / ' + GLYPHS.length;
+    inkbar.style.width = Math.max(0, ink) + '%';
+    statusEl.textContent = state === 'playing' ? currentGlyph().name : (state === 'won' ? 'Victory!' : (state === 'over' ? 'Game Over' : 'Ready'));
+  }
+
+  function startGame() {
+    ensureAudio();
+    level = 0; score = 0; lives = 3;
+    startGlyph();
+    titleScreen.style.display = 'none';
+    endScreen.style.display = 'none';
+    state = 'playing';
+    msgEl.textContent = 'Trace the glowing glyph. Steady strokes save ink.';
+    beep(523, 0.15, 'triangle', 0.15);
+    updateHUD();
+  }
+  function startGlyph() {
+    trace = []; ink = 100; shakiness = 0; glyphDone = false; lastPt = null;
+    brush = { x: currentGlyph().strokes[0][0][0], y: currentGlyph().strokes[0][0][1] };
+    updateHUD();
+  }
+  function failGlyph(reason) {
+    lives--;
+    beep(160, 0.35, 'sawtooth', 0.15);
+    flash = 1; flashMsg = reason;
+    if (lives <= 0) { endGame(false); return; }
+    msgEl.textContent = reason + ' A life is lost. Try this glyph again.';
+    startGlyph();
+    updateHUD();
+  }
+  function completeGlyph() {
+    var acc = Math.round(accuracy());
+    var cov = Math.round(coverage * 100);
+    var pts = Math.round(acc * 2 + cov);
+    if (shakiness > 40) pts = Math.max(10, pts - 40);
+    score += pts;
+    beep(660, 0.12, 'triangle', 0.15);
+    setTimeout(function () { beep(880, 0.2, 'triangle', 0.15); }, 120);
+    msgEl.textContent = 'Glyph sealed! Accuracy ' + acc + '%, coverage ' + cov + '%, +' + pts + ' points.';
+    level++;
+    if (level >= GLYPHS.length) { endGame(true); return; }
+    startGlyph();
+    updateHUD();
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    document.getElementById('endTitle').textContent = won ? 'MASTER INKSMITH!' : 'THE INK HAS DRIED';
+    document.getElementById('endText').textContent = won
+      ? 'You traced all 10 glyphs and finished with ' + score + ' points. The guild welcomes you, Inkmaster.'
+      : 'You ran out of lives with ' + score + ' points. Sharpen your quill and try again.';
+    endScreen.style.display = 'flex';
+    if (won) { beep(523, 0.15, 'triangle', 0.15); setTimeout(function(){ beep(659,0.15,'triangle',0.15); },150); setTimeout(function(){ beep(784,0.3,'triangle',0.15); },300); }
+    updateHUD();
+  }
+
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (evt.touches && evt.touches[0]) ? evt.touches[0].clientX : evt.clientX;
+    var cy = (evt.touches && evt.touches[0]) ? evt.touches[0].clientY : evt.clientY;
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  function addTracePoint(p) {
+    var now = performance.now();
+    if (lastPt) {
+      var dx = p.x - lastPt.x, dy = p.y - lastPt.y;
+      var step = Math.hypot(dx, dy);
+      // Jerk detection: sudden direction changes mark shaky lines.
+      if (lastPt.dx !== undefined) {
+        var dot = (dx * lastPt.dx + dy * lastPt.dy) / (Math.max(0.01, step) * Math.max(0.01, Math.hypot(lastPt.dx, lastPt.dy)));
+        if (dot < 0.2 && step > 2) shakiness += 3;
+      }
+      if (step > 1) trace.push(p);
+      p.dx = dx; p.dy = dy;
+    } else { trace.push(p); }
+    lastPt = p;
+    brush.x = p.x; brush.y = p.y;
+    // Ink cost: distance off the glyph wastes ink, as does shakiness.
+    var off = distToGlyph(p.x, p.y);
+    ink -= (off > 26 ? 0.55 : 0.08) + (shakiness > 40 ? 0.25 : 0);
+    lastTime = now;
+  }
+
+  canvas.addEventListener('mousedown', function (e) { if (state !== 'playing') return; ensureAudio(); drawing = true; lastPt = null; addTracePoint(canvasPos(e)); e.preventDefault(); });
+  canvas.addEventListener('mousemove', function (e) { if (state === 'playing' && drawing) addTracePoint(canvasPos(e)); });
+  window.addEventListener('mouseup', function () { drawing = false; lastPt = null; });
+  canvas.addEventListener('touchstart', function (e) { if (state !== 'playing') return; ensureAudio(); drawing = true; lastPt = null; addTracePoint(canvasPos(e)); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { if (state === 'playing' && drawing) { addTracePoint(canvasPos(e)); e.preventDefault(); } }, { passive: false });
+  canvas.addEventListener('touchend', function () { drawing = false; lastPt = null; });
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === 'Enter' && state === 'title') startGame();
+    if ((e.key === 'r' || e.key === 'R') && (state === 'over' || state === 'won')) startGame();
+    if (e.key === ' ' && state === 'playing') { keyInking = true; e.preventDefault(); }
+  });
+  document.addEventListener('keyup', function (e) {
+    keys[e.key] = false;
+    if (e.key === ' ') { keyInking = false; lastPt = null; }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function () {
+    var t = document.getElementById('howText');
+    t.style.display = t.style.display === 'none' ? 'block' : 'none';
+  });
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    // Keyboard brush movement.
+    var speed = 260 * dt;
+    var moved = false;
+    if (keys['ArrowLeft']) { brush.x -= speed; moved = true; }
+    if (keys['ArrowRight']) { brush.x += speed; moved = true; }
+    if (keys['ArrowUp']) { brush.y -= speed; moved = true; }
+    if (keys['ArrowDown']) { brush.y += speed; moved = true; }
+    brush.x = Math.max(10, Math.min(W - 10, brush.x));
+    brush.y = Math.max(10, Math.min(H - 10, brush.y));
+    if (moved && keyInking) addTracePoint({ x: brush.x, y: brush.y });
+    if (moved && !keyInking) lastPt = null;
+    // Ink slowly dries over time.
+    ink -= dt * 1.6;
+    coverage = computeCoverage();
+    if (coverage >= 0.92 && accuracy() >= 45 && !glyphDone) { glyphDone = true; completeGlyph(); return; }
+    if (ink <= 0) { failGlyph('Your ink dried before the glyph was finished.'); return; }
+    if (flash > 0) flash -= dt * 2;
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Parchment texture lines.
+    ctx.fillStyle = '#f7ead0'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(120,90,40,0.12)'; ctx.lineWidth = 1;
+    for (var y = 40; y < H; y += 44) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    if (state === 'title') {
+      ctx.fillStyle = '#5a4326'; ctx.font = 'bold 26px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('The guild awaits its next Inkmaster...', W / 2, H / 2 - 10);
+      ctx.font = '16px Georgia'; ctx.fillText('Press Start and trace your first glyph.', W / 2, H / 2 + 22);
+      return;
+    }
+    var g = currentGlyph();
+    // Glowing target glyph.
+    ctx.save();
+    ctx.shadowColor = '#e8b64c'; ctx.shadowBlur = 16;
+    ctx.strokeStyle = '#d99a26'; ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.setLineDash([14, 10]);
+    g.strokes.forEach(function (st) {
+      ctx.beginPath(); ctx.moveTo(st[0][0], st[0][1]);
+      for (var i = 1; i < st.length; i++) ctx.lineTo(st[i][0], st[i][1]);
+      ctx.stroke();
+    });
+    ctx.restore();
+    // Player ink trace.
+    ctx.strokeStyle = '#1d2a5a'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    var started = false;
+    trace.forEach(function (p) {
+      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+    // Brush tip.
+    ctx.fillStyle = '#8b1a1a'; ctx.beginPath(); ctx.arc(brush.x, brush.y, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(brush.x - 2, brush.y - 2, 2, 0, Math.PI * 2); ctx.fill();
+    // Labels.
+    ctx.fillStyle = '#5a4326'; ctx.font = 'bold 18px Georgia'; ctx.textAlign = 'left';
+    ctx.fillText(g.name, 16, 30);
+    ctx.textAlign = 'right';
+    ctx.fillText('Coverage: ' + Math.round(coverage * 100) + '%', W - 16, 30);
+    ctx.fillText('Accuracy: ' + Math.round(accuracy()) + '%', W - 16, 54);
+    if (shakiness > 40) { ctx.fillStyle = '#8b1a1a'; ctx.fillText('Shaky! Ink spilling...', W - 16, 78); }
+    if (flash > 0) { ctx.fillStyle = 'rgba(139,26,26,' + (flash * 0.35) + ')'; ctx.fillRect(0, 0, W, H); }
+    if (flashMsg) { ctx.fillStyle = '#8b1a1a'; ctx.textAlign = 'center'; ctx.font = 'bold 18px Georgia'; ctx.fillText(flashMsg, W / 2, H - 16); }
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

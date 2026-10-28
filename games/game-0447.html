@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Lantern Lurker</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; background: #07070d; overflow: hidden; font-family: Georgia, 'Times New Roman', serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 8px; }
+  #hud { display: flex; gap: 18px; align-items: center; color: #f5d67a; font-size: 15px; letter-spacing: 0.5px; flex-wrap: wrap; justify-content: center; padding: 0 10px; }
+  #hud b { color: #fff3c4; }
+  #hud span { background: #14141f; border: 1px solid #3a3247; border-radius: 8px; padding: 5px 10px; }
+  #gameCanvas { background: #0b0b14; border: 2px solid #4a3f2a; border-radius: 10px; max-width: 96vw; max-height: 72vh; touch-action: none; cursor: crosshair; }
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(3,3,8,0.82); z-index: 5; }
+  #panel { background: #171422; border: 2px solid #6b5a2e; border-radius: 14px; padding: 26px 30px; max-width: 560px; width: 92vw; text-align: center; color: #e8e0c8; box-shadow: 0 0 40px rgba(245,214,122,0.15); }
+  #panel h1 { color: #f5d67a; font-size: 42px; letter-spacing: 3px; margin-bottom: 4px; text-shadow: 0 0 18px rgba(245,214,122,0.5); }
+  #panel h2 { color: #f5d67a; font-size: 30px; margin-bottom: 10px; }
+  #panel p { line-height: 1.55; margin: 8px 0; font-size: 15px; }
+  #panel .sub { color: #b8a97e; font-style: italic; }
+  .howto { text-align: left; background: #100e1a; border: 1px solid #38324a; border-radius: 10px; padding: 12px 16px; margin: 14px 0; font-size: 14px; line-height: 1.6; }
+  .howto li { margin-left: 18px; }
+  button { background: #f5d67a; color: #1a1408; border: none; border-radius: 10px; padding: 13px 30px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 12px; font-family: Georgia, serif; }
+  button:hover { background: #ffe89a; transform: scale(1.03); }
+  button:active { transform: scale(0.98); }
+  #hint { color: #8f8aa0; font-size: 12.5px; text-align: center; padding: 0 12px; }
+  kbd { background: #2c2940; border: 1px solid #555; border-bottom-width: 3px; border-radius: 5px; padding: 1px 6px; font-family: inherit; color: #fff; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Lives: <b id="lives">3</b></span>
+    <span>Level: <b id="level">1</b></span>
+    <span>Shadows: <b id="shadows">0</b></span>
+    <span>Status: <b id="status">On the prowl</b></span>
+  </div>
+  <canvas id="gameCanvas" width="720" height="480"></canvas>
+  <div id="hint">Move: WASD / Arrow keys / drag on touch &bull; Douse a lamp: <kbd>Space</kbd> or tap the Douse button &bull; Click / tap the canvas to nudge toward a point</div>
+  <div id="overlay">
+    <div id="panel">
+      <h1>LANTERN LURKER</h1>
+      <p class="sub">A stealth light maze in a sleeping manor.</p>
+      <p>You are the Lurker. Slip through the dark manor, snuff out lamps to carve shadows, dodge the guards' sweeping light cones, gather relics, and reach the vault.</p>
+      <div class="howto">
+        <strong>How to Play</strong>
+        <ul>
+          <li><strong>Move</strong> with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys. On touch, drag to steer; tap the canvas to walk toward a point.</li>
+          <li><strong>Douse lamps:</strong> stand near a glowing lamp and press <kbd>Space</kbd> (or tap DOUSE). Darkness hides you.</li>
+          <li><strong>Stay out of light cones:</strong> guards patrol with sweeping cones. Being caught in a cone costs a life.</li>
+          <li><strong>Collect relics</strong> (golden diamonds) for points, then reach the <strong>vault door</strong> to win the level.</li>
+          <li>Your own lantern glows dimly &mdash; it reveals the maze near you, but guards see you sooner in open light.</li>
+        </ul>
+      </div>
+      <button id="startBtn">Start the Heist</button>
+      <p class="sub" style="margin-top:10px;">Sound is procedural and starts only after you press Start.</p>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('gameCanvas');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var overlay = document.getElementById('overlay');
+  var panel = document.getElementById('panel');
+  var startBtn = document.getElementById('startBtn');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var shadowsEl = document.getElementById('shadows');
+  var statusEl = document.getElementById('status');
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, lives = 3, level = 1, shadowsMade = 0;
+  var keys = {};
+  var target = null; // mouse/touch destination
+  var player = { x: 40, y: 240, r: 11, speed: 2.4 };
+  var relics = [], lamps = [], guards = [], walls = [];
+  var particles = [];
+  var frame = 0, caughtFlash = 0, winFlash = 0;
+  var audioCtx = null, muted = false;
+
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (name === 'relic') { beep(880, 0.15, 'triangle', 0.15); setTimeout(function(){ beep(1320, 0.2, 'triangle', 0.12); }, 80); }
+    else if (name === 'douse') { beep(320, 0.3, 'sawtooth', 0.08); }
+    else if (name === 'caught') { beep(160, 0.4, 'square', 0.15); setTimeout(function(){ beep(110, 0.5, 'square', 0.12); }, 120); }
+    else if (name === 'win') { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.14); }, i * 130); }); }
+    else if (name === 'step') { beep(90, 0.05, 'sine', 0.04); }
+  }
+
+  function buildLevel(lv) {
+    walls = [
+      { x: 0, y: 0, w: W, h: 14 }, { x: 0, y: H - 14, w: W, h: 14 },
+      { x: 0, y: 0, w: 14, h: H }, { x: W - 14, y: 0, w: 14, h: H },
+      { x: 150, y: 60, w: 16, h: 180 }, { x: 150, y: 330, w: 16, h: 90 },
+      { x: 330, y: 90, w: 16, h: 150 }, { x: 330, y: 330, w: 16, h: 90 },
+      { x: 510, y: 60, w: 16, h: 180 }, { x: 510, y: 330, w: 16, h: 90 },
+      { x: 240, y: 220, w: 110, h: 16 }, { x: 420, y: 220, w: 110, h: 16 }
+    ];
+    player.x = 40; player.y = 240; target = null;
+    relics = [
+      { x: 110, y: 90, got: false }, { x: 250, y: 400, got: false },
+      { x: 430, y: 90, got: false }, { x: 600, y: 400, got: false },
+      { x: 250, y: 170, got: false }, { x: 600, y: 170, got: false }
+    ];
+    lamps = [
+      { x: 100, y: 240, on: true, r: 90 }, { x: 260, y: 60, on: true, r: 80 },
+      { x: 260, y: 420, on: true, r: 80 }, { x: 440, y: 240, on: true, r: 90 },
+      { x: 620, y: 60, on: true, r: 80 }, { x: 620, y: 420, on: true, r: 80 }
+    ];
+    var speed = 1.0 + lv * 0.25;
+    guards = [
+      { x: 210, y: 140, dir: 1, range: 130, speed: speed, angle: 0, sweep: 0.02, baseY: 140 },
+      { x: 390, y: 360, dir: -1, range: 150, speed: speed, angle: Math.PI, sweep: 0.025, baseY: 360 },
+      { x: 570, y: 240, dir: 1, range: 140, speed: speed * 0.9, angle: Math.PI / 2, sweep: 0.03, baseY: 240 }
+    ];
+    if (lv >= 2) guards.push({ x: 210, y: 400, dir: 1, range: 130, speed: speed, angle: -Math.PI / 2, sweep: 0.03, baseY: 400 });
+    if (lv >= 3) guards.push({ x: 480, y: 90, dir: -1, range: 140, speed: speed, angle: 0, sweep: 0.035, baseY: 90 });
+  }
+
+  function hitWall(x, y, r) {
+    for (var i = 0; i < walls.length; i++) {
+      var w = walls[i];
+      if (x + r > w.x && x - r < w.x + w.w && y + r > w.y && y - r < w.y + w.h) return true;
+    }
+    return false;
+  }
+  function tryMove(nx, ny) {
+    if (!hitWall(nx, player.y, player.r)) player.x = nx;
+    if (!hitWall(player.x, ny, player.r)) player.y = ny;
+    player.x = Math.max(20, Math.min(W - 20, player.x));
+    player.y = Math.max(20, Math.min(H - 20, player.y));
+  }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  function inCone(g) {
+    var dx = player.x - g.x, dy = player.y - g.y;
+    var d = Math.hypot(dx, dy);
+    if (d > g.range) return false;
+    var ang = Math.atan2(dy, dx);
+    var diff = Math.abs(((ang - g.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    return diff < 0.42;
+  }
+  function playerLit() {
+    for (var i = 0; i < lamps.length; i++) {
+      if (lamps[i].on && dist(player, lamps[i]) < lamps[i].r * 0.85) return true;
+    }
+    return false;
+  }
+
+  function douse() {
+    if (state !== 'playing') return;
+    for (var i = 0; i < lamps.length; i++) {
+      var lamp = lamps[i];
+      if (lamp.on && dist(player, lamp) < 55) {
+        lamp.on = false;
+        shadowsMade++;
+        score += 25;
+        sfx('douse');
+        for (var p = 0; p < 14; p++) particles.push({ x: lamp.x, y: lamp.y, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, life: 30, color: '#8f8aa0' });
+        statusEl.textContent = 'Lamp doused — shadows grow';
+        updateHud();
+        return;
+      }
+    }
+    statusEl.textContent = 'No lamp in reach — get closer';
+  }
+
+  function caught() {
+    lives--;
+    caughtFlash = 25;
+    sfx('caught');
+    updateHud();
+    if (lives <= 0) {
+      state = 'over';
+      showEnd('CAUGHT IN THE LIGHT', 'The manor guards drag you to the cellar. Your lantern gutters out... but every lurker gets another night.', false);
+    } else {
+      statusEl.textContent = 'Spotted! A life slips away';
+      player.x = 40; player.y = 240; target = null;
+    }
+  }
+
+  function showEnd(title, text, won) {
+    overlay.style.display = 'flex';
+    panel.innerHTML = '<h2>' + title + '</h2><p>' + text + '</p>' +
+      '<p>Final Score: <b>' + score + '</b> &nbsp;|&nbsp; Level reached: <b>' + level + '</b> &nbsp;|&nbsp; Shadows made: <b>' + shadowsMade + '</b></p>' +
+      '<button id="restartBtn">Play Again</button>';
+    var rb = document.getElementById('restartBtn');
+    rb.addEventListener('click', function () { startGame(true); });
+    rb.focus();
+  }
+
+  function startGame(resetAll) {
+    if (resetAll) { score = 0; lives = 3; level = 1; shadowsMade = 0; }
+    buildLevel(level);
+    state = 'playing';
+    overlay.style.display = 'none';
+    statusEl.textContent = 'On the prowl';
+    updateHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    levelEl.textContent = level;
+    shadowsEl.textContent = shadowsMade;
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    var dx = 0, dy = 0;
+    if (keys['arrowup'] || keys['w']) dy -= 1;
+    if (keys['arrowdown'] || keys['s']) dy += 1;
+    if (keys['arrowleft'] || keys['a']) dx -= 1;
+    if (keys['arrowright'] || keys['d']) dx += 1;
+    if (dx || dy) {
+      var len = Math.hypot(dx, dy);
+      tryMove(player.x + dx / len * player.speed, player.y + dy / len * player.speed);
+      if (frame % 24 === 0) sfx('step');
+      target = null;
+    } else if (target) {
+      var tx = target.x - player.x, ty = target.y - player.y;
+      var td = Math.hypot(tx, ty);
+      if (td < 6) target = null;
+      else tryMove(player.x + tx / td * player.speed, player.y + ty / td * player.speed);
+    }
+    guards.forEach(function (g) {
+      g.x += g.dir * g.speed * 0.7;
+      if (g.x < 180) g.dir = 1;
+      if (g.x > 660) g.dir = -1;
+      g.angle += g.sweep * (g.dir >= 0 ? 1 : -1);
+      if (g.angle > Math.PI) g.angle -= Math.PI * 2;
+      if (g.angle < -Math.PI) g.angle += Math.PI * 2;
+    });
+    relics.forEach(function (r) {
+      if (!r.got && dist(player, r) < 24) {
+        r.got = true; score += 100; sfx('relic');
+        statusEl.textContent = 'Relic claimed (+100)';
+        for (var p = 0; p < 12; p++) particles.push({ x: r.x, y: r.y, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, life: 25, color: '#f5d67a' });
+      }
+    });
+    particles = particles.filter(function (p) { p.x += p.vx; p.y += p.vy; p.life--; return p.life > 0; });
+    if (caughtFlash > 0) caughtFlash--;
+    if (winFlash > 0) winFlash--;
+    var exposed = playerLit();
+    var seen = false;
+    guards.forEach(function (g) { if (inCone(g)) seen = true; });
+    if (seen && (exposed || dist(player, { x: 0, y: 0 }) >= 0)) {
+      // A guard cone alone only catches you if you are also lit, or very close.
+      var near = false;
+      guards.forEach(function (g) { if (dist(player, g) < 55) near = true; });
+      if (exposed || near) caught();
+    }
+    if (player.x > W - 55 && player.y > H - 110 && player.y < H - 30) {
+      var allGot = relics.every(function (r) { return r.got; });
+      if (allGot) {
+        score += 250; winFlash = 30; sfx('win');
+        if (level >= 3) {
+          state = 'won';
+          showEnd('THE VAULT IS YOURS', 'Three vaults emptied, not a single alarm that stuck. The manor will remember the Lurker.', true);
+        } else {
+          level++;
+          statusEl.textContent = 'Vault breached! Deeper into the manor...';
+          updateHud();
+          buildLevel(level);
+        }
+      } else {
+        statusEl.textContent = 'The vault needs every relic first';
+      }
+    }
+    updateHud();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#12101e';
+    ctx.fillRect(0, 0, W, H);
+    // floor tiles
+    ctx.fillStyle = '#171426';
+    for (var tx = 0; tx < W; tx += 48) for (var ty = 0; ty < H; ty += 48) {
+      if (((tx + ty) / 48) % 2 === 0) ctx.fillRect(tx, ty, 48, 48);
+    }
+    // walls
+    ctx.fillStyle = '#3d3350';
+    walls.forEach(function (w) { ctx.fillRect(w.x, w.y, w.w, w.h); });
+    ctx.fillStyle = '#5a4c72';
+    walls.forEach(function (w) { ctx.fillRect(w.x, w.y, w.w, 4); });
+    // vault door
+    ctx.fillStyle = '#6b5a2e';
+    ctx.fillRect(W - 40, H - 110, 26, 80);
+    ctx.fillStyle = '#f5d67a';
+    ctx.font = 'bold 20px Georgia';
+    ctx.fillText('V', W - 33, H - 62);
+    ctx.font = '11px Georgia';
+    ctx.fillText('VAULT', W - 58, H - 16);
+    // relics
+    relics.forEach(function (r) {
+      if (r.got) return;
+      ctx.save();
+      ctx.translate(r.x, r.y);
+      ctx.rotate(Math.PI / 4 + Math.sin(frame / 20) * 0.2);
+      ctx.fillStyle = '#f5d67a';
+      ctx.shadowColor = '#f5d67a'; ctx.shadowBlur = 14;
+      ctx.fillRect(-8, -8, 16, 16);
+      ctx.restore();
+    });
+    // lamps
+    lamps.forEach(function (lamp) {
+      if (lamp.on) {
+        var grad = ctx.createRadialGradient(lamp.x, lamp.y, 4, lamp.x, lamp.y, lamp.r);
+        grad.addColorStop(0, 'rgba(245,214,122,0.35)');
+        grad.addColorStop(1, 'rgba(245,214,122,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(lamp.x, lamp.y, lamp.r, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = lamp.on ? '#f5d67a' : '#4a4658';
+      ctx.beginPath(); ctx.arc(lamp.x, lamp.y, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#2c2940';
+      ctx.fillRect(lamp.x - 2, lamp.y + 7, 4, 10);
+    });
+    // guard cones
+    guards.forEach(function (g) {
+      ctx.fillStyle = 'rgba(255,120,90,0.18)';
+      ctx.beginPath();
+      ctx.moveTo(g.x, g.y);
+      ctx.arc(g.x, g.y, g.range, g.angle - 0.42, g.angle + 0.42);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#c0392b';
+      ctx.beginPath(); ctx.arc(g.x, g.y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(g.x + Math.cos(g.angle) * 3, g.y + Math.sin(g.angle) * 3, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    // player lantern glow
+    var pg = ctx.createRadialGradient(player.x, player.y, 4, player.x, player.y, 85);
+    pg.addColorStop(0, 'rgba(245,214,122,0.30)');
+    pg.addColorStop(1, 'rgba(245,214,122,0)');
+    ctx.fillStyle = pg;
+    ctx.beginPath(); ctx.arc(player.x, player.y, 85, 0, Math.PI * 2); ctx.fill();
+    // player
+    ctx.fillStyle = '#1f1c33';
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#f5d67a'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#f5d67a';
+    ctx.beginPath(); ctx.arc(player.x, player.y - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+    // particles
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 30);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+      ctx.globalAlpha = 1;
+    });
+    // darkness vignette (not over HUD): dim everything except lantern glow is simulated by overlay
+    ctx.fillStyle = 'rgba(3,3,10,0.25)';
+    ctx.fillRect(0, 0, W, H);
+    if (caughtFlash > 0) {
+      ctx.fillStyle = 'rgba(200,40,30,' + (caughtFlash / 25 * 0.45) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (winFlash > 0) {
+      ctx.fillStyle = 'rgba(245,214,122,' + (winFlash / 30 * 0.35) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (state === 'title') {
+      ctx.fillStyle = '#8f8aa0';
+      ctx.font = '16px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText('The manor sleeps. The lantern is dim. Move quietly.', W / 2, H / 2);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Input: keyboard
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === ' ') { e.preventDefault(); douse(); }
+    if ((k === 'enter') && (state === 'title' || state === 'won' || state === 'over')) {
+      var btn = document.getElementById('startBtn') || document.getElementById('restartBtn');
+      if (btn) btn.click();
+    }
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].indexOf(k) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+  // Input: mouse
+  canvas.addEventListener('mousedown', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    var sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+    target = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    if (e.buttons === 1) {
+      var rect = canvas.getBoundingClientRect();
+      var sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+      target = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+    }
+  });
+  canvas.addEventListener('click', function () { if (state === 'playing') douse(); });
+
+  // Input: touch
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    target = { x: (t.clientX - rect.left) * canvas.width / rect.width, y: (t.clientY - rect.top) * canvas.height / rect.height };
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    target = { x: (t.clientX - rect.left) * canvas.width / rect.width, y: (t.clientY - rect.top) * canvas.height / rect.height };
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); }, { passive: false });
+
+  // Start button (also the user gesture that starts audio)
+  startBtn.addEventListener('click', function () {
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    startGame(true);
+  });
+
+  buildLevel(1);
+  updateHud();
+  loop();
+})();
+</script>
+</body>
+</html>

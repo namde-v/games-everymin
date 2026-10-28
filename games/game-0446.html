@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Juniper Jumper</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1f14; font-family: Verdana, Geneva, sans-serif; }
+  #wrap { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; background: linear-gradient(#7ec8e3, #cfeef7); max-width: 100vw; max-height: 100vh; border: 3px solid #1d4d2b; border-radius: 10px; touch-action: none; }
+  #hud { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; background: rgba(0,0,0,0.55); color: #fff; padding: 8px 16px; border-radius: 20px; font-size: 15px; font-weight: bold; z-index: 5; }
+  #hud span { white-space: nowrap; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(6, 30, 16, 0.82); color: #fff; text-align: center; padding: 20px; z-index: 10; }
+  .screen.hidden { display: none; }
+  .screen h1 { font-size: 46px; color: #ffe066; text-shadow: 3px 3px 0 #1d4d2b; margin-bottom: 8px; }
+  .screen h2 { font-size: 34px; margin-bottom: 10px; }
+  .screen p { max-width: 520px; line-height: 1.6; margin: 6px 0; font-size: 16px; }
+  .screen .tag { color: #a8e6a1; font-weight: bold; }
+  button { margin-top: 18px; padding: 14px 34px; font-size: 20px; font-weight: bold; border: none; border-radius: 12px; background: #ffb703; color: #1d2b1d; cursor: pointer; box-shadow: 0 4px 0 #b97e00; }
+  button:hover { background: #ffd166; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b97e00; }
+  .keys { background: rgba(255,255,255,0.12); border-radius: 10px; padding: 12px 18px; margin-top: 12px; }
+  #msg { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); color: #fff; font-weight: bold; background: rgba(0,0,0,0.5); padding: 6px 14px; border-radius: 12px; font-size: 14px; z-index: 5; min-height: 20px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="800" height="600"></canvas>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Lives: <span id="lives">3</span></span>
+    <span>Height: <span id="height">0</span>m</span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="titleScreen" class="screen">
+    <h1>Juniper Jumper</h1>
+    <p class="tag">Action / Vine Bounce Platformer</p>
+    <p>Bounce on springy juniper vines to climb the great cliff. Time your bounces to spring higher and reach the sunny summit ledge!</p>
+    <div class="keys">
+      <p><strong>How to Play</strong></p>
+      <p>Move: Arrow keys / A &amp; D, or drag with mouse / touch</p>
+      <p>Bounce: land on a vine — press Space, click, or tap just as you land for a SUPER bounce</p>
+      <p>Avoid falling pinecones! Each hit costs a life. Fall off the bottom and you lose a life too.</p>
+      <p>Collect golden juniper berries for bonus points. Reach the summit flag to win!</p>
+    </div>
+    <button id="startBtn">Start Climbing</button>
+  </div>
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p>Final Score: <strong id="finalScore">0</strong></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+  <div id="msg"></div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 800, H = 600;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var heightEl = document.getElementById('height');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+
+  var state = 'title'; // title, playing, won, over
+  var score = 0, lives = 3, bestHeight = 0, bounceStreak = 0;
+  var SUMMIT = 3200; // pixels of climb to win
+  var cameraY = 0;   // world y of top of screen; world y decreases upward
+  var keys = {};
+  var pointerX = null;
+
+  // ---- Procedural audio (created only after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function bounceSound(superB) {
+    if (superB) { beep(520, 0.22, 'triangle', 0.2); setTimeout(function(){ beep(780, 0.2, 'triangle', 0.18); }, 60); }
+    else { beep(300, 0.15, 'sine', 0.18); }
+  }
+
+  // ---- World generation ----
+  var vines = [];   // bounce platforms: {x, y, w, phase}
+  var ledges = [];  // solid resting ledges: {x, y, w}
+  var berries = []; // {x, y, taken}
+  var cones = [];   // falling hazards: {x, y, vy, rot}
+  var particles = [];
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  function buildWorld() {
+    vines = []; ledges = []; berries = []; cones = [];
+    var y = 0; // ground level (world y = 0 at bottom)
+    // Ground vine row
+    vines.push({ x: 350, y: -20, w: 140, phase: 0 });
+    ledges.push({ x: 300, y: -40, w: 200 });
+    for (var i = 1; i < 46; i++) {
+      y = -i * 78;
+      var vx = rand(40, W - 180);
+      vines.push({ x: vx, y: y, w: rand(90, 150), phase: rand(0, 6.28) });
+      if (i % 3 === 0) ledges.push({ x: rand(40, W - 200), y: y - 40, w: rand(110, 170) });
+      if (i % 2 === 0) berries.push({ x: rand(60, W - 60), y: y - 55, taken: false });
+    }
+    // Summit flag ledge
+    ledges.push({ x: 300, y: -SUMMIT - 30, w: 220 });
+    vines.push({ x: 340, y: -SUMMIT + 40, w: 150, phase: 0 });
+  }
+
+  var player = { x: 400, y: -80, vx: 0, vy: 0, w: 34, h: 44, onVine: false, squash: 0, facing: 1 };
+
+  function resetGame() {
+    score = 0; lives = 3; bestHeight = 0; bounceStreak = 0;
+    cameraY = -H; // start so ground is at bottom: world y 0 maps near bottom
+    buildWorld();
+    player.x = 400; player.y = -90; player.vx = 0; player.vy = 0; player.squash = 0;
+    cones = []; particles = [];
+    updateHUD('Climbing!');
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    heightEl.textContent = Math.max(0, Math.floor(bestHeight / 10));
+    if (status) statusEl.textContent = status;
+  }
+
+  function showMsg(t) {
+    msgEl.textContent = t;
+    setTimeout(function(){ if (msgEl.textContent === t) msgEl.textContent = ''; }, 1800);
+  }
+
+  function spawnCone() {
+    var topWorld = cameraY;
+    cones.push({ x: rand(40, W - 40), y: topWorld - 30, vy: rand(2.2, 4.2), rot: rand(0, 6.28), vr: rand(-0.08, 0.08) });
+  }
+
+  function loseLife(reason) {
+    lives--;
+    bounceStreak = 0;
+    beep(140, 0.35, 'sawtooth', 0.2);
+    updateHUD('Ouch!');
+    showMsg(reason);
+    if (lives <= 0) { endGame(false); return; }
+    // Respawn on nearest ledge below current height
+    var py = player.y;
+    var best = null;
+    for (var i = 0; i < ledges.length; i++) {
+      if (ledges[i].y > py && (!best || ledges[i].y < best.y)) best = ledges[i];
+    }
+    if (best) { player.x = best.x + best.w / 2; player.y = best.y - player.h - 2; }
+    else { player.y = -90; player.x = 400; }
+    player.vx = 0; player.vy = -6;
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? 'Summit Reached! You Win!' : 'Game Over';
+    endText.textContent = won
+      ? 'You bounced all the way to the sunny summit! The junipers cheer for you.'
+      : 'The cliff got the better of you this time. Bounce back and try again!';
+    finalScore.textContent = score;
+    updateHUD(won ? 'Winner!' : 'Game Over');
+    if (won) { beep(523, 0.2, 'triangle', 0.2); setTimeout(function(){ beep(659, 0.2, 'triangle', 0.2); }, 150); setTimeout(function(){ beep(784, 0.35, 'triangle', 0.2); }, 300); }
+    endScreen.classList.remove('hidden');
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    updateHUD('Climbing!');
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // ---- Input: keyboard + mouse + touch ----
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'ArrowUp') { e.preventDefault(); tryBounceBoost(); }
+    if ((e.key === 'Enter') && (state === 'title' || state === 'won' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  canvas.addEventListener('mousemove', function (e) {
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    ensureAudio();
+    var r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+    tryBounceBoost();
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio();
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    pointerX = (t.clientX - r.left) * (W / r.width);
+    tryBounceBoost();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    pointerX = (t.clientX - r.left) * (W / r.width);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointerX = null; });
+
+  var boostQueued = false;
+  function tryBounceBoost() {
+    // Pressing near a landing queues a timed super bounce.
+    boostQueued = true;
+    setTimeout(function(){ boostQueued = false; }, 180);
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: rand(-3, 3), vy: rand(-4, 0), life: 26, color: color });
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    var p = player;
+    // Horizontal control
+    var accel = 0.7;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) { p.vx -= accel; p.facing = -1; }
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) { p.vx += accel; p.facing = 1; }
+    if (pointerX !== null) {
+      var dx = pointerX - p.x;
+      if (Math.abs(dx) > 8) p.vx += Math.max(-accel, Math.min(accel, dx * 0.02));
+    }
+    p.vx *= 0.92;
+    p.vx = Math.max(-7, Math.min(7, p.vx));
+    p.x += p.vx;
+    if (p.x < 20) { p.x = 20; p.vx = 0; }
+    if (p.x > W - 20) { p.x = W - 20; p.vx = 0; }
+
+    // Gravity
+    p.vy += 0.45;
+    if (p.vy > 16) p.vy = 16;
+    var prevBottom = p.y + p.h;
+    p.y += p.vy;
+    if (p.squash > 0) p.squash--;
+
+    // Vine bounces (springy: only when falling onto the vine top)
+    if (p.vy >= 0) {
+      for (var i = 0; i < vines.length; i++) {
+        var v = vines[i];
+        var sy = v.y + Math.sin(Date.now() / 300 + v.phase) * 3;
+        if (prevBottom <= sy + 6 && p.y + p.h >= sy && p.x > v.x - 10 && p.x < v.x + v.w + 10) {
+          var superB = boostQueued;
+          p.y = sy - p.h;
+          p.vy = superB ? -19.5 : -14.5;
+          p.squash = 8;
+          bounceStreak++;
+          score += superB ? 25 : 10;
+          bounceSound(superB);
+          burst(p.x, sy, superB ? '#ffd166' : '#7fbf5a', superB ? 16 : 8);
+          if (superB) showMsg('SUPER BOUNCE! +' + 25);
+          boostQueued = false;
+          break;
+        }
+      }
+      // Ledge landings (rest, no bounce)
+      for (var j = 0; j < ledges.length; j++) {
+        var L = ledges[j];
+        if (prevBottom <= L.y + 6 && p.y + p.h >= L.y && p.x > L.x - 10 && p.x < L.x + L.w + 10) {
+          p.y = L.y - p.h;
+          if (p.vy > 6) { p.vy = -4; } else { p.vy = 0; }
+          boostQueued = false;
+          break;
+        }
+      }
+    }
+
+    // Berries
+    for (var b = 0; b < berries.length; b++) {
+      var be = berries[b];
+      if (!be.taken && Math.abs(be.x - p.x) < 30 && Math.abs(be.y - (p.y + p.h / 2)) < 34) {
+        be.taken = true; score += 50; beep(880, 0.12, 'sine', 0.15);
+        burst(be.x, be.y, '#ffd166', 10); showMsg('Berry! +50');
+      }
+    }
+
+    // Height tracking and win check
+    var climbed = -p.y;
+    if (climbed > bestHeight) { bestHeight = climbed; score += 0; }
+    if (p.y <= -SUMMIT) {
+      score += 500;
+      endGame(true);
+      return;
+    }
+
+    // Camera follows player upward, never scrolls back down
+    var targetCam = p.y - H * 0.45;
+    if (targetCam < cameraY) cameraY = targetCam;
+
+    // Pinecones spawn more often higher up
+    var spawnChance = 0.012 + Math.min(0.02, bestHeight / 3200 * 0.02);
+    if (Math.random() < spawnChance && cones.length < 7) spawnCone();
+    for (var c = cones.length - 1; c >= 0; c--) {
+      var cone = cones[c];
+      cone.y += cone.vy; cone.rot += cone.vr;
+      if (Math.abs(cone.x - p.x) < 28 && Math.abs(cone.y - (p.y + p.h / 2)) < 32) {
+        cones.splice(c, 1);
+        burst(p.x, p.y, '#8b5a2b', 12);
+        loseLife('Pinecone bonk! -1 life');
+        if (state !== 'playing') return;
+        continue;
+      }
+      if (cone.y > cameraY + H + 60) cones.splice(c, 1);
+    }
+
+    // Fell below the screen
+    if (p.y > cameraY + H + 40) {
+      loseLife('You slipped off! -1 life');
+      if (state !== 'playing') return;
+      cameraY = Math.min(cameraY, p.y - H * 0.45);
+    }
+
+    // Particles
+    for (var q = particles.length - 1; q >= 0; q--) {
+      var pt = particles[q];
+      pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.15; pt.life--;
+      if (pt.life <= 0) particles.splice(q, 1);
+    }
+
+    updateHUD();
+  }
+
+  function toScreenY(worldY) { return worldY - cameraY; }
+
+  function drawBackground() {
+    // Sky gradient handled by canvas CSS; draw distant cliff bands and sun
+    ctx.fillStyle = '#ffe9a8';
+    ctx.beginPath(); ctx.arc(680, toScreenY(-600), 46, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(90, 140, 90, 0.35)';
+    ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, H * 0.35); ctx.lineTo(180, H * 0.5); ctx.lineTo(120, H); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W, H); ctx.lineTo(W, H * 0.3); ctx.lineTo(W - 170, H * 0.45); ctx.lineTo(W - 110, H); ctx.closePath(); ctx.fill();
+    // Summit flag area marker
+    var fy = toScreenY(-SUMMIT - 30);
+    if (fy > -80 && fy < H + 80) {
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(400, fy - 60, 4, 60);
+      ctx.beginPath(); ctx.moveTo(404, fy - 60); ctx.lineTo(452, fy - 48); ctx.lineTo(404, fy - 34); ctx.closePath(); ctx.fill();
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#a8d8ea';
+    ctx.fillRect(0, 0, W, H);
+    drawBackground();
+    // Vines
+    for (var i = 0; i < vines.length; i++) {
+      var v = vines[i];
+      var sy = toScreenY(v.y + Math.sin(Date.now() / 300 + v.phase) * 3);
+      if (sy < -40 || sy > H + 40) continue;
+      ctx.strokeStyle = '#2d6a2e'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(v.x, sy);
+      for (var x = 0; x <= v.w; x += 12) ctx.lineTo(v.x + x, sy + Math.sin(x / 18) * 5);
+      ctx.stroke();
+      ctx.fillStyle = '#3f8f3f';
+      for (var lx = 8; lx < v.w; lx += 26) {
+        ctx.beginPath(); ctx.ellipse(v.x + lx, sy - 4, 9, 5, -0.4, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    // Ledges
+    for (var j = 0; j < ledges.length; j++) {
+      var L = ledges[j];
+      var ly = toScreenY(L.y);
+      if (ly < -40 || ly > H + 40) continue;
+      ctx.fillStyle = '#8b6b4a'; ctx.fillRect(L.x, ly, L.w, 18);
+      ctx.fillStyle = '#5d8a4a'; ctx.fillRect(L.x, ly, L.w, 7);
+    }
+    // Berries
+    for (var b = 0; b < berries.length; b++) {
+      var be = berries[b];
+      if (be.taken) continue;
+      var by = toScreenY(be.y);
+      if (by < -30 || by > H + 30) continue;
+      ctx.fillStyle = '#ffbf00';
+      ctx.beginPath(); ctx.arc(be.x, by, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff3b0';
+      ctx.beginPath(); ctx.arc(be.x - 3, by - 3, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    // Pinecones
+    for (var c = 0; c < cones.length; c++) {
+      var cone = cones[c];
+      var cy = toScreenY(cone.y);
+      if (cy < -40 || cy > H + 40) continue;
+      ctx.save(); ctx.translate(cone.x, cy); ctx.rotate(cone.rot);
+      ctx.fillStyle = '#7a4a21';
+      ctx.beginPath(); ctx.ellipse(0, 0, 13, 19, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#a9713d';
+      for (var s = -12; s <= 12; s += 8) { ctx.beginPath(); ctx.ellipse(0, s, 11, 4, 0, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    }
+    // Player: a cheerful climber
+    if (state !== 'title') {
+      var py = toScreenY(player.y);
+      var sq = player.squash > 0 ? 1.25 : 1;
+      var pw = player.w * sq, ph = player.h / sq;
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(player.x - pw / 2, py + ph - 14, pw, 14); // jacket
+      ctx.fillStyle = '#ffd9a0';
+      ctx.beginPath(); ctx.arc(player.x, py + ph - 26, 13, 0, Math.PI * 2); ctx.fill(); // head
+      ctx.fillStyle = '#1d4d2b';
+      ctx.beginPath(); ctx.arc(player.x, py + ph - 34, 11, Math.PI, 0); ctx.fill(); // cap
+      ctx.fillStyle = '#222';
+      ctx.fillRect(player.x - 8, py + ph - 24, 3, 3);
+      ctx.fillRect(player.x + 5, py + ph - 24, 3, 3);
+      ctx.fillStyle = '#333';
+      ctx.fillRect(player.x - pw / 2, py + ph, pw, 4); // boots
+    }
+    // Particles (screen coords): particles store world y
+    for (var q2 = 0; q2 < particles.length; q2++) {
+      var pt2 = particles[q2];
+      ctx.globalAlpha = Math.max(0, pt2.life / 26);
+      ctx.fillStyle = pt2.color;
+      ctx.fillRect(pt2.x - 3, toScreenY(pt2.y) - 3, 6, 6);
+      ctx.globalAlpha = 1;
+    }
+    // Progress marker on the side
+    var prog = Math.min(1, bestHeight / SUMMIT);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(W - 26, 60, 12, H - 120);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(W - 26, 60 + (H - 120) * (1 - prog), 12, (H - 120) * prog);
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  resetGame();
+  state = 'title';
+  updateHUD('Ready');
+  loop();
+})();
+</script>
+</body>
+</html>

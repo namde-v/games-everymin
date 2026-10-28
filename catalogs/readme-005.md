@@ -49,9 +49,21 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0439 | Cipher Courier | Puzzle / Code-Breaking Delivery | Arrow Keys/WASD move, mouse/touch click waypoints | [Play](./../games/game-0439.html) |
 | 0440 | Drift Diver | Arcade / Deep-Sea Current Dodging | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0440.html) |
 
+| 0441 | Ember Engineer | Strategy / Furnace Logistics Simulation | Mouse/touch click furnaces, Keys 1/2/3 select, V vent | [Play](./../games/game-0441.html) |
+| 0442 | Frost Falcon | Arcade / Dive-Bomb Fishing | Arrow Keys steer, Space dive, mouse/touch tap dive | [Play](./../games/game-0442.html) |
+| 0443 | Glade Gardener | Puzzle / Pollination Tile Rotation | Mouse/touch tap rotate tiles, Arrow Keys select, Space rotate | [Play](./../games/game-0443.html) |
+| 0444 | Harbor Herald | Rhythm / Signal Drum Timing | Keys 1/2/3 or A/S/D drum, mouse/touch tap drums | [Play](./../games/game-0444.html) |
+| 0445 | Iron Inkmaster | Puzzle / Glyph Tracing Precision | Mouse/touch drag trace, Arrow Keys move pen, Space confirm | [Play](./../games/game-0445.html) |
+| 0446 | Juniper Jumper | Action / Vine Bounce Platformer | Arrow Keys move, Space bounce, mouse/touch tap bounce | [Play](./../games/game-0446.html) |
+| 0447 | Lantern Lurker | Strategy / Stealth Light Maze | Arrow Keys/WASD move, Space douse, mouse/touch click nudge | [Play](./../games/game-0447.html) |
+| 0448 | Marble Miner | Arcade / Rolling Marble Physics | Arrow Keys/WASD steer, mouse/touch drag steer | [Play](./../games/game-0448.html) |
+| 0449 | Nova Nomad | Strategy / Space Trade Route Planning | Mouse/touch click stations to plot route, Space launch | [Play](./../games/game-0449.html) |
+| 0450 | Onyx Oracle | Puzzle / Rune Deduction Logic | Mouse/touch click cells, Arrow Keys select, Space mark | [Play](./../games/game-0450.html) |
+
 ## Batch notes
 
 - Batch 041: 10 games, produced in one cycle (0401–0410). Volume 005 opened at game 0401.
 - Batch 042: 10 games, produced in one cycle (0411–0420).
 - Batch 043: 10 games, produced in one cycle (0421–0430).
 - Batch 044: 10 games, produced in one cycle (0431–0440).
+- Batch 045: 10 games, produced in one cycle (0441–0450).

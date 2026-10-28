@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Marble Miner</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0d0a14; color:#f5e9d0; font-family:Georgia, 'Times New Roman', serif; overflow:hidden; height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  #wrap { position:relative; width:min(96vw, 760px); }
+  h1 { text-align:center; font-size:clamp(26px, 5vw, 44px); letter-spacing:2px; color:#ffd166; text-shadow:0 2px 0 #7a3b00, 0 0 22px rgba(255,209,102,.45); margin-bottom:6px; }
+  #hud { display:flex; justify-content:space-between; align-items:center; background:#241a33; border:2px solid #6b4f2a; border-radius:10px 10px 0 0; padding:8px 12px; font-weight:bold; font-size:15px; }
+  #hud span { margin-right:14px; white-space:nowrap; }
+  #hud .heart { color:#ff5d73; }
+  canvas { display:block; width:100%; height:auto; aspect-ratio:760/520; background:#1a1226; border:2px solid #6b4f2a; border-top:none; border-radius:0 0 10px 10px; touch-action:none; cursor:crosshair; }
+  #overlay { position:absolute; left:0; right:0; top:0; bottom:0; display:flex; align-items:center; justify-content:center; background:rgba(10,6,18,.82); border-radius:10px; z-index:5; }
+  .panel { text-align:center; max-width:560px; padding:24px; }
+  .panel h2 { font-size:32px; color:#ffd166; margin-bottom:10px; }
+  .panel p { line-height:1.55; margin:8px 0; font-size:16px; }
+  .panel .small { font-size:14px; color:#cbb98f; }
+  .gem { color:#7ee8fa; } .pit { color:#ff5d73; } .rock { color:#c9a86a; }
+  button { font-family:inherit; font-size:19px; font-weight:bold; padding:12px 30px; margin:12px 6px 0; border:none; border-radius:999px; background:#ffd166; color:#3a2200; cursor:pointer; box-shadow:0 4px 0 #a66a00; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #a66a00; }
+  button.secondary { background:#3d3355; color:#f5e9d0; box-shadow:0 4px 0 #1d1730; }
+  #howto { display:none; text-align:left; background:#1e1630; border:1px solid #6b4f2a; border-radius:10px; padding:14px 18px; margin-top:14px; font-size:15px; line-height:1.6; }
+  #howto b { color:#ffd166; }
+  #controls { text-align:center; font-size:13px; color:#cbb98f; margin-top:8px; line-height:1.5; }
+  @media (max-width:520px){ #hud{font-size:13px;} #hud span{margin-right:8px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9935; MARBLE MINER &#9935;</h1>
+  <div id="hud">
+    <div><span>&#128142; Gems: <b id="score">0</b>/12</span><span>Level: <b id="level">1</b>/3</span></div>
+    <div><span class="heart" id="lives">&#10084;&#10084;&#10084;</span><span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="760" height="520"></canvas>
+  <div id="overlay">
+    <div class="panel" id="titlePanel">
+      <h2>Marble Miner</h2>
+      <p>Roll your marble through twisting underground tunnels. Momentum is everything &mdash; brake early, swing wide, and let gravity do the work.</p>
+      <p>Collect all <span class="gem">12 gems</span> per level, dodge <span class="pit">bottomless pits</span> and rolling <span class="rock">boulders</span>, then reach the glowing exit shaft.</p>
+      <button id="startBtn">▶ Start Mining</button>
+      <button id="howBtn" class="secondary">How to Play</button>
+      <div id="howto">
+        <b>Steer:</b> Arrow keys / WASD tilt the tunnel &mdash; your marble accelerates in that direction and keeps rolling. Tap Space to brake hard.<br>
+        <b>Mouse:</b> Hold and drag &mdash; the marble rolls toward your pointer.<br>
+        <b>Touch:</b> Drag anywhere to steer; lift your finger to coast.<br>
+        <b>Rules:</b> Falling in a pit or being hit by a boulder costs 1 life. You have 3 lives. Collect every gem to open the exit. Finish all 3 levels to win. Boulders roll downhill and bounce off walls &mdash; use tunnels as shields.
+      </div>
+      <p class="small">Best played with sound on. Audio starts only after you press Start.</p>
+    </div>
+    <div class="panel" id="endPanel" style="display:none;">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn">↻ Play Again</button>
+    </div>
+  </div>
+  <div id="controls">Arrows / WASD steer &nbsp;•&nbsp; Space brake &nbsp;•&nbsp; Mouse drag steer &nbsp;•&nbsp; Touch drag steer &nbsp;•&nbsp; P pause</div>
+</div>
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 760, H = 520;
+  var overlay = document.getElementById('overlay');
+  var titlePanel = document.getElementById('titlePanel');
+  var endPanel = document.getElementById('endPanel');
+  var scoreEl = document.getElementById('score');
+  var levelEl = document.getElementById('level');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+
+  // ---------- Audio (procedural, created only after user gesture) ----------
+  var AC = null, master = null, muted = false;
+  function initAudio(){
+    if (AC) return;
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      master = AC.createGain(); master.gain.value = 0.22; master.connect(AC.destination);
+    } catch(e){ AC = null; }
+  }
+  function tone(freq, dur, type, vol, slide){
+    if (!AC || muted) return;
+    try {
+      var o = AC.createOscillator(), g = AC.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, AC.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, AC.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.3, AC.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + dur);
+      o.connect(g); g.connect(master); o.start(); o.stop(AC.currentTime + dur);
+    } catch(e){}
+  }
+  function sfxGem(){ tone(880, 0.12, 'sine', 0.35); setTimeout(function(){ tone(1320, 0.16, 'sine', 0.3); }, 70); }
+  function sfxHit(){ tone(180, 0.35, 'sawtooth', 0.4, 60); }
+  function sfxWin(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.25, 'triangle', 0.35); }, i*130); }); }
+  function sfxLose(){ [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.22, 'triangle', 0.3); }, i*140); }); }
+
+  // ---------- Levels ----------
+  // Walls are rectangles; pits are circles; gems are points; exit is a rect.
+  function levelData(n){
+    if (n === 1) return {
+      spawn:{x:70,y:70},
+      walls:[ {x:0,y:150,w:560,h:22},{x:200,y:300,w:560,h:22},{x:0,y:430,w:520,h:22},
+              {x:640,y:0,w:22,h:150},{x:90,y:150,w:22,h:150},{x:640,y:300,w:22,h:130} ],
+      pits:[ {x:380,y:250,r:34},{x:560,y:380,r:30},{x:180,y:480,r:30} ],
+      gems:[ {x:480,y:90},{x:650,y:220},{x:300,y:110},{x:160,y:240},{x:420,y:190},
+             {x:250,y:370},{x:500,y:260},{x:700,y:360},{x:120,y:340},{x:620,y:480},
+             {x:330,y:480},{x:700,y:80} ],
+      boulders:[ {x:500,y:200,vx:-1.4,vy:0.8} ],
+      exit:{x:690,y:450,w:56,h:56}
+    };
+    if (n === 2) return {
+      spawn:{x:60,y:460},
+      walls:[ {x:150,y:0,w:22,h:340},{x:150,y:410,w:430,h:22},{x:330,y:110,w:430,h:22},
+              {x:330,y:260,w:22,h:180},{x:580,y:260,w:22,h:180},{x:0,y:330,w:150,h:22} ],
+      pits:[ {x:260,y:200,r:32},{x:470,y:180,r:30},{x:470,y:380,r:34},{x:650,y:90,r:28} ],
+      gems:[ {x:80,y:80},{x:250,y:80},{x:420,y:60},{x:700,y:180},{x:250,y:280},
+             {x:420,y:320},{x:100,y:400},{x:700,y:320},{x:250,y:470},{x:500,y:470},
+             {x:640,y:470},{x:80,y:250} ],
+      boulders:[ {x:400,y:60,vx:1.6,vy:0.6},{x:250,y:400,vx:0.8,vy:-1.2} ],
+      exit:{x:680,y:450,w:56,h:56}
+    };
+    return {
+      spawn:{x:380,y:60},
+      walls:[ {x:0,y:120,w:300,h:22},{x:460,y:120,w:300,h:22},{x:200,y:250,w:360,h:22},
+              {x:0,y:380,w:300,h:22},{x:460,y:380,w:300,h:22},{x:330,y:250,w:22,h:130} ],
+      pits:[ {x:380,y:185,r:30},{x:180,y:320,r:32},{x:580,y:320,r:32},{x:380,y:440,r:30} ],
+      gems:[ {x:80,y:70},{x:680,y:70},{x:150,y:190},{x:610,y:190},{x:80,y:320},
+             {x:680,y:320},{x:150,y:440},{x:610,y:440},{x:380,y:300},{x:250,y:60},
+             {x:520,y:60},{x:380,y:490} ],
+      boulders:[ {x:200,y:180,vx:1.8,vy:0.4},{x:560,y:180,vx:-1.8,vy:0.4},{x:380,y:320,vx:1.2,vy:1.2} ],
+      exit:{x:700,y:460,w:46,h:46}
+    };
+  }
+
+  var state = 'title'; // title | playing | paused | over | won
+  var level = 1, score = 0, lives = 3, totalScore = 0;
+  var lv = null, gemsLeft = [];
+  var marble = { x:70, y:70, vx:0, vy:0, r:16 };
+  var keys = {};
+  var pointer = { active:false, x:0, y:0 };
+  var shake = 0, particles = [], exitOpen = false;
+
+  function loadLevel(n){
+    level = n; lv = levelData(n);
+    gemsLeft = lv.gems.map(function(g){ return {x:g.x, y:g.y, taken:false, bob:Math.random()*6}; });
+    marble.x = lv.spawn.x; marble.y = lv.spawn.y; marble.vx = 0; marble.vy = 0;
+    lv.boulders.forEach(function(b){ b.r = 20; });
+    exitOpen = false; particles = [];
+    scoreEl.textContent = '0'; levelEl.textContent = n;
+    statusEl.textContent = 'Level ' + n + ' — collect gems!';
+  }
+  function updateHUD(){
+    scoreEl.textContent = (12 - gemsLeft.filter(function(g){ return !g.taken; }).length);
+    livesEl.textContent = '\u2764'.repeat(Math.max(0,lives));
+    if (lives <= 1) livesEl.style.color = '#ff2d4d'; else livesEl.style.color = '#ff5d73';
+  }
+  function burst(x, y, color, n){
+    for (var i=0;i<n;i++){
+      particles.push({x:x, y:y, vx:(Math.random()-0.5)*5, vy:(Math.random()-0.5)*5, life:30, color:color});
+    }
+  }
+  function loseLife(reason){
+    lives--; updateHUD(); shake = 14; sfxHit();
+    burst(marble.x, marble.y, '#ff5d73', 18);
+    statusEl.textContent = reason;
+    if (lives <= 0){
+      state = 'over'; sfxLose(); showEnd(false);
+    } else {
+      marble.x = lv.spawn.x; marble.y = lv.spawn.y; marble.vx = 0; marble.vy = 0;
+      setTimeout(function(){ if (state === 'playing') statusEl.textContent = 'Keep rolling!'; }, 1200);
+    }
+  }
+  function showEnd(won){
+    overlay.style.display = 'flex';
+    titlePanel.style.display = 'none'; endPanel.style.display = 'block';
+    document.getElementById('endTitle').textContent = won ? 'You Win! Master Miner!' : 'Game Over';
+    document.getElementById('endText').textContent = won
+      ? 'You cleared all 3 tunnels and banked ' + totalScore + ' gems. The mountain is yours!'
+      : 'The tunnels claimed your marble after ' + totalScore + ' gems. Try again — brake earlier on the curves!';
+    if (won) sfxWin();
+  }
+  function startGame(){
+    initAudio(); if (AC && AC.state === 'suspended') AC.resume();
+    level = 1; lives = 3; totalScore = 0; score = 0;
+    loadLevel(1); updateHUD();
+    overlay.style.display = 'none'; state = 'playing';
+    statusEl.textContent = 'Roll! Collect all gems.';
+  }
+
+  // ---------- Input ----------
+  document.addEventListener('keydown', function(e){
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === ' '){ e.preventDefault(); marble.vx *= 0.55; marble.vy *= 0.55; }
+    if (e.key.toLowerCase() === 'p' && state === 'playing'){ state = 'paused'; statusEl.textContent = 'Paused'; }
+    else if (e.key.toLowerCase() === 'p' && state === 'paused'){ state = 'playing'; statusEl.textContent = 'Rolling!'; }
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(e.key.toLowerCase()) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+  function pointerPos(e){
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches ? e.touches[0].clientX : e.clientX);
+    var cy = (e.touches ? e.touches[0].clientY : e.clientY);
+    return { x:(cx - r.left) * (W / r.width), y:(cy - r.top) * (H / r.height) };
+  }
+  canvas.addEventListener('mousedown', function(e){ pointer.active = true; pointer.x = pointerPos(e).x; pointer.y = pointerPos(e).y; });
+  canvas.addEventListener('mousemove', function(e){ if (pointer.active){ var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; } });
+  document.addEventListener('mouseup', function(){ pointer.active = false; });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); pointer.active = true; var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; }, {passive:false});
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); if (pointer.active){ var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; } }, {passive:false});
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); pointer.active = false; }, {passive:false});
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function(){
+    var h = document.getElementById('howto');
+    h.style.display = (h.style.display === 'block') ? 'none' : 'block';
+  });
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // ---------- Physics ----------
+  function collideWalls(obj){
+    lv.walls.forEach(function(w){
+      var nx = Math.max(w.x, Math.min(obj.x, w.x + w.w));
+      var ny = Math.max(w.y, Math.min(obj.y, w.y + w.h));
+      var dx = obj.x - nx, dy = obj.y - ny, d = Math.sqrt(dx*dx + dy*dy);
+      if (d < obj.r){
+        if (d === 0){ obj.y = w.y - obj.r; obj.vy = -Math.abs(obj.vy) * 0.5; return; }
+        var push = obj.r - d; obj.x += dx/d*push; obj.y += dy/d*push;
+        var dot = obj.vx*dx/d + obj.vy*dy/d;
+        if (dot < 0){ obj.vx -= 1.5*dot*dx/d; obj.vy -= 1.5*dot*dy/d; obj.vx *= 0.82; obj.vy *= 0.82; }
+      }
+    });
+    if (obj.x < obj.r){ obj.x = obj.r; obj.vx = Math.abs(obj.vx)*0.6; }
+    if (obj.x > W - obj.r){ obj.x = W - obj.r; obj.vx = -Math.abs(obj.vx)*0.6; }
+    if (obj.y < obj.r){ obj.y = obj.r; obj.vy = Math.abs(obj.vy)*0.6; }
+    if (obj.y > H - obj.r){ obj.y = H - obj.r; obj.vy = -Math.abs(obj.vy)*0.6; }
+  }
+  function update(){
+    if (state !== 'playing') return;
+    var ax = 0, ay = 0, ACC = 0.28;
+    if (keys['arrowleft'] || keys['a']) ax -= ACC;
+    if (keys['arrowright'] || keys['d']) ax += ACC;
+    if (keys['arrowup'] || keys['w']) ay -= ACC;
+    if (keys['arrowdown'] || keys['s']) ay += ACC;
+    if (pointer.active){
+      var dx = pointer.x - marble.x, dy = pointer.y - marble.y, d = Math.sqrt(dx*dx + dy*dy);
+      if (d > 12){ ax += dx/d*ACC; ay += dy/d*ACC; }
+    }
+    marble.vx += ax; marble.vy += ay;
+    marble.vx *= 0.985; marble.vy *= 0.985; // rolling friction
+    var sp = Math.sqrt(marble.vx*marble.vx + marble.vy*marble.vy);
+    if (sp > 7){ marble.vx *= 7/sp; marble.vy *= 7/sp; }
+    marble.x += marble.vx; marble.y += marble.vy;
+    collideWalls(marble);
+
+    // Gems
+    gemsLeft.forEach(function(g){
+      if (g.taken) return;
+      var dx = marble.x - g.x, dy = marble.y - g.y;
+      if (Math.sqrt(dx*dx + dy*dy) < marble.r + 13){
+        g.taken = true; totalScore++; sfxGem(); burst(g.x, g.y, '#7ee8fa', 12); updateHUD();
+        if (gemsLeft.every(function(x){ return x.taken; })){
+          exitOpen = true; statusEl.textContent = 'Exit open! Roll to the glowing shaft!';
+          tone(660, 0.3, 'triangle', 0.35); setTimeout(function(){ tone(990, 0.3, 'triangle', 0.35); }, 150);
+        }
+      }
+    });
+
+    // Pits
+    lv.pits.forEach(function(p){
+      var dx = marble.x - p.x, dy = marble.y - p.y;
+      if (Math.sqrt(dx*dx + dy*dy) < p.r - 4){ loseLife('Fell into a pit!'); }
+    });
+
+    // Boulders: roll, bounce, chase downhill drift
+    lv.boulders.forEach(function(b){
+      b.x += b.vx; b.y += b.vy;
+      var before = {x:b.x, y:b.y};
+      collideWalls(b);
+      if (b.x !== before.x + b.vx || b.y !== before.y + b.vy){
+        // crude bounce handled by collideWalls velocity flip; add spin drift
+        b.vx += (Math.random()-0.5)*0.05; b.vy += (Math.random()-0.5)*0.05;
+      }
+      var dx = marble.x - b.x, dy = marble.y - b.y, d = Math.sqrt(dx*dx + dy*dy);
+      if (d < marble.r + b.r - 2){ loseLife('Crushed by a boulder!'); }
+    });
+
+    // Exit
+    if (exitOpen){
+      var ex = lv.exit;
+      if (marble.x > ex.x && marble.x < ex.x + ex.w && marble.y > ex.y && marble.y < ex.y + ex.h){
+        burst(marble.x, marble.y, '#ffd166', 20); sfxWin();
+        if (level >= 3){ state = 'won'; showEnd(true); }
+        else { statusEl.textContent = 'Level ' + level + ' clear! Descending...'; loadLevel(level + 1); updateHUD(); }
+      }
+    }
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    if (shake > 0) shake--;
+  }
+
+  // ---------- Draw ----------
+  function draw(){
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+    // tunnel background
+    ctx.fillStyle = '#1a1226'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    for (var i=0;i<40;i++){ ctx.beginPath(); ctx.arc((i*173)%W, (i*97)%H, 2 + (i%3), 0, Math.PI*2); ctx.fill(); }
+    // walls
+    lv && lv.walls.forEach(function(w){
+      ctx.fillStyle = '#4a3520'; ctx.fillRect(w.x, w.y, w.w, w.h);
+      ctx.fillStyle = '#6b4f2a'; ctx.fillRect(w.x, w.y, w.w, 5);
+      ctx.fillStyle = '#2e2013'; ctx.fillRect(w.x, w.y + w.h - 4, w.w, 4);
+    });
+    if (lv){
+      // pits
+      lv.pits.forEach(function(p){
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fillStyle = '#000'; ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.strokeStyle = '#ff5d73'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r*0.55, 0, Math.PI*2); ctx.fillStyle = 'rgba(255,93,115,0.15)'; ctx.fill();
+      });
+      // exit
+      var ex = lv.exit;
+      ctx.fillStyle = exitOpen ? '#ffd166' : '#3a3348';
+      ctx.fillRect(ex.x, ex.y, ex.w, ex.h);
+      ctx.strokeStyle = exitOpen ? '#fff3c4' : '#6b6b8a'; ctx.lineWidth = 3; ctx.strokeRect(ex.x, ex.y, ex.w, ex.h);
+      ctx.fillStyle = exitOpen ? '#3a2200' : '#9a93ad';
+      ctx.font = 'bold 11px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText(exitOpen ? 'EXIT' : 'LOCKED', ex.x + ex.w/2, ex.y + ex.h/2 + 4);
+      // gems
+      gemsLeft.forEach(function(g){
+        if (g.taken) return;
+        var bob = Math.sin(Date.now()/300 + g.bob) * 2;
+        ctx.save(); ctx.translate(g.x, g.y + bob); ctx.rotate(Math.PI/4);
+        ctx.fillStyle = '#7ee8fa'; ctx.fillRect(-8, -8, 16, 16);
+        ctx.fillStyle = '#d9fbff'; ctx.fillRect(-4, -4, 8, 8); ctx.restore();
+      });
+      // boulders
+      lv.boulders.forEach(function(b){
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fillStyle = '#8a6f45'; ctx.fill();
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.strokeStyle = '#5c4526'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.beginPath(); ctx.arc(b.x - 5, b.y - 5, 6, 0, Math.PI*2); ctx.fillStyle = '#c9a86a'; ctx.fill();
+      });
+    }
+    // marble with spin highlight
+    ctx.beginPath(); ctx.arc(marble.x, marble.y, marble.r, 0, Math.PI*2);
+    var grad = ctx.createRadialGradient(marble.x - 5, marble.y - 6, 2, marble.x, marble.y, marble.r);
+    grad.addColorStop(0, '#ffffff'); grad.addColorStop(0.4, '#c86dd7'); grad.addColorStop(1, '#5b1e6e');
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.strokeStyle = '#2a0a35'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(marble.x - 4, marble.y - 5, 4, 0, Math.PI*2); ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+    // particles
+    particles.forEach(function(p){
+      ctx.globalAlpha = Math.max(0, p.life/30); ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4); ctx.globalAlpha = 1;
+    });
+    ctx.restore();
+    if (state === 'paused'){
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 36px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED', W/2, H/2);
+    }
+    if (state === 'title'){
+      ctx.fillStyle = '#cbb98f'; ctx.font = '16px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start Mining to descend into the tunnels.', W/2, H/2);
+    }
+  }
+  function loop(){ update(); draw(); requestAnimationFrame(loop); }
+  loadLevel(1); updateHUD(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

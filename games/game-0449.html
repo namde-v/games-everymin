@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Nova Nomad — Space Trade Route Planning</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #050514; font-family: Verdana, Geneva, sans-serif; color: #e8ecff; }
+  #wrap { position: relative; width: 100%; height: 100%; }
+  canvas { display: block; width: 100%; height: 100%; background: radial-gradient(ellipse at 50% 40%, #141a3d 0%, #050514 70%); touch-action: none; }
+  #hud { position: absolute; top: 0; left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; pointer-events: none; }
+  .pill { background: rgba(10,16,44,.85); border: 1px solid #4d5fc0; border-radius: 999px; padding: 5px 11px; font-size: 13px; }
+  .pill b { color: #ffd75e; }
+  #panel { position: absolute; left: 8px; bottom: 8px; width: min(360px, calc(100% - 16px)); background: rgba(10,16,44,.92); border: 1px solid #4d5fc0; border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+  #panel h3 { font-size: 14px; color: #ffd75e; margin-bottom: 4px; }
+  #log { max-height: 74px; overflow: hidden; color: #cdd4ff; }
+  .contract { border: 1px dashed #6d7de0; border-radius: 8px; padding: 5px 8px; margin-top: 6px; }
+  .contract button, .bigbtn { background: #ffd75e; color: #1a1440; border: none; border-radius: 8px; padding: 7px 13px; font-weight: bold; cursor: pointer; margin-top: 5px; }
+  .contract button:disabled { background: #555; color: #bbb; cursor: default; }
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(3,3,18,.82); text-align: center; padding: 16px; }
+  #overlay .card { max-width: 560px; background: #10173a; border: 2px solid #ffd75e; border-radius: 16px; padding: 24px; }
+  #overlay h1 { font-size: 42px; letter-spacing: 2px; color: #ffd75e; }
+  #overlay h2 { font-size: 20px; margin: 8px 0; color: #9fb2ff; }
+  #overlay p { font-size: 14px; line-height: 1.6; margin: 8px 0; }
+  #overlay .bigbtn { font-size: 18px; padding: 12px 26px; }
+  #howto { display: none; text-align: left; background: rgba(0,0,0,.35); border-radius: 10px; padding: 10px 14px; margin-top: 10px; }
+  #howto li { margin-left: 18px; margin-bottom: 4px; font-size: 13px; }
+  #routeBar { position: absolute; top: 48px; left: 8px; right: 8px; text-align: center; font-size: 13px; pointer-events: none; text-shadow: 1px 1px 2px #000; }
+  #routeBar button { pointer-events: auto; background: #2bd9a8; color: #06251b; border: none; border-radius: 8px; padding: 6px 14px; font-weight: bold; cursor: pointer; margin-left: 8px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="600"></canvas>
+  <div id="hud">
+    <div class="pill">Credits: <b id="credits">500</b></div>
+    <div class="pill">Fuel: <b id="fuel">100</b></div>
+    <div class="pill">Hull: <b id="hull">3</b></div>
+    <div class="pill">Cargo: <b id="cargo">Empty</b></div>
+    <div class="pill">Deliveries: <b id="done">0 / 5</b></div>
+    <div class="pill">Status: <b id="status">Docked</b></div>
+  </div>
+  <div id="routeBar"><span id="routeText">Click stations to plot a route, then Launch.</span><button id="launchBtn">Launch Route</button><button id="clearBtn" style="background:#ff8a7a">Clear</button></div>
+  <div id="panel">
+    <h3>Contracts Board</h3>
+    <div id="contracts"></div>
+    <div id="log"></div>
+  </div>
+  <div id="overlay">
+    <div class="card">
+      <h1>NOVA NOMAD</h1>
+      <h2>Strategy / Space Trade Route Planning</h2>
+      <p>Chart your own course across a pirate-haunted star map. Short hops are safe but thirsty; long direct jumps save fuel but invite pirate ambush. Take contracts, haul cargo, and bank 5,000 credits to win.</p>
+      <button class="bigbtn" id="startBtn">Start</button>
+      <button class="bigbtn" id="howBtn" style="background:#9fb2ff">How to Play</button>
+      <div id="howto">
+        <ul>
+          <li>Click (or tap) stations on the star map to add them to your route. Click again to remove the last stop.</li>
+          <li>Press Launch Route (or Space) to fly. Each jump burns fuel based on distance.</li>
+          <li>Accept a contract, pick up its cargo at the origin station, then deliver it to the destination for credits.</li>
+          <li>Long jumps (over 170 units) risk pirate interception: you lose cargo and 1 hull. Hull 0 or fuel 0 ends the run.</li>
+          <li>Refuel at any station for 2 credits per unit. Keyboard: arrows select a station, Enter adds it, Space launches, R restarts.</li>
+          <li>Win by reaching 5,000 credits or completing 5 deliveries.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = 900, H = 600;
+  var stations = [
+    { id: 0, name: "Sol Gate", x: 110, y: 120, color: "#ffd75e" },
+    { id: 1, name: "Kepler Yard", x: 300, y: 90, color: "#7ee0ff" },
+    { id: 2, name: "Vega Market", x: 520, y: 110, color: "#9dff8a" },
+    { id: 3, name: "Orion Depot", x: 760, y: 150, color: "#ff9ad5" },
+    { id: 4, name: "Dust Hollow", x: 200, y: 320, color: "#ffb066" },
+    { id: 5, name: "Cygnus Port", x: 460, y: 300, color: "#b79cff" },
+    { id: 6, name: "Rigel Forge", x: 700, y: 330, color: "#7ee0ff" },
+    { id: 7, name: "Nova Reach", x: 420, y: 500, color: "#ffd75e" },
+    { id: 8, name: "Eventide", x: 770, y: 500, color: "#9dff8a" }
+  ];
+  var goods = ["Spice", "Ore", "Med-Gel", "Circuits", "Water Ice", "Textiles"];
+  var state = null;
+  var audioCtx = null;
+  var selected = 0;
+  var ship = { x: 110, y: 120 };
+  var travelling = false;
+  var travel = null;
+  var stars = [];
+  for (var i = 0; i < 90; i++) stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.6 + 0.4, tw: Math.random() * 6.28 });
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function logMsg(m) {
+    var el = document.getElementById("log");
+    el.innerHTML = m + "<br>" + el.innerHTML;
+    el.innerHTML = el.innerHTML.split("<br>").slice(0, 4).join("<br>");
+  }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function newContract() {
+    var a = Math.floor(Math.random() * stations.length), b = a;
+    while (b === a) b = Math.floor(Math.random() * stations.length);
+    return { from: a, to: b, good: goods[Math.floor(Math.random() * goods.length)], pay: 400 + Math.floor(Math.random() * 9) * 100, accepted: false, loaded: false };
+  }
+  function reset() {
+    state = { credits: 500, fuel: 100, hull: 3, route: [], current: 0, cargo: null, delivered: 0, contracts: [newContract(), newContract(), newContract()], over: false, won: false };
+    ship = { x: stations[0].x, y: stations[0].y };
+    travelling = false; travel = null;
+    document.getElementById("overlay").style.display = "none";
+    document.getElementById("status").textContent = "Docked at Sol Gate";
+    logMsg("Welcome, Nomad. Plot a route and take a contract.");
+    renderContracts(); updateHUD();
+  }
+  function updateHUD() {
+    document.getElementById("credits").textContent = state.credits;
+    document.getElementById("fuel").textContent = Math.floor(state.fuel);
+    document.getElementById("hull").textContent = state.hull;
+    document.getElementById("cargo").textContent = state.cargo ? state.cargo.good + " -> " + stations[state.cargo.to].name : "Empty";
+    document.getElementById("done").textContent = state.delivered + " / 5";
+  }
+  function renderContracts() {
+    var box = document.getElementById("contracts");
+    box.innerHTML = "";
+    state.contracts.forEach(function (c, idx) {
+      var d = document.createElement("div");
+      d.className = "contract";
+      var label = c.loaded ? "Loaded — deliver to " : (c.accepted ? "Pick up at " : "");
+      var place = c.loaded ? stations[c.to].name : stations[c.from].name;
+      d.innerHTML = label + place + ": " + c.good + " — " + c.pay + " cr" +
+        (c.accepted ? "" : ' <button data-i="' + idx + '">Accept</button>');
+      box.appendChild(d);
+    });
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var c = state.contracts[parseInt(btn.getAttribute("data-i"), 10)];
+        c.accepted = true; beep(660, 0.15, "triangle");
+        logMsg("Contract accepted: " + c.good + " from " + stations[c.from].name + ".");
+        renderContracts();
+      });
+    });
+  }
+  function stationAt(px, py) {
+    for (var i = 0; i < stations.length; i++) {
+      if (Math.hypot(stations[i].x - px, stations[i].y - py) < 30) return i;
+    }
+    return -1;
+  }
+  function addStation(idx) {
+    if (state.over || travelling) return;
+    var last = state.route.length ? state.route[state.route.length - 1] : state.current;
+    if (state.route.length && state.route[state.route.length - 1] === idx) { state.route.pop(); }
+    else if (idx !== last) { state.route.push(idx); beep(520, 0.08, "sine"); }
+    updateRouteText();
+  }
+  function updateRouteText() {
+    var names = state.route.map(function (i) { return stations[i].name; });
+    var cost = 0, prev = state.current;
+    state.route.forEach(function (i) { cost += dist(stations[prev], stations[i]) / 10; prev = i; });
+    document.getElementById("routeText").textContent = state.route.length ?
+      "Route: " + names.join(" -> ") + "  |  Est. fuel: " + Math.ceil(cost) : "Click stations to plot a route, then Launch.";
+  }
+  function launch() {
+    if (state.over || travelling || !state.route.length) return;
+    var prev = state.current, need = 0;
+    state.route.forEach(function (i) { need += dist(stations[prev], stations[i]) / 10; prev = i; });
+    if (need > state.fuel) { logMsg("Not enough fuel for that route. Refuel or shorten it."); beep(160, 0.25, "sawtooth"); return; }
+    travelling = true;
+    travel = { legs: state.route.slice(), leg: 0, t: 0 };
+    document.getElementById("status").textContent = "In transit...";
+    beep(440, 0.2, "triangle");
+  }
+  function arriveAt(idx) {
+    state.current = idx;
+    ship.x = stations[idx].x; ship.y = stations[idx].y;
+    // Refuel offer: auto-refuel to full if affordable, otherwise partial.
+    var missing = 100 - state.fuel;
+    if (missing > 0 && state.credits >= 2) {
+      var buy = Math.min(missing, Math.floor(state.credits / 2));
+      state.fuel += buy; state.credits -= buy * 2;
+      if (buy > 0) logMsg("Refuelled +" + buy + " at " + stations[idx].name + " (" + (buy * 2) + " cr).");
+    }
+    state.contracts.forEach(function (c) {
+      if (c.accepted && !c.loaded && c.from === idx) { c.loaded = true; state.cargo = c; logMsg("Loaded " + c.good + " at " + stations[idx].name + "."); beep(780, 0.15, "triangle"); }
+      if (c.loaded && c.to === idx) {
+        state.credits += c.pay; state.delivered++; state.cargo = null;
+        logMsg("Delivered " + c.good + " to " + stations[idx].name + " for " + c.pay + " cr.");
+        beep(880, 0.25, "triangle");
+        state.contracts[state.contracts.indexOf(c)] = newContract();
+      }
+    });
+    document.getElementById("status").textContent = "Docked at " + stations[idx].name;
+    renderContracts(); updateHUD(); checkEnd();
+  }
+  function checkEnd() {
+    if (state.over) return;
+    if (state.credits >= 5000 || state.delivered >= 5) { endGame(true); }
+    else if (state.fuel <= 0) { logMsg("Out of fuel, stranded in deep space."); endGame(false); }
+    else if (state.hull <= 0) { logMsg("Hull destroyed by pirates."); endGame(false); }
+  }
+  function endGame(won) {
+    state.over = true; state.won = won; travelling = false;
+    var ov = document.getElementById("overlay");
+    ov.style.display = "flex";
+    ov.querySelector(".card").innerHTML =
+      "<h1>" + (won ? "YOU WIN!" : "GAME OVER") + "</h1>" +
+      "<h2>" + (won ? "A legendary trader!" : "The void claims another nomad.") + "</h2>" +
+      "<p>Final credits: <b>" + state.credits + "</b> &nbsp; Deliveries: <b>" + state.delivered + "</b></p>" +
+      '<button class="bigbtn" id="restartBtn">Restart</button>';
+    document.getElementById("restartBtn").addEventListener("click", function () {
+      ov.querySelector(".card").innerHTML = originalCard;
+      bindTitle(); reset();
+    });
+    beep(won ? 1040 : 140, won ? 0.5 : 0.6, won ? "triangle" : "sawtooth");
+  }
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+    var cy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
+    return { x: cx * W / r.width, y: cy * H / r.height };
+  }
+  canvas.addEventListener("click", function (e) {
+    var p = canvasPos(e); var idx = stationAt(p.x, p.y);
+    if (idx >= 0) addStation(idx);
+  });
+  canvas.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    var p = canvasPos(e); var idx = stationAt(p.x, p.y);
+    if (idx >= 0) addStation(idx);
+  }, { passive: false });
+  document.addEventListener("keydown", function (e) {
+    if (state && state.over && (e.key === "r" || e.key === "R")) { location.reload(); return; }
+    if (!state || state.over) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") { selected = (selected + 1) % stations.length; beep(300, 0.05, "sine"); }
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") { selected = (selected + stations.length - 1) % stations.length; beep(300, 0.05, "sine"); }
+    else if (e.key === "Enter") { addStation(selected); }
+    else if (e.key === " ") { e.preventDefault(); launch(); }
+    else if (e.key === "r" || e.key === "R") { reset(); }
+  });
+  document.getElementById("launchBtn").addEventListener("click", launch);
+  document.getElementById("clearBtn").addEventListener("click", function () { if (state && !travelling) { state.route = []; updateRouteText(); } });
+  var originalCard = document.querySelector("#overlay .card").innerHTML;
+  function bindTitle() {
+    document.getElementById("startBtn").addEventListener("click", function () {
+      if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+      if (audioCtx && audioCtx.resume) audioCtx.resume();
+      reset();
+    });
+    document.getElementById("howBtn").addEventListener("click", function () {
+      var h = document.getElementById("howto");
+      h.style.display = h.style.display === "block" ? "none" : "block";
+    });
+  }
+  bindTitle();
+
+  function resize() {
+    canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
+    W = canvas.width; H = canvas.height;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+  // Keep map coordinates stable by drawing in a fixed 900x600 space scaled to canvas.
+  function draw(time) {
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    var sx = canvas.width / 900, sy = canvas.height / 600;
+    ctx.scale(sx, sy);
+    stars.forEach(function (s) {
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(time / 900 + s.tw));
+      ctx.fillStyle = "#cdd4ff"; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.29); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (state) {
+      // Route lines
+      ctx.strokeStyle = "#2bd9a8"; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      var prev = stations[state.current];
+      ctx.moveTo(prev.x, prev.y);
+      state.route.forEach(function (i) { ctx.lineTo(stations[i].x, stations[i].y); });
+      ctx.stroke(); ctx.setLineDash([]);
+      // Pirate danger shading on long legs
+      ctx.strokeStyle = "rgba(255,90,90,.5)"; ctx.lineWidth = 5;
+      prev = stations[state.current];
+      state.route.forEach(function (i) {
+        if (dist(prev, stations[i]) > 170) { ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(stations[i].x, stations[i].y); ctx.stroke(); }
+        prev = stations[i];
+      });
+    }
+    stations.forEach(function (st, i) {
+      ctx.fillStyle = st.color; ctx.beginPath(); ctx.arc(st.x, st.y, 13, 0, 6.29); ctx.fill();
+      ctx.fillStyle = "#050514"; ctx.beginPath(); ctx.arc(st.x, st.y, 7, 0, 6.29); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 12px Verdana"; ctx.textAlign = "center";
+      ctx.fillText(st.name, st.x, st.y + 30);
+      if (i === selected) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(st.x, st.y, 19, 0, 6.29); ctx.stroke(); }
+      if (state && state.current === i) { ctx.strokeStyle = "#ffd75e"; ctx.beginPath(); ctx.arc(st.x, st.y, 22, 0, 6.29); ctx.stroke(); }
+    });
+    // Ship
+    if (state) {
+      ctx.fillStyle = "#2bd9a8"; ctx.beginPath();
+      ctx.moveTo(ship.x, ship.y - 10); ctx.lineTo(ship.x + 7, ship.y + 8); ctx.lineTo(ship.x - 7, ship.y + 8); ctx.closePath(); ctx.fill();
+      if (state.cargo) { ctx.fillStyle = "#ffd75e"; ctx.fillRect(ship.x - 4, ship.y + 10, 8, 5); }
+    }
+    ctx.restore();
+    // Travel animation
+    if (travelling && travel && state) {
+      var from = stations[state.current === travel.legs[travel.leg] ? state.current : (travel.leg === 0 ? state.current : travel.legs[travel.leg - 1])];
+      // Simpler: animate from last arrived station to target leg
+      var origin = travel.leg === 0 ? stations[travel.from || state.current] : stations[travel.legs[travel.leg - 1]];
+      if (travel.leg === 0 && !travel.from) travel.from = state.current;
+      origin = stations[travel.from];
+      var target = stations[travel.legs[travel.leg]];
+      travel.t += 0.02;
+      var d = dist(origin, target);
+      var step = Math.min(1, travel.t * (260 / Math.max(d, 1)));
+      ship.x = origin.x + (target.x - origin.x) * step;
+      ship.y = origin.y + (target.y - origin.y) * step;
+      if (step >= 1) {
+        var fuelCost = d / 10;
+        state.fuel -= fuelCost;
+        var pirate = d > 170 && Math.random() < 0.45;
+        if (pirate) {
+          state.hull -= 1;
+          if (state.cargo) { logMsg("PIRATES! Ambushed on a long jump — cargo seized, hull damaged."); state.cargo = null; state.contracts.forEach(function (c) { if (c.loaded) c.loaded = false; }); }
+          else logMsg("PIRATES! Ambushed on a long jump — hull damaged.");
+          beep(120, 0.4, "sawtooth");
+        }
+        var dest = travel.legs[travel.leg];
+        travel.from = dest;
+        travel.leg++; travel.t = 0;
+        updateHUD();
+        if (travel.leg >= travel.legs.length) {
+          travelling = false; state.route = [];
+          arriveAt(dest); updateRouteText();
+        } else {
+          // keep going: current stays origin until final arrival handling
+          state.current = travel.from === dest ? state.current : state.current;
+        }
+        checkEnd();
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Glade Gardener — Pollination Tile Rotation</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#12261a;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+  .wrap{width:min(680px,100%);background:#1d3a28;border:2px solid #7ec850;border-radius:18px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+  h1{margin:4px 0 2px;text-align:center;font-size:30px;letter-spacing:.5px}
+  .sub{text-align:center;color:#cfe8b8;margin:0 0 12px}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;background:#0f2416;border:1px solid #3f6b35;border-radius:12px;padding:10px 12px;font-weight:700}
+  #hud span{background:#244d2e;padding:5px 10px;border-radius:999px}
+  #boardWrap{position:relative;margin:14px auto;width:min(520px,92vw);aspect-ratio:1/1}
+  canvas{width:100%;height:100%;background:#8bc34a;background:linear-gradient(180deg,#a5d66d,#6aa84f);border-radius:14px;border:3px solid #2e4d22;display:block;touch-action:none}
+  .overlay{position:absolute;inset:0;background:rgba(10,30,15,.92);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px;gap:10px}
+  .overlay.hidden{display:none}
+  .overlay h2{margin:0;font-size:28px}
+  .overlay p{margin:0;line-height:1.55;color:#dcefd0;max-width:460px}
+  button{cursor:pointer;border:0;border-radius:999px;padding:12px 22px;font-size:17px;font-weight:800;background:#ffd54a;color:#243a12;box-shadow:0 4px 0 #b8860b}
+  button:active{transform:translateY(2px);box-shadow:0 2px 0 #b8860b}
+  button.secondary{background:#e8f5e9;color:#1d3a28;box-shadow:0 4px 0 #7fae7f}
+  .controls{text-align:center;color:#d7ecc6;font-size:14px;line-height:1.6}
+  kbd{background:#fff;color:#222;padding:1px 6px;border-radius:5px;font-weight:700}
+  .legend{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;font-size:13px;color:#d7ecc6}
+  #msg{min-height:22px;text-align:center;font-weight:700;color:#ffe082}
+  #selected{font-size:13px;text-align:center;color:#cfe8b8}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🌻 Glade Gardener 🐝</h1>
+  <p class="sub">Rotate garden tiles to guide bees from the hive to every flower before sunset.</p>
+  <div id="hud" aria-live="polite">
+    <span>Score: <b id="score">0</b></span>
+    <span>Round: <b id="round">1</b> / 3</span>
+    <span>Blooms: <b id="blooms">0</b> / 3</span>
+    <span>Lives: <b id="lives">❤❤❤</b></span>
+    <span>Sunset: <b id="time">120</b>s</span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="boardWrap">
+    <canvas id="cv" width="520" height="520"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>🌻 Glade Gardener 🐝</h2>
+      <p><b>How to Play:</b> Each tile shows a garden path. Tap, click, or use arrow keys + <kbd>Space</kbd> / <kbd>R</kbd> to rotate the selected tile. Connect a continuous blooming path from the hive 🏡 to every flower 🌸. Bloomed flowers stay open. Finish all 3 rounds before the sunset timer runs out!</p>
+      <p>Wrong-tile penalty: rotating a tile that breaks a bloomed path costs one life. You have 3 lives.</p>
+      <button id="startBtn" type="button">▶ Start Gardening</button>
+      <p class="controls">Mouse / Touch: tap a tile to rotate it &nbsp;•&nbsp; Keyboard: arrows move, <kbd>R</kbd> rotates, <kbd>Enter</kbd> starts</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn" type="button">↻ Play Again Instantly</button>
+    </div>
+  </div>
+  <p id="msg">Tap Start, then rotate tiles to grow the bee path.</p>
+  <p id="selected">Selected tile: row 2, column 2 — press R or tap a tile to rotate.</p>
+  <div class="legend"><span>🏡 Hive = bee start</span><span>🌸 Flower = goal</span><span>🌿 Path = connection</span><span>🌼 Bloomed = complete</span></div>
+  <p class="controls">Controls: Click / Tap a tile • Arrow keys to move selection • <kbd>R</kbd> or <kbd>Space</kbd> to rotate • <kbd>Enter</kbd> to start / restart</p>
+</div>
+<script>
+(function(){
+  "use strict";
+  var cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+  var scoreEl=document.getElementById("score"), roundEl=document.getElementById("round"),
+      bloomsEl=document.getElementById("blooms"), livesEl=document.getElementById("lives"),
+      timeEl=document.getElementById("time"), statusEl=document.getElementById("status"),
+      msgEl=document.getElementById("msg"), selEl=document.getElementById("selected"),
+      titleScreen=document.getElementById("titleScreen"), endScreen=document.getElementById("endScreen"),
+      endTitle=document.getElementById("endTitle"), endText=document.getElementById("endText");
+  var SIZE=5, CELL=104, audioCtx=null, audioOn=false;
+  var score=0, lives=3, round=1, timeLeft=120, running=false, gameOver=false, won=false;
+  var sel={r:2,c:2}, lastTime=0, beeT=0, sunT=0;
+  // Directions: 0=N 1=E 2=S 3=W ; tile connections as arrays
+  var TILE_TYPES={
+    straight:[0,2], corner:[0,1], tee:[0,1,2], cross:[0,1,2,3], elbow2:[1,2], bend:[2,3]
+  };
+  // Levels: hive position, flower positions, and a solvable base layout (tile keys)
+  var LEVELS=[
+    {hive:{r:2,c:0}, flowers:[{r:0,c:4},{r:4,c:4},{r:2,c:4}],
+     base:[["cross","straight","corner","tee","corner"],["tee","corner","straight","corner","straight"],["cross","tee","cross","tee","flower"],["corner","straight","tee","corner","straight"],["straight","corner","tee","straight","corner"]]},
+    {hive:{r:0,c:0}, flowers:[{r:4,c:2},{r:2,c:4},{r:4,c:4}],
+     base:[["cross","tee","corner","straight","corner"],["straight","corner","tee","straight","tee"],["tee","straight","cross","corner","flower"],["corner","tee","straight","tee","straight"],["straight","corner","flower","corner","flower"]]},
+    {hive:{r:4,c:0}, flowers:[{r:0,c:2},{r:0,c:4},{r:3,c:4}],
+     base:[["straight","corner","flower","tee","flower"],["tee","straight","corner","straight","straight"],["corner","tee","cross","corner","tee"],["straight","corner","straight","tee","flower"],["cross","tee","straight","corner","straight"]]}
+  ];
+  var grid=[], bloomed={};
+  function rotConn(key, rot){
+    if(key==="flower"||key==="hive") return [0,1,2,3];
+    var base=TILE_TYPES[key]||[0,2];
+    return base.map(function(d){return (d+rot)%4;});
+  }
+  function buildLevel(n){
+    var L=LEVELS[n-1], i,j;
+    grid=[];
+    for(i=0;i<SIZE;i++){
+      grid[i]=[];
+      for(j=0;j<SIZE;j++){
+        var key=L.base[i][j];
+        if(i===L.hive.r && j===L.hive.c) key="hive";
+        if(L.flowers.some(function(f){return f.r===i&&f.c===j;})) key="flower";
+        // Random rotation, but keep it solvable by rotation alone: any rotation can be undone
+        grid[i][j]={key:key, rot:Math.floor(Math.random()*4), flower:false, hive:false};
+      }
+    }
+    L.flowers.forEach(function(f){grid[f.r][f.c].flower=true;});
+    grid[L.hive.r][L.hive.c].hive=true;
+    bloomed={};
+    bloomsEl.textContent="0 / "+L.flowers.length;
+    sel={r:2,c:2};
+  }
+  function dirsOf(cell){ return rotConn(cell.key, cell.rot); }
+  function hasDir(cell,d){ return dirsOf(cell).indexOf(d)>=0; }
+  function opp(d){ return (d+2)%4; }
+  function inB(r,c){ return r>=0&&r<SIZE&&c>=0&&c<SIZE; }
+  function neighbour(r,c,d){
+    var dr=[-1,0,1,0][d], dc=[0,1,0,-1][d];
+    return {r:r+dr,c:c+dc};
+  }
+  function connectedFlowers(){
+    var L=LEVELS[round-1], start=L.hive, seen={}, q=[start], out=[];
+    seen[start.r+","+start.c]=true;
+    while(q.length){
+      var cur=q.shift(), cell=grid[cur.r][cur.c];
+      [0,1,2,3].forEach(function(d){
+        if(!hasDir(cell,d)) return;
+        var nb=neighbour(cur.r,cur.c,d);
+        if(!inB(nb.r,nb.c)) return;
+        if(!hasDir(grid[nb.r][nb.c], opp(d))) return;
+        var k=nb.r+","+nb.c;
+        if(!seen[k]){seen[k]=true;q.push(nb);}
+      });
+    }
+    L.flowers.forEach(function(f){
+      if(seen[f.r+","+f.c]) out.push(f.r+","+f.c);
+    });
+    return out;
+  }
+  function checkBlooms(penalize){
+    var before=Object.keys(bloomed).length;
+    var now=connectedFlowers();
+    now.forEach(function(k){
+      if(!bloomed[k]){
+        bloomed[k]=true; score+=100; playTone(660,0.12); playTone(880,0.16);
+        msgEl.textContent="🌼 A flower bloomed! Bees found the path.";
+      }
+    });
+    var after=Object.keys(bloomed).length;
+    if(penalize && after<before){
+      lives--; playTone(180,0.25);
+      msgEl.textContent="🥀 That rotation broke a bloomed path! Life lost.";
+      if(lives<=0){ endGame(false); return; }
+    }
+    bloomsEl.textContent=after+" / "+LEVELS[round-1].flowers.length;
+    scoreEl.textContent=score;
+    livesEl.textContent="❤".repeat(Math.max(lives,0)) || "—";
+    if(after>=LEVELS[round-1].flowers.length){
+      score+=250; playTone(523,0.12); playTone(659,0.12); playTone(784,0.22);
+      if(round>=3){ endGame(true); }
+      else{
+        round++; roundEl.textContent=round; timeLeft+=30;
+        msgEl.textContent="🌻 Round complete! +250 bonus and +30s. Next garden awaits.";
+        buildLevel(round); draw();
+      }
+    }
+  }
+  function endGame(win){
+    running=false; gameOver=true; won=win;
+    statusEl.textContent=win?"Victory!":"Game Over";
+    endTitle.textContent=win?"🌻 You Win! The Glade Blooms! 🌻":"🌙 Game Over — Sunset Arrived";
+    endText.textContent=win
+      ? "All flowers bloomed in every garden! Final score: "+score+". The bees thank you, gardener."
+      : "The sun set before every flower bloomed. Final score: "+score+". Try again — the garden regrows instantly.";
+    endScreen.classList.remove("hidden");
+    if(win) playTone(784,0.2);
+  }
+  function startGame(){
+    ensureAudio();
+    score=0; lives=3; round=1; timeLeft=120; gameOver=false; won=false; running=true;
+    roundEl.textContent=round; scoreEl.textContent=score; livesEl.textContent="❤❤❤"; timeEl.textContent=timeLeft;
+    statusEl.textContent="Gardening"; msgEl.textContent="Rotate tiles to connect the hive to all flowers!";
+    titleScreen.classList.add("hidden"); endScreen.classList.add("hidden");
+    buildLevel(1); draw(); lastTime=performance.now();
+  }
+  function ensureAudio(){
+    try{
+      if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state==="suspended") audioCtx.resume();
+      audioOn=true;
+    }catch(e){ audioOn=false; }
+  }
+  function playTone(freq,dur){
+    if(!audioOn||!audioCtx) return;
+    try{
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type="sine"; o.frequency.value=freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function rotateAt(r,c){
+    if(!running||gameOver) return;
+    ensureAudio();
+    var cell=grid[r][c];
+    if(cell.hive||cell.flower){ msgEl.textContent="That tile is fixed — rotate the garden paths around it."; playTone(220,0.12); return; }
+    cell.rot=(cell.rot+1)%4; playTone(440,0.08);
+    sel={r:r,c:c}; updateSel();
+    checkBlooms(true); draw();
+  }
+  function updateSel(){ selEl.textContent="Selected tile: row "+(sel.r+1)+", column "+(sel.c+1)+" — press R or tap a tile to rotate."; }
+  function drawPath(cx,cy,dirs){
+    ctx.strokeStyle="#2e6b2e"; ctx.lineWidth=16; ctx.lineCap="round"; ctx.beginPath();
+    var mid={x:cx,y:cy};
+    dirs.forEach(function(d){
+      var x=cx, y=cy;
+      if(d===0) y=cy-CELL/2; if(d===1) x=cx+CELL/2; if(d===2) y=cy+CELL/2; if(d===3) x=cx-CELL/2;
+      ctx.moveTo(mid.x,mid.y); ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    ctx.fillStyle="#3e8e41"; ctx.beginPath(); ctx.arc(cx,cy,11,0,Math.PI*2); ctx.fill();
+  }
+  function draw(){
+    ctx.clearRect(0,0,520,520);
+    // sunset sky tint at top based on time
+    var frac=Math.max(0,timeLeft/120);
+    ctx.fillStyle="rgba(255,"+Math.round(120+100*frac)+",60,"+(0.12*(1-frac))+")";
+    ctx.fillRect(0,0,520,60);
+    var r,c;
+    for(r=0;r<SIZE;r++) for(c=0;c<SIZE;c++){
+      var x=c*CELL, y=r*CELL, cell=grid[r][c];
+      ctx.fillStyle=(r+c)%2?"#7fb069":"#8bc34a";
+      ctx.fillRect(x+2,y+2,CELL-4,CELL-4);
+      if(sel.r===r&&sel.c===c){
+        ctx.strokeStyle="#fff176"; ctx.lineWidth=5; ctx.strokeRect(x+4,y+4,CELL-8,CELL-8);
+      }
+      var cx=x+CELL/2, cy=y+CELL/2;
+      if(cell.hive||cell.flower){
+        ctx.fillStyle="#fff8e1"; ctx.beginPath(); ctx.arc(cx,cy,20,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#5d4037"; ctx.font="34px serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+        ctx.fillText(cell.hive?"🏡":"🌸",cx,cy+1);
+        if(cell.flower && bloomed[r+","+c]){
+          ctx.font="bold 15px sans-serif"; ctx.fillStyle="#e91e63";
+          ctx.fillText("BLOOMED",cx,cy+32);
+        }
+      } else {
+        drawPath(cx,cy,dirsOf(cell));
+        ctx.fillStyle="#1b5e20"; ctx.font="bold 13px sans-serif"; ctx.textAlign="center";
+        ctx.fillText("↻",cx,cy-28);
+      }
+    }
+    // Animated bee: hops around the hive and along a bloomed path when possible
+    beeT+=0.02;
+    var L=LEVELS[round-1], hx=L.hive.c*CELL+CELL/2, hy=L.hive.r*CELL+CELL/2;
+    var bx=hx+Math.sin(beeT*2)*22, by=hy+Math.cos(beeT*3)*14;
+    ctx.font="28px serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText("🐝",bx,by);
+    // Sun indicator
+    ctx.font="26px serif"; ctx.fillText("🌇",490,26);
+  }
+  function loop(now){
+    requestAnimationFrame(loop);
+    if(running && !gameOver){
+      if(!lastTime) lastTime=now;
+      var dt=(now-lastTime)/1000; lastTime=now; sunT+=dt;
+      if(sunT>=1){ sunT-=1; timeLeft--; timeEl.textContent=timeLeft;
+        if(timeLeft<=0){ timeLeft=0; endGame(false); }
+        else if(timeLeft<=20){ statusEl.textContent="Sunset soon!"; }
+      }
+    }
+    draw();
+  }
+  function cellFromEvent(e){
+    var rect=cv.getBoundingClientRect();
+    var clientX=(e.touches&&e.touches[0])?e.touches[0].clientX:e.clientX;
+    var clientY=(e.touches&&e.touches[0])?e.touches[0].clientY:e.clientY;
+    var x=(clientX-rect.left)/rect.width*520, y=(clientY-rect.top)/rect.height*520;
+    return {r:Math.max(0,Math.min(4,Math.floor(y/CELL))), c:Math.max(0,Math.min(4,Math.floor(x/CELL)))};
+  }
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  cv.addEventListener("mousedown", function(e){ var p=cellFromEvent(e); sel=p; updateSel(); rotateAt(p.r,p.c); });
+  cv.addEventListener("click", function(e){ /* click handled via mousedown for responsiveness */ });
+  cv.addEventListener("touchstart", function(e){ e.preventDefault(); var p=cellFromEvent(e); sel=p; updateSel(); rotateAt(p.r,p.c); }, {passive:false});
+  document.addEventListener("keydown", function(e){
+    if(e.key==="Enter" && (!running || gameOver)){ startGame(); return; }
+    if(!running) return;
+    if(e.key==="ArrowUp") sel.r=Math.max(0,sel.r-1);
+    else if(e.key==="ArrowDown") sel.r=Math.min(4,sel.r+1);
+    else if(e.key==="ArrowLeft") sel.c=Math.max(0,sel.c-1);
+    else if(e.key==="ArrowRight") sel.c=Math.min(4,sel.c+1);
+    else if(e.key==="r"||e.key==="R"||e.key===" "){ e.preventDefault(); rotateAt(sel.r,sel.c); return; }
+    else return;
+    updateSel(); draw();
+  });
+  buildLevel(1); updateSel(); draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
