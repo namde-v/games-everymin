@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Coral Reef Turtle Race</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #062a3a; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+  h1 { font-size: 26px; margin: 8px 0 4px; text-shadow: 2px 2px 0 #0a5a6a; text-align: center; }
+  p.tag { color: #aee8f5; font-size: 13px; margin-bottom: 8px; text-align: center; }
+  #wrap { position: relative; width: 800px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#1aa7c9, #0b6d8f 55%, #084a6b); border: 4px solid #ffd166; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; background: #083344; border: 2px solid #22d3ee; border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; font-weight: bold; font-size: 15px; flex-wrap: wrap; }
+  #hud span { color: #fde68a; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(3, 35, 55, 0.82); border-radius: 14px; padding: 24px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; color: #e0f7ff; }
+  .overlay .big { font-size: 20px; color: #ffd166; font-weight: bold; }
+  button { margin-top: 14px; padding: 13px 26px; font-size: 19px; font-weight: bold; border: none; border-radius: 999px; background: #ffd166; color: #083344; cursor: pointer; box-shadow: 0 5px 0 #b45309; }
+  button:active { transform: translateY(3px); box-shadow: 0 2px 0 #b45309; }
+  .keys { background: rgba(255,255,255,0.12); border-radius: 10px; padding: 10px 14px; margin-top: 10px; font-size: 14px; }
+  #foot { font-size: 12px; color: #9adbe8; margin-top: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>🐢 Coral Reef Turtle Race</h1>
+<p class="tag">Arcade / Underwater Racing — ride the current, beat the clock!</p>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">❤❤❤</span></div>
+    <div>Distance: <span id="dist">0</span> / 2400 m</div>
+    <div>Time: <span id="time">90</span>s</div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="800" height="480"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🐢 Coral Reef Turtle Race</h2>
+    <p class="big">Race to the finish before time runs out!</p>
+    <p><strong>How to Play:</strong> Steer your sea turtle through glowing coral gates for points. Dodge jellyfish and rocks — each hit costs a life. Collect bubbles for a speed boost and bonus points. Reach 2400 m before the 90-second timer ends to win.</p>
+    <div class="keys">⌨️ Arrow Keys / WASD to steer &nbsp;•&nbsp; 🖱️ Move mouse / click to steer &nbsp;•&nbsp; 👆 Touch and drag to steer</div>
+    <p>Tip: Gates are worth 100 points, bubbles 25 points, and boosts help you outrun the current.</p>
+    <button id="startBtn" type="button">▶ Start Race</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Race Over</h2>
+    <p id="endText" class="big"></p>
+    <p id="endScore"></p>
+    <p>Press Restart to race again through the reef.</p>
+    <button id="restartBtn" type="button">↻ Restart</button>
+  </div>
+</div>
+<p id="foot">Steer with keyboard, mouse, or touch. No downloads needed — play fully offline.</p>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var timeEl = document.getElementById('time');
+  var statusEl = document.getElementById('status');
+
+  var W = 800, H = 480;
+  var state = 'title';
+  var score = 0, lives = 3, distance = 0, timeLeft = 90;
+  var boost = 0, invuln = 0, gateCount = 0, bubbleCount = 0;
+  var lastTime = 0, elapsed = 0, spawnTimer = 0, gateTimer = 0;
+  var keys = {};
+  var pointer = { active: false, x: 400, y: 300 };
+  var turtle = { x: 140, y: 240, w: 64, h: 42, speed: 3.2 };
+  var obstacles = [], bubbles = [], gates = [], particles = [], seaweed = [];
+
+  // Procedural audio: created only after a user gesture.
+  var audioCtx = null, master = null;
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') { audioCtx.resume(); } return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      master = audioCtx.createGain();
+      master.gain.value = 0.18;
+      master.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx || !master) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(master);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function playBubble() { tone(880 + Math.random() * 300, 0.18, 'sine', 0.6); }
+  function playGate() { tone(523, 0.12, 'triangle', 0.6); setTimeout(function () { tone(784, 0.16, 'triangle', 0.6); }, 90); }
+  function playHit() { tone(140, 0.25, 'sawtooth', 0.5); }
+  function playWin() { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, 'triangle', 0.6); }, i * 140); }); }
+  function playLose() { [392, 330, 262, 196].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, 'sawtooth', 0.4); }, i * 150); }); }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function reset() {
+    score = 0; lives = 3; distance = 0; timeLeft = 90;
+    boost = 0; invuln = 0; gateCount = 0; bubbleCount = 0;
+    elapsed = 0; spawnTimer = 0; gateTimer = 0;
+    turtle.x = 140; turtle.y = 240;
+    obstacles = []; bubbles = []; gates = []; particles = [];
+    seaweed = [];
+    for (var i = 0; i < 14; i++) { seaweed.push({ x: rand(0, W), y: H - rand(8, 60), h: rand(30, 90), sway: rand(0, 6.28) }); }
+    // Opening gates and bubbles so the race starts fairly.
+    gates.push({ x: 520, gapY: 220, passed: false });
+    bubbles.push({ x: 420, y: 180, r: 14, taken: false });
+    bubbles.push({ x: 620, y: 320, r: 14, taken: false });
+    updateHUD('Racing!');
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = '❤'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    distEl.textContent = Math.floor(distance);
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+    if (status) statusEl.textContent = status;
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) { particles.push({ x: x, y: y, vx: rand(-2.5, 2.5), vy: rand(-2.5, 2.5), life: 26, color: color }); }
+  }
+  function spawnObstacle() {
+    var kind = Math.random() < 0.55 ? 'jelly' : 'rock';
+    var y = rand(50, H - 60);
+    if (kind === 'jelly') { obstacles.push({ kind: kind, x: W + 40, y: y, r: 26, bob: rand(0, 6.28) }); }
+    else { obstacles.push({ kind: kind, x: W + 40, y: y, r: 28, bob: 0 }); }
+  }
+  function spawnBubble() { bubbles.push({ x: W + 30, y: rand(50, H - 60), r: 14, taken: false }); }
+  function spawnGate() { gates.push({ x: W + 40, gapY: rand(110, H - 110), passed: false }); }
+
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    tone(440, 0.15, 'triangle', 0.5);
+    requestAnimationFrame(loop);
+  }
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    updateHUD(won ? 'You Won!' : 'Game Over');
+    endTitle.textContent = won ? '🏆 You Win!' : '💀 Game Over';
+    endText.textContent = won ? 'You crossed the finish line through the coral reef!' : (lives <= 0 ? 'The reef got the better of your turtle this time.' : 'Time ran out before the finish line.');
+    endScore.textContent = 'Final Score: ' + score + '  •  Gates: ' + gateCount + '  •  Bubbles: ' + bubbleCount + '  •  Distance: ' + Math.floor(distance) + ' m';
+    endScreen.classList.remove('hidden');
+    if (won) { playWin(); } else { playLose(); }
+  }
+
+  function update(dt) {
+    elapsed += dt;
+    timeLeft -= dt;
+    if (timeLeft <= 0) { timeLeft = 0; updateHUD(); endGame(false); return; }
+    // Steering: keyboard first, then pointer follow.
+    var dx = 0, dy = 0;
+    if (keys.ArrowLeft || keys.a || keys.A) dx -= 1;
+    if (keys.ArrowRight || keys.d || keys.D) dx += 1;
+    if (keys.ArrowUp || keys.w || keys.W) dy -= 1;
+    if (keys.ArrowDown || keys.s || keys.S) dy += 1;
+    if (dx !== 0 || dy !== 0) {
+      var len = Math.sqrt(dx * dx + dy * dy);
+      turtle.x += (dx / len) * turtle.speed;
+      turtle.y += (dy / len) * turtle.speed;
+    } else if (pointer.active) {
+      turtle.x += (pointer.x - turtle.x) * 0.10;
+      turtle.y += (pointer.y - turtle.y) * 0.12;
+    }
+    turtle.x = Math.max(40, Math.min(W - 40, turtle.x));
+    turtle.y = Math.max(30, Math.min(H - 30, turtle.y));
+
+    // Forward progress: boost doubles speed for a short burst.
+    var speed = 55 + (boost > 0 ? 75 : 0);
+    distance += speed * dt;
+    if (boost > 0) boost -= dt;
+    if (invuln > 0) invuln -= dt;
+
+    // Currents push gently up and down like waves.
+    turtle.y += Math.sin(elapsed * 2.2) * 0.25;
+
+    spawnTimer -= dt; gateTimer -= dt;
+    if (spawnTimer <= 0) { spawnObstacle(); if (Math.random() < 0.5) spawnBubble(); spawnTimer = rand(0.7, 1.3); }
+    if (gateTimer <= 0) { spawnGate(); gateTimer = rand(2.6, 3.6); }
+
+    var move = (95 + (boost > 0 ? 80 : 0)) * dt;
+    obstacles.forEach(function (o) { o.x -= move; if (o.kind === 'jelly') { o.bob += dt * 3; o.y += Math.sin(o.bob) * 0.6; } });
+    bubbles.forEach(function (b) { b.x -= move; });
+    gates.forEach(function (g) { g.x -= move; });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life -= 1; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    obstacles = obstacles.filter(function (o) { return o.x > -70; });
+    bubbles = bubbles.filter(function (b) { return b.x > -40 && !b.taken; });
+    gates = gates.filter(function (g) { return g.x > -90; });
+
+    // Gates: pass through the glowing gap.
+    gates.forEach(function (g) {
+      if (!g.passed && g.x < turtle.x && g.x > turtle.x - 60) {
+        if (Math.abs(turtle.y - g.gapY) < 62) {
+          g.passed = true; gateCount++; score += 100; burst(turtle.x, turtle.y, '#ffd166', 14); playGate(); updateHUD('Gate! +100');
+        } else {
+          g.passed = true; updateHUD('Missed gate');
+        }
+      }
+    });
+    // Bubbles: collect for boost and points.
+    bubbles.forEach(function (b) {
+      var ddx = turtle.x - b.x, ddy = turtle.y - b.y;
+      if (!b.taken && Math.sqrt(ddx * ddx + ddy * ddy) < 42) {
+        b.taken = true; bubbleCount++; score += 25; boost = 2.2; burst(b.x, b.y, '#a5f3fc', 12); playBubble(); updateHUD('Bubble Boost!');
+      }
+    });
+    // Collisions, with brief invulnerability after a hit.
+    if (invuln <= 0) {
+      for (var i = 0; i < obstacles.length; i++) {
+        var ob = obstacles[i];
+        var ox = turtle.x - ob.x, oy = turtle.y - ob.y;
+        if (Math.sqrt(ox * ox + oy * oy) < ob.r + 24) {
+          lives--; invuln = 1.4; obstacles.splice(i, 1); burst(turtle.x, turtle.y, '#f87171', 16); playHit(); updateHUD('Ouch! Life lost');
+          if (lives <= 0) { updateHUD(); endGame(false); return; }
+          break;
+        }
+      }
+    }
+    if (distance >= 2400) { distance = 2400; score += Math.max(0, Math.ceil(timeLeft)) * 10; updateHUD(); endGame(true); return; }
+    updateHUD();
+  }
+
+  function drawBackground() {
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#2ec4e6'); grad.addColorStop(0.55, '#0e7ba8'); grad.addColorStop(1, '#075a80');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    for (var i = 0; i < 18; i++) {
+      var bx = ((i * 173 + elapsed * 18) % (W + 60)) - 30;
+      ctx.beginPath(); ctx.arc(bx, 30 + (i * 37 % 160), 5 + (i % 3) * 3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath(); ctx.arc(700, 60, 34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.beginPath(); ctx.arc(688, 48, 12, 0, Math.PI * 2); ctx.fill();
+    // Sandy floor and swaying seaweed.
+    ctx.fillStyle = '#eab308'; ctx.fillRect(0, H - 26, W, 26);
+    ctx.fillStyle = '#fde68a'; ctx.fillRect(0, H - 26, W, 5);
+    seaweed.forEach(function (s) {
+      ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 5; ctx.beginPath();
+      ctx.moveTo(s.x, H - 22); ctx.quadraticCurveTo(s.x + Math.sin(elapsed + s.sway) * 12, H - s.h / 2, s.x + Math.sin(elapsed * 1.4 + s.sway) * 16, H - s.h); ctx.stroke();
+    });
+    // Finish banner when close.
+    if (distance > 2050) {
+      ctx.fillStyle = '#111827'; ctx.fillRect(W - 90, 60, 70, 150);
+      ctx.fillStyle = '#fff';
+      for (var r = 0; r < 5; r++) { for (var c = 0; c < 2; c++) { if ((r + c) % 2 === 0) ctx.fillRect(W - 90 + c * 35, 60 + r * 30, 35, 30); } }
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 14px Arial'; ctx.fillText('FINISH', W - 88, 50);
+    }
+  }
+  function drawTurtle() {
+    ctx.save();
+    ctx.translate(turtle.x, turtle.y);
+    if (invuln > 0 && Math.floor(elapsed * 10) % 2 === 0) ctx.globalAlpha = 0.45;
+    if (boost > 0) { ctx.fillStyle = 'rgba(165,243,252,0.7)'; ctx.beginPath(); ctx.arc(-42, 0, 14 + Math.random() * 6, 0, Math.PI * 2); ctx.fill(); }
+    // Flippers and shell.
+    ctx.fillStyle = '#4ade80';
+    ctx.beginPath(); ctx.ellipse(-18, -26, 18, 8, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-18, 26, 18, 8, 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-34, -12, 14, 7, -0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-34, 12, 14, 7, 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#16a34a';
+    ctx.beginPath(); ctx.ellipse(0, 0, 32, 22, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#86efac';
+    ctx.beginPath(); ctx.ellipse(-4, -4, 20, 13, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#14532d'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(20, 0); ctx.moveTo(0, -20); ctx.lineTo(0, 20); ctx.stroke();
+    // Head and eye.
+    ctx.fillStyle = '#4ade80'; ctx.beginPath(); ctx.arc(36, 0, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.arc(41, -4, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function drawEntities() {
+    gates.forEach(function (g) {
+      ctx.fillStyle = '#ff6b9d';
+      ctx.fillRect(g.x - 6, 0, 12, g.gapY - 62);
+      ctx.fillRect(g.x - 6, g.gapY + 62, 12, H - (g.gapY + 62));
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.arc(g.x, g.gapY - 62, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(g.x, g.gapY + 62, 10, 0, Math.PI * 2); ctx.fill();
+      if (!g.passed) { ctx.fillStyle = 'rgba(255,209,102,0.18)'; ctx.fillRect(g.x - 22, g.gapY - 62, 44, 124); }
+    });
+    bubbles.forEach(function (b) {
+      ctx.strokeStyle = '#cffafe'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.beginPath(); ctx.arc(b.x - 4, b.y - 5, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 12px Arial'; ctx.fillText('+25', b.x - 10, b.y + 28);
+    });
+    obstacles.forEach(function (o) {
+      if (o.kind === 'jelly') {
+        ctx.fillStyle = 'rgba(240,171,252,0.95)';
+        ctx.beginPath(); ctx.arc(o.x, o.y, o.r, Math.PI, 0); ctx.fill();
+        ctx.fillRect(o.x - o.r, o.y, o.r * 2, 10);
+        ctx.strokeStyle = '#e879f9'; ctx.lineWidth = 2;
+        for (var t = 0; t < 4; t++) { ctx.beginPath(); ctx.moveTo(o.x - 16 + t * 11, o.y + 10); ctx.quadraticCurveTo(o.x - 16 + t * 11 + Math.sin(elapsed * 4 + t) * 5, o.y + 26, o.x - 16 + t * 11, o.y + 38); ctx.stroke(); }
+      } else {
+        ctx.fillStyle = '#78716c'; ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#a8a29e'; ctx.beginPath(); ctx.arc(o.x - 8, o.y - 8, 10, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    particles.forEach(function (p) { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life / 26); ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; });
+  }
+  function drawProgress() {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(12, 12, W - 24, 16);
+    ctx.fillStyle = boost > 0 ? '#22d3ee' : '#ffd166';
+    ctx.fillRect(12, 12, (W - 24) * Math.min(1, distance / 2400), 16);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.fillText('START', 16, 24); ctx.fillText('FINISH', W - 66, 24);
+  }
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    if (state !== 'playing') { drawBackground(); drawEntities(); drawTurtle(); drawProgress(); return; }
+    drawBackground(); drawEntities(); drawTurtle(); drawProgress();
+    requestAnimationFrame(loop);
+  }
+
+  // Controls: keyboard, mouse, and touch.
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) >= 0) e.preventDefault();
+    if (e.key === 'Enter' && state === 'title') startGame();
+    if (e.key === 'Enter' && (state === 'win' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  function pointerPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  canvas.addEventListener('mousemove', function (e) { var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; });
+  canvas.addEventListener('mousedown', function (e) { initAudio(); pointer.active = true; var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; });
+  document.addEventListener('mouseup', function () { pointer.active = false; });
+  canvas.addEventListener('touchstart', function (e) { initAudio(); e.preventDefault(); pointer.active = true; var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointer.active = false; });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  canvas.addEventListener('click', function () { initAudio(); });
+
+  reset();
+  drawBackground(); drawEntities(); drawTurtle(); drawProgress();
+  updateHUD('Ready — press Start');
+})();
+</script>
+</body>
+</html>

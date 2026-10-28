@@ -84,3 +84,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0678 | Archery Wind Shot | Precision / Archery Wind Aim | Mouse/touch drag aim, Space/click/tap release, Arrow Keys aim | [Play](./../games/game-0678.html) |
 | 0679 | Deep Sea Pearl Diver | Arcade / Underwater Treasure Diving | Arrow Keys/WASD swim, mouse/touch steer | [Play](./../games/game-0679.html) |
 | 0680 | Mirror Labyrinth Reflector | Puzzle / Laser Mirror Logic | Mouse/touch place and rotate mirrors, Arrow Keys select, Enter confirm | [Play](./../games/game-0680.html) |
+| 0681 | Aurora Ice Skater Glide | Arcade / Ice Skating Momentum | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0681.html) |
+| 0682 | Clockwork Gear Lock | Puzzle / Gear Rotation Logic | Mouse/touch rotate gears, Arrow Keys select, Space/Enter rotate | [Play](./../games/game-0682.html) |
+| 0683 | Harbor Crane Stacker | Strategy / Cargo Crane Logistics | Arrow Keys/WASD move crane, Space/click/tap drop | [Play](./../games/game-0683.html) |
+| 0684 | Jungle Drum Circle | Rhythm / Drum Pattern Memory | Keys 1-4/A S D F tap drums, mouse/touch tap drums | [Play](./../games/game-0684.html) |
+| 0685 | Falcon Dive Hunter | Precision / Dive Timing Hunt | Mouse/touch aim, Space/click/tap hold/release dive, Arrow Keys aim | [Play](./../games/game-0685.html) |
+| 0686 | Ant Trail Architect | Puzzle / Trail Drawing Logic | Mouse/touch drag trails, Arrow Keys select | [Play](./../games/game-0686.html) |
+| 0687 | Gemstone Mine Match | Puzzle / Match-3 Swap Logic | Mouse/touch swap gems, Arrow Keys select, Enter confirm | [Play](./../games/game-0687.html) |
+| 0688 | Airport Runway Controller | Strategy / Air Traffic Routing | Mouse/touch assign runways, Keys 1-3/H assign | [Play](./../games/game-0688.html) |
+| 0689 | Neon Beat Boxer | Rhythm / Beat Punch Timing | Keys D/F/J/K punch lanes, mouse/touch tap lanes | [Play](./../games/game-0689.html) |
+| 0690 | Coral Reef Turtle Race | Arcade / Underwater Racing | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0690.html) |

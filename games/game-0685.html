@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Falcon Dive Hunter</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a2b1a; font-family: Arial, Helvetica, sans-serif; color: #fff;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; margin: 6px 0 2px; text-align: center; color: #ffe066; text-shadow: 2px 2px 0 #000; }
+  p.sub { font-size: 13px; color: #cfe8cf; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin: 6px 0;
+    font-size: 16px; font-weight: bold; }
+  #hud span { background: #2d4a2d; border: 2px solid #7fb069; border-radius: 8px; padding: 5px 12px; }
+  #wrap { position: relative; width: min(92vw, 760px); }
+  canvas { width: 100%; height: auto; display: block; background: linear-gradient(#87ceeb, #e8f4d9);
+    border: 4px solid #3a5a3a; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 10px; background: rgba(0,0,0,0.62); border-radius: 12px;
+    text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffe066; }
+  .overlay p { max-width: 520px; font-size: 15px; line-height: 1.55; }
+  button { font-size: 19px; font-weight: bold; padding: 12px 30px; border: none; border-radius: 10px;
+    background: #ffb703; color: #222; cursor: pointer; box-shadow: 0 4px 0 #b97e00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #chargeBar { width: min(92vw, 760px); height: 18px; background: #333; border-radius: 9px;
+    margin-top: 8px; overflow: hidden; border: 2px solid #555; }
+  #chargeFill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffe066, #fb8500, #e63946); }
+  .hint { font-size: 13px; color: #ddd; margin-top: 8px; text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>&#129413; Falcon Dive Hunter</h1>
+<p class="sub">Precision / Dive Timing Hunt &mdash; catch prey before your lives run out!</p>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Lives: <b id="lives">&#10084;&#10084;&#10084;</b></span>
+  <span>Caught: <b id="caught">0</b> / 12</span>
+  <span>Wind: <b id="wind">Calm</b></span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="760" height="480"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Falcon Dive Hunter</h2>
+    <p><b>How to Play:</b> You are a falcon soaring high above a meadow. Prey scurries along the ground below.
+    Move your mouse, finger, or arrow keys to aim the falcon. <b>Hold</b> mouse button, touch, or SPACE to charge your dive &mdash; watch the power bar!
+    <b>Release</b> to stoop down and snatch the prey. A perfect hit on a fast rabbit scores more. Beware: sudden wind gusts push your dive sideways, so lead your target!
+    Catch <b>12 prey</b> to win. Miss 3 times and the hunt is over.</p>
+    <button id="startBtn">Start Hunt</button>
+    <p>Controls: Mouse / Touch / Arrow Keys + SPACE. Hold to charge, release to dive.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<div id="chargeBar"><div id="chargeFill"></div></div>
+<p class="hint">Aim with mouse / touch / arrow keys. Hold SPACE, mouse, or touch to charge, then release to dive!<br>
+Wind gusts change every few seconds &mdash; watch the arrows and the HUD wind readout.</p>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var caughtEl = document.getElementById('caught');
+  var windEl = document.getElementById('wind');
+  var statusEl = document.getElementById('status');
+  var chargeFill = document.getElementById('chargeFill');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var W = 760, H = 480, GROUND = 400;
+  var state = 'title'; // title, playing, diving, over
+  var score = 0, lives = 3, caught = 0, targetCaught = 12;
+  var falcon = { x: 380, y: 70, vx: 0 };
+  var aimX = 380, charge = 0, charging = false;
+  var dive = null;
+  var wind = 0, windTimer = 0, windLabel = 'Calm';
+  var prey = [];
+  var particles = [];
+  var message = '', messageTimer = 0;
+  var keys = {};
+  var audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function swoosh() { beep(900, 0.35, 'sawtooth', 0.08); beep(300, 0.35, 'triangle', 0.1); }
+  function catchSound() { beep(660, 0.12, 'sine', 0.2); setTimeout(function(){ beep(880, 0.15, 'sine', 0.2); }, 90); }
+  function missSound() { beep(180, 0.35, 'square', 0.12); }
+
+  var preyKinds = [
+    { name: 'Rabbit', color: '#b08968', speed: 1.6, points: 100, size: 16 },
+    { name: 'Mouse', color: '#8d99ae', speed: 2.4, points: 150, size: 11 },
+    { name: 'Snake', color: '#588157', speed: 1.2, points: 120, size: 14 },
+    { name: 'Squirrel', color: '#bc6c25', speed: 2.0, points: 130, size: 13 }
+  ];
+
+  function spawnPrey() {
+    var k = preyKinds[Math.floor(Math.random() * preyKinds.length)];
+    var dir = Math.random() < 0.5 ? 1 : -1;
+    prey.push({ x: dir > 0 ? -30 : W + 30, y: GROUND + 28 + Math.random() * 30,
+      dir: dir, speed: k.speed * (0.8 + Math.random() * 0.5), kind: k, bob: Math.random() * 6 });
+  }
+  function resetGame() {
+    score = 0; lives = 3; caught = 0; charge = 0; charging = false; dive = null;
+    falcon.x = 380; falcon.y = 70; aimX = 380; prey = []; particles = [];
+    wind = 0; windTimer = 0; message = ''; messageTimer = 0;
+    for (var i = 0; i < 3; i++) spawnPrey();
+    updateHUD(); statusEl.textContent = 'Hunting...';
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, lives));
+    caughtEl.textContent = caught + ' / ' + targetCaught;
+    windEl.textContent = windLabel;
+  }
+  function showEnd(win) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    endTitle.textContent = win ? 'You Win! Master Falcon!' : 'Game Over';
+    endText.textContent = win
+      ? 'You caught all ' + targetCaught + ' prey with a final score of ' + score + '. Magnificent hunting!'
+      : 'The prey escaped. You caught ' + caught + ' prey and scored ' + score + '. Try again!';
+    statusEl.textContent = win ? 'Victory!' : 'Game Over';
+    if (win) { beep(523, 0.2, 'sine', 0.2); setTimeout(function(){ beep(659, 0.2, 'sine', 0.2); }, 150); setTimeout(function(){ beep(784, 0.3, 'sine', 0.2); }, 300); }
+    else { missSound(); }
+  }
+  function startGame() {
+    initAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    beep(440, 0.15, 'sine', 0.18);
+  }
+
+  function startDive() {
+    if (state !== 'playing' || charging) return;
+    charging = true; charge = 0;
+    statusEl.textContent = 'Charging dive...';
+  }
+  function releaseDive() {
+    if (state !== 'playing' || !charging) return;
+    charging = false;
+    var power = Math.max(0.35, charge);
+    dive = { x: falcon.x, y: falcon.y, tx: aimX, power: power, t: 0 };
+    state = 'diving';
+    swoosh();
+    statusEl.textContent = 'Diving!';
+  }
+  function resolveDive() {
+    var hitX = dive.x + wind * 26;
+    var hit = null, hitIdx = -1;
+    for (var i = 0; i < prey.length; i++) {
+      var p = prey[i];
+      if (Math.abs(p.x - hitX) < 34 && Math.abs(p.y - (GROUND + 30)) < 60) { hit = p; hitIdx = i; break; }
+    }
+    if (hit) {
+      var bonus = Math.round(dive.power * 60) + (hit.kind.speed > 2 ? 40 : 0);
+      var gained = hit.kind.points + bonus;
+      score += gained; caught++;
+      for (var j = 0; j < 16; j++) particles.push({ x: hit.x, y: hit.y, vx: (Math.random()-0.5)*4, vy: -Math.random()*3, life: 30 });
+      prey.splice(hitIdx, 1); spawnPrey();
+      message = 'Caught a ' + hit.kind.name + '! +' + gained; messageTimer = 90;
+      catchSound();
+      if (caught >= targetCaught) { updateHUD(); showEnd(true); return; }
+    } else {
+      lives--;
+      message = 'Missed! The prey got away.'; messageTimer = 90;
+      missSound();
+      if (lives <= 0) { updateHUD(); showEnd(false); return; }
+    }
+    falcon.x = 380; falcon.y = 70; aimX = 380; charge = 0; dive = null;
+    state = 'playing'; statusEl.textContent = 'Hunting...'; updateHUD();
+  }
+
+  function update() {
+    if (state === 'playing' || state === 'diving') {
+      windTimer--;
+      if (windTimer <= 0) {
+        windTimer = 180 + Math.floor(Math.random() * 120);
+        wind = (Math.random() * 2 - 1) * 1.4;
+        windLabel = wind < -0.7 ? 'Strong Left' : wind > 0.7 ? 'Strong Right' : Math.abs(wind) < 0.25 ? 'Calm' : (wind < 0 ? 'Left' : 'Right');
+        updateHUD();
+      }
+      if (keys['ArrowLeft'] || keys['a']) aimX -= 5;
+      if (keys['ArrowRight'] || keys['d']) aimX += 5;
+      aimX = Math.max(30, Math.min(W - 30, aimX));
+      falcon.x += (aimX - falcon.x) * 0.12;
+      if (charging) { charge = Math.min(1, charge + 0.016); }
+      chargeFill.style.width = Math.round(charge * 100) + '%';
+      if (Math.random() < 0.012 && prey.length < 5) spawnPrey();
+      for (var i = prey.length - 1; i >= 0; i--) {
+        var p = prey[i]; p.x += p.dir * p.speed; p.bob += 0.15;
+        if (p.x < -50 || p.x > W + 50) { prey.splice(i, 1); spawnPrey(); }
+      }
+      if (state === 'diving' && dive) {
+        dive.t += 0.045 + dive.power * 0.03;
+        var t = Math.min(1, dive.t);
+        dive.x = falcon.x + (dive.tx - falcon.x) * t + wind * 26 * t * t;
+        dive.y = falcon.y + (GROUND + 28 - falcon.y) * t;
+        if (t >= 1) resolveDive();
+      }
+    }
+    for (var k = particles.length - 1; k >= 0; k--) {
+      var pt = particles[k]; pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.12; pt.life--;
+      if (pt.life <= 0) particles.splice(k, 1);
+    }
+    if (messageTimer > 0) messageTimer--;
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#87ceeb'; ctx.fillRect(0, 0, W, GROUND);
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(120, 60, 26, 0, Math.PI * 2); ctx.arc(155, 55, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#7fb069'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#588157'; for (var i = 0; i < 40; i++) { ctx.fillRect((i * 97) % W, GROUND + 8 + ((i * 53) % 60), 22, 5); }
+    ctx.fillStyle = '#8d6e63'; ctx.fillRect(0, GROUND, W, 6);
+    // Wind arrows
+    if (Math.abs(wind) > 0.25) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 18px Arial';
+      var arrow = wind > 0 ? '>>>>' : '<<<<';
+      ctx.fillText('Wind ' + arrow, wind > 0 ? 40 : W - 180, 30);
+    }
+  }
+  function drawFalcon(x, y) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = '#5b4a3f';
+    ctx.beginPath(); ctx.ellipse(0, 0, 26, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#8d99ae';
+    ctx.beginPath(); ctx.ellipse(-22, -4, 20, 7, -0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(22, -4, 20, 7, 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(12, -2, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(14, -3, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function draw() {
+    drawBackground();
+    // Aim line and target marker
+    if (state === 'playing' || state === 'diving') {
+      ctx.strokeStyle = 'rgba(230,57,70,0.7)'; ctx.setLineDash([6, 6]);
+      ctx.beginPath(); ctx.moveTo(falcon.x, falcon.y); ctx.lineTo(aimX, GROUND + 28); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = '#e63946'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(aimX, GROUND + 28, 16, 0, Math.PI * 2); ctx.stroke(); ctx.lineWidth = 1;
+    }
+    // Prey
+    for (var i = 0; i < prey.length; i++) {
+      var p = prey[i]; var bobY = Math.sin(p.bob) * 2;
+      ctx.fillStyle = p.kind.color;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y + bobY, p.kind.size, p.kind.size * 0.65, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x + p.dir * p.kind.size * 0.8, p.y + bobY - 4, p.kind.size * 0.45, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(p.x + p.dir * p.kind.size, p.y + bobY - 5, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    // Falcon (or diving falcon)
+    if (state === 'diving' && dive) drawFalcon(dive.x, dive.y);
+    else drawFalcon(falcon.x, falcon.y);
+    // Particles
+    for (var j = 0; j < particles.length; j++) {
+      ctx.fillStyle = 'rgba(255,224,102,0.9)';
+      ctx.fillRect(particles[j].x, particles[j].y, 4, 4);
+    }
+    if (messageTimer > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(180, 120, 400, 40);
+      ctx.fillStyle = '#ffe066'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(message, 380, 147); ctx.textAlign = 'left';
+    }
+    if (charging) {
+      ctx.fillStyle = '#e63946'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('CHARGING: ' + Math.round(charge * 100) + '%', 380, 200); ctx.textAlign = 'left';
+    }
+  }
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches ? e.touches[0].clientX : e.clientX);
+    return (cx - r.left) * (W / r.width);
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  canvas.addEventListener('mousemove', function (e) { aimX = canvasPos(e); });
+  canvas.addEventListener('mousedown', function (e) { initAudio(); aimX = canvasPos(e); startDive(); });
+  document.addEventListener('mouseup', function () { releaseDive(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); aimX = canvasPos(e); startDive(); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); aimX = canvasPos(e); }, { passive: false });
+  document.addEventListener('touchend', function () { releaseDive(); });
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ') { e.preventDefault(); initAudio(); startDive(); }
+    if (e.key === 'Enter' && (state === 'title' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function (e) {
+    keys[e.key] = false;
+    if (e.key === ' ') releaseDive();
+  });
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.id === 'startBtn') startGame();
+  });
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

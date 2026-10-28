@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Aurora Ice Skater Glide</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06121f; color: #eafcff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 12px; overflow: hidden; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin-bottom: 4px; text-align: center; color: #aef7ff; text-shadow: 0 0 14px #35d6ff; }
+  p.tag { color: #9fb8cc; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(900px, 96vw); }
+  canvas { width: 100%; height: auto; display: block; background: linear-gradient(180deg, #0b2a44 0%, #123a5e 45%, #7ec8e8 100%); border: 3px solid #7fe7ff; border-radius: 14px; box-shadow: 0 0 28px rgba(80,220,255,.35); touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0; font-weight: bold; font-size: 15px; flex-wrap: wrap; }
+  #hud span { background: #102a44; border: 1px solid #3fa8c9; border-radius: 8px; padding: 6px 10px; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(3, 18, 32, 0.86); border-radius: 12px; padding: 22px; gap: 10px; }
+  .hidden { display: none !important; }
+  .overlay h2 { font-size: 30px; color: #bdf6ff; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #d7ecf5; font-size: 15px; }
+  .overlay .how { background: rgba(255,255,255,.08); border: 1px solid #4db8d8; border-radius: 10px; padding: 12px 16px; text-align: left; }
+  button { background: #27d6ff; color: #04202e; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #0d7ea0; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #ffe066; box-shadow: 0 4px 0 #b88900; }
+  .shardline { color: #ffe066; font-weight: bold; }
+  .controls { color: #c6dbe8; font-size: 12px; text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>❄ Aurora Ice Skater Glide ❄</h1>
+<p class="tag">Glide under the northern lights. Momentum is your friend — and your danger.</p>
+<div id="wrap">
+  <canvas id="game" width="900" height="520"></canvas>
+  <div id="hud">
+    <span id="score">Score: 0</span>
+    <span id="shards">Aurora Shards: 0 / 25</span>
+    <span id="lives">Lives: ❤❤❤</span>
+    <span id="speed">Speed: Level 1</span>
+    <span id="status">Status: Ready</span>
+  </div>
+  <div id="titleScreen" class="overlay">
+    <h2>Aurora Ice Skater Glide</h2>
+    <p>Skate across a moonlit frozen lake beneath the aurora. Collect glowing shards, glide with real momentum, and dodge cracks and snowmen.</p>
+    <div class="how">
+      <strong>How to Play</strong><br>
+      • Arrow keys or WASD to push and steer — you keep sliding, so plan your turns.<br>
+      • Mouse: click and hold in a direction to glide that way. Touch: drag on the ice to steer.<br>
+      • Collect <span class="shardline">25 aurora shards</span> to WIN. Hitting a crack or snowman costs a life.<br>
+      • Speed rises every 15 seconds. You have 3 lives. Survive, sparkle, and win!
+    </div>
+    <button id="startBtn">Start Skating</button>
+    <p>Tip: gentle taps beat hard pushes on slippery ice.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText">The ice got the better of you this time.</p>
+    <p id="finalScore">Score: 0</p>
+    <button id="restartBtn">Restart Instantly</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+<p class="controls">Keyboard: Arrows / WASD &nbsp;|&nbsp; Mouse: click &amp; hold to steer &nbsp;|&nbsp; Touch: drag to steer &nbsp;|&nbsp; P pauses</p>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var shardEl = document.getElementById('shards');
+  var livesEl = document.getElementById('lives');
+  var speedEl = document.getElementById('speed');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+
+  var state = 'title'; // title, playing, paused, over, win
+  var px, py, vx, vy, angle;
+  var score, shards, lives, elapsed, level, invuln, spawnTimer, shardTimer;
+  var obstacles = [], items = [], trail = [], stars = [];
+  var keys = {};
+  var pointer = { active: false, x: 0, y: 0 };
+
+  for (var i = 0; i < 90; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * 180, r: Math.random() * 1.8 + 0.4, tw: Math.random() * Math.PI * 2 });
+  }
+
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function chime() { beep(880, 0.18, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.22, 'sine', 0.12); }, 70); }
+  function thud() { beep(140, 0.25, 'triangle', 0.18); }
+
+  function resetGame() {
+    px = W / 2; py = H - 110; vx = 0; vy = 0; angle = -Math.PI / 2;
+    score = 0; shards = 0; lives = 3; elapsed = 0; level = 1; invuln = 0;
+    spawnTimer = 0; shardTimer = 0; obstacles = []; items = []; trail = [];
+    for (var k = 0; k < 6; k++) spawnShard(true);
+    updateHUD('Skating!');
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    beep(523, 0.15, 'sine', 0.12); setTimeout(function(){ beep(784, 0.2, 'sine', 0.12); }, 90);
+  }
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? 'You Win! Aurora Master!' : 'Game Over';
+    endText.textContent = win
+      ? 'You gathered all 25 aurora shards and lit up the frozen lake. Beautiful skating!'
+      : 'You ran out of lives on the icy lake. Shake off the snow and glide again!';
+    finalScore.textContent = 'Final Score: ' + score + ' | Shards: ' + shards + ' / 25 | Time: ' + Math.floor(elapsed) + 's';
+    endScreen.classList.remove('hidden');
+    updateHUD(win ? 'You Win!' : 'Game Over');
+    if (win) { chime(); setTimeout(chime, 250); } else { thud(); }
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = 'Score: ' + score;
+    shardEl.textContent = 'Aurora Shards: ' + shards + ' / 25';
+    var hearts = ''; for (var i = 0; i < 3; i++) hearts += (i < lives ? '❤' : '♡');
+    livesEl.textContent = 'Lives: ' + hearts;
+    speedEl.textContent = 'Speed: Level ' + level;
+    if (status) statusEl.textContent = 'Status: ' + status;
+  }
+  function spawnShard(anywhere) {
+    items.push({ x: 40 + Math.random() * (W - 80), y: anywhere ? 60 + Math.random() * (H - 160) : 50 + Math.random() * 180, r: 13, pulse: Math.random() * 6 });
+  }
+  function spawnObstacle() {
+    var kind = Math.random() < 0.55 ? 'crack' : 'snowman';
+    obstacles.push({ x: 40 + Math.random() * (W - 80), y: -40, kind: kind, r: kind === 'crack' ? 30 : 26, wob: Math.random() * 6, speed: 90 + level * 22 + Math.random() * 40 });
+  }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    elapsed += dt;
+    level = 1 + Math.floor(elapsed / 15);
+    if (invuln > 0) invuln -= dt;
+
+    // Steering with momentum and ice friction.
+    var ax = 0, ay = 0, power = 520;
+    if (keys['arrowleft'] || keys['a']) ax -= 1;
+    if (keys['arrowright'] || keys['d']) ax += 1;
+    if (keys['arrowup'] || keys['w']) ay -= 1;
+    if (keys['arrowdown'] || keys['s']) ay += 1;
+    if (pointer.active) {
+      var rect = canvas.getBoundingClientRect();
+      var mx = (pointer.x - rect.left) * (W / rect.width);
+      var my = (pointer.y - rect.top) * (H / rect.height);
+      var dx = mx - px, dy = my - py, d = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (d > 24) { ax = dx / d; ay = dy / d; power = 620; }
+    }
+    if (ax !== 0 || ay !== 0) {
+      var len = Math.sqrt(ax * ax + ay * ay) || 1;
+      vx += (ax / len) * power * dt;
+      vy += (ay / len) * power * dt;
+      angle = Math.atan2(vy, vx);
+    }
+    // Ice is slippery: very low friction, so momentum persists.
+    var friction = Math.pow(0.985, dt * 60);
+    vx *= friction; vy *= friction;
+    var maxSpeed = 300 + level * 28;
+    var sp = Math.sqrt(vx * vx + vy * vy);
+    if (sp > maxSpeed) { vx = vx / sp * maxSpeed; vy = vy / sp * maxSpeed; }
+    px += vx * dt; py += vy * dt;
+    if (px < 24) { px = 24; vx = Math.abs(vx) * 0.6; }
+    if (px > W - 24) { px = W - 24; vx = -Math.abs(vx) * 0.6; }
+    if (py < 24) { py = 24; vy = Math.abs(vy) * 0.6; }
+    if (py > H - 24) { py = H - 24; vy = -Math.abs(vy) * 0.6; }
+    trail.push({ x: px, y: py, a: 0.5 });
+    if (trail.length > 26) trail.shift();
+    trail.forEach(function(t){ t.a *= 0.96; });
+
+    spawnTimer -= dt; shardTimer -= dt;
+    if (spawnTimer <= 0) { spawnObstacle(); spawnTimer = Math.max(0.55, 1.35 - level * 0.09); }
+    if (shardTimer <= 0) { if (items.length < 7) spawnShard(false); shardTimer = 1.6; }
+
+    for (var i = obstacles.length - 1; i >= 0; i--) {
+      var o = obstacles[i];
+      o.y += o.speed * dt; o.wob += dt * 3;
+      o.x += Math.sin(o.wob) * 12 * dt;
+      if (o.y > H + 60) { obstacles.splice(i, 1); score += 5; continue; }
+      if (invuln <= 0 && dist({x: px, y: py}, o) < o.r + 16) {
+        lives--; invuln = 1.6; thud(); obstacles.splice(i, 1);
+        updateHUD('Ouch! A crash!');
+        if (lives <= 0) { updateHUD(); endGame(false); return; }
+      }
+    }
+    for (var j = items.length - 1; j >= 0; j--) {
+      var s = items[j]; s.pulse += dt * 4;
+      if (dist({x: px, y: py}, s) < s.r + 18) {
+        items.splice(j, 1); shards++; score += 100; chime();
+        spawnShard(false);
+        if (shards >= 25) { score += 500; updateHUD(); endGame(true); return; }
+      }
+    }
+    score += dt * (2 + level);
+    updateHUD();
+  }
+
+  function drawSkater() {
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
+    ctx.fillStyle = '#101c2e';
+    ctx.beginPath(); ctx.ellipse(0, 0, 22, 11, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff5d8f';
+    ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(3, -3, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#cfe9ff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-16, 10); ctx.lineTo(16, 10); ctx.stroke();
+    ctx.restore();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Frozen lake sheen and aurora bands.
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0b2a44'); grad.addColorStop(0.45, '#164a6b'); grad.addColorStop(1, '#9ed8ef');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    for (var i = 0; i < 14; i++) { ctx.beginPath(); ctx.ellipse((i * 173) % W, 300 + (i % 3) * 70, 90, 12, 0, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    stars.forEach(function(s){ s.tw += 0.03; ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(s.tw)); ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(120,255,190,0.22)';
+    ctx.beginPath(); ctx.moveTo(0, 70); ctx.bezierCurveTo(220, 20, 520, 130, 900, 50); ctx.lineTo(900, 110); ctx.bezierCurveTo(560, 190, 240, 90, 0, 140); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(180,140,255,0.18)';
+    ctx.beginPath(); ctx.moveTo(0, 100); ctx.bezierCurveTo(260, 60, 620, 160, 900, 90); ctx.lineTo(900, 145); ctx.bezierCurveTo(600, 210, 260, 130, 0, 165); ctx.closePath(); ctx.fill();
+    // Skate trail.
+    trail.forEach(function(t){ ctx.fillStyle = 'rgba(220,245,255,' + t.a.toFixed(2) + ')'; ctx.beginPath(); ctx.arc(t.x, t.y, 5, 0, Math.PI * 2); ctx.fill(); });
+    // Shards.
+    items.forEach(function(s){
+      var pulse = 1 + Math.sin(s.pulse) * 0.25;
+      ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.pulse * 0.3); ctx.scale(pulse, pulse);
+      ctx.fillStyle = '#ffe066'; ctx.shadowColor = '#ffe066'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(8, 0); ctx.lineTo(0, 15); ctx.lineTo(-8, 0); ctx.closePath(); ctx.fill();
+      ctx.restore(); ctx.shadowBlur = 0;
+    });
+    // Obstacles.
+    obstacles.forEach(function(o){
+      if (o.kind === 'crack') {
+        ctx.strokeStyle = '#06121f'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(o.x - 26, o.y); ctx.lineTo(o.x - 8, o.y - 12); ctx.lineTo(o.x + 10, o.y + 8); ctx.lineTo(o.x + 28, o.y - 4); ctx.stroke();
+        ctx.strokeStyle = '#bfe9ff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(o.x - 26, o.y - 3); ctx.lineTo(o.x - 8, o.y - 15); ctx.lineTo(o.x + 10, o.y + 5); ctx.lineTo(o.x + 28, o.y - 7); ctx.stroke();
+      } else {
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(o.x, o.y + 12, 22, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(o.x, o.y - 10, 15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(o.x - 5, o.y - 13, 2.5, 0, Math.PI * 2); ctx.arc(o.x + 5, o.y - 13, 2.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ff7a1a'; ctx.beginPath(); ctx.moveTo(o.x, o.y - 8); ctx.lineTo(o.x + 16, o.y - 5); ctx.lineTo(o.x, o.y - 3); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#e63946'; ctx.fillRect(o.x - 14, o.y - 24, 28, 7);
+      }
+    });
+    if (state === 'playing' || state === 'paused') {
+      if (invuln <= 0 || Math.floor(invuln * 10) % 2 === 0) drawSkater();
+    }
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 34px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Paused — press P to resume', W / 2, H / 2);
+      ctx.textAlign = 'left';
+    }
+  }
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000); last = now;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  document.getElementById('startBtn').addEventListener('click', function(){ startGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function(){ startGame(); });
+  document.getElementById('menuBtn').addEventListener('click', function(){
+    state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); updateHUD('Ready');
+  });
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === 'p' && state === 'playing') { state = 'paused'; updateHUD('Paused'); }
+    else if (k === 'p' && state === 'paused') { state = 'playing'; updateHUD('Skating!'); }
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+  canvas.addEventListener('mousedown', function(e){ ensureAudio(); pointer.active = true; pointer.x = e.clientX; pointer.y = e.clientY; });
+  document.addEventListener('mouseup', function(){ pointer.active = false; });
+  canvas.addEventListener('mousemove', function(e){ if (pointer.active) { pointer.x = e.clientX; pointer.y = e.clientY; } });
+  canvas.addEventListener('click', function(e){ ensureAudio(); pointer.x = e.clientX; pointer.y = e.clientY; });
+  canvas.addEventListener('touchstart', function(e){ ensureAudio(); e.preventDefault(); pointer.active = true; var t = e.touches[0]; pointer.x = t.clientX; pointer.y = t.clientY; }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); if (pointer.active) { var t = e.touches[0]; pointer.x = t.clientX; pointer.y = t.clientY; } }, { passive: false });
+  canvas.addEventListener('touchend', function(){ pointer.active = false; });
+  resetGame(); state = 'title'; updateHUD('Ready');
+})();
+</script>
+</body>
+</html>

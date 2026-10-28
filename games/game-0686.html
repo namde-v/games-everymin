@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Ant Trail Architect</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#1a1408;color:#fff8e1;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+  h1{font-size:26px;color:#ffcc33;text-align:center;margin:6px 0 2px;text-shadow:0 2px 0 #000}
+  p.sub{font-size:13px;color:#ffe9a8;text-align:center;margin-bottom:8px}
+  #hud{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;width:100%;max-width:640px;margin-bottom:8px}
+  .pill{background:#3a2a10;border:2px solid #ffcc33;border-radius:20px;padding:6px 12px;font-weight:bold;font-size:14px}
+  .pill b{color:#ffcc33}
+  #wrap{position:relative;width:100%;max-width:640px}
+  canvas{display:block;width:100%;height:auto;background:#2e7d32;border:4px solid #5d4037;border-radius:12px;touch-action:none;cursor:crosshair}
+  .overlay{position:absolute;inset:0;background:rgba(20,14,2,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;gap:10px}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:30px;color:#ffcc33}
+  .overlay p{font-size:14px;line-height:1.55;max-width:480px;color:#fff8e1}
+  .overlay ul{text-align:left;font-size:13px;line-height:1.6;max-width:480px;color:#ffe9a8}
+  button{background:#ffcc33;color:#3a2200;border:0;border-radius:10px;padding:12px 22px;font-size:17px;font-weight:bold;cursor:pointer;box-shadow:0 4px 0 #b8860b}
+  button:active{transform:translateY(3px);box-shadow:0 1px 0 #b8860b}
+  button.secondary{background:#fff;color:#333;box-shadow:0 4px 0 #999}
+  #msg{margin-top:8px;min-height:20px;font-weight:bold;color:#ffec8b;text-align:center;font-size:14px}
+  #controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+  #controls button{padding:9px 14px;font-size:14px}
+  .legend{font-size:12px;color:#ffe9a8;text-align:center;margin-top:6px;line-height:1.5}
+  kbd{background:#fff;color:#111;padding:1px 5px;border-radius:4px;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>🐜 Ant Trail Architect</h1>
+<p class="sub">Puzzle / Trail Drawing Logic — Draw pheromone trails from the nest to every food source.</p>
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Lives: <b id="lives">♥♥♥</b></div>
+  <div class="pill">Routes: <b id="routes">0 / 3</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+  <div class="pill">Trail: <b id="trailLen">0</b> steps</div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="600" height="500"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🐜 Ant Trail Architect</h2>
+    <p><b>How to Play:</b> You are the colony architect. Draw a pheromone trail from the Nest to each Food source.</p>
+    <ul>
+      <li>Drag from the Nest (brown mound, left side) through empty grass cells to a Food (apple / leaf / crumb).</li>
+      <li>Trails must be continuous, step to a neighbouring cell, and must NEVER cross an existing trail, a rock, or another route.</li>
+      <li>Rival red ants patrol the field. If your drawing touches a rival ant, you lose a life and the trail is cancelled.</li>
+      <li>Shorter trails score more. Complete all 3 food routes to WIN. Lose all 3 lives and it is Game Over.</li>
+      <li>Mouse: drag to draw. Touch: drag with your finger. Keyboard: Arrow keys move the cursor, <kbd>Space</kbd> starts / extends trail, <kbd>Enter</kbd> starts, <kbd>R</kbd> restarts, <kbd>C</kbd> clears current trail.</li>
+    </ul>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Tip: Plan around rocks first — a blocked middle cell can ruin a long route.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+    <button id="playAgainBtn" class="secondary">Play Again</button>
+  </div>
+</div>
+<div id="msg">Press Start, then drag from the Nest to food.</div>
+<div id="controls">
+  <button id="clearBtn">Clear Current Trail</button>
+  <button id="undoBtn">Undo Last Route</button>
+  <button id="soundBtn">Sound: On</button>
+</div>
+<p class="legend">🟤 Nest &nbsp; 🍎 🥬 🍪 Food &nbsp; ⬛ Rock obstacle &nbsp; 🔴 Rival ant &nbsp; 🟡 Pheromone trail &nbsp; ⬜ Cursor</p>
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var COLS=12, ROWS=10, CW=50, CH=50;
+  var scoreEl=document.getElementById('score'), livesEl=document.getElementById('lives'), routesEl=document.getElementById('routes'), statusEl=document.getElementById('status'), trailEl=document.getElementById('trailLen'), msgEl=document.getElementById('msg');
+  var titleScreen=document.getElementById('titleScreen'), endScreen=document.getElementById('endScreen');
+  var COLS_N=COLS, ROWS_N=ROWS;
+  var nest={x:0,y:5};
+  var foods=[{x:11,y:1,label:'🍎',name:'Apple',done:false},{x:11,y:5,label:'🥬',name:'Leaf',done:false},{x:11,y:8,label:'🍪',name:'Crumb',done:false}];
+  var rocks=[{x:3,y:2},{x:3,y:3},{x:6,y:4},{x:6,y:5},{x:4,y:7},{x:8,y:2},{x:9,y:7},{x:2,y:8},{x:5,y:1},{x:7,y:8}];
+  var rivals=[
+    {x:5,y:3,dx:1,dy:0,step:0},
+    {x:8,y:5,dx:0,dy:1,step:0},
+    {x:4,y:6,dx:1,dy:0,step:0}
+  ];
+  var routes=[]; // each: array of cells + food index
+  var current=[]; // cells being drawn
+  var drawing=false;
+  var score=0, lives=3, playing=false, gameOver=false, won=false;
+  var cursor={x:0,y:5};
+  var soundOn=true, audioCtx=null, shake=0, flashMsg=0;
+  function key(x,y){return x+','+y;}
+  function isRock(x,y){return rocks.some(function(r){return r.x===x&&r.y===y;});}
+  function isFood(x,y){for(var i=0;i<foods.length;i++){if(foods[i].x===x&&foods[i].y===y)return i;}return -1;}
+  function isNest(x,y){return x===nest.x&&y===nest.y;}
+  function occupiedByRoute(x,y){
+    for(var i=0;i<routes.length;i++){for(var j=0;j<routes[i].cells.length;j++){if(routes[i].cells[j].x===x&&routes[i].cells[j].y===y)return true;}}
+    return false;
+  }
+  function inCurrent(x,y){return current.some(function(c){return c.x===x&&c.y===y;});}
+  function isRival(x,y){return rivals.some(function(r){return r.x===x&&r.y===y;});}
+  function ensureAudio(){
+    if(!audioCtx){
+      try{var AC=window.AudioContext||window.webkitAudioContext; audioCtx=new AC();}catch(e){}
+    }
+    if(audioCtx&&audioCtx.state==='suspended'){audioCtx.resume();}
+  }
+  function beep(freq,dur,type,vol){
+    if(!soundOn||!audioCtx)return;
+    try{
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type||'sine'; o.frequency.value=freq;
+      g.gain.setValueAtTime(vol||0.12,audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+(dur||0.12));
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+(dur||0.12));
+    }catch(e){}
+  }
+  function setStatus(t){statusEl.textContent=t;}
+  function updateHUD(){
+    scoreEl.textContent=score;
+    livesEl.textContent='♥'.repeat(Math.max(0,lives))||'—';
+    routesEl.textContent=routes.length+' / 3';
+    trailEl.textContent=current.length;
+  }
+  function setMsg(t){msgEl.textContent=t;}
+  function loseLife(reason){
+    lives--; shake=18; beep(140,0.3,'sawtooth',0.15);
+    current=[]; drawing=false;
+    updateHUD();
+    if(lives<=0){ endGame(false); } else { setStatus('Life lost'); setMsg(reason+' — Lives left: '+lives+'. Draw again from the Nest.'); }
+  }
+  function cellFromEvent(e){
+    var rect=canvas.getBoundingClientRect();
+    var cx, cy;
+    if(e.touches&&e.touches.length){cx=e.touches[0].clientX; cy=e.touches[0].clientY;}
+    else{cx=e.clientX; cy=e.clientY;}
+    var x=Math.floor((cx-rect.left)/rect.width*COLS);
+    var y=Math.floor((cy-rect.top)/rect.height*ROWS);
+    x=Math.max(0,Math.min(COLS-1,x)); y=Math.max(0,Math.min(ROWS-1,y));
+    return {x:x,y:y};
+  }
+  function tryStart(cell){
+    if(!playing||gameOver)return;
+    if(!isNest(cell.x,cell.y)){ setMsg('Start your trail at the Nest on the left edge.'); return; }
+    drawing=true; current=[{x:cell.x,y:cell.y}]; setStatus('Drawing…'); setMsg('Drawing… drag to a food source without crossing trails or rocks.'); beep(520,0.08,'sine',0.1); updateHUD();
+  }
+  function tryExtend(cell){
+    if(!drawing)return;
+    var last=current[current.length-1];
+    if(cell.x===last.x&&cell.y===last.y)return;
+    var dx=Math.abs(cell.x-last.x), dy=Math.abs(cell.y-last.y);
+    if(dx+dy!==1){ setMsg('Trails must step to a neighbouring cell only.'); return; }
+    if(isRock(cell.x,cell.y)){ loseLife('Blocked! That cell is a rock'); return; }
+    if(isRival(cell.x,cell.y)){ loseLife('Rival ant ate your pheromone'); return; }
+    if(inCurrent(cell.x,cell.y)){ setMsg('Cannot loop back on your own current trail.'); return; }
+    if(occupiedByRoute(cell.x,cell.y)&&!isNest(cell.x,cell.y)){ loseLife('Crossed an existing trail'); return; }
+    // allow stepping onto food only as final cell
+    var fi=isFood(cell.x,cell.y);
+    if(fi>=0){
+      if(foods[fi].done){ setMsg('That food is already connected. Choose another food.'); return; }
+      current.push({x:cell.x,y:cell.y});
+      completeRoute(fi);
+      return;
+    }
+    current.push({x:cell.x,y:cell.y});
+    beep(660+current.length*8,0.05,'sine',0.07);
+    setStatus('Drawing…'); updateHUD();
+  }
+  function completeRoute(fi){
+    var len=current.length;
+    var bonus=Math.max(20,120-len*4);
+    score+=100+bonus;
+    foods[fi].done=true;
+    routes.push({cells:current.slice(),food:fi});
+    current=[]; drawing=false;
+    beep(880,0.15,'sine',0.14); setTimeout(function(){beep(1100,0.2,'sine',0.14);},120);
+    setStatus('Route complete!');
+    setMsg('Connected the '+foods[fi].name+'! +'+(100+bonus)+' points. '+(3-routes.length)+' route(s) left.');
+    updateHUD();
+    if(routes.length>=3){ endGame(true); }
+  }
+  function endGame(win){
+    playing=false; gameOver=true; won=win;
+    endScreen.classList.remove('hidden');
+    var t=document.getElementById('endTitle'), tx=document.getElementById('endText'), sc=document.getElementById('endScore');
+    if(win){ t.textContent='🏆 You Win!'; tx.textContent='All 3 food sources are connected. The colony feasts thanks to your trails!'; beep(523,0.2,'sine',0.14); setTimeout(function(){beep(659,0.2,'sine',0.14);},180); setTimeout(function(){beep(784,0.3,'sine',0.14);},360); setStatus('WIN'); }
+    else{ t.textContent='💀 Game Over'; tx.textContent='The rival ants overwhelmed your trails. Try again with a smarter plan!'; setStatus('Game Over'); }
+    sc.textContent='Final Score: '+score+' | Routes: '+routes.length+' / 3 | Lives left: '+Math.max(0,lives);
+    setMsg(win?'Victory! Press Restart to play again.':'Game Over. Press Restart to try again.');
+  }
+  function resetGame(){
+    score=0; lives=3; routes=[]; current=[]; drawing=false; playing=true; gameOver=false; won=false; shake=0;
+    foods.forEach(function(f){f.done=false;});
+    rivals[0].x=5; rivals[0].y=3; rivals[1].x=8; rivals[1].y=5; rivals[2].x=4; rivals[2].y=6;
+    cursor={x:0,y:5};
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    setStatus('Playing'); setMsg('Drag from the Nest to the Apple, Leaf and Crumb — no crossings, no rocks!');
+    updateHUD();
+  }
+  function draw(){
+    ctx.save();
+    if(shake>0){ ctx.translate((Math.random()-0.5)*shake,(Math.random()-0.5)*shake); shake*=0.85; if(shake<0.5)shake=0; }
+    ctx.fillStyle='#2e7d32'; ctx.fillRect(0,0,600,500);
+    // checker grass
+    for(var y=0;y<ROWS;y++){for(var x=0;x<COLS;x++){
+      if((x+y)%2===0){ctx.fillStyle='rgba(255,255,255,0.06)'; ctx.fillRect(x*CW,y*CH,CW,CH);}
+      ctx.strokeStyle='rgba(0,0,0,0.15)'; ctx.strokeRect(x*CW+0.5,y*CH+0.5,CW,CH);
+    }}
+    // completed routes
+    var colors=['#ffcc33','#ff8a65','#81d4fa'];
+    routes.forEach(function(r,i){
+      ctx.strokeStyle=colors[i%colors.length]; ctx.lineWidth=10; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.beginPath();
+      r.cells.forEach(function(c,j){ var px=c.x*CW+CW/2, py=c.y*CH+CH/2; if(j===0)ctx.moveTo(px,py); else ctx.lineTo(px,py); });
+      ctx.stroke();
+      ctx.fillStyle='rgba(0,0,0,0.25)'; r.cells.forEach(function(c){ctx.beginPath(); ctx.arc(c.x*CW+CW/2,c.y*CH+CH/2,5,0,Math.PI*2); ctx.fill();});
+    });
+    // current trail
+    if(current.length>1){
+      ctx.strokeStyle='#fff176'; ctx.lineWidth=8; ctx.lineCap='round'; ctx.beginPath();
+      current.forEach(function(c,j){var px=c.x*CW+CW/2, py=c.y*CH+CH/2; if(j===0)ctx.moveTo(px,py); else ctx.lineTo(px,py);});
+      ctx.stroke();
+    }
+    // rocks
+    rocks.forEach(function(r){ ctx.fillStyle='#5d4037'; ctx.beginPath(); ctx.arc(r.x*CW+CW/2,r.y*CH+CH/2,20,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#8d6e63'; ctx.font='22px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('🪨',r.x*CW+CW/2,r.y*CH+CH/2+1); });
+    // nest
+    ctx.fillStyle='#6d4c41'; ctx.beginPath(); ctx.ellipse(nest.x*CW+CW/2,nest.y*CH+CH/2+8,26,16,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#4e342e'; ctx.beginPath(); ctx.arc(nest.x*CW+CW/2,nest.y*CH+CH/2-6,11,0,Math.PI*2); ctx.fill();
+    ctx.font='24px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('🐜',nest.x*CW+CW/2,nest.y*CH+CH/2-4);
+    ctx.fillStyle='#fff'; ctx.font='bold 11px Arial'; ctx.fillText('NEST',nest.x*CW+CW/2,nest.y*CH+44);
+    // foods
+    foods.forEach(function(f){
+      ctx.font='30px Arial'; ctx.fillText(f.label,f.x*CW+CW/2,f.y*CH+CH/2+1);
+      if(f.done){ ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.font='bold 20px Arial'; ctx.fillText('✓',f.x*CW+CW/2+18,f.y*CH+14); }
+      ctx.fillStyle='#fff'; ctx.font='bold 10px Arial'; ctx.fillText(f.name.toUpperCase(),f.x*CW+CW/2,f.y*CH+44);
+    });
+    // rivals
+    rivals.forEach(function(r){
+      ctx.fillStyle='#d32f2f'; ctx.beginPath(); ctx.arc(r.x*CW+CW/2,r.y*CH+CH/2,15,0,Math.PI*2); ctx.fill();
+      ctx.font='20px Arial'; ctx.fillText('🐜',r.x*CW+CW/2,r.y*CH+CH/2+1);
+      ctx.fillStyle='#fff'; ctx.font='bold 12px Arial'; ctx.fillText('!',r.x*CW+CW/2+14,r.y*CH+14);
+    });
+    // cursor
+    if(playing){
+      ctx.strokeStyle='#ffffff'; ctx.lineWidth=3; ctx.setLineDash([6,4]); ctx.strokeRect(cursor.x*CW+3,cursor.y*CH+3,CW-6,CH-6); ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+  var lastRivalMove=0;
+  function loop(ts){
+    requestAnimationFrame(loop);
+    if(playing && ts-lastRivalMove>650){
+      lastRivalMove=ts;
+      rivals.forEach(function(r){
+        // wander, bounce off rocks / edges / foods / nest, avoid completed routes lightly
+        var dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+        var d=dirs[Math.floor(Math.random()*dirs.length)];
+        var nx=r.x+d[0], ny=r.y+d[1];
+        if(nx<0||nx>=COLS||ny<0||ny>=ROWS)return;
+        if(isRock(nx,ny)||isNest(nx,ny)||isFood(nx,ny)>=0)return;
+        r.x=nx; r.y=ny;
+        // if rival steps onto current drawing, cancel it
+        if(drawing&&inCurrent(nx,ny)){ loseLife('A rival ant crossed your unfinished trail'); }
+      });
+    }
+    draw();
+  }
+  // Mouse
+  canvas.addEventListener('mousedown',function(e){ ensureAudio(); if(!playing)return; var c=cellFromEvent(e); cursor=c; tryStart(c); });
+  canvas.addEventListener('mousemove',function(e){ if(!drawing)return; var c=cellFromEvent(e); cursor=c; tryExtend(c); });
+  window.addEventListener('mouseup',function(){ drawing=false; if(playing&&current.length>0){ /* keep partial? clear on release if not completed */ } if(playing){ current=[]; updateHUD(); } });
+  canvas.addEventListener('click',function(e){ ensureAudio(); if(!playing)return; var c=cellFromEvent(e); cursor=c; });
+  // Touch
+  canvas.addEventListener('touchstart',function(e){ e.preventDefault(); ensureAudio(); if(!playing)return; var c=cellFromEvent(e); cursor=c; tryStart(c); },{passive:false});
+  canvas.addEventListener('touchmove',function(e){ e.preventDefault(); if(!drawing)return; var c=cellFromEvent(e); cursor=c; tryExtend(c); },{passive:false});
+  canvas.addEventListener('touchend',function(e){ e.preventDefault(); if(drawing){ drawing=false; current=[]; updateHUD(); } },{passive:false});
+  // Keyboard
+  document.addEventListener('keydown',function(e){
+    ensureAudio();
+    if(e.key==='Enter'&&!playing&&!gameOver){ resetGame(); return; }
+    if((e.key==='r'||e.key==='R')){ resetGame(); return; }
+    if(!playing)return;
+    if(e.key==='c'||e.key==='C'){ current=[]; drawing=false; setMsg('Current trail cleared.'); updateHUD(); return; }
+    var nx=cursor.x, ny=cursor.y;
+    if(e.key==='ArrowLeft')nx--;
+    else if(e.key==='ArrowRight')nx++;
+    else if(e.key==='ArrowUp')ny--;
+    else if(e.key==='ArrowDown')ny++;
+    else if(e.key===' '){
+      e.preventDefault();
+      if(!drawing){ tryStart(cursor); } else { /* space extends in facing direction is handled by arrows */ }
+      return;
+    } else return;
+    if(nx<0||nx>=COLS||ny<0||ny>=ROWS)return;
+    e.preventDefault();
+    cursor={x:nx,y:ny};
+    if(drawing){ tryExtend(cursor); }
+    else if(e.shiftKey){ /* shift+arrow preview only */ }
+  });
+  // Buttons
+  document.getElementById('startBtn').addEventListener('click',function(){ ensureAudio(); beep(660,0.12,'sine',0.12); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('click',function(){ ensureAudio(); resetGame(); });
+  document.getElementById('playAgainBtn').addEventListener('click',function(){ ensureAudio(); resetGame(); });
+  document.getElementById('clearBtn').addEventListener('click',function(){ ensureAudio(); current=[]; drawing=false; setMsg('Current trail cleared.'); updateHUD(); });
+  document.getElementById('undoBtn').addEventListener('click',function(){
+    ensureAudio();
+    if(routes.length===0){ setMsg('No route to undo yet.'); return; }
+    var last=routes.pop(); foods[last.food].done=false; score=Math.max(0,score-100); setStatus('Route undone'); setMsg('Undid the '+foods[last.food].name+' route. Draw it again.'); updateHUD();
+  });
+  document.getElementById('soundBtn').addEventListener('click',function(e){ ensureAudio(); soundOn=!soundOn; e.target.textContent='Sound: '+(soundOn?'On':'Off'); if(soundOn)beep(700,0.1,'sine',0.1); });
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

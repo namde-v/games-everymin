@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Airport Runway Controller</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1d33; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 12px; min-height: 100vh; }
+  h1 { font-size: 26px; margin: 6px 0 2px; text-align: center; letter-spacing: 0.5px; }
+  p.sub { color: #9fc3e8; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px; font-weight: bold; font-size: 15px; }
+  #hud span { background: #14365e; border: 1px solid #2f6db0; border-radius: 8px; padding: 6px 12px; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { display: block; width: 100%; height: auto; background: #123a2a; border: 3px solid #d7e6ff; border-radius: 10px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(4, 16, 30, 0.88); border-radius: 10px; text-align: center; padding: 22px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #d6e6f7; }
+  button { background: #ffb020; color: #1a1200; border: none; border-radius: 10px; padding: 12px 22px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffc94d; }
+  button.small { padding: 9px 14px; font-size: 14px; background: #2f7de1; color: #fff; }
+  button.small.active { background: #ffb020; color: #1a1200; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  #msg { min-height: 22px; margin-top: 8px; font-weight: bold; color: #ffd970; text-align: center; }
+  .keys { font-size: 13px; color: #b9d2ee; text-align: center; margin-top: 8px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>✈️ Airport Runway Controller</h1>
+<p class="sub">Strategy / Air Traffic Routing — keep the skies safe and land the quota!</p>
+<div id="hud">
+  <span>Score: <span id="score">0</span></span>
+  <span>Lives: <span id="lives">❤️❤️❤️</span></span>
+  <span>Landed: <span id="landed">0</span> / 12</span>
+  <span>Status: <span id="status">Ready</span></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="860" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Airport Runway Controller</h2>
+    <p><strong>How to Play:</strong> Planes approach from every direction. Tap or click a plane to select it, then assign it to a free runway (buttons below, or keys 1 / 2 / 3) or send it to a holding pattern (H). Assigned planes steer to their runway and land for points. Unassigned planes that fly off screen are missed. If two planes get too close they collide!</p>
+    <p>Land <strong>12 planes</strong> to win. You have 3 lives. Collisions and missed planes cost a life. Watch the fuel ring: planes flashing red are urgent — land them first!</p>
+    <button id="startBtn">▶ Start Game</button>
+    <p style="font-size:13px;">Mouse / touch: click a plane, then a runway. Keyboard: 1, 2, 3 = runway, H = hold, Esc = deselect.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+<div id="controls">
+  <button class="small" id="rw1">Runway 1</button>
+  <button class="small" id="rw2">Runway 2</button>
+  <button class="small" id="rw3">Runway 3</button>
+  <button class="small" id="holdBtn">Holding Pattern</button>
+  <button class="small" id="pauseBtn">Pause</button>
+</div>
+<div id="msg"></div>
+<div class="keys">Click / tap a plane to select it &nbsp;•&nbsp; Keys 1-3 assign runway, H holds, P pauses &nbsp;•&nbsp; Avoid collisions, land 12 planes!</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var landedEl = document.getElementById('landed');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var W = 860, H = 560;
+  var runways = [
+    { id: 1, x: 180, y: 130, w: 500, label: 'RWY 1', busy: false },
+    { id: 2, x: 180, y: 280, w: 500, label: 'RWY 2', busy: false },
+    { id: 3, x: 180, y: 430, w: 500, label: 'RWY 3', busy: false }
+  ];
+  var planes = [], particles = [];
+  var score = 0, lives = 3, landed = 0, quota = 12;
+  var selected = null, running = false, paused = false;
+  var spawnTimer = 0, spawnEvery = 150, frame = 0, rafId = null;
+  var audioCtx = null;
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function initAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    landedEl.textContent = landed;
+    livesEl.textContent = '❤️'.repeat(Math.max(0, lives));
+    statusEl.textContent = !running ? 'Ready' : (paused ? 'Paused' : (selected ? 'Plane ' + selected.call + ' selected' : 'Directing traffic'));
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 18; i++) particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 30, color: color });
+  }
+  var calls = ['A101','B204','C307','D412','E515','F620','G731','H842','J953','K064','L175','M286'];
+  var callIdx = 0;
+  function spawnPlane() {
+    var side = Math.floor(Math.random() * 4);
+    var x, y, vx, vy;
+    if (side === 0) { x = -20; y = 60 + Math.random() * 440; vx = 1.1 + Math.random() * 0.5; vy = (Math.random() - 0.5) * 0.5; }
+    else if (side === 1) { x = W + 20; y = 60 + Math.random() * 440; vx = -(1.1 + Math.random() * 0.5); vy = (Math.random() - 0.5) * 0.5; }
+    else if (side === 2) { x = 60 + Math.random() * 740; y = -20; vx = (Math.random() - 0.5) * 0.5; vy = 1.1 + Math.random() * 0.5; }
+    else { x = 60 + Math.random() * 740; y = H + 20; vx = (Math.random() - 0.5) * 0.5; vy = -(1.1 + Math.random() * 0.5); }
+    var colors = ['#ffdf6b','#7fd8ff','#ff9ecb','#b6ff9e','#ffa07a'];
+    planes.push({ x: x, y: y, vx: vx, vy: vy, call: calls[callIdx++ % calls.length], color: colors[Math.floor(Math.random() * colors.length)], runway: 0, holding: false, angle: 0, age: 0, holdAngle: Math.random() * 6.28, landedPhase: 0, state: 'approach' });
+  }
+  function assignRunway(rwId) {
+    if (!selected || !running || paused) return;
+    var rw = runways[rwId - 1];
+    if (rw.busy) { setMsg(rw.label + ' is busy — pick another runway or hold!'); beep(160, 0.2, 'square'); return; }
+    if (selected.runway) runways[selected.runway - 1].busy = false;
+    selected.runway = rwId; selected.holding = false; selected.state = 'landing';
+    rw.busy = true;
+    setMsg(selected.call + ' cleared to land on ' + rw.label + '!');
+    beep(660, 0.12, 'sine'); updateHUD();
+  }
+  function assignHold() {
+    if (!selected || !running || paused) return;
+    if (selected.runway) runways[selected.runway - 1].busy = false;
+    selected.runway = 0; selected.holding = true; selected.state = 'holding';
+    setMsg(selected.call + ' sent to holding pattern.'); beep(440, 0.12, 'sine'); updateHUD();
+  }
+  function loseLife(reason) {
+    lives--; beep(120, 0.4, 'sawtooth'); setMsg(reason);
+    updateHUD();
+    if (lives <= 0) endGame(false);
+  }
+  function endGame(won) {
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    endTitle.textContent = won ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    endText.textContent = won ? 'Brilliant controlling! You landed ' + landed + ' planes with a score of ' + score + '.' : 'The skies got too busy. You landed ' + landed + ' of 12 planes. Score: ' + score + '. Try again!';
+    if (won) { beep(523, 0.2, 'sine'); setTimeout(function() { beep(659, 0.2, 'sine'); }, 150); setTimeout(function() { beep(784, 0.3, 'sine'); }, 300); }
+    endScreen.classList.remove('hidden'); updateHUD();
+  }
+  function reset() {
+    planes = []; particles = []; score = 0; lives = 3; landed = 0; selected = null;
+    runways.forEach(function(r) { r.busy = false; });
+    spawnTimer = 0; spawnEvery = 150; frame = 0; paused = false;
+    endScreen.classList.add('hidden'); setMsg('Click a plane, then assign a runway!');
+    updateHUD();
+  }
+  function startGame() {
+    initAudio(); reset();
+    titleScreen.classList.add('hidden');
+    running = true; statusEl.textContent = 'Directing traffic';
+    beep(523, 0.15, 'sine');
+    if (rafId) cancelAnimationFrame(rafId);
+    requestAnimationFrame(loop);
+  }
+  function pickPlane(cx, cy) {
+    var best = null, bestD = 42;
+    planes.forEach(function(p) {
+      var d = Math.hypot(p.x - cx, p.y - cy);
+      if (d < bestD) { bestD = d; best = p; }
+    });
+    if (best) {
+      selected = best; setMsg(best.call + ' selected — assign Runway 1, 2, 3 or Hold.');
+      beep(880, 0.08, 'sine');
+    } else { selected = null; setMsg('No plane there. Click a plane to select it.'); }
+    updateHUD();
+  }
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0].clientX));
+    var cy = (e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0].clientY));
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  canvas.addEventListener('click', function(e) { if (running && !paused) { var p = canvasPos(e); pickPlane(p.x, p.y); } });
+  canvas.addEventListener('mousedown', function(e) { initAudio(); });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); initAudio(); if (running && !paused) { var p = canvasPos(e); pickPlane(p.x, p.y); } }, { passive: false });
+  document.addEventListener('keydown', function(e) {
+    if (!running) return;
+    if (e.key === '1') assignRunway(1);
+    else if (e.key === '2') assignRunway(2);
+    else if (e.key === '3') assignRunway(3);
+    else if (e.key === 'h' || e.key === 'H') assignHold();
+    else if (e.key === 'p' || e.key === 'P') togglePause();
+    else if (e.key === 'Escape') { selected = null; updateHUD(); }
+  });
+  function togglePause() {
+    if (!running) return;
+    paused = !paused; setMsg(paused ? 'Paused — press P or Pause to resume.' : 'Resumed!');
+    if (!paused) requestAnimationFrame(loop);
+    updateHUD();
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('rw1').addEventListener('click', function() { initAudio(); assignRunway(1); });
+  document.getElementById('rw2').addEventListener('click', function() { initAudio(); assignRunway(2); });
+  document.getElementById('rw3').addEventListener('click', function() { initAudio(); assignRunway(3); });
+  document.getElementById('holdBtn').addEventListener('click', function() { initAudio(); assignHold(); });
+  document.getElementById('pauseBtn').addEventListener('click', function() { initAudio(); togglePause(); });
+
+  function update() {
+    frame++;
+    spawnTimer++;
+    if (spawnTimer >= spawnEvery && planes.length < 7) {
+      spawnPlane(); spawnTimer = 0;
+      if (spawnEvery > 95) spawnEvery -= 4;
+    }
+    var i, j, p;
+    for (i = planes.length - 1; i >= 0; i--) {
+      p = planes[i]; p.age++;
+      if (p.state === 'holding') {
+        p.holdAngle += 0.03;
+        var cx = 430 + Math.cos(p.holdAngle) * 90, cy = 280 + Math.sin(p.holdAngle) * 55;
+        p.vx = (cx - p.x) * 0.05; p.vy = (cy - p.y) * 0.05;
+        p.x += p.vx; p.y += p.vy;
+      } else if (p.state === 'landing') {
+        var rw = runways[p.runway - 1];
+        var tx = rw.x - 10, ty = rw.y;
+        if (p.landedPhase === 0) {
+          var dx = tx - p.x, dy = ty - p.y, dist = Math.hypot(dx, dy) || 1;
+          p.vx = dx / dist * 2.2; p.vy = dy / dist * 2.2;
+          p.x += p.vx; p.y += p.vy;
+          if (dist < 14) p.landedPhase = 1;
+        } else {
+          p.x += 2.6; p.vx = 2.6; p.vy = 0;
+          if (p.x > rw.x + rw.w) {
+            runways[p.runway - 1].busy = false;
+            burst(p.x, p.y, '#7dff9e'); score += 100; landed++;
+            if (selected === p) selected = null;
+            planes.splice(i, 1); beep(784, 0.18, 'sine');
+            setMsg('Landed! +' + 100 + ' points. ' + landed + ' / 12 landed.');
+            updateHUD();
+            if (landed >= quota) { endGame(true); return; }
+            continue;
+          }
+        }
+      } else {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) {
+          if (selected === p) selected = null;
+          planes.splice(i, 1);
+          loseLife('Missed ' + p.call + '! It left the airspace unlanded.'); 
+          if (!running) return;
+          continue;
+        }
+      }
+      p.angle = Math.atan2(p.vy, p.vx);
+    }
+    for (i = 0; i < planes.length; i++) {
+      for (j = i + 1; j < planes.length; j++) {
+        var a = planes[i], b = planes[j];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < 30) {
+          burst((a.x + b.x) / 2, (a.y + b.y) / 2, '#ff5a4e');
+          var ca = a.call, cb = b.call;
+          planes = planes.filter(function(q) { return q !== a && q !== b; });
+          runways.forEach(function(r) { if (a.runway === r.id || b.runway === r.id) r.busy = false; });
+          if (selected === a || selected === b) selected = null;
+          loseLife('Collision between ' + ca + ' and ' + cb + '!');
+          return;
+        }
+      }
+    }
+    particles.forEach(function(pt) { pt.x += pt.vx; pt.y += pt.vy; pt.life--; });
+    particles = particles.filter(function(pt) { return pt.life > 0; });
+  }
+  function draw() {
+    ctx.fillStyle = '#123a2a'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+    for (var gx = 0; gx < W; gx += 86) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+    for (var gy = 0; gy < H; gy += 80) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+    runways.forEach(function(r) {
+      ctx.fillStyle = r.busy ? '#5a3a10' : '#2b2f36';
+      ctx.fillRect(r.x, r.y - 14, r.w, 28);
+      ctx.fillStyle = '#ffffff';
+      for (var d = 0; d < 10; d++) ctx.fillRect(r.x + 20 + d * 50, r.y - 2, 24, 4);
+      ctx.fillStyle = '#ffd970'; ctx.font = 'bold 13px Arial'; ctx.fillText(r.label + (r.busy ? ' • BUSY' : ' • FREE'), r.x, r.y - 22);
+    });
+    ctx.fillStyle = '#cfe8ff'; ctx.font = 'bold 14px Arial'; ctx.fillText('HOLDING ZONE', 350, 40);
+    ctx.strokeStyle = 'rgba(127,216,255,0.5)'; ctx.beginPath(); ctx.ellipse(430, 280, 95, 60, 0, 0, 6.29); ctx.stroke();
+    planes.forEach(function(p) {
+      var urgent = p.age > 900;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.angle);
+      ctx.fillStyle = p.color; ctx.beginPath();
+      ctx.moveTo(16, 0); ctx.lineTo(-10, -11); ctx.lineTo(-5, 0); ctx.lineTo(-10, 11); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = urgent ? '#ff6b5e' : '#ffffff';
+      ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(p.call + (p.runway ? ' → RWY ' + p.runway : (p.holding ? ' • HOLD' : '')), p.x, p.y - 20);
+      if (selected === p) {
+        ctx.strokeStyle = '#ffd970'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 26, 0, 6.29); ctx.stroke();
+      }
+      if (urgent) {
+        ctx.strokeStyle = 'rgba(255,80,60,0.8)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 20, 0, 6.29); ctx.stroke();
+      }
+      ctx.textAlign = 'left';
+    });
+    particles.forEach(function(pt) {
+      ctx.fillStyle = pt.color; ctx.globalAlpha = pt.life / 30;
+      ctx.fillRect(pt.x, pt.y, 5, 5); ctx.globalAlpha = 1;
+    });
+  }
+  function loop() {
+    if (!running || paused) return;
+    update(); draw();
+    if (running && !paused) rafId = requestAnimationFrame(loop);
+  }
+  draw(); updateHUD();
+})();
+</script>
+</body>
+</html>
