@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glacier Kayak Rapids</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0b1e2d; color:#eaf7ff; font-family:Arial, Helvetica, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; overflow:hidden; }
+  h1 { font-size:26px; letter-spacing:1px; margin:10px 0 4px; text-align:center; text-shadow:0 2px 0 #123; }
+  p.sub { font-size:13px; color:#a8d8ee; margin-bottom:8px; text-align:center; }
+  #wrap { position:relative; width:480px; max-width:96vw; }
+  canvas { display:block; width:100%; height:640px; background:#1b6f9e; border:3px solid #7dd3fc; border-radius:12px; touch-action:none; }
+  #hud { display:flex; justify-content:space-between; padding:8px 10px; font-weight:bold; font-size:15px; background:#12364d; border-radius:8px; margin-bottom:8px; }
+  #hud span { color:#ffd166; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:rgba(4,24,38,0.86); border-radius:12px; padding:24px; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { font-size:30px; margin-bottom:10px; }
+  .overlay p { font-size:15px; line-height:1.55; max-width:380px; margin-bottom:10px; color:#d6eefb; }
+  button { background:#ffd166; color:#1a2a33; border:none; border-radius:10px; padding:13px 26px; font-size:18px; font-weight:bold; cursor:pointer; margin-top:8px; box-shadow:0 4px 0 #b8860b; }
+  button:active { transform:translateY(3px); box-shadow:none; }
+  .keys { font-size:13px; color:#a8d8ee; margin-top:10px; line-height:1.5; }
+  #msg { min-height:20px; font-size:14px; color:#7dd3fc; text-align:center; margin-top:6px; }
+</style>
+</head>
+<body>
+<h1>🛶 Glacier Kayak Rapids</h1>
+<p class="sub">Ride the meltwater! Dodge rocks, leap logs, grab gems, reach the calm lake.</p>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Gems: <span id="gems">0</span>/25</div>
+    <div>Lives: <span id="lives">♥♥♥</span></div>
+    <div>Dist: <span id="dist">0</span>m / 1500m</div>
+  </div>
+  <canvas id="game" width="480" height="640"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Glacier Kayak Rapids</h2>
+    <p><strong>How to Play:</strong> Steer your kayak down the glacier river. Dodge grey rocks and floating logs, collect sparkling river gems, and survive 1500 metres to the calm lake — or collect 25 gems for an early win!</p>
+    <p>Steer left / right to change lanes, and press Up (or tap the top of the river) for a quick paddle burst. Hitting an obstacle costs one life. You have 3 lives.</p>
+    <button id="startBtn">▶ Start Paddling</button>
+    <div class="keys">Controls: ← → Arrow Keys / A D to steer • ↑ / W / Space for paddle burst<br>Mouse: move to steer, click for burst • Touch: drag to steer, tap for burst</div>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="finalStats"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<div id="msg">Tip: gems near the banks are worth the risk — but rocks love the banks too!</div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var gemsEl = document.getElementById('gems');
+  var livesEl = document.getElementById('lives');
+  var distEl = document.getElementById('dist');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalStats = document.getElementById('finalStats');
+  var msgEl = document.getElementById('msg');
+
+  var W = 480, H = 640;
+  var state = 'title'; // title, playing, won, over
+  var score = 0, gems = 0, lives = 3, distance = 0;
+  var speed = 3.2, frame = 0, spawnTimer = 0, invuln = 0, burst = 0, burstTimer = 0;
+  var keys = {};
+  var player = { x: 240, y: 530, w: 44, h: 68, targetX: 240, tilt: 0 };
+  var obstacles = [], pickups = [], particles = [], ripples = [];
+  var audioCtx = null, muted = false;
+
+  function initAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol, slide){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function sfx(name){
+    if (name === 'gem') { tone(880, 0.12, 'sine', 0.14); setTimeout(function(){ tone(1320, 0.18, 'sine', 0.12); }, 60); }
+    else if (name === 'crash') { tone(160, 0.35, 'sawtooth', 0.2, -100); }
+    else if (name === 'burst') { tone(300, 0.2, 'triangle', 0.12, 300); }
+    else if (name === 'win') { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.3, 'triangle', 0.15); }, i*140); }); }
+    else if (name === 'lose') { [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.3, 'sawtooth', 0.12); }, i*150); }); }
+  }
+
+  function reset(){
+    score = 0; gems = 0; lives = 3; distance = 0;
+    speed = 3.2; frame = 0; spawnTimer = 0; invuln = 0; burst = 0; burstTimer = 0;
+    player.x = 240; player.targetX = 240; player.tilt = 0;
+    obstacles = []; pickups = []; particles = []; ripples = [];
+    updateHUD();
+  }
+  function updateHUD(){
+    scoreEl.textContent = score;
+    gemsEl.textContent = gems;
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    distEl.textContent = Math.floor(distance);
+  }
+  function startGame(){
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    msgEl.textContent = 'Paddle! Watch for rocks ahead.';
+    requestAnimationFrame(loop);
+  }
+  function endGame(won){
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '🏆 You Reached the Lake!' : '💥 Wrecked in the Rapids!';
+    endText.textContent = won ? 'Smooth water at last! Your kayak glides into the calm glacier lake.' : 'The rapids claimed your kayak. The river always wins sometimes.';
+    finalStats.textContent = 'Final score: ' + score + ' • Gems: ' + gems + ' • Distance: ' + Math.floor(distance) + 'm';
+    endScreen.classList.remove('hidden');
+    if (won) sfx('win'); else sfx('lose');
+  }
+
+  function riverBanks(t){
+    // Winding river: centre moves sinusoidally, width narrows slightly as speed rises
+    var centre = 240 + Math.sin(t * 0.012) * 55 + Math.sin(t * 0.004) * 25;
+    var half = 165 - Math.min(30, speed * 3);
+    return { left: centre - half, right: centre + half, centre: centre };
+  }
+
+  function spawn(){
+    var banks = riverBanks(frame);
+    var r = Math.random();
+    if (r < 0.62) {
+      var kind = Math.random() < 0.55 ? 'rock' : 'log';
+      var x = banks.left + 25 + Math.random() * (banks.right - banks.left - 50);
+      obstacles.push({ x: x, y: -50, w: kind === 'rock' ? 46 : 78, h: kind === 'rock' ? 42 : 26, kind: kind, rot: Math.random() * 3 });
+    } else {
+      var gx = banks.left + 30 + Math.random() * (banks.right - banks.left - 60);
+      pickups.push({ x: gx, y: -30, r: 14, bob: Math.random() * 6 });
+    }
+    // Occasionally a second obstacle to force a lane choice
+    if (Math.random() < 0.35) {
+      var x2 = banks.left + 25 + Math.random() * (banks.right - banks.left - 50);
+      obstacles.push({ x: x2, y: -120, w: 46, h: 42, kind: 'rock', rot: 0 });
+    }
+  }
+
+  function burstParticles(x, y, color, n){
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random()-0.5)*5, vy: (Math.random()-0.5)*5, life: 30, color: color });
+    }
+  }
+
+  function update(){
+    frame++;
+    var effSpeed = speed + burst;
+    distance += effSpeed * 0.55;
+    if (distance > 400 && distance < 410) msgEl.textContent = 'The river narrows — stay sharp!';
+    if (distance > 900 && distance < 910) msgEl.textContent = 'White water ahead! Gems are plentiful here.';
+    if (distance > 1300) msgEl.textContent = 'Almost there — the lake glimmers ahead!';
+
+    speed = Math.min(7.5, 3.2 + distance / 350);
+    if (burstTimer > 0) { burstTimer--; if (burstTimer === 0) burst = 0; }
+    if (invuln > 0) invuln--;
+
+    // Steering
+    if (keys.ArrowLeft || keys.a || keys.A) player.targetX -= 7;
+    if (keys.ArrowRight || keys.d || keys.D) player.targetX += 7;
+    player.targetX = Math.max(50, Math.min(430, player.targetX));
+    var dx = player.targetX - player.x;
+    player.x += dx * 0.22;
+    player.tilt = Math.max(-0.35, Math.min(0.35, dx * 0.02));
+
+    spawnTimer--;
+    if (spawnTimer <= 0) { spawn(); spawnTimer = Math.max(28, 78 - speed * 6 - Math.random() * 20); }
+
+    var banks = riverBanks(frame);
+    // Keep player inside banks
+    if (player.x < banks.left + 24) { player.x = banks.left + 24; player.targetX = player.x; }
+    if (player.x > banks.right - 24) { player.x = banks.right - 24; player.targetX = player.x; }
+
+    for (var i = obstacles.length - 1; i >= 0; i--) {
+      var o = obstacles[i]; o.y += effSpeed;
+      if (o.y > H + 60) { obstacles.splice(i, 1); score += 10; continue; }
+      var hit = Math.abs(o.x - player.x) < (o.w/2 + 18) && Math.abs(o.y - player.y) < (o.h/2 + 28);
+      if (hit && invuln <= 0) {
+        lives--; invuln = 90; sfx('crash');
+        burstParticles(player.x, player.y, '#ff6b6b', 22);
+        msgEl.textContent = lives > 0 ? 'Crash! ' + lives + (lives === 1 ? ' life' : ' lives') + ' left — paddle on!' : 'No lives left!';
+        obstacles.splice(i, 1);
+        if (lives <= 0) { updateHUD(); endGame(false); return; }
+      }
+    }
+    for (var j = pickups.length - 1; j >= 0; j--) {
+      var p = pickups[j]; p.y += effSpeed; p.bob += 0.15;
+      if (p.y > H + 40) { pickups.splice(j, 1); continue; }
+      if (Math.abs(p.x - player.x) < 34 && Math.abs(p.y - player.y) < 40) {
+        gems++; score += 50; sfx('gem');
+        burstParticles(p.x, p.y, '#7df9ff', 14);
+        pickups.splice(j, 1);
+        if (gems >= 25) { updateHUD(); endGame(true); return; }
+      }
+    }
+    // Ripples + particles
+    if (frame % 8 === 0) ripples.push({ x: player.x + (Math.random()-0.5)*30, y: player.y + 30, r: 4, life: 24 });
+    for (var k = ripples.length - 1; k >= 0; k--) { ripples[k].r += 1.2; ripples[k].life--; if (ripples[k].life <= 0) ripples.splice(k, 1); }
+    for (var m = particles.length - 1; m >= 0; m--) { var pt = particles[m]; pt.x += pt.vx; pt.y += pt.vy; pt.life--; if (pt.life <= 0) particles.splice(m, 1); }
+
+    score += 1;
+    updateHUD();
+    if (distance >= 1500) { endGame(true); return; }
+  }
+
+  function draw(){
+    // Water with current streaks
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#2a8fc4'); grad.addColorStop(0.5, '#1b6f9e'); grad.addColorStop(1, '#155a82');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+
+    var banks = riverBanks(frame);
+    // Banks (snow / rock)
+    ctx.fillStyle = '#e8f4fa';
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    for (var y = 0; y <= H; y += 20) { var b = riverBanks(frame - (H - y) / (speed + 0.1) * 2); ctx.lineTo(b.left, y); }
+    ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W, 0);
+    for (var y2 = 0; y2 <= H; y2 += 20) { var b2 = riverBanks(frame - (H - y2) / (speed + 0.1) * 2); ctx.lineTo(b2.right, y2); }
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    // Pine trees on banks
+    ctx.fillStyle = '#14532d';
+    for (var t = 0; t < 10; t++) {
+      var ty = (t * 70 + (frame * (speed + burst) % 70)) % (H + 40) - 20;
+      ctx.beginPath(); ctx.moveTo(22, ty - 14); ctx.lineTo(38, ty + 14); ctx.lineTo(6, ty + 14); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(W - 22, ty - 14); ctx.lineTo(W - 6, ty + 14); ctx.lineTo(W - 38, ty + 14); ctx.closePath(); ctx.fill();
+    }
+    // Foam streaks
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+    for (var s = 0; s < 12; s++) {
+      var sx = banks.left + 20 + ((s * 47 + frame * 2) % (banks.right - banks.left - 40));
+      var sy = (s * 83 + frame * (speed + burst)) % H;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 6, sy + 18); ctx.stroke();
+    }
+    // Ripples
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ripples.forEach(function(r){ ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke(); });
+    // Gems
+    pickups.forEach(function(p){
+      var bobY = p.y + Math.sin(p.bob) * 4;
+      ctx.save(); ctx.translate(p.x, bobY); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = '#7df9ff'; ctx.shadowColor = '#7df9ff'; ctx.shadowBlur = 12;
+      ctx.fillRect(-9, -9, 18, 18); ctx.restore(); ctx.shadowBlur = 0;
+    });
+    // Obstacles
+    obstacles.forEach(function(o){
+      if (o.kind === 'rock') {
+        ctx.fillStyle = '#5b6470'; ctx.beginPath();
+        ctx.ellipse(o.x, o.y, o.w/2, o.h/2, o.rot, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#8b95a3'; ctx.beginPath(); ctx.ellipse(o.x - 8, o.y - 8, 12, 8, 0, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(0.2);
+        ctx.fillStyle = '#7a5230'; ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+        ctx.fillStyle = '#a9743f'; ctx.fillRect(-o.w/2, -o.h/2, o.w, 8); ctx.restore();
+      }
+    });
+    // Kayak
+    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.tilt);
+    if (invuln > 0 && Math.floor(frame / 6) % 2 === 0) ctx.globalAlpha = 0.4;
+    ctx.fillStyle = '#ff5d5d';
+    ctx.beginPath(); ctx.ellipse(0, 0, 20, 34, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.ellipse(0, -6, 12, 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a2a33'; ctx.beginPath(); ctx.arc(0, -2, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.restore(); ctx.globalAlpha = 1;
+    // Paddle hint when bursting
+    if (burst > 0) { ctx.fillStyle = 'rgba(255,209,102,0.8)'; ctx.font = 'bold 14px Arial'; ctx.fillText('BURST!', player.x - 22, player.y - 46); }
+    // Particles
+    particles.forEach(function(pt){ ctx.fillStyle = pt.color; ctx.fillRect(pt.x - 3, pt.y - 3, 6, 6); });
+    // Distance progress bar
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(10, 10, W - 20, 10);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(10, 10, (W - 20) * Math.min(1, distance / 1500), 10);
+  }
+
+  function loop(){
+    if (state !== 'playing') return;
+    update();
+    if (state !== 'playing') { draw(); return; }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function doBurst(){
+    if (state !== 'playing') return;
+    if (burstTimer <= 0) { burst = 2.2; burstTimer = 40; sfx('burst'); }
+  }
+  function steerTo(clientX){
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    player.targetX = Math.max(40, Math.min(440, x));
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { doBurst(); e.preventDefault(); }
+    if ((e.key === 'Enter') && (state === 'title' || state === 'won' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key] = false; });
+
+  canvas.addEventListener('mousemove', function(e){ if (state === 'playing') steerTo(e.clientX); });
+  canvas.addEventListener('mousedown', function(e){ initAudio(); if (state === 'playing') { steerTo(e.clientX); doBurst(); } });
+  canvas.addEventListener('touchstart', function(e){ initAudio(); e.preventDefault(); if (state === 'playing' && e.touches[0]) { steerTo(e.touches[0].clientX); doBurst(); } }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); if (state === 'playing' && e.touches[0]) steerTo(e.touches[0].clientX); }, { passive: false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); }, { passive: false });
+
+  draw();
+})();
+</script>
+</body>
+</html>

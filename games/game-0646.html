@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Volcano Ash Glider</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#1a0d08; color:#ffe8c8; font-family: "Trebuchet MS", Verdana, sans-serif; overflow:hidden; display:flex; justify-content:center; align-items:center; height:100vh; }
+  #wrap { position:relative; width:960px; max-width:100vw; }
+  canvas { display:block; width:100%; height:540px; max-height:100vh; background:linear-gradient(#2b1410,#4a1c0e); border:3px solid #ff7a2a; border-radius:10px; touch-action:none; }
+  #hud { position:absolute; top:10px; left:12px; right:12px; display:flex; justify-content:space-between; font-weight:bold; font-size:17px; text-shadow:1px 1px 2px #000; pointer-events:none; }
+  #hud span { background:rgba(0,0,0,.45); padding:4px 10px; border-radius:8px; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background:rgba(10,4,2,.78); border-radius:10px; padding:20px; }
+  .hidden { display:none !important; }
+  h1 { font-size:46px; color:#ffb347; text-shadow:0 0 18px #ff5a00, 2px 2px 0 #000; margin-bottom:8px; }
+  h2 { font-size:42px; color:#ffd700; text-shadow:2px 2px 0 #000; margin-bottom:10px; }
+  p { max-width:620px; line-height:1.55; font-size:16px; margin:6px 0; }
+  .howto { background:rgba(255,122,42,.15); border:1px solid #ff7a2a; border-radius:10px; padding:12px 18px; margin:14px 0; text-align:left; }
+  .howto b { color:#ffb347; }
+  button { cursor:pointer; font-size:22px; font-weight:bold; padding:14px 34px; border:none; border-radius:12px; background:#ff7a2a; color:#fff; box-shadow:0 4px 0 #b34700; margin-top:16px; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b34700; }
+  button.small { font-size:16px; padding:10px 22px; }
+  #distbar { width:620px; max-width:90%; height:16px; background:#333; border-radius:8px; overflow:hidden; margin-top:12px; }
+  #distfill { height:100%; width:0%; background:linear-gradient(90deg,#ffb347,#ff5a00); }
+  .keys { font-size:14px; opacity:.9; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="hud">
+    <span id="hScore">Score: 0</span>
+    <span id="hLives">Lives: 3</span>
+    <span id="hDist">Distance: 0m</span>
+    <span id="hStatus">Gliding...</span>
+  </div>
+
+  <div id="titleScreen" class="screen">
+    <h1>VOLCANO ASH GLIDER</h1>
+    <p>Ride the hot winds above a erupting volcano. Dodge embers and rock pillars, grab crystals, and reach the safe landing zone!</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      &bull; <b>Arrow keys / W S</b> or <b>mouse move</b> or <b>touch drag</b> &mdash; steer the glider up and down.<br>
+      &bull; Hold <b>Space</b> or press and hold to catch lift &mdash; updrafts (glowing orange columns) push you up and give bonus points.<br>
+      &bull; Collect <b>cyan crystals</b> (+50 points). Avoid <b>falling embers</b> and <b>rock pillars</b> &mdash; each hit costs a life.<br>
+      &bull; Survive 3000m to reach the <b>green landing zone</b> and WIN. You have 3 lives.
+    </div>
+    <button id="startBtn">START GLIDING</button>
+    <p class="keys">Tip: stay near updrafts when embers rain down &mdash; lift is your best escape.</p>
+  </div>
+
+  <div id="winScreen" class="screen hidden">
+    <h2>YOU LANDED SAFELY!</h2>
+    <p id="winText">You reached the safe landing zone!</p>
+    <p>Final score and crystals are shown below. Great flying, glider pilot!</p>
+    <button id="winRestart">FLY AGAIN</button>
+  </div>
+
+  <div id="overScreen" class="screen hidden">
+    <h2>GAME OVER</h2>
+    <p id="overText">The volcano claimed your glider...</p>
+    <p>Try again &mdash; learn the ember patterns and ride every updraft.</p>
+    <button id="overRestart">RESTART</button>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+var cv = document.getElementById("game");
+var ctx = cv.getContext("2d");
+var W = 960, H = 540;
+var titleScreen = document.getElementById("titleScreen");
+var winScreen = document.getElementById("winScreen");
+var overScreen = document.getElementById("overScreen");
+var hScore = document.getElementById("hScore");
+var hLives = document.getElementById("hLives");
+var hDist = document.getElementById("hDist");
+var hStatus = document.getElementById("hStatus");
+
+var state = "title"; // title, playing, win, over
+var score = 0, lives = 3, distance = 0, crystals = 0;
+var keys = {};
+var mouseY = null, mouseDown = false, touchY = null, touchDown = false;
+var frame = 0, spawnTimer = 0, emberTimer = 0, updraftTimer = 0;
+var player, pillars, embers, crystalList, updrafts, particles, ash;
+
+var audioCtx = null;
+function ensureAudio(){
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+  }
+  if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+}
+function beep(freq, dur, type, vol){
+  if (!audioCtx || state !== "playing") return;
+  try {
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || "sine"; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+function noiseBurst(){
+  if (!audioCtx || state !== "playing") return;
+  try {
+    var len = audioCtx.sampleRate * 0.15;
+    var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i=0;i<len;i++) d[i] = (Math.random()*2-1) * (1 - i/len);
+    var src = audioCtx.createBufferSource(); src.buffer = buf;
+    var g = audioCtx.createGain(); g.gain.value = 0.12;
+    src.connect(g); g.connect(audioCtx.destination); src.start();
+  } catch(e) {}
+}
+
+function reset(){
+  score = 0; lives = 3; distance = 0; crystals = 0;
+  frame = 0; spawnTimer = 0; emberTimer = 0; updraftTimer = 0;
+  player = { x: 130, y: H/2, vy: 0, tilt: 0, inv: 0 };
+  pillars = []; embers = []; crystalList = []; updrafts = []; particles = []; ash = [];
+  for (var i=0;i<70;i++) ash.push({ x: Math.random()*W, y: Math.random()*H, s: 1+Math.random()*2.5, v: 0.4+Math.random()*1.2, a: 0.2+Math.random()*0.5 });
+  updateHUD();
+}
+function updateHUD(){
+  hScore.textContent = "Score: " + score + "  Crystals: " + crystals;
+  hLives.textContent = "Lives: " + lives;
+  hDist.textContent = "Distance: " + Math.floor(distance) + "m / 3000m";
+  hStatus.textContent = state === "playing" ? (player && player.inv>0 ? "Invincible!" : "Gliding...") : state;
+}
+function showScreen(which){
+  titleScreen.classList.add("hidden");
+  winScreen.classList.add("hidden");
+  overScreen.classList.add("hidden");
+  if (which) which.classList.remove("hidden");
+}
+function startGame(){
+  ensureAudio();
+  reset();
+  state = "playing";
+  showScreen(null);
+  hStatus.textContent = "Gliding...";
+  beep(440, 0.2, "triangle", 0.12);
+}
+function winGame(){
+  state = "win";
+  score += lives * 250;
+  document.getElementById("winText").textContent = "You reached the safe landing zone with " + lives + " life(s) left! Crystals: " + crystals + " | Final Score: " + score;
+  showScreen(winScreen);
+  beep(660, 0.3, "triangle", 0.12); setTimeout(function(){ beep(880, 0.4, "triangle", 0.12); }, 200);
+}
+function gameOver(){
+  state = "over";
+  document.getElementById("overText").textContent = "The volcano claimed your glider after " + Math.floor(distance) + "m. Score: " + score + " | Crystals: " + crystals;
+  showScreen(overScreen);
+  noiseBurst();
+}
+function hit(){
+  if (player.inv > 0) return;
+  lives--; player.inv = 90; noiseBurst();
+  burst(player.x, player.y, "#ff5a00", 22);
+  if (lives <= 0) { gameOver(); return; }
+  updateHUD();
+}
+
+function burst(x, y, color, n){
+  for (var i=0;i<n;i++) particles.push({ x:x, y:y, vx:(Math.random()-0.5)*6, vy:(Math.random()-0.5)*6, life:30+Math.random()*20, color:color });
+}
+function spawnPillar(){
+  var gap = 150 + Math.random()*40;
+  var gy = 90 + Math.random()*(H-180-gap);
+  pillars.push({ x: W+40, gapY: gy, gapH: gap, w: 64, passed:false });
+}
+function spawnEmber(){
+  embers.push({ x: 200+Math.random()*(W-200), y: -20, vx: (Math.random()-0.5)*1.5, vy: 2.5+Math.random()*3.5, r: 5+Math.random()*7 });
+}
+function spawnCrystal(){
+  crystalList.push({ x: W+30, y: 60+Math.random()*(H-120), r: 13, bob: Math.random()*6 });
+}
+function spawnUpdraft(){
+  updrafts.push({ x: W+30, y: 0, w: 90+Math.random()*60, h: H });
+}
+function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh){
+  return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by;
+}
+
+function update(){
+  if (state !== "playing") return;
+  frame++;
+  distance += 2.2;
+  score += 1;
+  if (distance >= 3000) { winGame(); updateHUD(); return; }
+
+  // Steering
+  var target = player.y;
+  if (keys["ArrowUp"] || keys["w"] || keys["W"]) target -= 6;
+  if (keys["ArrowDown"] || keys["s"] || keys["S"]) target += 6;
+  if (mouseY !== null && !mouseDown) target = mouseY;
+  if (mouseDown && mouseY !== null) target = mouseY;
+  if (touchY !== null) target = touchY;
+  if (keys[" "] ) target -= 2.5; // space gives gentle lift
+  player.y += (target - player.y) * 0.22;
+  player.tilt = (target - player.y) * 0.02;
+  if (player.y < 30) player.y = 30;
+  if (player.y > H-30) player.y = H-30;
+  if (player.inv > 0) player.inv--;
+
+  // Updraft lift + bonus
+  var inUp = false;
+  for (var u=0;u<updrafts.length;u++){
+    if (player.x+20 > updrafts[u].x && player.x-20 < updrafts[u].x+updrafts[u].w){ inUp = true; }
+  }
+  if (inUp){ player.y -= 1.6; if (frame % 30 === 0) score += 5; hStatus.textContent = "Riding updraft!"; }
+  else if (player.inv <= 0) hStatus.textContent = "Gliding...";
+
+  // Spawning, difficulty ramps with distance
+  spawnTimer--;
+  if (spawnTimer <= 0){ spawnPillar(); spawnTimer = 90 - Math.min(35, Math.floor(distance/150)); }
+  emberTimer--;
+  if (emberTimer <= 0){ spawnEmber(); if (distance > 800) spawnEmber(); emberTimer = 28 + Math.random()*30; }
+  updraftTimer--;
+  if (updraftTimer <= 0){ spawnUpdraft(); updraftTimer = 220 + Math.random()*160; }
+  if (frame % 130 === 0) spawnCrystal();
+
+  // Move world
+  var speed = 3.2 + Math.min(2.5, distance/1200);
+  for (var i=pillars.length-1;i>=0;i--){
+    pillars[i].x -= speed;
+    if (!pillars[i].passed && pillars[i].x + pillars[i].w < player.x){ pillars[i].passed = true; score += 25; beep(520,0.08,"sine",0.05); }
+    if (pillars[i].x < -80) pillars.splice(i,1);
+  }
+  for (var j=embers.length-1;j>=0;j--){
+    embers[j].x += embers[j].vx; embers[j].y += embers[j].vy;
+    if (embers[j].y > H+30) embers.splice(j,1);
+  }
+  for (var k=crystalList.length-1;k>=0;k--){
+    crystalList[k].x -= speed; crystalList[k].bob += 0.1;
+    if (crystalList[k].x < -30) crystalList.splice(k,1);
+  }
+  for (var m=updrafts.length-1;m>=0;m--){
+    updrafts[m].x -= speed * 0.8;
+    if (updrafts[m].x + updrafts[m].w < 0) updrafts.splice(m,1);
+  }
+  for (var a=0;a<ash.length;a++){ ash[a].x -= ash[a].v; ash[a].y += 0.2; if (ash[a].x < -5){ ash[a].x = W+5; ash[a].y = Math.random()*H; } }
+  for (var p=particles.length-1;p>=0;p--){ particles[p].x += particles[p].vx; particles[p].y += particles[p].vy; particles[p].life--; if (particles[p].life<=0) particles.splice(p,1); }
+
+  // Collisions
+  for (var q=0;q<pillars.length;q++){
+    var pl = pillars[q];
+    if (rectsOverlap(player.x-18, player.y-12, 36, 24, pl.x, 0, pl.w, pl.gapY) ||
+        rectsOverlap(player.x-18, player.y-12, 36, 24, pl.x, pl.gapY+pl.gapH, pl.w, H-(pl.gapY+pl.gapH))){
+      hit(); if (state!=="playing") return; pillars.splice(q,1); break;
+    }
+  }
+  for (var r=embers.length-1;r>=0;r--){
+    var e = embers[r];
+    var dx = e.x-player.x, dy = e.y-player.y;
+    if (dx*dx+dy*dy < (e.r+16)*(e.r+16)){ hit(); embers.splice(r,1); if (state!=="playing") return; }
+  }
+  for (var c=crystalList.length-1;c>=0;c--){
+    var cr = crystalList[c];
+    var ddx = cr.x-player.x, ddy = cr.y-player.y;
+    if (ddx*ddx+ddy*ddy < (cr.r+20)*(cr.r+20)){ crystalList.splice(c,1); crystals++; score += 50; burst(cr.x, cr.y, "#00e5ff", 14); beep(880,0.12,"sine",0.1); }
+  }
+  updateHUD();
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // Sky + volcano backdrop
+  var g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#2b1410"); g.addColorStop(0.6,"#4a1c0e"); g.addColorStop(1,"#120806");
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  // Volcano silhouette
+  ctx.fillStyle = "#1c0b06";
+  ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(180,H); ctx.lineTo(330,H-190); ctx.lineTo(430,H-190); ctx.lineTo(560,H); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#ff5a00";
+  ctx.beginPath(); ctx.moveTo(330,H-190); ctx.lineTo(380,H-160); ctx.lineTo(430,H-190); ctx.lineTo(405,H-150); ctx.lineTo(380,H-185); ctx.lineTo(355,H-150); ctx.closePath(); ctx.fill();
+  // Lava glow at bottom
+  ctx.fillStyle = "rgba(255,90,0,0.25)"; ctx.fillRect(0,H-30,W,30);
+  // Updrafts
+  for (var u=0;u<updrafts.length;u++){
+    var ud = updrafts[u];
+    ctx.fillStyle = "rgba(255,150,40,0.20)";
+    ctx.fillRect(ud.x, 0, ud.w, H);
+    ctx.strokeStyle = "rgba(255,200,80,0.6)"; ctx.setLineDash([8,8]);
+    ctx.strokeRect(ud.x, 0, ud.w, H); ctx.setLineDash([]);
+    ctx.fillStyle = "#ffcc66"; ctx.font = "bold 14px Verdana"; ctx.textAlign = "center";
+    ctx.fillText("UPDRAFT", ud.x+ud.w/2, 30);
+  }
+  // Landing zone marker when close
+  if (distance > 2700){
+    ctx.fillStyle = "#22cc66";
+    ctx.fillRect(W-90, H-90, 90, 90);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 15px Verdana"; ctx.textAlign = "center";
+    ctx.fillText("LAND", W-45, H-50);
+  }
+  // Pillars
+  for (var i=0;i<pillars.length;i++){
+    var pl = pillars[i];
+    ctx.fillStyle = "#3a2a22"; ctx.fillRect(pl.x, 0, pl.w, pl.gapY);
+    ctx.fillStyle = "#5a4232"; ctx.fillRect(pl.x, 0, pl.w, pl.gapY);
+    ctx.fillStyle = "#ff5a00"; ctx.fillRect(pl.x, pl.gapY-8, pl.w, 8);
+    ctx.fillStyle = "#3a2a22"; ctx.fillRect(pl.x, pl.gapY+pl.gapH, pl.w, H-(pl.gapY+pl.gapH));
+    ctx.fillStyle = "#ff5a00"; ctx.fillRect(pl.x, pl.gapY+pl.gapH, pl.w, 8);
+    ctx.fillStyle = "#7a5a40";
+    for (var ry=10; ry<pl.gapY; ry+=34) ctx.fillRect(pl.x+6, ry, pl.w-12, 4);
+    for (var ry2=pl.gapY+pl.gapH+12; ry2<H; ry2+=34) ctx.fillRect(pl.x+6, ry2, pl.w-12, 4);
+  }
+  // Crystals
+  for (var c=0;c<crystalList.length;c++){
+    var cr = crystalList[c];
+    var bobY = cr.y + Math.sin(cr.bob)*6;
+    ctx.save(); ctx.translate(cr.x, bobY); ctx.rotate(cr.bob*0.3);
+    ctx.fillStyle = "#00e5ff"; ctx.shadowColor = "#00e5ff"; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.moveTo(0,-14); ctx.lineTo(10,0); ctx.lineTo(0,14); ctx.lineTo(-10,0); ctx.closePath(); ctx.fill();
+    ctx.restore(); ctx.shadowBlur = 0;
+  }
+  // Embers
+  for (var e=0;e<embers.length;e++){
+    var em = embers[e];
+    ctx.fillStyle = "#ffcc33"; ctx.shadowColor = "#ff5a00"; ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.arc(em.x, em.y, em.r, 0, Math.PI*2); ctx.fill();
+    ctx.restore(); ctx.shadowBlur = 0;
+    ctx.fillStyle = "#ff5a00"; ctx.beginPath(); ctx.arc(em.x, em.y, em.r*0.55, 0, Math.PI*2); ctx.fill();
+  }
+  // Ash particles
+  ctx.fillStyle = "#cccccc";
+  for (var a=0;a<ash.length;a++){ ctx.globalAlpha = ash[a].a; ctx.fillRect(ash[a].x, ash[a].y, ash[a].s, ash[a].s); }
+  ctx.globalAlpha = 1;
+  // Burst particles
+  for (var p=0;p<particles.length;p++){ ctx.fillStyle = particles[p].color; ctx.globalAlpha = Math.max(0, particles[p].life/50); ctx.fillRect(particles[p].x, particles[p].y, 4, 4); }
+  ctx.globalAlpha = 1;
+  // Player glider (blink while invincible)
+  if (player && state !== "title"){
+    if (!(player.inv > 0 && Math.floor(frame/6)%2===0)){
+      ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.tilt);
+      ctx.fillStyle = "#ffb347";
+      ctx.beginPath(); ctx.moveTo(24,0); ctx.lineTo(-16,-16); ctx.lineTo(-8,0); ctx.lineTo(-16,16); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#ff5a00"; ctx.beginPath(); ctx.arc(0,0,7,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(3,-2,2.5,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+  }
+  // Distance progress
+  if (state === "playing"){
+    ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(20, H-22, W-40, 10);
+    ctx.fillStyle = "#ffb347"; ctx.fillRect(20, H-22, (W-40)*Math.min(1, distance/3000), 10);
+  }
+}
+
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// Input: keyboard
+document.addEventListener("keydown", function(ev){
+  keys[ev.key] = true;
+  if (ev.key === " " || ev.key === "ArrowUp" || ev.key === "ArrowDown") ev.preventDefault();
+  if ((ev.key === "Enter" || ev.key === " ") && state !== "playing"){
+    if (state === "title") startGame();
+  }
+});
+document.addEventListener("keyup", function(ev){ keys[ev.key] = false; });
+
+// Input: mouse
+cv.addEventListener("mousemove", function(ev){
+  var r = cv.getBoundingClientRect();
+  mouseY = (ev.clientY - r.top) * (H / r.height);
+});
+cv.addEventListener("mousedown", function(ev){
+  ensureAudio();
+  mouseDown = true;
+  var r = cv.getBoundingClientRect();
+  mouseY = (ev.clientY - r.top) * (H / r.height);
+});
+document.addEventListener("mouseup", function(){ mouseDown = false; });
+
+// Input: touch
+cv.addEventListener("touchstart", function(ev){
+  ensureAudio();
+  ev.preventDefault();
+  touchDown = true;
+  var r = cv.getBoundingClientRect();
+  touchY = (ev.touches[0].clientY - r.top) * (H / r.height);
+}, { passive:false });
+cv.addEventListener("touchmove", function(ev){
+  ev.preventDefault();
+  var r = cv.getBoundingClientRect();
+  touchY = (ev.touches[0].clientY - r.top) * (H / r.height);
+}, { passive:false });
+cv.addEventListener("touchend", function(){ touchDown = false; touchY = null; });
+
+// Buttons
+document.getElementById("startBtn").addEventListener("click", startGame);
+document.getElementById("winRestart").addEventListener("click", startGame);
+document.getElementById("overRestart").addEventListener("click", startGame);
+
+reset();
+showScreen(titleScreen);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

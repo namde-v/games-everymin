@@ -44,3 +44,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0638 | Metronome Mechanic | Rhythm / Metronome Repair Timing | Space/click/tap on tick, mouse/touch tap | [Play](./../games/game-0638.html) |
 | 0639 | Paper Plane Postman | Arcade / Paper Plane Delivery | Arrow Keys/WASD steer, Space drop letter, mouse/touch drag | [Play](./../games/game-0639.html) |
 | 0640 | Glassblower's Breath | Precision / Glassblowing Breath Control | Hold Space/mouse/touch to blow, release to shape | [Play](./../games/game-0640.html) |
+| 0641 | Glacier Kayak Rapids | Arcade / River Kayak Rapids | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0641.html) |
+| 0642 | Constellation Weaver | Puzzle / Star Connection Logic | Mouse/touch click stars, Arrow Keys select, Enter confirm | [Play](./../games/game-0642.html) |
+| 0643 | Beehive Honey Manager | Strategy / Beehive Management Simulation | Mouse/touch assign bees, Keys select task | [Play](./../games/game-0643.html) |
+| 0644 | Taiko Drum Festival | Rhythm / Drum Beat Timing | Keys tap drums on beat, mouse/touch tap drums | [Play](./../games/game-0644.html) |
+| 0645 | Archery Wind Trial | Precision / Archery Wind Aiming | Mouse/touch aim and release, Arrow Keys adjust aim | [Play](./../games/game-0645.html) |
+| 0646 | Volcano Ash Glider | Arcade / Volcanic Gliding Action | Arrow Keys/WASD glide, mouse/touch steer | [Play](./../games/game-0646.html) |
+| 0647 | Tumbler Code Breaker | Puzzle / Safe Dial Deduction | Mouse/touch dial numbers, Keys enter code | [Play](./../games/game-0647.html) |
+| 0648 | Desert Oasis Caravan | Strategy / Caravan Route Management | Mouse/touch choose route and stops, Keys select | [Play](./../games/game-0648.html) |
+| 0649 | Flamenco Clap Circle | Rhythm / Handclap Pattern Timing | Space/click/tap clap patterns, Arrow Keys select | [Play](./../games/game-0649.html) |
+| 0650 | Ice Sculptor Chisel | Precision / Ice Sculpting Timing | Space/click/tap timed chisel, mouse/touch aim | [Play](./../games/game-0650.html) |
