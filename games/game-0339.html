@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Shadow Scribe</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b0d12; color: #e8e6df; font-family: Georgia, "Times New Roman", serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #d8c27a; text-shadow: 0 0 14px rgba(216,194,122,.45); margin: 6px 0 2px; text-align: center; }
+  .tag { color: #9aa3b2; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(92vw, 640px); }
+  canvas { width: 100%; height: auto; display: block; background: #14161d; border: 2px solid #3a3f4d; border-radius: 10px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: #1a1d26; border: 1px solid #3a3f4d; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-family: Arial, sans-serif; font-size: 14px; }
+  #hud b { color: #d8c27a; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(5,6,10,.88); border-radius: 10px; text-align: center; padding: 20px; }
+  #overlay h2 { font-size: 28px; color: #d8c27a; }
+  #overlay p { max-width: 480px; line-height: 1.55; font-size: 15px; color: #cfd3dc; }
+  #overlay .howto { background: #22252f; border: 1px solid #3a3f4d; border-radius: 8px; padding: 12px 14px; text-align: left; font-family: Arial, sans-serif; font-size: 14px; }
+  #overlay .howto strong { color: #d8c27a; }
+  button { background: #d8c27a; color: #141414; border: none; border-radius: 8px; padding: 12px 22px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #efe0a8; }
+  button.secondary { background: #2c3140; color: #e8e6df; border: 1px solid #4a5062; }
+  #msg { min-height: 20px; color: #ffb84d; font-family: Arial, sans-serif; font-size: 14px; margin-top: 8px; text-align: center; }
+  #controls { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  #controls button { padding: 10px 14px; font-size: 15px; }
+  .hidden { display: none !important; }
+  @media (max-width: 520px) { h1 { font-size: 24px; } #hud { font-size: 13px; } }
+</style>
+</head>
+<body>
+<h1>INK INFILTRATOR</h1>
+<div class="tag">Arcade / Stealth Maze &mdash; slip through the ink-dark archive unnoticed.</div>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Lives: <b id="lives">3</b></span>
+    <span>Scrolls: <b id="scrolls">0 / 5</b></span>
+    <span>Status: <b id="status">Hidden</b></span>
+    <span>Level: <b id="level">1</b></span>
+  </div>
+  <canvas id="game" width="640" height="480"></canvas>
+  <div id="overlay">
+    <h2 id="ovTitle">INK INFILTRATOR</h2>
+    <p id="ovText">You are a thief of lost stories. Sneak through the ink-dark rooms, gather the five glowing scrolls, and reach the exit &mdash; without ever stepping into a guard's lantern light.</p>
+    <div class="howto">
+      <strong>How to Play</strong><br>
+      Move: Arrow keys / WASD &mdash; or tap / click a direction pad below, or tap the maze to walk toward that spot.<br>
+      Guards patrol fixed routes. Their yellow vision cones are danger: if a cone touches you, you lose a life and restart from the entrance.<br>
+      Collect all 5 scrolls to unlock the green exit door, then reach it to win. You have 3 lives. Stay in the shadows!
+    </div>
+    <button id="startBtn">Start Infiltration</button>
+    <button id="restartBtn" class="secondary hidden">Restart</button>
+  </div>
+  <div id="msg"></div>
+  <div id="controls">
+    <button data-dir="up" aria-label="Move up">&#9650;</button>
+    <button data-dir="left" aria-label="Move left">&#9664;</button>
+    <button data-dir="down" aria-label="Move down">&#9660;</button>
+    <button data-dir="right" aria-label="Move right">&#9654;</button>
+    <button id="pauseBtn" class="secondary">Pause</button>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var overlay = document.getElementById("overlay");
+  var ovTitle = document.getElementById("ovTitle");
+  var ovText = document.getElementById("ovText");
+  var startBtn = document.getElementById("startBtn");
+  var restartBtn = document.getElementById("restartBtn");
+  var pauseBtn = document.getElementById("pauseBtn");
+  var msgEl = document.getElementById("msg");
+  var scoreEl = document.getElementById("score");
+  var livesEl = document.getElementById("lives");
+  var scrollsEl = document.getElementById("scrolls");
+  var statusEl = document.getElementById("status");
+  var levelEl = document.getElementById("level");
+
+  // ---- Audio: procedural only, created after user interaction ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    if (kind === "pickup") { beep(660, 0.12, "sine", 0.15); setTimeout(function(){ beep(990, 0.16, "sine", 0.15); }, 90); }
+    else if (kind === "caught") { beep(180, 0.35, "sawtooth", 0.18); }
+    else if (kind === "win") { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, "triangle", 0.16); }, i * 140); }); }
+    else if (kind === "lose") { [330, 262, 196, 131].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, "sawtooth", 0.14); }, i * 160); }); }
+    else if (kind === "step") { beep(220, 0.05, "triangle", 0.05); }
+  }
+
+  // ---- Maze: 16 x 12 tiles, 40px each. 1 = wall, 0 = floor ----
+  var TILE = 40, COLS = 16, ROWS = 12;
+  var MAP = [
+    "1111111111111111",
+    "1000001000001001",
+    "1011101011101011",
+    "1000100000100001",
+    "1110101110101111",
+    "1000001000100001",
+    "1011111010111101",
+    "1000010000000101",
+    "1111010111100101",
+    "1000000100000101",
+    "1011100001110001",
+    "1111111111111111"
+  ];
+  function isWall(cx, cy) {
+    if (cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return true;
+    return MAP[cy].charAt(cx) === "1";
+  }
+  function tileFree(cx, cy) { return !isWall(cx, cy); }
+
+  var state = "title"; // title | playing | paused | won | over
+  var player, guards, scrollList, exitTile, keys, target, score, lives, collected, alertTimer, lastStep;
+
+  function resetGame() {
+    player = { x: 1.5 * TILE, y: 1.5 * TILE, r: 13, speed: 150, vx: 0, vy: 0 };
+    guards = [
+      { path: [[3,1],[3,5],[7,5],[7,1]], i: 0, t: 0, speed: 62, dir: 0, fov: 0.9, range: 130 },
+      { path: [[10,1],[10,5],[13,5],[13,2]], i: 0, t: 0, speed: 58, dir: 0, fov: 0.9, range: 125 },
+      { path: [[2,8],[6,8],[6,10],[11,10],[11,7]], i: 0, t: 0, speed: 66, dir: 0, fov: 1.0, range: 140 },
+      { path: [[13,8],[13,10],[8,10]], i: 0, t: 0, speed: 55, dir: 0, fov: 0.9, range: 120 }
+    ];
+    guards.forEach(function(g){
+      var p = g.path[0]; g.x = (p[0] + 0.5) * TILE; g.y = (p[1] + 0.5) * TILE;
+    });
+    scrollList = [
+      { cx: 5, cy: 1, taken: false }, { cx: 14, cy: 3, taken: false },
+      { cx: 1, cy: 7, taken: false }, { cx: 9, cy: 6, taken: false },
+      { cx: 14, cy: 10, taken: false }
+    ];
+    exitTile = { cx: 14, cy: 1 };
+    keys = {}; target = null;
+    score = 0; lives = 3; collected = 0; alertTimer = 0; lastStep = 0;
+    updateHUD("Hidden");
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    scrollsEl.textContent = collected + " / 5";
+    statusEl.textContent = status || "Hidden";
+    levelEl.textContent = "1";
+  }
+
+  function showOverlay(title, text, showStart, showRestart) {
+    ovTitle.textContent = title;
+    ovText.textContent = text;
+    startBtn.classList.toggle("hidden", !showStart);
+    restartBtn.classList.toggle("hidden", !showRestart);
+    overlay.classList.remove("hidden");
+  }
+  function hideOverlay() { overlay.classList.add("hidden"); }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = "playing";
+    hideOverlay();
+    msgEl.textContent = "Stay out of the lantern light. Collect all 5 scrolls!";
+    beep(440, 0.15, "triangle", 0.12);
+  }
+
+  function caught() {
+    lives -= 1;
+    sfx("caught");
+    alertTimer = 1.2;
+    updateHUD("SPOTTED!");
+    msgEl.textContent = "Spotted! A guard caught you in the light.";
+    if (lives <= 0) {
+      state = "over"; sfx("lose");
+      showOverlay("CAUGHT FOR GOOD", "The archive keepers found you three times. Your score: " + score + ". Try a quieter route.", false, true);
+    } else {
+      player.x = 1.5 * TILE; player.y = 1.5 * TILE; target = null; keys = {};
+    }
+  }
+
+  function winGame() {
+    state = "won"; score += 500; updateHUD("ESCAPED!");
+    sfx("win");
+    showOverlay("YOU ESCAPED!", "You slipped out with all five scrolls and " + score + " points. A true ink infiltrator.", false, true);
+  }
+
+  function moveEntity(e, dx, dy, dt) {
+    var nx = e.x + dx * dt, ny = e.y + dy * dt;
+    var r = e.r || 12;
+    // Axis-separated collision so sliding along walls feels smooth.
+    if (!hitsWall(nx, e.y, r)) e.x = nx;
+    if (!hitsWall(e.x, ny, r)) e.y = ny;
+    e.x = Math.max(r, Math.min(COLS * TILE - r, e.x));
+    e.y = Math.max(r, Math.min(ROWS * TILE - r, e.y));
+  }
+  function hitsWall(x, y, r) {
+    var corners = [[x - r, y - r], [x + r, y - r], [x - r, y + r], [x + r, y + r]];
+    for (var i = 0; i < corners.length; i++) {
+      if (isWall(Math.floor(corners[i][0] / TILE), Math.floor(corners[i][1] / TILE))) return true;
+    }
+    return false;
+  }
+
+  function update(dt, now) {
+    if (state !== "playing") return;
+    var dx = 0, dy = 0;
+    if (keys["arrowleft"] || keys["a"]) dx -= 1;
+    if (keys["arrowright"] || keys["d"]) dx += 1;
+    if (keys["arrowup"] || keys["w"]) dy -= 1;
+    if (keys["arrowdown"] || keys["s"]) dy += 1;
+    if (target) {
+      var tx = target.x - player.x, ty = target.y - player.y;
+      var dist = Math.sqrt(tx * tx + ty * ty);
+      if (dist < 10) { target = null; }
+      else { dx = tx / dist; dy = ty / dist; }
+    }
+    if (dx !== 0 || dy !== 0) {
+      var len = Math.sqrt(dx * dx + dy * dy);
+      moveEntity(player, dx / len * player.speed, dy / len * player.speed, dt);
+      if (now - lastStep > 260) { lastStep = now; sfx("step"); }
+    }
+    // Guards patrol their waypoints.
+    guards.forEach(function(g){
+      var a = g.path[g.i], b = g.path[(g.i + 1) % g.path.length];
+      var ax = (a[0] + 0.5) * TILE, ay = (a[1] + 0.5) * TILE;
+      var bx = (b[0] + 0.5) * TILE, by = (b[1] + 0.5) * TILE;
+      g.t += (g.speed * dt) / Math.hypot(bx - ax, by - ay);
+      if (g.t >= 1) { g.t = 0; g.i = (g.i + 1) % g.path.length; }
+      var na = g.path[g.i], nb = g.path[(g.i + 1) % g.path.length];
+      var nax = (na[0] + 0.5) * TILE, nay = (na[1] + 0.5) * TILE;
+      var nbx = (nb[0] + 0.5) * TILE, nby = (nb[1] + 0.5) * TILE;
+      var px = nax + (nbx - nax) * g.t, py = nay + (nby - nay) * g.t;
+      g.dir = Math.atan2(py - g.y, px - g.x);
+      g.x = px; g.y = py;
+    });
+    // Vision cones: distance + angle + line of sight (sampled, walls block).
+    var spotted = false;
+    guards.forEach(function(g){
+      var dxp = player.x - g.x, dyp = player.y - g.y;
+      var d = Math.sqrt(dxp * dxp + dyp * dyp);
+      if (d < g.range) {
+        var ang = Math.atan2(dyp, dxp);
+        var diff = Math.abs(((ang - g.dir + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+        if (diff < g.fov / 2) {
+          var blocked = false;
+          for (var s = 0.1; s < 1; s += 0.1) {
+            if (isWall(Math.floor((g.x + dxp * s) / TILE), Math.floor((g.y + dyp * s) / TILE))) { blocked = true; break; }
+          }
+          if (!blocked) spotted = true;
+        }
+      }
+    });
+    if (spotted) { caught(); return; }
+    if (alertTimer > 0) { alertTimer -= dt; if (alertTimer <= 0) updateHUD("Hidden"); }
+    else { updateHUD(collected >= 5 ? "Exit unlocked!" : "Hidden"); }
+    // Scroll pickup.
+    scrollList.forEach(function(s){
+      if (s.taken) return;
+      var sx = (s.cx + 0.5) * TILE, sy = (s.cy + 0.5) * TILE;
+      if (Math.hypot(player.x - sx, player.y - sy) < 26) {
+        s.taken = true; collected += 1; score += 100; sfx("pickup");
+        msgEl.textContent = collected >= 5 ? "All scrolls found! The exit door is open." : "Scroll recovered (" + collected + " / 5).";
+        updateHUD(collected >= 5 ? "Exit unlocked!" : "Hidden");
+      }
+    });
+    // Exit.
+    if (collected >= 5) {
+      var ex = (exitTile.cx + 0.5) * TILE, ey = (exitTile.cy + 0.5) * TILE;
+      if (Math.hypot(player.x - ex, player.y - ey) < 26) winGame();
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Floor and walls with an ink-wash feel.
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        if (isWall(x, y)) {
+          ctx.fillStyle = "#232634"; ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+          ctx.strokeStyle = "#31344a"; ctx.strokeRect(x * TILE + 1, y * TILE + 1, TILE - 2, TILE - 2);
+        } else {
+          ctx.fillStyle = ((x + y) % 2 === 0) ? "#171924" : "#151722";
+          ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+        }
+      }
+    }
+    // Exit door.
+    var ex = exitTile.cx * TILE, ey = exitTile.cy * TILE;
+    ctx.fillStyle = collected >= 5 ? "#2fbf71" : "#3d4a3a";
+    ctx.fillRect(ex + 4, ey + 4, TILE - 8, TILE - 8);
+    ctx.fillStyle = "#0b0d12"; ctx.font = "bold 11px Arial"; ctx.textAlign = "center";
+    ctx.fillText(collected >= 5 ? "EXIT" : "LOCKED", ex + TILE / 2, ey + TILE / 2 + 4);
+    // Scrolls.
+    scrollList.forEach(function(s){
+      if (s.taken) return;
+      var sx = (s.cx + 0.5) * TILE, sy = (s.cy + 0.5) * TILE;
+      ctx.fillStyle = "#f2d06b";
+      ctx.beginPath(); ctx.arc(sx, sy, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#0b0d12"; ctx.font = "bold 12px Georgia"; ctx.fillText("S", sx, sy + 4);
+    });
+    // Vision cones (translucent, drawn before guards).
+    guards.forEach(function(g){
+      ctx.save();
+      ctx.translate(g.x, g.y); ctx.rotate(g.dir);
+      ctx.fillStyle = "rgba(255, 200, 60, 0.16)";
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.arc(0, 0, g.range, -g.fov / 2, g.fov / 2); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+    // Guards.
+    guards.forEach(function(g){
+      ctx.fillStyle = "#c0392b";
+      ctx.beginPath(); ctx.arc(g.x, g.y, 13, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ffe08a";
+      ctx.beginPath(); ctx.arc(g.x + Math.cos(g.dir) * 5, g.y + Math.sin(g.dir) * 5, 4, 0, Math.PI * 2); ctx.fill();
+    });
+    // Player: a hooded infiltrator dot with a cloak trail.
+    ctx.fillStyle = "#7a5cff";
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#e8e6df";
+    ctx.beginPath(); ctx.arc(player.x, player.y, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#d8c27a"; ctx.font = "12px Arial"; ctx.textAlign = "left";
+    ctx.fillText("Score " + score, 8, 16);
+  }
+
+  var last = 0;
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    if (!last) last = ts;
+    var dt = Math.min(0.05, (ts - last) / 1000);
+    last = ts;
+    if (state === "playing") update(dt, ts);
+    draw();
+  }
+
+  // ---- Input: keyboard, mouse, touch ----
+  document.addEventListener("keydown", function (e) {
+    var k = e.key.toLowerCase();
+    if (["arrowup","arrowdown","arrowleft","arrowright"," "].indexOf(k) >= 0) e.preventDefault();
+    keys[k] = true;
+    if (k === "enter" && (state === "title" || state === "won" || state === "over")) startGame();
+    if (k === "p" && state === "playing") { state = "paused"; showOverlay("PAUSED", "The guards wait for no one... except now. Press Start to keep sneaking.", true, false); }
+  });
+  document.addEventListener("keyup", function (e) { keys[e.key.toLowerCase()] = false; });
+
+  function canvasPoint(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : e.touches[0].clientX;
+    var cy = (e.clientY !== undefined) ? e.clientY : e.touches[0].clientY;
+    return { x: (cx - r.left) * (canvas.width / r.width), y: (cy - r.top) * (canvas.height / r.height) };
+  }
+  canvas.addEventListener("mousedown", function (e) {
+    ensureAudio();
+    if (state === "playing") target = canvasPoint(e);
+  });
+  canvas.addEventListener("click", function (e) {
+    ensureAudio();
+    if (state === "playing") target = canvasPoint(e);
+  });
+  canvas.addEventListener("touchstart", function (e) {
+    ensureAudio();
+    if (e.cancelable) e.preventDefault();
+    if (state === "playing") target = canvasPoint(e);
+  }, { passive: false });
+
+  document.querySelectorAll("#controls button[data-dir]").forEach(function (btn) {
+    var dir = btn.getAttribute("data-dir");
+    function press(ev) {
+      ensureAudio();
+      if (ev.cancelable) ev.preventDefault();
+      if (state !== "playing") return;
+      target = null;
+      var map = { up: "arrowup", down: "arrowdown", left: "arrowleft", right: "arrowright" };
+      keys[map[dir]] = true;
+      setTimeout(function(){ keys[map[dir]] = false; }, 160);
+    }
+    btn.addEventListener("mousedown", press);
+    btn.addEventListener("click", press);
+    btn.addEventListener("touchstart", press, { passive: false });
+  });
+
+  startBtn.addEventListener("click", startGame);
+  restartBtn.addEventListener("click", startGame);
+  pauseBtn.addEventListener("click", function () {
+    ensureAudio();
+    if (state === "playing") { state = "paused"; showOverlay("PAUSED", "Take a breath in the shadows. Press Start to continue.", true, false); }
+    else if (state === "paused") { state = "playing"; hideOverlay(); }
+  });
+
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

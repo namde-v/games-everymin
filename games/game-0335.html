@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sky Shepherd</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(180deg, #1b2a4a 0%, #274b7a 45%, #7db3e8 100%);
+    font-family: "Trebuchet MS", Verdana, sans-serif;
+    color: #fff;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12px; overflow-x: hidden;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  h1 { font-size: 34px; letter-spacing: 2px; text-shadow: 2px 2px 0 #123; margin: 6px 0 2px; }
+  .tagline { color: #dbeafe; font-size: 14px; margin-bottom: 10px; }
+  #hud {
+    width: min(820px, 96vw); display: flex; justify-content: space-between; gap: 8px;
+    background: rgba(0,0,0,0.35); border: 2px solid rgba(255,255,255,0.35);
+    border-radius: 12px; padding: 8px 14px; font-weight: bold; font-size: 16px; flex-wrap: wrap;
+  }
+  #hud span { white-space: nowrap; }
+  #wrap { position: relative; width: min(820px, 96vw); margin-top: 10px; }
+  canvas {
+    display: block; width: 100%; height: auto; aspect-ratio: 4 / 3;
+    background: linear-gradient(180deg, #8ec9f5 0%, #cfeaff 55%, #eaf7ff 100%);
+    border: 3px solid #fff; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px; text-align: center;
+    background: rgba(10, 25, 50, 0.72); border-radius: 14px; padding: 18px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { max-width: 560px; line-height: 1.5; font-size: 15px; color: #eaf2ff; }
+  .howto {
+    background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6;
+    max-width: 580px;
+  }
+  .howto b { color: #ffe58a; }
+  button {
+    font-size: 20px; font-weight: bold; padding: 12px 30px; border: none; border-radius: 999px;
+    background: #ffb020; color: #241a00; cursor: pointer; box-shadow: 0 4px 0 #b97a00;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b97a00; }
+  button.secondary { background: #e8f4ff; color: #123; box-shadow: 0 4px 0 #7aa7c7; }
+  #controls { margin-top: 10px; font-size: 13px; color: #dbeafe; text-align: center; line-height: 1.5; }
+  #gustBtn {
+    margin-top: 8px; font-size: 16px; padding: 10px 22px; background: #4ade80;
+    color: #062b12; box-shadow: 0 4px 0 #15803d;
+  }
+  @media (max-width: 520px) { h1 { font-size: 26px; } #hud { font-size: 14px; } }
+</style>
+</head>
+<body>
+<h1>&#9729; Sky Shepherd &#128038;</h1>
+<p class="tagline">Guide the drifting clouds home before the storm scatters your flock.</p>
+
+<div id="hud">
+  <span>Score: <span id="score">0</span></span>
+  <span>Herded: <span id="herded">0</span> / 12</span>
+  <span>Lives: <span id="lives">&#10084;&#10084;&#10084;</span></span>
+  <span>Status: <span id="status">Ready</span></span>
+  <span>Time: <span id="time">0s</span></span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="800" height="600"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Sky Shepherd</h2>
+    <p>You are a shepherd bird on a windy morning. Fluffy clouds are drifting away &mdash; herd them into the golden pen before the storm clouds catch you!</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      &#8226; <b>Move:</b> Arrow keys / WASD, or drag with mouse or touch.<br>
+      &#8226; <b>Herd:</b> Fly into a white cloud to nudge it along. Push it into the golden pen (top right) to herd it.<br>
+      &#8226; <b>Wind Gust:</b> Press Space, click, or tap the Gust button to blast nearby clouds away from you.<br>
+      &#8226; <b>Avoid:</b> Dark storm clouds. Touching one costs a life and scatters nearby clouds.<br>
+      &#8226; <b>Win:</b> Herd 12 clouds into the pen. <b>Lose:</b> Lose all 3 lives.
+    </div>
+    <button id="startBtn">Start Game</button>
+    <p>Tip: herd clouds one at a time and use gusts when a storm cloud closes in.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Play Again</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+
+<p id="controls">Arrows / WASD to fly &bull; Space or click / tap for a wind gust &bull; Drag to steer on touch screens</p>
+<button id="gustBtn">💨 Wind Gust (Space)</button>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = 800, H = 600;
+  var scoreEl = document.getElementById("score");
+  var herdedEl = document.getElementById("herded");
+  var livesEl = document.getElementById("lives");
+  var statusEl = document.getElementById("status");
+  var timeEl = document.getElementById("time");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+
+  var state = "title"; // title | playing | win | over
+  var score = 0, herded = 0, lives = 3, quota = 12;
+  var elapsed = 0, lastTime = 0, rafId = null;
+  var keys = {};
+  var pointer = { active: false, x: 400, y: 300 };
+  var gustCooldown = 0, gustTimer = 0, gustX = 0, gustY = 0;
+  var invuln = 0, flash = 0, spawnTimer = 0;
+  var wind = 0.4, windTimer = 0;
+
+  var bird = { x: 200, y: 400, vx: 0, vy: 0, r: 20, wing: 0 };
+  var pen = { x: 640, y: 20, w: 140, h: 120 };
+  var clouds = [];
+  var storms = [];
+  var particles = [];
+  var stars = [];
+  for (var i = 0; i < 40; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H * 0.4, r: Math.random() * 1.6 + 0.5 });
+  }
+
+  // ---------- Procedural Web Audio (created only after user interaction) ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || "sine";
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is decorative */ }
+  }
+  function sfx(kind) {
+    if (kind === "herd") { tone(660, 0.15, "sine", 0.15); setTimeout(function () { tone(880, 0.2, "sine", 0.15); }, 90); }
+    else if (kind === "hit") { tone(180, 0.3, "sawtooth", 0.16, 60); }
+    else if (kind === "gust") { tone(300, 0.25, "triangle", 0.12, 900); }
+    else if (kind === "win") { [523, 659, 784, 1047].forEach(function (f, k) { setTimeout(function () { tone(f, 0.3, "triangle", 0.15); }, k * 130); }); }
+    else if (kind === "over") { [400, 300, 200, 120].forEach(function (f, k) { setTimeout(function () { tone(f, 0.25, "sawtooth", 0.12); }, k * 140); }); }
+  }
+
+  // ---------- Setup ----------
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function makeCloud() {
+    return { x: rand(60, 560), y: rand(140, 520), vx: rand(-0.2, 0.4), vy: rand(-0.15, 0.15), r: rand(26, 38), wob: Math.random() * Math.PI * 2, herded: false };
+  }
+  function makeStorm() {
+    var side = Math.random() < 0.5;
+    return { x: side ? rand(40, 300) : rand(500, 760), y: rand(80, 480), vx: rand(-0.5, 0.5), vy: rand(-0.4, 0.4), r: 26, pulse: Math.random() * Math.PI * 2 };
+  }
+  function resetGame() {
+    score = 0; herded = 0; lives = 3; elapsed = 0;
+    bird.x = 200; bird.y = 400; bird.vx = 0; bird.vy = 0;
+    clouds = []; storms = []; particles = [];
+    for (var i = 0; i < 6; i++) clouds.push(makeCloud());
+    for (var j = 0; j < 2; j++) storms.push(makeStorm());
+    gustCooldown = 0; invuln = 0; spawnTimer = 0; wind = 0.4;
+    updateHud("Flying!");
+  }
+  function updateHud(status) {
+    scoreEl.textContent = score;
+    herdedEl.textContent = herded;
+    timeEl.textContent = Math.floor(elapsed) + "s";
+    livesEl.textContent = "\u2764".repeat(Math.max(0, lives)) + "\u2009";
+    if (lives <= 0) livesEl.textContent = "none";
+    if (status) statusEl.textContent = status;
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: rand(-2.5, 2.5), vy: rand(-2.5, 2.5), life: 1, color: color });
+    }
+  }
+
+  // ---------- Game logic ----------
+  function gust() {
+    if (state !== "playing" || gustCooldown > 0) return;
+    ensureAudio();
+    gustCooldown = 0.9; gustTimer = 0.35; gustX = bird.x; gustY = bird.y;
+    sfx("gust");
+    clouds.forEach(function (c) {
+      var dx = c.x - bird.x, dy = c.y - bird.y, d = Math.hypot(dx, dy) || 1;
+      if (d < 180) { c.vx += (dx / d) * 4.5; c.vy += (dy / d) * 4.5; }
+    });
+    storms.forEach(function (s) {
+      var dx = s.x - bird.x, dy = s.y - bird.y, d = Math.hypot(dx, dy) || 1;
+      if (d < 180) { s.vx += (dx / d) * 3.5; s.vy += (dy / d) * 3.5; }
+    });
+    burst(bird.x, bird.y, "#bfe9ff", 14);
+  }
+  function loseLife() {
+    lives -= 1; invuln = 2; flash = 0.4;
+    sfx("hit");
+    burst(bird.x, bird.y, "#f87171", 22);
+    clouds.forEach(function (c) { c.vx += rand(-1.5, 1.5); c.vy += rand(-1.5, 1.5); });
+    bird.x = 200; bird.y = 400; bird.vx = 0; bird.vy = 0;
+    updateHud(lives > 0 ? "Ouch! Storm hit!" : "Game Over");
+    if (lives <= 0) endGame(false);
+  }
+  function endGame(won) {
+    state = won ? "win" : "over";
+    endTitle.textContent = won ? "\u2600\uFE0F You Win! Flock Home!" : "\u26C8\uFE0F Game Over";
+    endText.textContent = won
+      ? "You herded all " + quota + " clouds in " + Math.floor(elapsed) + " seconds with a score of " + score + ". The sky is clear and calm!"
+      : "The storm scattered your flock. You herded " + herded + " of " + quota + " clouds and scored " + score + ". Try again, shepherd!";
+    endScreen.classList.remove("hidden");
+    sfx(won ? "win" : "over");
+    updateHud(won ? "Victory!" : "Game Over");
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    lastTime = performance.now();
+    if (!rafId) rafId = requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    elapsed += dt;
+    windTimer -= dt;
+    if (windTimer <= 0) { wind = rand(-0.5, 0.9); windTimer = rand(3, 7); }
+    if (gustCooldown > 0) gustCooldown -= dt;
+    if (gustTimer > 0) gustTimer -= dt;
+    if (invuln > 0) invuln -= dt;
+    if (flash > 0) flash -= dt;
+    bird.wing += dt * 18;
+
+    // Bird movement: keyboard
+    var ax = 0, ay = 0;
+    if (keys["arrowleft"] || keys["a"]) ax -= 1;
+    if (keys["arrowright"] || keys["d"]) ax += 1;
+    if (keys["arrowup"] || keys["w"]) ay -= 1;
+    if (keys["arrowdown"] || keys["s"]) ay += 1;
+    if (ax || ay) {
+      var len = Math.hypot(ax, ay);
+      bird.vx += (ax / len) * 900 * dt;
+      bird.vy += (ay / len) * 900 * dt;
+      pointer.active = false;
+    } else if (pointer.active) {
+      // Steer toward pointer (mouse / touch drag)
+      var dx = pointer.x - bird.x, dy = pointer.y - bird.y, d = Math.hypot(dx, dy);
+      if (d > 12) { bird.vx += (dx / d) * 700 * dt; bird.vy += (dy / d) * 700 * dt; }
+    }
+    bird.vx *= Math.pow(0.02, dt); bird.vy *= Math.pow(0.02, dt);
+    bird.x = Math.max(20, Math.min(W - 20, bird.x + bird.vx * dt));
+    bird.y = Math.max(20, Math.min(H - 20, bird.y + bird.vy * dt));
+
+    // Clouds drift and get herded
+    spawnTimer -= dt;
+    clouds.forEach(function (c) {
+      c.wob += dt * 2;
+      c.vx += wind * dt * 0.4;
+      c.vx *= Math.pow(0.4, dt); c.vy *= Math.pow(0.4, dt);
+      c.x += c.vx * 60 * dt + Math.sin(c.wob) * 0.2;
+      c.y += c.vy * 60 * dt;
+      if (c.x < c.r) { c.x = c.r; c.vx = Math.abs(c.vx); }
+      if (c.x > W - c.r) { c.x = W - c.r; c.vx = -Math.abs(c.vx); }
+      if (c.y < c.r) { c.y = c.r; c.vy = Math.abs(c.vy); }
+      if (c.y > H - c.r) { c.y = H - c.r; c.vy = -Math.abs(c.vy); }
+      // Bird nudges cloud like a shepherd
+      var dx = c.x - bird.x, dy = c.y - bird.y, d = Math.hypot(dx, dy);
+      if (d < c.r + bird.r) {
+        var push = (c.r + bird.r - d) / (c.r + bird.r);
+        c.vx += (dx / (d || 1)) * push * 3.2;
+        c.vy += (dy / (d || 1)) * push * 3.2;
+        score += 1;
+      }
+      // Pen check
+      if (c.x > pen.x && c.x < pen.x + pen.w && c.y > pen.y && c.y < pen.y + pen.h) {
+        c.herded = true;
+        herded += 1; score += 100;
+        burst(c.x, c.y, "#ffd94d", 20);
+        sfx("herd");
+        updateHud("Cloud herded! " + herded + " / " + quota);
+      }
+    });
+    clouds = clouds.filter(function (c) { return !c.herded; });
+    if (spawnTimer <= 0 && clouds.length < 6 && herded < quota) { clouds.push(makeCloud()); spawnTimer = 1.2; }
+    if (herded >= quota) { endGame(true); return; }
+
+    // Storms drift and hunt loosely
+    storms.forEach(function (s) {
+      s.pulse += dt * 3;
+      var dx = bird.x - s.x, dy = bird.y - s.y, d = Math.hypot(dx, dy) || 1;
+      s.vx += (dx / d) * 22 * dt; s.vy += (dy / d) * 22 * dt;
+      s.vx *= Math.pow(0.5, dt); s.vy *= Math.pow(0.5, dt);
+      s.x += s.vx * 60 * dt; s.y += s.vy * 60 * dt;
+      if (s.x < 30 || s.x > W - 30) s.vx *= -1;
+      if (s.y < 30 || s.y > H - 30) s.vy *= -1;
+      s.x = Math.max(30, Math.min(W - 30, s.x));
+      s.y = Math.max(30, Math.min(H - 30, s.y));
+      if (invuln <= 0 && Math.hypot(bird.x - s.x, bird.y - s.y) < s.r + bird.r - 4) loseLife();
+    });
+    if (storms.length < 2 + Math.floor(herded / 4) && Math.random() < dt * 0.15) storms.push(makeStorm());
+
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life -= dt * 2; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    updateHud();
+  }
+
+  // ---------- Drawing ----------
+  function drawCloudShape(x, y, r, color, dark) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x - r * 0.55, y + r * 0.2, r * 0.55, 0, Math.PI * 2);
+    ctx.arc(x, y - r * 0.25, r * 0.75, 0, Math.PI * 2);
+    ctx.arc(x + r * 0.6, y + r * 0.2, r * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+    if (dark) {
+      ctx.fillStyle = "rgba(60,70,110,0.5)";
+      ctx.beginPath();
+      ctx.ellipse(x, y + r * 0.45, r * 0.9, r * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky, sun, hills
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "#8ec9f5"); grad.addColorStop(0.55, "#cfeaff"); grad.addColorStop(1, "#eaf7ff");
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#ffd94d";
+    ctx.beginPath(); ctx.arc(90, 80, 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,217,77,0.25)";
+    ctx.beginPath(); ctx.arc(90, 80, 62, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#7ec850";
+    ctx.beginPath(); ctx.ellipse(400, 620, 520, 70, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    stars.forEach(function (s) { ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill(); });
+
+    // Pen (top right)
+    ctx.fillStyle = "#fff3c4";
+    ctx.fillRect(pen.x, pen.y, pen.w, pen.h);
+    ctx.strokeStyle = "#b97a00"; ctx.lineWidth = 5;
+    ctx.strokeRect(pen.x, pen.y, pen.w, pen.h);
+    ctx.fillStyle = "#8a5a00"; ctx.font = "bold 17px Verdana";
+    ctx.textAlign = "center";
+    ctx.fillText("CLOUD PEN", pen.x + pen.w / 2, pen.y + 24);
+    ctx.fillStyle = "#b97a00";
+    for (var fx = pen.x + 16; fx < pen.x + pen.w; fx += 28) {
+      ctx.fillRect(fx, pen.y + pen.h - 8, 5, 22);
+    }
+
+    // Clouds
+    clouds.forEach(function (c) {
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      drawCloudShape(c.x + 3, c.y + 5, c.r, "rgba(255,255,255,0.55)", false);
+      drawCloudShape(c.x, c.y, c.r, "#ffffff", false);
+      ctx.fillStyle = "#334155"; ctx.font = "bold 13px Verdana";
+      ctx.fillText("\u2631", c.x, c.y + 5);
+    });
+
+    // Storm clouds
+    storms.forEach(function (s) {
+      drawCloudShape(s.x, s.y, s.r, "#3b4a6b", true);
+      ctx.strokeStyle = "#ffe58a"; ctx.lineWidth = 3;
+      ctx.beginPath();
+      var px = s.x + Math.sin(s.pulse) * 6;
+      ctx.moveTo(px, s.y + 10); ctx.lineTo(px - 8, s.y + 30); ctx.lineTo(px + 2, s.y + 30); ctx.lineTo(px - 4, s.y + 48);
+      ctx.stroke();
+    });
+
+    // Gust ring
+    if (gustTimer > 0) {
+      ctx.strokeStyle = "rgba(191,233,255,0.9)"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(gustX, gustY, 180 * (1 - gustTimer / 0.35) + 30, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // Shepherd bird
+    if (!(invuln > 0 && Math.floor(invuln * 10) % 2 === 0)) {
+      var flap = Math.sin(bird.wing) * 10;
+      ctx.fillStyle = "#f59e0b";
+      ctx.beginPath(); ctx.ellipse(bird.x - 22, bird.y - 6 - flap, 16, 7, -0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(bird.x + 22, bird.y - 6 + flap, 16, 7, 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#38bdf8";
+      ctx.beginPath(); ctx.ellipse(bird.x, bird.y, 20, 14, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(bird.x + 12, bird.y - 6, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.beginPath(); ctx.arc(bird.x + 14, bird.y - 6, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#f97316";
+      ctx.beginPath(); ctx.moveTo(bird.x + 20, bird.y - 4); ctx.lineTo(bird.x + 30, bird.y - 1); ctx.lineTo(bird.x + 20, bird.y + 2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#dc2626";
+      ctx.beginPath(); ctx.moveTo(bird.x - 4, bird.y - 14); ctx.lineTo(bird.x + 4, bird.y - 14); ctx.lineTo(bird.x, bird.y - 24); ctx.closePath(); ctx.fill();
+    }
+
+    // Particles
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+
+    if (flash > 0) { ctx.fillStyle = "rgba(239,68,68,0.25)"; ctx.fillRect(0, 0, W, H); }
+    if (state === "playing") {
+      ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.font = "bold 15px Verdana"; ctx.textAlign = "left";
+      ctx.fillText("Wind: " + (wind >= 0 ? "east " : "west ") + Math.abs(wind).toFixed(1), 12, H - 12);
+      ctx.textAlign = "right";
+      ctx.fillText("Gust ready: " + (gustCooldown <= 0 ? "YES" : Math.ceil(gustCooldown) + "s"), W - 12, H - 12);
+      ctx.textAlign = "center";
+    }
+  }
+
+  function loop(now) {
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    if (state === "playing") update(dt);
+    draw();
+    rafId = requestAnimationFrame(loop);
+  }
+
+  // ---------- Controls: keyboard, mouse, touch ----------
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  document.addEventListener("keydown", function (e) {
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === " " || k === "spacebar") { e.preventDefault(); gust(); }
+    if (k === "enter" && (state === "title" || state === "win" || state === "over")) startGame();
+  });
+  document.addEventListener("keyup", function (e) { keys[e.key.toLowerCase()] = false; });
+  canvas.addEventListener("mousedown", function (e) {
+    ensureAudio();
+    var p = canvasPos(e); pointer.active = true; pointer.x = p.x; pointer.y = p.y;
+    if (state === "playing") gust();
+  });
+  canvas.addEventListener("mousemove", function (e) {
+    if (pointer.active) { var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; }
+  });
+  document.addEventListener("mouseup", function () { pointer.active = false; });
+  canvas.addEventListener("click", function (e) {
+    ensureAudio();
+    if (state === "playing") { var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; }
+  });
+  canvas.addEventListener("touchstart", function (e) {
+    ensureAudio();
+    e.preventDefault();
+    var p = canvasPos(e); pointer.active = true; pointer.x = p.x; pointer.y = p.y;
+    if (state === "playing") gust();
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) {
+    e.preventDefault();
+    var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y;
+  }, { passive: false });
+  document.addEventListener("touchend", function () { pointer.active = false; });
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  document.getElementById("menuBtn").addEventListener("click", function () {
+    state = "title";
+    endScreen.classList.add("hidden");
+    titleScreen.classList.remove("hidden");
+    updateHud("Ready");
+  });
+  document.getElementById("gustBtn").addEventListener("click", function () { ensureAudio(); gust(); });
+  document.getElementById("gustBtn").addEventListener("touchstart", function (e) { e.preventDefault(); ensureAudio(); gust(); }, { passive: false });
+
+  updateHud("Ready");
+  rafId = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

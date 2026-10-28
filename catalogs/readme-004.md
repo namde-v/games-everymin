@@ -34,6 +34,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0328 | Tempo Tailor | Rhythm / Sewing Beat | D/F/J/K rhythm lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0328.html) |
 | 0329 | Cinder Climber | Arcade / Volcano Climbing | Arrow Keys / WASD move and jump, mouse click jump, touch tap jump, R restart | [Play](./../games/game-0329.html) |
 | 0330 | Lantern Logic | Puzzle / Lantern Grid | Mouse/touch click cycle lantern, Arrow Keys move cursor, Space/Enter place, H hint, R restart | [Play](./../games/game-0330.html) |
+| 0331 | Quarry Rumble | Arcade / Boulder Dodge | Arrow Keys / WASD move, mouse steer, touch drag, R restart | [Play](./../games/game-0331.html) |
+| 0332 | Hexfield Harvest | Puzzle / Hex Match | Mouse/touch click swap hexes, Arrow Keys move cursor, Space/Enter select, R restart | [Play](./../games/game-0332.html) |
+| 0333 | Beacon Keeper | Strategy / Lighthouse Management | Mouse/touch drag aim beam, A/D or Arrow Keys aim, Space toggle lamp, R restart | [Play](./../games/game-0333.html) |
+| 0334 | Dune Drummers | Rhythm / Desert Drums | D/F/J/K rhythm lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0334.html) |
+| 0335 | Sky Shepherd | Arcade / Cloud Herding | Arrow Keys / WASD steer, mouse drag, touch drag, Space wind gust, R restart | [Play](./../games/game-0335.html) |
+| 0336 | Glyph Relay | Puzzle / Rune Sequence | Mouse/touch click runes, Arrow Keys navigate, Space start/restart, R restart | [Play](./../games/game-0336.html) |
+| 0337 | Foundry Foreman | Strategy / Factory Line | Mouse/touch click assign workers, Arrow Keys move selection, Space/Enter confirm, R restart | [Play](./../games/game-0337.html) |
+| 0338 | Metronome Mines | Rhythm / Precision Mining | Space strike, mouse click, touch tap, R restart | [Play](./../games/game-0338.html) |
+| 0339 | Shadow Scribe | Arcade / Stealth Maze | Arrow Keys / WASD move, mouse click, touch tap, R restart | [Play](./../games/game-0339.html) |
+| 0340 | Star Cartographer | Puzzle / Constellation Drawing | Mouse/touch click connect stars, Arrow Keys navigate, R restart | [Play](./../games/game-0340.html) |
 
 ## Batch notes
 
@@ -43,3 +53,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 032: 10 games, produced in one cycle (0311–0320).
 
 - Batch 033: 10 games, produced in one cycle (0321–0330).
+
+- Batch 034: 10 games, produced in one cycle (0331–0340). Five worker titles duplicated earlier games and were renamed before cataloguing (Quarry Quake→Quarry Rumble, Hex Harvest→Hexfield Harvest, Drumline Dunes→Dune Drummers, Rune Relay→Glyph Relay, Ink Infiltrator→Shadow Scribe).

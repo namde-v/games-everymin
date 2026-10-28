@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Beacon Keeper</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06121f; color: #eaf4ff; font-family: Georgia, 'Times New Roman', serif; overflow: hidden; touch-action: none; }
+  #wrap { display: flex; flex-direction: column; align-items: center; padding: 8px; height: 100vh; }
+  h1 { font-size: 26px; letter-spacing: 2px; color: #ffd76a; text-shadow: 0 0 12px rgba(255,215,106,.6); margin-bottom: 4px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; font-size: 14px; background: #0b2438; border: 1px solid #2a4a66; border-radius: 8px; padding: 6px 12px; margin-bottom: 6px; width: min(860px, 98vw); }
+  #hud span { white-space: nowrap; }
+  #hud b { color: #ffd76a; }
+  #msg { min-height: 22px; font-size: 14px; color: #9fe8ff; margin-bottom: 4px; text-align: center; }
+  canvas { background: #071c2e; border: 2px solid #2a4a66; border-radius: 10px; width: min(860px, 98vw); height: auto; display: block; touch-action: none; }
+  #panel { width: min(860px, 98vw); display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
+  button { background: #ffd76a; color: #1a1200; border: none; border-radius: 8px; padding: 10px 16px; font-size: 15px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffe89a; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.secondary { background: #2a4a66; color: #eaf4ff; }
+  #overlay { position: fixed; inset: 0; background: rgba(3,10,18,.88); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  #card { max-width: 620px; background: #0b2438; border: 1px solid #ffd76a; border-radius: 14px; padding: 24px; text-align: center; }
+  #card h2 { color: #ffd76a; font-size: 30px; margin-bottom: 8px; }
+  #card p, #card li { font-size: 15px; line-height: 1.55; text-align: left; }
+  #card ul { margin: 10px 0 16px 20px; }
+  #card .center { text-align: center; }
+  .big { font-size: 18px; }
+  #shop { display: none; }
+  @media (max-width: 600px) { h1 { font-size: 20px; } #hud { font-size: 12px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>BEACON KEEPER</h1>
+  <div id="hud">
+    <span>Night: <b id="hNight">1 / 7</b></span>
+    <span>Score: <b id="hScore">0</b></span>
+    <span>Oil: <b id="hOil">100</b></span>
+    <span>Lens: <b id="hLens">100%</b></span>
+    <span>Saved: <b id="hSaved">0</b></span>
+    <span>Wrecks: <b id="hWreck">0 / 3</b></span>
+    <span>Lamp: <b id="hLamp">ON</b></span>
+    <span>Time: <b id="hTime">--</b></span>
+  </div>
+  <div id="msg">Keep the light burning. Warn every ship before it hits the rocks.</div>
+  <canvas id="game" width="860" height="480"></canvas>
+  <div id="panel">
+    <button id="btnLamp">Toggle Lamp (Space)</button>
+    <button id="btnLeft" class="secondary">Beam Left (A)</button>
+    <button id="btnRight" class="secondary">Beam Right (D)</button>
+    <button id="btnPause" class="secondary">Pause (P)</button>
+  </div>
+  <div id="panel">
+    <button id="btnOil" class="secondary">Buy +30 Oil (20 pts)</button>
+    <button id="btnRepair" class="secondary">Repair Lens +25% (15 pts)</button>
+    <button id="btnNext" class="secondary">Begin Next Night</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <div id="card">
+    <h2>Beacon Keeper</h2>
+    <p class="center big">Seven nights. One lighthouse. Every ship counts.</p>
+    <h3 style="margin-top:14px;color:#9fe8ff;text-align:left;">How to Play</h3>
+    <ul>
+      <li><b>Aim the beam:</b> move the mouse, drag on touch, or use A / D and arrow keys. The beam sweeps from the lighthouse tower.</li>
+      <li><b>Warn ships:</b> shine the beam on a ship while it is inside the danger zone (the red-tinted water near the rocks) and it will turn away, safe.</li>
+      <li><b>Manage oil:</b> the lamp burns oil while it is ON. Press Space, click the lamp button, or tap the tower to toggle it. Running dry in the dark is dangerous.</li>
+      <li><b>Protect the lens:</b> the beam slowly wears the lens. A cracked lens makes a narrower beam. Repair it between nights with points earned from saved ships.</li>
+      <li><b>Between nights:</b> spend points on oil and repairs, then begin the next night. Survive all 7 nights to win. Three wrecks and the coast is lost.</li>
+      <li><b>Storms:</b> later nights bring faster ships and rough seas. Watch the warning bells: a ship flashing red is about to strike.</li>
+    </ul>
+    <p class="center">Controls: Mouse / Touch drag to aim &nbsp;|&nbsp; A / D or Arrow keys &nbsp;|&nbsp; Space = lamp &nbsp;|&nbsp; P = pause</p>
+    <p class="center" style="margin-top:14px;"><button id="btnStart">Start Keeping the Light</button></p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var state = 'title'; // title | night | shop | win | over | paused
+  var prevState = 'night';
+  var night = 1, TOTAL_NIGHTS = 7;
+  var score = 0, oil = 100, lens = 100, saved = 0, wrecks = 0;
+  var lampOn = true, paused = false;
+  var beamAngle = -Math.PI / 2, targetAngle = -Math.PI / 2;
+  var ships = [], particles = [], stars = [];
+  var nightTime = 0, NIGHT_LEN = 48, spawnTimer = 0, elapsed = 0, lastTs = 0;
+  var flash = 0, shake = 0;
+
+  var LX = W / 2, LY = H - 90; // lighthouse base
+  var ROCK_Y = H - 60;
+
+  for (var i = 0; i < 90; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * (H * 0.45), r: Math.random() * 1.6 + 0.4, tw: Math.random() * Math.PI * 2 });
+  }
+
+  // ---------- Procedural audio (created only after user interaction) ----------
+  var audioCtx = null, master = null;
+  function ensureAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') { audioCtx.resume(); } return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      master = audioCtx.createGain();
+      master.gain.value = 0.16;
+      master.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    if (slide) { o.frequency.exponentialRampToValueAtTime(Math.max(40, slide), audioCtx.currentTime + dur); }
+    g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(master);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (!audioCtx) return;
+    if (kind === 'warn') { tone(880, 0.18, 'triangle', 0.6); tone(1320, 0.22, 'triangle', 0.4); }
+    else if (kind === 'save') { tone(523, 0.15, 'sine', 0.5); tone(659, 0.15, 'sine', 0.5); tone(784, 0.25, 'sine', 0.5); }
+    else if (kind === 'wreck') { tone(160, 0.7, 'sawtooth', 0.7, 50); tone(90, 0.8, 'square', 0.5, 40); }
+    else if (kind === 'bell') { tone(1175, 0.5, 'sine', 0.4); }
+    else if (kind === 'buy') { tone(660, 0.12, 'triangle', 0.5); tone(990, 0.18, 'triangle', 0.5); }
+    else if (kind === 'win') { [523, 659, 784, 1047].forEach(function (f, k) { setTimeout(function () { tone(f, 0.4, 'triangle', 0.5); }, k * 160); }); }
+  }
+
+  // ---------- HUD ----------
+  function el(id) { return document.getElementById(id); }
+  function updateHUD() {
+    el('hNight').textContent = night + ' / ' + TOTAL_NIGHTS;
+    el('hScore').textContent = score;
+    el('hOil').textContent = Math.max(0, Math.floor(oil));
+    el('hLens').textContent = Math.max(0, Math.floor(lens)) + '%';
+    el('hSaved').textContent = saved;
+    el('hWreck').textContent = wrecks + ' / 3';
+    el('hLamp').textContent = lampOn ? 'ON' : 'OFF';
+    el('hTime').textContent = (state === 'night') ? Math.max(0, Math.ceil(NIGHT_LEN - nightTime)) + 's' : '--';
+    var shop = (state === 'shop');
+    el('btnOil').disabled = !shop || score < 20 || oil >= 150;
+    el('btnRepair').disabled = !shop || score < 15 || lens >= 100;
+    el('btnNext').disabled = !shop;
+  }
+  function setMsg(t) { el('msg').textContent = t; }
+
+  // ---------- Ships ----------
+  function spawnShip() {
+    var fromLeft = Math.random() < 0.5;
+    var speed = (0.55 + night * 0.16 + Math.random() * 0.35) * (night >= 5 ? 1.25 : 1);
+    ships.push({
+      x: fromLeft ? -30 : W + 30, y: 90 + Math.random() * 150,
+      vx: (fromLeft ? 1 : -1) * speed, warned: false, danger: false,
+      bell: false, wob: Math.random() * Math.PI * 2, hull: ['#c96f3a', '#7fa8c9', '#a8c97f'][Math.floor(Math.random() * 3)]
+    });
+  }
+  function startNight() {
+    ships = []; particles = [];
+    nightTime = 0; spawnTimer = 1.2;
+    lampOn = true; beamAngle = -Math.PI / 2; targetAngle = beamAngle;
+    state = 'night'; paused = false;
+    el('overlay').style.display = 'none';
+    setMsg('Night ' + night + ' begins. Aim the beam at ships in the red water!');
+    sfx('bell');
+    updateHUD();
+  }
+  function endNight() {
+    if (night >= TOTAL_NIGHTS) { winGame(); return; }
+    state = 'shop';
+    setMsg('Dawn breaks. Spend points on oil and lens repair, then begin night ' + (night + 1) + '.');
+    sfx('save');
+    updateHUD();
+  }
+  function winGame() {
+    state = 'win'; sfx('win');
+    showCard('Victory! The Coast Is Safe',
+      'You kept the light burning for all 7 nights. Ships saved: ' + saved + '. Final score: ' + score + '. The harbourmaster salutes you, Keeper.',
+      'Play Again');
+  }
+  function gameOver(reason) {
+    state = 'over'; sfx('wreck');
+    showCard('Game Over', reason + ' Ships saved: ' + saved + '. Final score: ' + score + '.', 'Try Again');
+  }
+  function showCard(title, body, btnText) {
+    var card = el('card');
+    card.innerHTML = '<h2>' + title + '</h2><p class="center big">' + body + '</p>' +
+      '<p class="center" style="margin-top:16px;"><button id="btnRestart">' + btnText + '</button></p>';
+    el('overlay').style.display = 'flex';
+    document.getElementById('btnRestart').addEventListener('click', function () {
+      ensureAudio(); resetGame(); startNight();
+    });
+  }
+  function resetGame() {
+    night = 1; score = 0; oil = 100; lens = 100; saved = 0; wrecks = 0; lampOn = true;
+  }
+
+  // ---------- Update ----------
+  function angleToShip(s) {
+    return Math.atan2(s.y - (LY - 70), s.x - LX);
+  }
+  function beamWidth() { return 0.16 + (lens / 100) * 0.30; }
+  function update(dt) {
+    if (state !== 'night' || paused) return;
+    elapsed += dt; nightTime += dt;
+    // beam easing
+    var diff = targetAngle - beamAngle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    beamAngle += diff * Math.min(1, dt * 8);
+    // oil + lens wear
+    if (lampOn) {
+      oil -= dt * (1.1 + night * 0.12);
+      lens -= dt * 0.35;
+      if (lens < 10) lens = 10;
+      if (oil <= 0) { oil = 0; lampOn = false; setMsg('Oil empty! The lamp is dark. Buy more oil at dawn... if you survive.'); }
+    }
+    // spawn
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnShip(); spawnTimer = Math.max(1.6, 5.2 - night * 0.45) * (0.7 + Math.random() * 0.6); }
+    // ships
+    var i = ships.length;
+    while (i--) {
+      var s = ships[i];
+      s.x += s.vx * dt * 10; s.wob += dt * 3;
+      var inDanger = (s.y > 200 && Math.abs(s.x - LX) < 260);
+      s.danger = inDanger;
+      if (!s.warned && lampOn) {
+        var a = angleToShip(s);
+        var d = Math.abs(a - beamAngle);
+        if (d > Math.PI) d = Math.PI * 2 - d;
+        if (inDanger && d < beamWidth()) {
+          s.warned = true; saved++; score += 10 + night * 2;
+          sfx('warn'); setMsg('Ship warned! It turns away. +' + (10 + night * 2) + ' points.');
+          for (var p = 0; p < 14; p++) particles.push({ x: s.x, y: s.y, vx: (Math.random() - 0.5) * 90, vy: -Math.random() * 60, life: 0.8 });
+        }
+      }
+      if (s.warned) { s.y -= dt * 26; s.vx *= 0.995; }
+      if (!s.warned && !s.bell && s.y > 300 && Math.abs(s.x - LX) < 200) { s.bell = true; sfx('bell'); }
+      // wreck: reaches rocks
+      if (!s.warned && s.y >= ROCK_Y - 14 && Math.abs(s.x - LX) < 190) {
+        ships.splice(i, 1); wrecks++; shake = 0.5; flash = 0.5; sfx('wreck');
+        setMsg('A ship struck the rocks! Wrecks: ' + wrecks + ' / 3.');
+        if (wrecks >= 3) { updateHUD(); gameOver('Three ships wrecked on your watch.'); return; }
+      } else if (s.x < -60 || s.x > W + 60 || s.y < -40) {
+        ships.splice(i, 1);
+      }
+    }
+    // particles
+    i = particles.length;
+    while (i--) { var pt = particles[i]; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt; if (pt.life <= 0) particles.splice(i, 1); }
+    if (flash > 0) flash -= dt;
+    if (shake > 0) shake -= dt;
+    if (nightTime >= NIGHT_LEN) { oil = Math.min(150, oil + 15); setMsg('Night survived. Dawn bonus: +15 oil.'); endNight(); }
+    updateHUD();
+  }
+
+  // ---------- Draw ----------
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 10 * shake);
+    // sky
+    var sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#04101f'); sky.addColorStop(0.55, '#0a2438'); sky.addColorStop(1, '#123a52');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    stars.forEach(function (st) {
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(elapsed * 0.8 + st.tw));
+      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // moon
+    ctx.fillStyle = '#f4ecd0'; ctx.beginPath(); ctx.arc(760, 60, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#04101f'; ctx.beginPath(); ctx.arc(748, 52, 22, 0, Math.PI * 2); ctx.fill();
+    // sea
+    ctx.fillStyle = '#0d3a55'; ctx.fillRect(0, 200, W, H - 200);
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    for (var w = 0; w < 12; w++) {
+      ctx.beginPath();
+      var wy = 220 + w * 22;
+      for (var x = 0; x <= W; x += 20) ctx.lineTo(x, wy + Math.sin(elapsed * 1.4 + w + x * 0.02) * 4);
+      ctx.stroke();
+    }
+    // danger zone
+    ctx.fillStyle = 'rgba(200,60,50,0.16)'; ctx.fillRect(LX - 260, 200, 520, ROCK_Y - 200);
+    ctx.fillStyle = 'rgba(255,120,100,0.5)'; ctx.font = '13px Georgia';
+    ctx.fillText('DANGER WATER', LX - 52, 216);
+    // rocks
+    ctx.fillStyle = '#3a3f4a';
+    for (var r = -3; r <= 3; r++) {
+      ctx.beginPath(); ctx.ellipse(LX + r * 52, ROCK_Y + 12, 42, 22, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // island
+    ctx.fillStyle = '#2c3a2a'; ctx.beginPath(); ctx.ellipse(LX, H - 30, 130, 34, 0, 0, Math.PI * 2); ctx.fill();
+    // beam
+    if (lampOn && (state === 'night' || state === 'paused')) {
+      var bw = beamWidth();
+      var grad = ctx.createLinearGradient(LX, LY - 70, LX + Math.cos(beamAngle) * 520, (LY - 70) + Math.sin(beamAngle) * 520);
+      grad.addColorStop(0, 'rgba(255,225,130,0.55)'); grad.addColorStop(1, 'rgba(255,225,130,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(LX, LY - 70);
+      ctx.arc(LX, LY - 70, 520, beamAngle - bw, beamAngle + bw);
+      ctx.closePath(); ctx.fill();
+    }
+    // lighthouse
+    ctx.fillStyle = '#e8e0d0'; ctx.fillRect(LX - 18, LY - 70, 36, 70);
+    ctx.fillStyle = '#b03030'; ctx.fillRect(LX - 18, LY - 50, 36, 14); ctx.fillRect(LX - 18, LY - 22, 36, 14);
+    ctx.fillStyle = lampOn ? '#ffd76a' : '#5a5a55';
+    ctx.beginPath(); ctx.arc(LX, LY - 78, 16, 0, Math.PI * 2); ctx.fill();
+    if (lampOn) { ctx.fillStyle = 'rgba(255,215,106,0.25)'; ctx.beginPath(); ctx.arc(LX, LY - 78, 30 + Math.sin(elapsed * 5) * 4, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.moveTo(LX - 22, LY - 92); ctx.lineTo(LX + 22, LY - 92); ctx.lineTo(LX, LY - 112); ctx.closePath(); ctx.fill();
+    // ships
+    ships.forEach(function (s) {
+      var bob = Math.sin(s.wob) * 3;
+      ctx.save(); ctx.translate(s.x, s.y + bob);
+      if (s.warned) ctx.rotate(s.vx > 0 ? -0.3 : 0.3);
+      ctx.fillStyle = s.hull; ctx.fillRect(-22, -8, 44, 14);
+      ctx.fillStyle = '#e8e0d0'; ctx.fillRect(-6, -22, 12, 14);
+      ctx.fillStyle = s.danger && !s.warned ? '#ff5040' : '#ffd76a';
+      ctx.beginPath(); ctx.arc(0, -30, s.danger && !s.warned ? 6 : 3.5, 0, Math.PI * 2); ctx.fill();
+      if (s.warned) { ctx.fillStyle = '#7dff9a'; ctx.font = 'bold 14px Georgia'; ctx.fillText('SAFE', -16, -34); }
+      ctx.restore();
+    });
+    // particles
+    particles.forEach(function (pt) {
+      ctx.globalAlpha = Math.max(0, pt.life); ctx.fillStyle = '#ffd76a';
+      ctx.fillRect(pt.x, pt.y, 4, 4); ctx.globalAlpha = 1;
+    });
+    if (flash > 0) { ctx.fillStyle = 'rgba(255,80,60,' + (flash * 0.35) + ')'; ctx.fillRect(0, 0, W, H); }
+    // night banner
+    if (state === 'shop') {
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ffd76a'; ctx.font = 'bold 30px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('Dawn — Night ' + night + ' complete', W / 2, H / 2 - 10);
+      ctx.font = '16px Georgia'; ctx.fillStyle = '#eaf4ff';
+      ctx.fillText('Use the shop buttons below, then begin the next night.', W / 2, H / 2 + 22);
+      ctx.textAlign = 'left';
+    }
+    if (paused) {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 32px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED', W / 2, H / 2); ctx.textAlign = 'left';
+    }
+    ctx.restore();
+  }
+
+  // ---------- Loop ----------
+  function loop(ts) {
+    if (!lastTs) lastTs = ts;
+    var dt = Math.min(0.05, (ts - lastTs) / 1000);
+    lastTs = ts;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Input ----------
+  function aimFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX - rect.left) * (W / rect.width);
+    var cy = (e.clientY - rect.top) * (H / rect.height);
+    targetAngle = Math.atan2(cy - (LY - 70), cx - LX);
+    if (targetAngle > -0.15) targetAngle = -0.15;
+    if (targetAngle < -Math.PI + 0.15) targetAngle = -Math.PI + 0.15;
+  }
+  function toggleLamp() { lampOn = !lampOn; if (lampOn && oil <= 0) { lampOn = false; setMsg('No oil left!'); } updateHUD(); }
+  function togglePause() {
+    if (state !== 'night' && state !== 'paused') return;
+    if (state === 'night') { prevState = 'night'; state = 'paused'; paused = true; }
+    else { state = prevState; paused = false; }
+    updateHUD();
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') targetAngle -= 0.12;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') targetAngle += 0.12;
+    if (e.key === ' ') { e.preventDefault(); ensureAudio(); toggleLamp(); }
+    if (e.key === 'p' || e.key === 'P') togglePause();
+    if (targetAngle > -0.15) targetAngle = -0.15;
+    if (targetAngle < -Math.PI + 0.15) targetAngle = -Math.PI + 0.15;
+  });
+  canvas.addEventListener('mousemove', aimFromEvent);
+  canvas.addEventListener('mousedown', function (e) { ensureAudio(); aimFromEvent(e); });
+  canvas.addEventListener('click', function (e) { ensureAudio(); aimFromEvent(e); });
+  canvas.addEventListener('touchstart', function (e) { ensureAudio(); if (e.touches[0]) aimFromEvent(e.touches[0]); e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { if (e.touches[0]) aimFromEvent(e.touches[0]); e.preventDefault(); }, { passive: false });
+  document.addEventListener('click', function (e) { if (e.target && e.target.id === 'btnStart') { ensureAudio(); resetGame(); startNight(); } });
+
+  el('btnStart').addEventListener('click', function () { ensureAudio(); resetGame(); startNight(); });
+  el('btnLamp').addEventListener('click', function () { ensureAudio(); toggleLamp(); });
+  el('btnLeft').addEventListener('click', function () { targetAngle -= 0.18; });
+  el('btnRight').addEventListener('click', function () { targetAngle += 0.18; });
+  el('btnPause').addEventListener('click', togglePause);
+  el('btnOil').addEventListener('click', function () {
+    if (state !== 'shop' || score < 20) return;
+    score -= 20; oil = Math.min(150, oil + 30); sfx('buy'); setMsg('Bought 30 oil.'); updateHUD();
+  });
+  el('btnRepair').addEventListener('click', function () {
+    if (state !== 'shop' || score < 15) return;
+    score -= 15; lens = Math.min(100, lens + 25); sfx('buy'); setMsg('Lens repaired.'); updateHUD();
+  });
+  el('btnNext').addEventListener('click', function () {
+    if (state !== 'shop') return;
+    night++; startNight();
+  });
+
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
