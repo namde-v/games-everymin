@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 60
-- **Latest game:** 0060 — Boomerang Bay
+- **Total games:** 70
+- **Latest game:** 0070 — Lantern Labyrinth
 - **Current volume:** 001 (Games 0001 to 0100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -13,7 +13,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 | Volume | Games | Catalog |
 |--------|-------|---------|
-| 001 | 0001–0060 (60 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
+| 001 | 0001–0070 (70 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -27,20 +27,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 006
+## Latest batch — Batch 007
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0051 | Ember Escape | Arcade / Lava Platform Hopper | [Play](./games/game-0051.html) |
-| 0052 | Rune Rings | Puzzle / Ring Rotation Logic | [Play](./games/game-0052.html) |
-| 0053 | Antlion Empire | Strategy / Ant Colony Builder | [Play](./games/game-0053.html) |
-| 0054 | Neon Note Runner | Rhythm / Lane Runner | [Play](./games/game-0054.html) |
-| 0055 | Paper Plane Pilot | Precision / Wind Glider | [Play](./games/game-0055.html) |
-| 0056 | Deep Dive Dash | Arcade / Cave Diver | [Play](./games/game-0056.html) |
-| 0057 | Shadow Shapes | Puzzle / Silhouette Matching | [Play](./games/game-0057.html) |
-| 0058 | Skyline Tycoon | Strategy / City Builder | [Play](./games/game-0058.html) |
-| 0059 | Synth Surfer | Rhythm / Wave Riding | [Play](./games/game-0059.html) |
-| 0060 | Boomerang Bay | Precision / Boomerang Throw | [Play](./games/game-0060.html) |
+| 0061 | Frostbite Frontier | Arcade / Ice Rescue | [Play](./games/game-0061.html) |
+| 0062 | Glyph Grove | Puzzle / Rune Path Logic | [Play](./games/game-0062.html) |
+| 0063 | Railway Rendezvous | Strategy / Train Yard Scheduler | [Play](./games/game-0063.html) |
+| 0064 | Beat Botanist | Rhythm / Garden Groove | [Play](./games/game-0064.html) |
+| 0065 | Magnet Minefield | Arcade / Polarity Action | [Play](./games/game-0065.html) |
+| 0066 | Clockwork Courier | Puzzle / Gear Route Logic | [Play](./games/game-0066.html) |
+| 0067 | Desert Drone Dash | Arcade / Canyon Racer | [Play](./games/game-0067.html) |
+| 0068 | Orbit Orchard | Strategy / Asteroid Farming | [Play](./games/game-0068.html) |
+| 0069 | Echo Chamber | Rhythm / Memory Echo | [Play](./games/game-0069.html) |
+| 0070 | Lantern Labyrinth | Puzzle / Mirror Light Maze | [Play](./games/game-0070.html) |
 
 ## Quality standard
 

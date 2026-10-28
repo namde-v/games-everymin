@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Desert Drone Dash — Canyon Racer</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#1a0f08; color:#fff; font-family:Arial, Helvetica, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; overflow:hidden; }
+  h1 { font-size:26px; letter-spacing:2px; color:#ffd166; text-shadow:0 2px 0 #b45309; margin:8px 0 4px; text-align:center; }
+  #wrap { position:relative; width:min(96vw, 820px); }
+  canvas { display:block; width:100%; height:auto; background:linear-gradient(#f59e0b, #fbbf24); border:4px solid #78350f; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.6); }
+  #hud { display:flex; gap:8px; flex-wrap:wrap; justify-content:space-between; width:min(96vw, 820px); margin:8px 0; font-weight:bold; font-size:15px; }
+  .pill { background:#292524; border:2px solid #f59e0b; border-radius:20px; padding:6px 12px; }
+  #batteryBarWrap { width:180px; height:16px; background:#44403c; border-radius:10px; overflow:hidden; display:inline-block; vertical-align:middle; margin-left:6px; }
+  #batteryBar { height:100%; width:100%; background:linear-gradient(90deg,#22c55e,#facc15); transition:width .2s; }
+  .overlay { position:absolute; inset:0; background:rgba(20,10,2,.88); border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; z-index:5; }
+  .overlay h2 { font-size:34px; color:#fde68a; margin-bottom:10px; }
+  .overlay p { max-width:520px; line-height:1.55; margin:6px 0; color:#fef3c7; font-size:15px; }
+  .overlay .small { font-size:13px; color:#fcd34d; }
+  button { margin-top:16px; font-size:20px; font-weight:bold; padding:12px 28px; border:none; border-radius:12px; background:#f59e0b; color:#1c1917; cursor:pointer; box-shadow:0 4px 0 #92400e; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #92400e; }
+  button:hover { background:#fbbf24; }
+  .keys { background:#44403c; border-radius:8px; padding:10px 14px; margin-top:12px; font-size:13px; line-height:1.6; }
+  .hidden { display:none !important; }
+  #msg { text-align:center; color:#fde68a; font-size:14px; min-height:20px; margin-top:4px; }
+  @media (max-width:600px){ h1{font-size:20px} .overlay h2{font-size:26px} .overlay p{font-size:14px} }
+</style>
+</head>
+<body>
+<h1>☀️ DESERT DRONE DASH</h1>
+<div id="hud">
+  <span class="pill">⭐ Score: <span id="score">0</span></span>
+  <span class="pill">🚁 Battery: <span id="batteryText">100%</span><span id="batteryBarWrap"><span id="batteryBar"></span></span></span>
+  <span class="pill">🚩 Gates: <span id="gates">0</span> / 20</span>
+  <span class="pill">📏 Distance: <span id="dist">0</span> m</span>
+  <span class="pill">❤️ Lives: <span id="lives">3</span></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="820" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>☀️ Desert Drone Dash</h2>
+    <p><strong>Canyon Racer</strong> — Pilot your solar drone through desert canyons!</p>
+    <p>Thread the glowing gates for bonus points, dodge rock spires, and keep your battery alive. Sun patches recharge you — shade and boosting drain you. Reach 20 gates or 3000 m to WIN!</p>
+    <div class="keys">
+      <strong>HOW TO PLAY</strong><br>
+      ⬅️ ➡️ ⬆️ ⬇️ / WASD — Steer drone &nbsp;|&nbsp; SPACE / Hold — Boost (fast, drains battery)<br>
+      🖱️ Mouse — Move to steer &nbsp;|&nbsp; 👆 Touch &amp; drag — Steer &nbsp;|&nbsp; Tap boost button on screen for boost<br>
+      ☀️ Fly through sun patches to recharge &nbsp;|&nbsp; 🚩 Thread gates for +150 &nbsp;|&nbsp; 🪨 Hitting a spire costs a life
+    </div>
+    <button id="startBtn" type="button">▶ START FLIGHT</button>
+    <p class="small">Battery drains over time and faster in shade. Don't let it hit 0%!</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn" type="button">↻ RESTART</button>
+  </div>
+</div>
+<p id="msg">Tip: Gates give big points — aim for the centre of each gate ring!</p>
+<p style="font-size:12px;color:#d6d3d1;margin-top:6px;">Keyboard: Arrows / WASD + Space boost &nbsp;•&nbsp; Mouse &amp; touch steering supported</p>
+
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var gatesEl = document.getElementById('gates');
+  var distEl = document.getElementById('dist');
+  var livesEl = document.getElementById('lives');
+  var batteryText = document.getElementById('batteryText');
+  var batteryBar = document.getElementById('batteryBar');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  var state = 'title'; // title | playing | over | win
+  var score = 0, gatesPassed = 0, distance = 0, lives = 3, battery = 100;
+  var frame = 0, spawnTimer = 0, invincible = 0, flashTimer = 0;
+  var drone = { x: W/2, y: H-110, w: 54, h: 36, vx: 0, vy: 0, tilt: 0 };
+  var keys = {};
+  var pointer = { active:false, x: W/2, y: H-110 };
+  var boost = false;
+  var obstacles = [], gates = [], suns = [], clouds = [], birds = [], particles = [];
+  var speedBase = 3.2;
+  var lastTime = 0;
+
+  // ---- Audio: procedural only, created after Start ----
+  var audioCtx = null, masterGain = null, muted = false;
+  function initAudio(){
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+    } catch(e) {}
+  }
+  function beep(freq, dur, type, vol){
+    if(!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.3, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function gateSound(){ beep(880, 0.12, 'triangle', 0.5); setTimeout(function(){ beep(1320, 0.18, 'triangle', 0.5); }, 90); }
+  function crashSound(){ beep(120, 0.35, 'sawtooth', 0.5); setTimeout(function(){ beep(70, 0.3, 'square', 0.4); }, 80); }
+  function sunSound(){ beep(660, 0.1, 'sine', 0.3); setTimeout(function(){ beep(990, 0.14, 'sine', 0.3); }, 70); }
+  function winSound(){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.5); }, i*140); }); }
+
+  function reset(){
+    score = 0; gatesPassed = 0; distance = 0; lives = 3; battery = 100;
+    frame = 0; spawnTimer = 0; invincible = 0; flashTimer = 0;
+    drone.x = W/2; drone.y = H-110; drone.vx = 0; drone.vy = 0; drone.tilt = 0;
+    obstacles = []; gates = []; suns = []; particles = [];
+    clouds = []; birds = [];
+    for(var i=0;i<6;i++){ clouds.push({x: Math.random()*W, y: Math.random()*180, s: 30+Math.random()*50, v: 0.3+Math.random()*0.5}); }
+    for(var j=0;j<4;j++){ birds.push({x: Math.random()*W, y: 40+Math.random()*120, v: 0.8+Math.random()*0.8}); }
+    updateHUD();
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = Math.floor(score);
+    gatesEl.textContent = gatesPassed;
+    distEl.textContent = Math.floor(distance);
+    livesEl.textContent = lives;
+    batteryText.textContent = Math.max(0, Math.floor(battery)) + '%';
+    batteryBar.style.width = Math.max(0, Math.min(100, battery)) + '%';
+    batteryBar.style.background = battery > 50 ? 'linear-gradient(90deg,#22c55e,#a3e635)' : battery > 25 ? 'linear-gradient(90deg,#facc15,#fb923c)' : 'linear-gradient(90deg,#ef4444,#f97316)';
+  }
+
+  function rectsOverlap(a, b){
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+  function droneBox(){
+    return { x: drone.x - drone.w/2 + 6, y: drone.y - drone.h/2 + 4, w: drone.w - 12, h: drone.h - 8 };
+  }
+
+  function spawnWave(){
+    var r = Math.random();
+    if(r < 0.42){
+      // Rock spire
+      var w = 34 + Math.random()*46;
+      obstacles.push({ x: 30 + Math.random()*(W-60-w), y: -90, w: w, h: 70+Math.random()*70, kind: Math.random()<0.5 ? 'spire' : 'rock' });
+    } else if(r < 0.72){
+      // Gate: two posts with a gap to thread
+      var gapW = 150 + Math.random()*40;
+      var cx = 110 + Math.random()*(W-220);
+      gates.push({ x: cx - gapW/2, y: -60, w: gapW, h: 26, passed:false, glow: Math.random() });
+    } else if(r < 0.88){
+      suns.push({ x: 40 + Math.random()*(W-80), y: -50, w: 78, h: 52, taken:false });
+    } else {
+      // Double spires leaving a narrow lane
+      var lane = 90 + Math.random()*(W-180);
+      obstacles.push({ x: 10, y: -90, w: lane-55, h: 80, kind:'spire' });
+      obstacles.push({ x: lane+55, y: -90, w: W-lane-65, h: 80, kind:'spire' });
+    }
+  }
+
+  function endGame(won, reason){
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    endText.textContent = won ? 'You conquered the canyon! The drone lands safely at the oasis base.' : reason;
+    endStats.textContent = 'Final Score: ' + Math.floor(score) + '  •  Gates: ' + gatesPassed + '/20  •  Distance: ' + Math.floor(distance) + ' m  •  Battery left: ' + Math.max(0, Math.floor(battery)) + '%';
+    if(won) winSound();
+    endScreen.classList.remove('hidden');
+  }
+
+  function startGame(){
+    initAudio();
+    if(audioCtx && audioCtx.state === 'suspended'){ audioCtx.resume(); }
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    msgEl.textContent = 'Fly! Thread gates, grab sun patches, dodge spires.';
+    beep(523, 0.15, 'triangle', 0.4);
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input ----
+  document.addEventListener('keydown', function(e){
+    keys[e.key.toLowerCase()] = true;
+    if(e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+    if(e.key === ' '){ boost = true; }
+    if((e.key === 'Enter') && (state === 'title' || state === 'over' || state === 'win')){ startGame(); }
+    if(e.key.toLowerCase() === 'm'){ muted = !muted; msgEl.textContent = muted ? 'Sound muted (press M to unmute).' : 'Sound on.'; }
+  });
+  document.addEventListener('keyup', function(e){
+    keys[e.key.toLowerCase()] = false;
+    if(e.key === ' '){ boost = false; }
+  });
+  function canvasPos(e){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  canvas.addEventListener('mousemove', function(e){ var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true; });
+  canvas.addEventListener('mousedown', function(e){ var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true; boost = true; });
+  document.addEventListener('mouseup', function(){ boost = false; });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true; boost = true; }, {passive:false});
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true; }, {passive:false});
+  canvas.addEventListener('touchend', function(){ boost = false; pointer.active = false; });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // ---- Drawing ----
+  function drawBackground(){
+    var grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'#fde68a'); grad.addColorStop(0.45,'#fbbf24'); grad.addColorStop(1,'#ea580c');
+    ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+    // Sun
+    ctx.fillStyle = '#fef08a'; ctx.beginPath(); ctx.arc(700, 60, 46, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(254,240,138,.35)'; ctx.beginPath(); ctx.arc(700, 60, 70, 0, Math.PI*2); ctx.fill();
+    // Clouds
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    clouds.forEach(function(c){
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.s*0.5, 0, Math.PI*2); ctx.arc(c.x+28, c.y-8, c.s*0.4, 0, Math.PI*2); ctx.arc(c.x+55, c.y, c.s*0.45, 0, Math.PI*2); ctx.fill();
+    });
+    // Birds
+    ctx.strokeStyle = '#44403c'; ctx.lineWidth = 2;
+    birds.forEach(function(b){
+      var flap = Math.sin(frame*0.2 + b.x*0.05)*5;
+      ctx.beginPath(); ctx.moveTo(b.x-10, b.y+flap); ctx.quadraticCurveTo(b.x, b.y-6, b.x+10, b.y+flap); ctx.stroke();
+    });
+    // Canyon walls (scrolling parallax)
+    ctx.fillStyle = '#92400e';
+    ctx.beginPath(); ctx.moveTo(0,0);
+    for(var y=0;y<=H;y+=40){ ctx.lineTo(28 + Math.sin((y+frame*2)*0.02)*14, y); }
+    ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W,0);
+    for(var y2=0;y2<=H;y2+=40){ ctx.lineTo(W-28 + Math.cos((y2+frame*2)*0.02)*14, y2); }
+    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#78350f';
+    ctx.fillRect(0,0,16,H); ctx.fillRect(W-16,0,16,H);
+    // Ground dunes at bottom
+    ctx.fillStyle = '#d97706';
+    ctx.beginPath(); ctx.moveTo(0,H-30);
+    for(var x=0;x<=W;x+=60){ ctx.quadraticCurveTo(x+30, H-52 - Math.sin((x+frame*3)*0.03)*8, x+60, H-30); }
+    ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+  }
+
+  function drawDrone(){
+    ctx.save();
+    ctx.translate(drone.x, drone.y);
+    ctx.rotate(drone.tilt * 0.18);
+    if(invincible > 0 && Math.floor(frame/4)%2===0){ ctx.globalAlpha = 0.45; }
+    // Rotors
+    ctx.fillStyle = '#44403c';
+    ctx.fillRect(-30,-22,60,5); ctx.fillRect(-30,17,60,5);
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.fillRect(-34,-24,14,3); ctx.fillRect(20,-24,14,3); ctx.fillRect(-34,22,14,3); ctx.fillRect(20,22,14,3);
+    // Body
+    ctx.fillStyle = '#0f766e';
+    ctx.beginPath(); ctx.ellipse(0,0,28,17,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#14b8a6'; ctx.beginPath(); ctx.ellipse(0,-4,20,11,0,0,Math.PI*2); ctx.fill();
+    // Solar panel + camera eye
+    ctx.fillStyle = '#1e3a8a'; ctx.fillRect(-18,-8,36,10);
+    ctx.fillStyle = '#fde047'; ctx.beginPath(); ctx.arc(14,2,6,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.arc(15,2,3,0,Math.PI*2); ctx.fill();
+    // Boost flame
+    if(boost && state==='playing'){
+      ctx.fillStyle = '#f97316';
+      ctx.beginPath(); ctx.moveTo(-24,0); ctx.lineTo(-40 - Math.random()*12, -6); ctx.lineTo(-40 - Math.random()*12, 6); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawObstacles(){
+    obstacles.forEach(function(o){
+      if(o.kind === 'spire'){
+        ctx.fillStyle = '#57534e';
+        ctx.beginPath(); ctx.moveTo(o.x, o.y+o.h); ctx.lineTo(o.x+o.w/2, o.y); ctx.lineTo(o.x+o.w, o.y+o.h); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#78716c'; ctx.beginPath(); ctx.moveTo(o.x+o.w*0.3, o.y+o.h); ctx.lineTo(o.x+o.w/2, o.y+14); ctx.lineTo(o.x+o.w*0.7, o.y+o.h); ctx.closePath(); ctx.fill();
+      } else {
+        ctx.fillStyle = '#44403c'; ctx.beginPath(); ctx.ellipse(o.x+o.w/2, o.y+o.h/2, o.w/2, o.h/2, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#78716c'; ctx.beginPath(); ctx.ellipse(o.x+o.w/2, o.y+o.h/2-8, o.w/3, o.h/3, 0, 0, Math.PI*2); ctx.fill();
+      }
+    });
+  }
+
+  function drawGates(){
+    gates.forEach(function(g){
+      var pulse = 0.6 + Math.sin(frame*0.15 + g.glow*10)*0.4;
+      ctx.strokeStyle = 'rgba(34,211,238,' + pulse + ')'; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(g.x, g.y); ctx.lineTo(g.x, g.y+g.h+46); ctx.moveTo(g.x+g.w, g.y); ctx.lineTo(g.x+g.w, g.y+g.h+46); ctx.stroke();
+      ctx.fillStyle = '#22d3ee'; ctx.fillRect(g.x-6, g.y+g.h+40, 12, 12); ctx.fillRect(g.x+g.w-6, g.y+g.h+40, 12, 12);
+      ctx.fillStyle = '#ecfeff'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center'; ctx.fillText('🚩 GATE', g.x+g.w/2, g.y+34);
+      ctx.textAlign = 'left';
+    });
+  }
+
+  function drawSuns(){
+    suns.forEach(function(s){
+      if(s.taken) return;
+      var p = 0.7 + Math.sin(frame*0.12)*0.3;
+      ctx.fillStyle = 'rgba(253,224,71,' + p + ')';
+      ctx.beginPath(); ctx.arc(s.x+s.w/2, s.y+s.h/2, 30, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(s.x+s.w/2, s.y+s.h/2, 20, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#78350f'; ctx.font = 'bold 13px Arial'; ctx.textAlign='center'; ctx.fillText('+BATTERY', s.x+s.w/2, s.y+s.h/2+4); ctx.textAlign='left';
+    });
+  }
+
+  function drawParticles(){
+    particles.forEach(function(p){
+      ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life/30);
+      ctx.fillRect(p.x, p.y, p.s, p.s); ctx.globalAlpha = 1;
+    });
+  }
+
+  function burst(x, y, color, n){
+    for(var i=0;i<n;i++){ particles.push({x:x, y:y, vx:(Math.random()-0.5)*6, vy:(Math.random()-0.5)*6, s:3+Math.random()*5, life:30, color:color}); }
+  }
+
+  function loop(now){
+    if(state !== 'playing') return;
+    var dt = Math.min(50, now - lastTime); lastTime = now;
+    frame++;
+    var isBoost = boost || keys[' '] === true;
+    var speed = speedBase + Math.min(3, distance/900) + (isBoost ? 2.4 : 0);
+
+    // Steering: keyboard
+    var accel = 0.9;
+    if(keys['arrowleft'] || keys['a']) drone.vx -= accel;
+    if(keys['arrowright'] || keys['d']) drone.vx += accel;
+    if(keys['arrowup'] || keys['w']) drone.vy -= accel;
+    if(keys['arrowdown'] || keys['s']) drone.vy += accel;
+    // Pointer steering: glide toward pointer
+    if(pointer.active){
+      var dx = pointer.x - drone.x, dy = pointer.y - drone.y;
+      drone.vx += dx * 0.02; drone.vy += dy * 0.02;
+    }
+    drone.vx *= 0.88; drone.vy *= 0.88;
+    drone.x += drone.vx; drone.y += drone.vy;
+    drone.tilt = Math.max(-1, Math.min(1, drone.vx * 0.18));
+    drone.x = Math.max(34, Math.min(W-34, drone.x));
+    drone.y = Math.max(60, Math.min(H-50, drone.y));
+
+    // Battery: drain always, faster when boosting, slower in sun is handled by pickups; shade drain extra when not near sun
+    var drain = isBoost ? 0.22 : 0.07;
+    battery -= drain * (dt/16.7);
+    // Small passive solar trickle
+    battery += 0.008 * (dt/16.7);
+    if(battery <= 0){
+      battery = 0; lives = 0; updateHUD();
+      endGame(false, 'Your battery ran dry in the desert heat. Recharge in sun patches next time!');
+      return;
+    }
+
+    // Distance and score
+    distance += speed * 0.55 * (dt/16.7);
+    score += speed * 0.35 * (dt/16.7);
+    if(invincible > 0) invincible--;
+    if(flashTimer > 0) flashTimer--;
+
+    // Spawning
+    spawnTimer -= dt;
+    if(spawnTimer <= 0){ spawnWave(); spawnTimer = Math.max(520, 1050 - distance*0.12); }
+
+    // Move world
+    obstacles.forEach(function(o){ o.y += speed * (dt/16.7); });
+    gates.forEach(function(g){ g.y += speed * (dt/16.7); });
+    suns.forEach(function(s){ s.y += speed * (dt/16.7); });
+    clouds.forEach(function(c){ c.x += c.v; if(c.x > W+60) c.x = -60; });
+    birds.forEach(function(b){ b.x += b.v; b.y += Math.sin(frame*0.05+b.x*0.01)*0.4; if(b.x > W+20) b.x = -20; });
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+
+    var db = droneBox();
+
+    // Collisions: spires
+    if(invincible <= 0){
+      for(var i=0;i<obstacles.length;i++){
+        var o = obstacles[i];
+        if(rectsOverlap(db, o)){
+          lives--; crashSound(); burst(drone.x, drone.y, '#ef4444', 22); flashTimer = 10;
+          battery = Math.max(0, battery - 12); invincible = 90;
+          msgEl.textContent = 'CRASH! Spire hit — ' + lives + ' lives left. Fly carefully!';
+          if(lives <= 0){ updateHUD(); endGame(false, 'Your drone crashed into the canyon rocks three times.'); drawAll(); return; }
+          break;
+        }
+      }
+    }
+    // Gates
+    gates.forEach(function(g){
+      if(!g.passed && g.y + g.h + 46 > drone.y && g.y < drone.y){
+        var centre = g.x + g.w/2;
+        if(Math.abs(drone.x - centre) < g.w/2){
+          g.passed = true; gatesPassed++; score += 150; gateSound(); burst(drone.x, drone.y-20, '#22d3ee', 18);
+          msgEl.textContent = 'GATE THREADED! +150 points — ' + gatesPassed + '/20 gates.';
+        } else if(g.y > drone.y + 20){
+          g.passed = true; // missed gate, no penalty beyond lost bonus
+        }
+      }
+    });
+    // Sun patches
+    suns.forEach(function(s){
+      if(!s.taken && rectsOverlap(db, s)){
+        s.taken = true; battery = Math.min(100, battery + 28); sunSound(); burst(s.x+s.w/2, s.y+s.h/2, '#facc15', 16);
+        msgEl.textContent = 'SUN PATCH! Battery recharged +28%.';
+      }
+    });
+
+    // Cleanup
+    obstacles = obstacles.filter(function(o){ return o.y < H+110; });
+    gates = gates.filter(function(g){ return g.y < H+110; });
+    suns = suns.filter(function(s){ return s.y < H+110 && !s.taken; });
+
+    // Win conditions
+    if(gatesPassed >= 20 || distance >= 3000){
+      updateHUD(); drawAll();
+      endGame(true, '');
+      return;
+    }
+    // Level progression message
+    if(Math.floor(distance) % 500 < 3 && distance > 100 && Math.floor(distance) > 0){
+      // subtle speed-up is already applied; keep HUD fresh
+    }
+
+    updateHUD();
+    drawAll();
+    requestAnimationFrame(loop);
+  }
+
+  function drawAll(){
+    drawBackground();
+    drawSuns();
+    drawGates();
+    drawObstacles();
+    drawParticles();
+    drawDrone();
+    if(flashTimer > 0){ ctx.fillStyle = 'rgba(239,68,68,.25)'; ctx.fillRect(0,0,W,H); }
+    // Progress bar to win
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(20, H-22, W-40, 12);
+    var prog = Math.max(gatesPassed/20, distance/3000);
+    ctx.fillStyle = '#22d3ee'; ctx.fillRect(20, H-22, (W-40)*Math.min(1, prog), 12);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign='center';
+    ctx.fillText('PROGRESS TO OASIS BASE  •  Gates ' + gatesPassed + '/20  or  ' + Math.floor(distance) + '/3000 m', W/2, H-26);
+    ctx.textAlign='left';
+    if(boost && state==='playing'){ ctx.fillStyle='#fef3c7'; ctx.font='bold 14px Arial'; ctx.fillText('⚡ BOOST', 24, 30); }
+  }
+
+  reset();
+  drawBackground();
+  drawDrone();
+  // Title idle scene: draw once so canvas is not blank behind overlay
+  drawAll();
+}
+)();
+</script>
+</body>
+</html>

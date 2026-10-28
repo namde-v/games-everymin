@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Frostbite Frontier — Ice Rescue</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e2d; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 28px; letter-spacing: 1px; margin: 6px 0 2px; text-shadow: 0 2px 0 #1e6f8e; }
+  .tag { color: #9fd8ef; font-size: 13px; margin-bottom: 10px; }
+  #hud { width: 728px; max-width: 96vw; display: flex; justify-content: space-between; gap: 8px; background: #12364a; border: 2px solid #4db6d6; border-radius: 10px; padding: 8px 12px; font-weight: bold; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  #wrap { position: relative; width: 728px; max-width: 96vw; margin-top: 10px; }
+  canvas { width: 100%; height: auto; display: block; background: #bfe6f5; border: 3px solid #eaf6ff; border-radius: 12px; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(7, 28, 42, 0.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay h2 { font-size: 34px; color: #bfefff; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #d9eef8; }
+  .overlay .how { background: rgba(255,255,255,0.10); border: 1px solid #4db6d6; border-radius: 10px; padding: 12px 16px; text-align: left; }
+  button { background: #ff9f1c; color: #1a1200; border: none; border-radius: 10px; padding: 12px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b96e00; }
+  button:hover { filter: brightness(1.08); }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b96e00; }
+  button.secondary { background: #4db6d6; color: #06222f; box-shadow: 0 4px 0 #1e6f8e; }
+  #pad { display: none; margin-top: 10px; gap: 6px; }
+  #pad button { width: 58px; height: 52px; padding: 0; font-size: 22px; }
+  .hidden { display: none !important; }
+  .legend { margin-top: 10px; font-size: 13px; color: #9fd8ef; text-align: center; line-height: 1.6; }
+  @media (max-width: 700px) { #pad { display: grid; grid-template-columns: repeat(3, 58px); justify-content: center; } h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<h1>❄️ FROSTBITE FRONTIER ❄️</h1>
+<div class="tag">Arcade / Ice Rescue — Slide, don't walk. Momentum is your only steering.</div>
+<div id="hud">
+  <span id="hudScore">Score: 0</span>
+  <span id="hudLives">Lives: ❤️❤️❤️</span>
+  <span id="hudLevel">Level: 1 / 3</span>
+  <span id="hudStatus">Rescued: 0 / 2</span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="728" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>FROSTBITE FRONTIER</h2>
+    <p><strong>You are the rescue ranger.</strong> Stranded climbers are waiting on a frozen lake. The ice is so slick you cannot stop on your own — you slide until you hit a snowbank.</p>
+    <div class="how">
+      <strong>How to Play</strong><br>
+      • Arrow keys / WASD — slide up, down, left or right<br>
+      • Mouse — click a tile in the direction you want to slide<br>
+      • Touch — swipe, or use the on-screen pad<br>
+      • Slide into a climber 🧗 to rescue them<br>
+      • Avoid crevasses ⬛ and thin ice: thin ice cracks once, then breaks!<br>
+      • Rescue everyone, then slide into the glowing igloo ⛺ to finish the level<br>
+      • You have 3 lives. Complete all 3 levels to win.
+    </div>
+    <button id="startBtn">▶ START RESCUE</button>
+    <p>Tip: Plan every slide. A snowbank is your brake — a crevasse is not.</p>
+  </div>
+  <div id="winScreen" class="overlay hidden">
+    <h2>🏆 FRONTIER SAVED!</h2>
+    <p id="winText">You rescued every climber on the frozen lake.</p>
+    <button id="winRestartBtn">↻ PLAY AGAIN</button>
+  </div>
+  <div id="overScreen" class="overlay hidden">
+    <h2>💙 LOST IN THE BLIZZARD</h2>
+    <p id="overText">The ice claimed the rescue. The climbers are still waiting.</p>
+    <button id="overRestartBtn">↻ TRY AGAIN</button>
+  </div>
+</div>
+<div id="pad">
+  <span></span><button data-dir="up" aria-label="Up">▲</button><span></span>
+  <button data-dir="left" aria-label="Left">◀</button><button data-dir="down" aria-label="Down">▼</button><button data-dir="right" aria-label="Right">▶</button>
+</div>
+<div class="legend">🧑 You &nbsp; 🧗 Climber &nbsp; ⬜ Snowbank &nbsp; 🧊 Ice &nbsp; ❄️ Thin ice (cracks!) &nbsp; ⬛ Crevasse &nbsp; ⛺ Igloo exit</div>
+<script>
+(function() {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 13, ROWS = 10, TILE = 56;
+  // Legend: # snowbank, . ice, T thin ice, X crevasse, P player, R climber, E igloo exit
+  var LEVELS = [
+    [
+      "#############",
+      "#P...T......#",
+      "#.###.###.#.#",
+      "#.....R...#.#",
+      "###.#.###.#.#",
+      "#...#...#.#R#",
+      "#.X.#.T.#.#.#",
+      "#...###...#.#",
+      "#.T.....#..E#",
+      "#############"
+    ],
+    [
+      "#############",
+      "#P.T..#..R..#",
+      "#.#.###.#.###",
+      "#.#...#.#...#",
+      "#.###.#.###.#",
+      "#R..#.#T..#.#",
+      "###.#.###.#X#",
+      "#...#...#.#.#",
+      "#.T.R.#.#..E#",
+      "#############"
+    ],
+    [
+      "#############",
+      "#P..T.#.R...#",
+      "#.###.#.###.#",
+      "#...#...#.#.#",
+      "###.#.X.#.#.#",
+      "#R..#.###.#.#",
+      "#.#.#T..#.#.#",
+      "#.#.###.#.X.#",
+      "#..R..T.#..E#",
+      "#############"
+    ]
+  ];
+  var levelIndex = 0, score = 0, lives = 3, rescued = 0, totalToRescue = 0;
+  var grid = [], thinState = [], climbers = [], exitPos = null, startPos = null;
+  var player = { x: 1, y: 1, px: 56, py: 56 };
+  var sliding = false, slidePath = [], slideStep = 0, slideTimer = 0;
+  var running = false, gameOver = false, gameWon = false, statusMsg = 'Ready';
+  var shake = 0, sparkles = [], snowflakes = [];
+  for (var i = 0; i < 90; i++) snowflakes.push({ x: Math.random() * 728, y: Math.random() * 560, s: 1 + Math.random() * 2, v: 12 + Math.random() * 28, o: 0.3 + Math.random() * 0.6 });
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; } }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    if (kind === 'slide') tone(300, 0.18, 'triangle', 0.08);
+    if (kind === 'rescue') { tone(660, 0.12, 'sine', 0.14); setTimeout(function(){ tone(880, 0.14, 'sine', 0.14); }, 90); setTimeout(function(){ tone(1100, 0.2, 'sine', 0.14); }, 180); }
+    if (kind === 'crack') { tone(180, 0.15, 'sawtooth', 0.12); tone(120, 0.2, 'square', 0.08); }
+    if (kind === 'fall') { tone(400, 0.5, 'sawtooth', 0.14); setTimeout(function(){ tone(200, 0.5, 'sawtooth', 0.12); }, 120); }
+    if (kind === 'win') { [523, 659, 784, 1047].forEach(function(f, k){ setTimeout(function(){ tone(f, 0.25, 'sine', 0.14); }, k * 130); }); }
+    if (kind === 'bump') tone(140, 0.08, 'square', 0.10);
+  }
+  function loadLevel(idx) {
+    var raw = LEVELS[idx]; grid = []; thinState = []; climbers = []; rescued = 0;
+    for (var y = 0; y < ROWS; y++) {
+      grid[y] = []; thinState[y] = [];
+      for (var x = 0; x < COLS; x++) {
+        var ch = raw[y].charAt(x);
+        if (ch === 'P') { startPos = { x: x, y: y }; grid[y][x] = '.'; }
+        else if (ch === 'R') { climbers.push({ x: x, y: y, saved: false }); grid[y][x] = '.'; }
+        else if (ch === 'E') { exitPos = { x: x, y: y }; grid[y][x] = 'E'; }
+        else grid[y][x] = ch;
+        thinState[y][x] = (ch === 'T') ? 0 : -1;
+      }
+    }
+    totalToRescue = climbers.length;
+    player.x = startPos.x; player.y = startPos.y;
+    player.px = player.x * TILE; player.py = player.y * TILE;
+    sliding = false; slidePath = []; statusMsg = 'Rescue them all!';
+    updateHUD();
+  }
+  function updateHUD() {
+    document.getElementById('hudScore').textContent = 'Score: ' + score;
+    var hearts = ''; for (var i = 0; i < 3; i++) hearts += (i < lives) ? '❤️' : '🤍';
+    document.getElementById('hudLives').textContent = 'Lives: ' + hearts;
+    document.getElementById('hudLevel').textContent = 'Level: ' + (levelIndex + 1) + ' / ' + LEVELS.length;
+    document.getElementById('hudStatus').textContent = 'Rescued: ' + rescued + ' / ' + totalToRescue + ' — ' + statusMsg;
+  }
+  function isSolid(x, y) { return grid[y][x] === '#'; }
+  function isPit(x, y) { return grid[y][x] === 'X' || thinState[y][x] === 2; }
+  function startSlide(dx, dy) {
+    if (!running || sliding || gameOver || gameWon) return;
+    var nx = player.x + dx, ny = player.y + dy;
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS || isSolid(nx, ny)) { sfx('bump'); statusMsg = 'Blocked by a snowbank!'; updateHUD(); return; }
+    var path = []; var cx = player.x, cy = player.y;
+    while (true) {
+      var tx = cx + dx, ty = cy + dy;
+      if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS || isSolid(tx, ty)) break;
+      path.push({ x: tx, y: ty });
+      cx = tx; cy = ty;
+      // A crevasse swallows the slide: it is in the path, so the slide ends in a fall.
+      if (isPit(tx, ty)) break;
+    }
+    if (path.length === 0) { sfx('bump'); return; }
+    slidePath = path; slideStep = 0; sliding = true; slideTimer = 0; sfx('slide');
+    statusMsg = 'Sliding…'; updateHUD();
+  }
+  function onStepTile(tile) {
+    // Thin ice: first pass cracks it, second pass breaks it.
+    if (grid[tile.y][tile.x] === 'T') {
+      if (thinState[tile.y][tile.x] === 0) { thinState[tile.y][tile.x] = 1; sfx('crack'); statusMsg = 'Crack! That thin ice will not hold again!'; }
+      else if (thinState[tile.y][tile.x] === 1) { thinState[tile.y][tile.x] = 2; }
+    }
+    for (var i = 0; i < climbers.length; i++) {
+      var c = climbers[i];
+      if (!c.saved && c.x === tile.x && c.y === tile.y) {
+        c.saved = true; rescued++; score += 100;
+        for (var k = 0; k < 16; k++) sparkles.push({ x: tile.x * TILE + 28, y: tile.y * TILE + 28, vx: (Math.random() - 0.5) * 120, vy: -40 - Math.random() * 80, life: 0.7 });
+        sfx('rescue'); statusMsg = 'Climber rescued! ' + rescued + ' / ' + totalToRescue;
+      }
+    }
+  }
+  function loseLife(reason) {
+    lives--; sfx('fall'); shake = 10; statusMsg = reason; updateHUD();
+    if (lives <= 0) {
+      gameOver = true; running = false;
+      document.getElementById('overText').textContent = 'The ice claimed the rescue after ' + rescued + ' climber(s) saved on level ' + (levelIndex + 1) + '. Score: ' + score + '. The climbers are still waiting — try again!';
+      document.getElementById('overScreen').classList.remove('hidden');
+      return;
+    }
+    // Reset position and repair thin ice for a fair retry; rescued climbers stay rescued.
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) if (thinState[y][x] === 2) thinState[y][x] = 0; else if (thinState[y][x] === 1) thinState[y][x] = 0;
+    player.x = startPos.x; player.y = startPos.y; player.px = player.x * TILE; player.py = player.y * TILE;
+    sliding = false; slidePath = [];
+    setTimeout(function(){ if (!gameOver) { statusMsg = 'Back at base. Plan the next slide!'; updateHUD(); } }, 900);
+    updateHUD();
+  }
+  function finishSlide() {
+    sliding = false;
+    var last = slidePath[slidePath.length - 1];
+    player.x = last.x; player.y = last.y; player.px = last.x * TILE; player.py = last.y * TILE;
+    if (isPit(last.x, last.y)) { loseLife('Fell through the ice!'); return; }
+    if (exitPos && last.x === exitPos.x && last.y === exitPos.y) {
+      if (rescued >= totalToRescue) {
+        score += 250; statusMsg = 'Level complete!';
+        if (levelIndex + 1 >= LEVELS.length) {
+          gameWon = true; running = false; sfx('win');
+          document.getElementById('winText').textContent = 'You rescued every climber across all ' + LEVELS.length + ' frozen lakes! Final score: ' + score + '.';
+          document.getElementById('winScreen').classList.remove('hidden');
+        } else {
+          levelIndex++; sfx('win'); statusMsg = 'Level complete! +250';
+          loadLevel(levelIndex);
+        }
+      } else {
+        statusMsg = 'Igloo is locked: rescue all climbers first!';
+      }
+    }
+    updateHUD();
+  }
+  function drawTile(x, y) {
+    var px = x * TILE, py = y * TILE, cell = grid[y][x];
+    if (cell === '#') { ctx.fillStyle = '#eef8ff'; ctx.fillRect(px, py, TILE, TILE); ctx.fillStyle = '#cfe9f7'; ctx.beginPath(); ctx.arc(px + 14, py + 16, 10, 0, Math.PI * 2); ctx.arc(px + 36, py + 12, 13, 0, Math.PI * 2); ctx.arc(px + 42, py + 38, 9, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#9fc9dd'; ctx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1); }
+    else if (cell === 'X' || thinState[y][x] === 2) { ctx.fillStyle = '#06121f'; ctx.fillRect(px, py, TILE, TILE); ctx.fillStyle = '#0f2f4a'; ctx.beginPath(); ctx.moveTo(px + 8, py + 20); ctx.lineTo(px + 28, py + 10); ctx.lineTo(px + 48, py + 28); ctx.lineTo(px + 30, py + 48); ctx.closePath(); ctx.fill(); }
+    else if (cell === 'T') {
+      ctx.fillStyle = (thinState[y][x] === 1) ? '#d9f2ff' : '#a9dcef'; ctx.fillRect(px, py, TILE, TILE);
+      ctx.strokeStyle = '#5aa8c8'; ctx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1);
+      if (thinState[y][x] === 1) { ctx.strokeStyle = '#1e6f8e'; ctx.beginPath(); ctx.moveTo(px + 8, py + 10); ctx.lineTo(px + 24, py + 28); ctx.lineTo(px + 18, py + 46); ctx.moveTo(px + 30, py + 8); ctx.lineTo(px + 44, py + 30); ctx.stroke(); }
+      ctx.fillStyle = '#ffffff'; ctx.font = '20px Arial'; ctx.textAlign = 'center'; ctx.fillText('❄', px + 28, py + 34);
+    }
+    else if (cell === 'E') {
+      ctx.fillStyle = '#8fd3ef'; ctx.fillRect(px, py, TILE, TILE);
+      var open = rescued >= totalToRescue;
+      ctx.fillStyle = open ? '#ffe08a' : '#7a8a94'; ctx.font = '30px Arial'; ctx.textAlign = 'center'; ctx.fillText('⛺', px + 28, py + 38);
+      if (open) { ctx.fillStyle = '#fff3b0'; ctx.beginPath(); ctx.arc(px + 28, py + 28, 26, 0, Math.PI * 2); ctx.globalAlpha = 0.25; ctx.fill(); ctx.globalAlpha = 1; }
+    }
+    else { ctx.fillStyle = '#bfe6f5'; ctx.fillRect(px, py, TILE, TILE); ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fillRect(px, py, TILE, 2); ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(px + 12, py + 44, 4, 0, Math.PI * 2); ctx.arc(px + 44, py + 12, 3, 0, Math.PI * 2); ctx.fill(); }
+  }
+  function draw() {
+    ctx.save();
+    if (shake > 0) { ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); shake *= 0.88; if (shake < 0.5) shake = 0; }
+    ctx.fillStyle = '#bfe6f5'; ctx.fillRect(-20, -20, 768, 600);
+    for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) drawTile(x, y);
+    climbers.forEach(function(c) {
+      if (c.saved) return;
+      ctx.font = '30px Arial'; ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(c.x * TILE + 28, c.y * TILE + 48, 16, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillText('🧗', c.x * TILE + 28, c.y * TILE + 38);
+      ctx.fillStyle = '#ff4757'; ctx.font = 'bold 13px Arial'; ctx.fillText('HELP!', c.x * TILE + 28, c.y * TILE + 14);
+    });
+    // Player: ranger with orange parka and skis
+    ctx.fillStyle = 'rgba(0,0,0,0.20)'; ctx.beginPath(); ctx.ellipse(player.px + 28, player.py + 48, 17, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff7a1a'; ctx.beginPath(); ctx.arc(player.px + 28, player.py + 28, 17, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd9a0'; ctx.beginPath(); ctx.arc(player.px + 28, player.py + 22, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#12364a'; ctx.fillRect(player.px + 20, player.py + 12, 16, 4);
+    ctx.fillStyle = '#12364a'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('RANGER', player.px + 28, player.py + 52);
+    sparkles.forEach(function(s) { ctx.fillStyle = '#fff176'; ctx.fillRect(s.x - 2, s.y - 2, 4, 4); });
+    snowflakes.forEach(function(f) { ctx.fillStyle = 'rgba(255,255,255,' + f.o + ')'; ctx.beginPath(); ctx.arc(f.x, f.y, f.s, 0, Math.PI * 2); ctx.fill(); });
+    ctx.restore();
+  }
+  var lastTime = 0;
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime) / 1000); lastTime = ts;
+    snowflakes.forEach(function(f) { f.y += f.v * dt; f.x += Math.sin(f.y / 30) * 0.3; if (f.y > 560) { f.y = -5; f.x = Math.random() * 728; } });
+    sparkles.forEach(function(s) { s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt; });
+    sparkles = sparkles.filter(function(s) { return s.life > 0; });
+    if (sliding && slidePath.length > 0) {
+      slideTimer += dt;
+      var speed = 7; // tiles per second
+      var total = slideStep + slideTimer * speed;
+      var idx = Math.floor(total);
+      if (idx >= slidePath.length) {
+        // Step through any unvisited tiles for rescues and cracks before finishing.
+        for (var q = slideStep; q < slidePath.length; q++) onStepTile(slidePath[q]);
+        finishSlide();
+      } else {
+        var cur = slidePath[idx];
+        if (idx > slideStep) { for (var r = slideStep; r < idx; r++) onStepTile(slidePath[r]); slideStep = idx; }
+        var frac = total - idx;
+        var prev = (idx === 0) ? { x: player.x, y: player.y } : slidePath[idx - 1];
+        // If the slide already ended on a pit, finishSlide handles the fall; keep drawing the slide.
+        player.px = (prev.x + (cur.x - prev.x) * frac) * TILE;
+        player.py = (prev.y + (cur.y - prev.y) * frac) * TILE;
+        if (isPit(cur.x, cur.y) && frac > 0.85) { player.py += 8; }
+      }
+    }
+    draw();
+    if (!gameOver || gameWon) requestAnimationFrame(loop);
+    else if (running) requestAnimationFrame(loop);
+    else requestAnimationFrame(loop);
+  }
+  function startGame() {
+    ensureAudio(); sfx('win');
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('winScreen').classList.add('hidden');
+    document.getElementById('overScreen').classList.add('hidden');
+    levelIndex = 0; score = 0; lives = 3; gameOver = false; gameWon = false; running = true;
+    loadLevel(0); statusMsg = 'Rescue them all!'; updateHUD();
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestartBtn').addEventListener('click', startGame);
+  document.getElementById('overRestartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !running && !gameOver && !gameWon) { startGame(); return; }
+    if (e.key === 'r' || e.key === 'R') { if (gameOver || gameWon) startGame(); return; }
+    if (!running) return;
+    var k = e.key.toLowerCase();
+    if (k === 'arrowup' || k === 'w') { e.preventDefault(); startSlide(0, -1); }
+    else if (k === 'arrowdown' || k === 's') { e.preventDefault(); startSlide(0, 1); }
+    else if (k === 'arrowleft' || k === 'a') { e.preventDefault(); startSlide(-1, 0); }
+    else if (k === 'arrowright' || k === 'd') { e.preventDefault(); startSlide(1, 0); }
+  });
+  canvas.addEventListener('click', function(e) {
+    if (!running || sliding) return;
+    var rect = canvas.getBoundingClientRect();
+    var cx = Math.floor((e.clientX - rect.left) / rect.width * COLS);
+    var cy = Math.floor((e.clientY - rect.top) / rect.height * ROWS);
+    var dx = cx - player.x, dy = cy - player.y;
+    if (Math.abs(dx) >= Math.abs(dy) && dx !== 0) startSlide(dx > 0 ? 1 : -1, 0);
+    else if (dy !== 0) startSlide(0, dy > 0 ? 1 : -1);
+  });
+  document.querySelectorAll('#pad button').forEach(function(b) {
+    b.addEventListener('click', function() {
+      var d = b.getAttribute('data-dir');
+      if (d === 'up') startSlide(0, -1); if (d === 'down') startSlide(0, 1);
+      if (d === 'left') startSlide(-1, 0); if (d === 'right') startSlide(1, 0);
+    });
+  });
+  var touchX = null, touchY = null;
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var t = e.changedTouches[0]; touchX = t.clientX; touchY = t.clientY;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    if (touchX === null) return;
+    var t = e.changedTouches[0];
+    var dx = t.clientX - touchX, dy = t.clientY - touchY;
+    touchX = null; touchY = null;
+    if (Math.abs(dx) < 20 && Math.abs(dy) < 20) return;
+    if (Math.abs(dx) >= Math.abs(dy)) startSlide(dx > 0 ? 1 : -1, 0); else startSlide(0, dy > 0 ? 1 : -1);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+  loadLevel(0);
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

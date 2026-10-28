@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Beat Botanist — Garden Groove</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0e2416; color: #f2ffe9; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 30px; text-align: center; margin: 6px 0 2px; letter-spacing: 1px; text-shadow: 0 2px 0 #1d5c2e; }
+  .tag { text-align: center; color: #b8e6a3; font-size: 13px; margin-bottom: 8px; }
+  #wrap { position: relative; width: min(96vw, 720px); }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#123a22, #0e2b18); border: 3px solid #7ed957; border-radius: 14px; touch-action: none; }
+  #hud { display: none; width: 100%; justify-content: space-between; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  #hud.on { display: flex; }
+  .pill { background: #1e4d2a; border: 2px solid #7ed957; border-radius: 999px; padding: 7px 12px; font-size: 14px; font-weight: bold; }
+  .pill span { color: #ffe066; }
+  #barWrap { width: 100%; height: 14px; background: #17351f; border: 2px solid #7ed957; border-radius: 999px; overflow: hidden; margin-bottom: 8px; display: none; }
+  #barWrap.on { display: block; }
+  #bar { height: 100%; width: 0%; background: linear-gradient(90deg, #7ed957, #ffe066); transition: width .2s; }
+  .panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(8, 28, 14, 0.92); border-radius: 14px; padding: 20px; }
+  .panel h2 { font-size: 32px; margin-bottom: 8px; }
+  .panel p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #dff5cd; margin: 6px 0; }
+  .keys { background: #17351f; border: 1px solid #4caf50; border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 14px; line-height: 1.6; }
+  button { cursor: pointer; background: #7ed957; color: #0e2416; border: none; border-radius: 999px; padding: 14px 34px; font-size: 19px; font-weight: bold; margin-top: 14px; box-shadow: 0 4px 0 #3d8b2a; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #ffe066; }
+  .small { font-size: 12px; color: #a8d89a; margin-top: 10px; }
+  #endScreen { display: none; }
+  #feedback { text-align: center; font-size: 18px; font-weight: bold; min-height: 24px; color: #ffe066; margin: 4px 0; }
+  @media (max-width: 500px) { h1 { font-size: 24px; } .panel p { font-size: 14px; } .pill { font-size: 12px; } }
+</style>
+</head>
+<body>
+<h1>🌱 Beat Botanist 🌱</h1>
+<div class="tag">Garden Groove &bull; Plant it, water it, harvest it — right on the beat!</div>
+<div id="wrap">
+  <canvas id="game" width="720" height="520"></canvas>
+  <div id="hud">
+    <div class="pill">Score: <span id="score">0</span></div>
+    <div class="pill">Combo: <span id="combo">x0</span></div>
+    <div class="pill">Lives: <span id="lives">♥♥♥♥♥</span></div>
+    <div class="pill">Harvested: <span id="harvest">0 / 16</span></div>
+    <div class="pill">Accuracy: <span id="acc">—</span></div>
+  </div>
+  <div id="barWrap"><div id="bar"></div></div>
+  <div id="feedback"></div>
+  <div class="panel" id="titleScreen">
+    <h2>🌻 Beat Botanist 🌻</h2>
+    <p><strong>Garden Groove:</strong> Seeds, water drops and suns fall down four garden beds on the beat. Catch each one exactly when it lands on the glowing harvest line to grow your garden.</p>
+    <div class="keys">
+      <strong>How to Play</strong><br>
+      🌰 Seed = plant &nbsp; 💧 Water = grow &nbsp; ☀️ Sun = ripen &nbsp; 🌾 Harvest = score big<br>
+      Keys: <strong>D</strong> &nbsp; <strong>F</strong> &nbsp; <strong>J</strong> &nbsp; <strong>K</strong> for beds 1–4<br>
+      Or tap / click a bed at the bottom. Perfect hits build combos.<br>
+      Every 4 perfect-or-good hits grows one crop. Harvest <strong>16 crops</strong> before the song ends to win!<br>
+      Misses cost a life. Lose all 5 lives and the garden wilts.
+    </div>
+    <p>Perfect = within a blink of the beat &bull; Good = close &bull; Miss = too early, too late, or untouched.</p>
+    <button id="startBtn">▶ Start Grooving</button>
+    <div class="small">Sound starts only after you press Start. Headphones recommended. Fully offline — no downloads.</div>
+  </div>
+  <div class="panel" id="endScreen">
+    <h2 id="endTitle">Garden Complete!</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">↻ Play Again</button>
+    <button class="secondary" id="menuBtn">⌂ How to Play</button>
+  </div>
+</div>
+<script>
+(function() {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var livesEl = document.getElementById('lives');
+  var harvestEl = document.getElementById('harvest');
+  var accEl = document.getElementById('acc');
+  var barEl = document.getElementById('bar');
+  var feedbackEl = document.getElementById('feedback');
+  var hudEl = document.getElementById('hud');
+  var barWrap = document.getElementById('barWrap');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+
+  var LANES = [
+    { key: 'd', label: 'D', color: '#8d5a2b', name: 'Seed Bed' },
+    { key: 'f', label: 'F', color: '#3aa7e0', name: 'Water Bed' },
+    { key: 'j', label: 'J', color: '#f2c531', name: 'Sun Bed' },
+    { key: 'k', label: 'K', color: '#7ed957', name: 'Harvest Bed' }
+  ];
+  var HIT_Y = 440;
+  var LANE_W = 150;
+  var LANE_X0 = 60;
+  var BPM = 112;
+  var BEAT = 60 / BPM;
+  var TARGET_HARVEST = 16;
+  var MAX_LIVES = 5;
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, combo = 0, bestCombo = 0, lives = MAX_LIVES;
+  var harvested = 0, growth = 0; // growth 0..3, 4th hit harvests
+  var hits = 0, perfects = 0, goods = 0, misses = 0;
+  var notes = [], particles = [], floats = [];
+  var startTime = 0, songTime = 0, lastBeat = -1, beatCount = 0;
+  var flashLane = [-1, -1, -1, -1];
+  var flashTime = [0, 0, 0, 0];
+  var lastJudgement = '', judgementTime = 0;
+  var totalBeats = 96; // about 51 seconds at 112 BPM, plus lead-in
+  var audioCtx = null, masterGain = null, musicTimer = null;
+  var garden = []; // 16 plots, stage 0 empty, 1 sprout, 2 growing, 3 ripe, 4 harvested glow
+  for (var g = 0; g < 16; g++) { garden.push(0); }
+
+  function laneX(i) { return LANE_X0 + i * LANE_W; }
+  function laneCenter(i) { return laneX(i) + LANE_W / 2; }
+
+  // ---------- Audio: procedural only, after Start ----------
+  function ensureAudio() {
+    if (audioCtx) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = new AC();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.35;
+    masterGain.connect(audioCtx.destination);
+  }
+  function tone(freq, t, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var gn = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    gn.gain.setValueAtTime(0.0001, t);
+    gn.gain.exponentialRampToValueAtTime(vol || 0.2, t + 0.01);
+    gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(gn); gn.connect(masterGain);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function playBeatSound(beat) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    // Kick on every beat, hat off-beat feel, bass line cycling
+    tone(150, t, 0.18, 'sine', 0.45, 55);
+    tone(1200, t + 0.02, 0.05, 'square', 0.06);
+    var bassNotes = [110, 110, 130.8, 98, 110, 146.8, 130.8, 98];
+    tone(bassNotes[beat % 8], t, 0.28, 'triangle', 0.22);
+    if (beat % 4 === 0) tone(523.25, t, 0.35, 'sine', 0.10);
+    if (beat % 2 === 1) tone(2000, t + BEAT / 2, 0.04, 'square', 0.04);
+  }
+  function playHitSound(kind) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    if (kind === 'perfect') { tone(880, t, 0.18, 'sine', 0.28); tone(1320, t + 0.05, 0.18, 'sine', 0.18); }
+    else if (kind === 'good') { tone(660, t, 0.15, 'sine', 0.22); }
+    else { tone(180, t, 0.2, 'sawtooth', 0.15, 90); }
+  }
+  function playHarvestSound() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    [523.25, 659.25, 783.99, 1046.5].forEach(function(f, i) { tone(f, t + i * 0.07, 0.22, 'triangle', 0.22); });
+  }
+
+  // ---------- Notes: generated from the beat grid ----------
+  function buildSong() {
+    notes = [];
+    var types = ['seed', 'water', 'sun', 'harvest'];
+    // Lead-in of 4 beats, then a note on most beats, denser later.
+    for (var b = 4; b < totalBeats; b++) {
+      // Skip roughly 1 in 5 early beats, fewer later, for breathing room.
+      if (b < 32 && b % 5 === 4) continue;
+      if (b >= 32 && b < 64 && b % 7 === 6) continue;
+      var lane = (b * 7 + Math.floor(b / 4)) % 4;
+      // Occasionally double up on a strong beat for a chord-like moment.
+      var type = types[b % 4];
+      notes.push({ beat: b, lane: lane, type: type, hit: false, judged: false, y: -40 });
+      if (b % 16 === 12 && b + 1 < totalBeats) {
+        notes.push({ beat: b, lane: (lane + 2) % 4, type: types[(b + 1) % 4], hit: false, judged: false, y: -40 });
+      }
+    }
+  }
+
+  function nowSongTime() {
+    if (!audioCtx) return songTime;
+    return audioCtx.currentTime - startTime;
+  }
+  function beatToTime(beat) { return beat * BEAT; }
+
+  function spawnParticles(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 180, vy: -Math.random() * 160 - 30, life: 0.7, color: color });
+    }
+  }
+  function addFloat(x, y, text, color) {
+    floats.push({ x: x, y: y, text: text, color: color, life: 1.0 });
+  }
+
+  function setFeedback(text, color) {
+    feedbackEl.textContent = text;
+    feedbackEl.style.color = color || '#ffe066';
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    comboEl.textContent = 'x' + combo;
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, MAX_LIVES - lives));
+    harvestEl.textContent = harvested + ' / ' + TARGET_HARVEST;
+    var total = perfects + goods + misses;
+    accEl.textContent = total ? Math.round(((perfects + goods) / total) * 100) + '%' : '—';
+    barEl.style.width = Math.min(100, (harvested / TARGET_HARVEST) * 100) + '%';
+  }
+
+  function growGarden() {
+    // Advance the first non-ripe plot, or harvest when a plot is ripe.
+    growth++;
+    if (growth >= 4) {
+      growth = 0;
+      harvested++;
+      score += 250 + combo * 5;
+      playHarvestSound();
+      for (var i = 0; i < garden.length; i++) {
+        if (garden[i] < 3) { garden[i] = 3; break; }
+      }
+      spawnParticles(360, 140, '#ffe066', 26);
+      addFloat(360, 120, 'HARVEST! +250', '#ffe066');
+      setFeedback('🌾 Harvest! Garden is blooming!', '#ffe066');
+      if (harvested >= TARGET_HARVEST) { endGame(true); return; }
+    } else {
+      for (var j = 0; j < garden.length; j++) {
+        if (garden[j] < 3) { garden[j] = Math.min(3, garden[j] + 1); break; }
+      }
+    }
+    updateHUD();
+  }
+
+  function registerHit(note, kind) {
+    note.judged = true; note.hit = true;
+    hits++;
+    if (kind === 'perfect') { perfects++; score += 100 + combo * 10; }
+    else { goods++; score += 60 + combo * 5; }
+    combo++; if (combo > bestCombo) bestCombo = combo;
+    flashLane[note.lane] = 1; flashTime[note.lane] = performance.now();
+    spawnParticles(laneCenter(note.lane), HIT_Y, LANES[note.lane].color, kind === 'perfect' ? 18 : 10);
+    addFloat(laneCenter(note.lane), HIT_Y - 40, kind === 'perfect' ? 'PERFECT!' : 'Good!', kind === 'perfect' ? '#ffe066' : '#b8e6a3');
+    setFeedback(kind === 'perfect' ? '✨ Perfect on the beat!' : '👍 Good timing — keep grooving!', kind === 'perfect' ? '#ffe066' : '#b8e6a3');
+    playHitSound(kind);
+    growGarden();
+    updateHUD();
+  }
+
+  function registerMiss(note) {
+    if (note) { note.judged = true; }
+    misses++; combo = 0; lives--;
+    playHitSound('miss');
+    setFeedback('💔 Miss — the beat slipped away!', '#ff8a80');
+    if (note) addFloat(laneCenter(note.lane), HIT_Y - 40, 'MISS', '#ff8a80');
+    updateHUD();
+    if (lives <= 0) { endGame(false); }
+  }
+
+  function tryHit(lane) {
+    if (state !== 'playing') return;
+    var t = nowSongTime();
+    var best = null, bestDiff = 999;
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (n.judged || n.lane !== lane) continue;
+      var diff = Math.abs(beatToTime(n.beat) - t);
+      if (diff < bestDiff) { bestDiff = diff; best = n; }
+    }
+    flashLane[lane] = 1; flashTime[lane] = performance.now();
+    if (!best || bestDiff > 0.28) {
+      // Tapped with nothing nearby: small penalty only if a note is close-ish, otherwise just a visual tap.
+      if (best && bestDiff <= 0.45) { registerMiss(best); }
+      return;
+    }
+    if (bestDiff <= 0.13) registerHit(best, 'perfect');
+    else registerHit(best, 'good');
+  }
+
+  function startGame() {
+    ensureAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    buildSong();
+    score = 0; combo = 0; bestCombo = 0; lives = MAX_LIVES;
+    harvested = 0; growth = 0; hits = 0; perfects = 0; goods = 0; misses = 0;
+    particles = []; floats = [];
+    garden = []; for (var i = 0; i < 16; i++) garden.push(0);
+    state = 'playing';
+    titleScreen.style.display = 'none';
+    endScreen.style.display = 'none';
+    hudEl.classList.add('on'); barWrap.classList.add('on');
+    setFeedback('🎵 Get ready… first notes in 4 beats!');
+    updateHUD();
+    // Beat clock is the audio clock: notes are timed from audioCtx.currentTime.
+    startTime = audioCtx ? audioCtx.currentTime + 0.6 : performance.now() / 1000;
+    songTime = 0; lastBeat = -1; beatCount = 0;
+    if (musicTimer) clearInterval(musicTimer);
+    musicTimer = setInterval(function() {
+      if (state !== 'playing' || !audioCtx) return;
+      var bt = Math.floor(nowSongTime() / BEAT);
+      if (bt !== lastBeat && bt >= 0 && bt < totalBeats + 4) {
+        lastBeat = bt; beatCount = bt;
+        playBeatSound(bt);
+      }
+      if (nowSongTime() > beatToTime(totalBeats) + 1.0) {
+        endGame(harvested >= TARGET_HARVEST);
+      }
+    }, 40);
+  }
+
+  function endGame(won) {
+    if (state !== 'playing') return;
+    state = won ? 'win' : 'over';
+    if (musicTimer) clearInterval(musicTimer);
+    document.getElementById('endTitle').textContent = won ? '🌻 Garden Complete! 🌻' : '🥀 The Garden Wilted 🥀';
+    document.getElementById('endText').textContent = won
+      ? 'You harvested all ' + TARGET_HARVEST + ' crops right on the beat. The garden is in full bloom!'
+      : 'The song ended with ' + harvested + ' of ' + TARGET_HARVEST + ' crops harvested, or the garden ran out of lives. Try again — the beat is waiting.';
+    document.getElementById('endStats').textContent = 'Score: ' + score + ' • Best combo: x' + bestCombo + ' • Perfect: ' + perfects + ' • Good: ' + goods + ' • Miss: ' + misses;
+    endScreen.style.display = 'flex';
+    if (won) playHarvestSound();
+    setFeedback(won ? '🏆 WIN! Full bloom achieved!' : 'Game Over — press Play Again to regrow.');
+  }
+
+  function resetToMenu() {
+    state = 'title';
+    if (musicTimer) clearInterval(musicTimer);
+    endScreen.style.display = 'none';
+    titleScreen.style.display = 'flex';
+    hudEl.classList.remove('on'); barWrap.classList.remove('on');
+    setFeedback('');
+  }
+
+  // ---------- Drawing ----------
+  function drawNoteIcon(n, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (n.type === 'seed') {
+      ctx.fillStyle = '#8d5a2b'; ctx.beginPath(); ctx.ellipse(0, 0, 20, 26, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#5d3a1a'; ctx.beginPath(); ctx.ellipse(0, -4, 8, 14, 0.4, 0, Math.PI * 2); ctx.fill();
+    } else if (n.type === 'water') {
+      ctx.fillStyle = '#3aa7e0'; ctx.beginPath(); ctx.moveTo(0, -28); ctx.quadraticCurveTo(22, 4, 0, 26); ctx.quadraticCurveTo(-22, 4, 0, -28); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(-6, 6, 5, 0, Math.PI * 2); ctx.fill();
+    } else if (n.type === 'sun') {
+      ctx.fillStyle = '#f2c531'; ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#f2c531'; ctx.lineWidth = 4;
+      for (var a = 0; a < 8; a++) { var ang = a * Math.PI / 4; ctx.beginPath(); ctx.moveTo(Math.cos(ang) * 26, Math.sin(ang) * 26); ctx.lineTo(Math.cos(ang) * 34, Math.sin(ang) * 34); ctx.stroke(); }
+    } else {
+      ctx.fillStyle = '#7ed957';
+      for (var s = 0; s < 5; s++) { var sa = s * Math.PI * 2 / 5 - Math.PI / 2; ctx.beginPath(); ctx.ellipse(Math.cos(sa) * 14, Math.sin(sa) * 14, 10, 16, sa, 0, Math.PI * 2); ctx.fill(); }
+      ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawGardenBed() {
+    // Top garden strip: 16 plots in 2 rows of 8.
+    ctx.fillStyle = '#5d3a1a'; ctx.fillRect(30, 18, 660, 108);
+    ctx.fillStyle = '#3d2712'; ctx.fillRect(30, 18, 660, 8);
+    for (var i = 0; i < 16; i++) {
+      var px = 44 + (i % 8) * 80, py = 36 + Math.floor(i / 8) * 48;
+      ctx.fillStyle = '#2b1a0a'; ctx.fillRect(px - 4, py - 4, 68, 40);
+      var st = garden[i];
+      if (st === 0) { ctx.fillStyle = '#7a4a22'; ctx.beginPath(); ctx.arc(px + 30, py + 16, 6, 0, Math.PI * 2); ctx.fill(); }
+      else if (st === 1) { ctx.strokeStyle = '#7ed957'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(px + 30, py + 30); ctx.lineTo(px + 30, py + 8); ctx.stroke(); ctx.fillStyle = '#7ed957'; ctx.beginPath(); ctx.arc(px + 30, py + 8, 6, 0, Math.PI * 2); ctx.fill(); }
+      else if (st === 2) { ctx.strokeStyle = '#7ed957'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(px + 30, py + 32); ctx.lineTo(px + 30, py + 6); ctx.stroke(); ctx.fillStyle = '#3fae4a'; ctx.beginPath(); ctx.ellipse(px + 22, py + 14, 10, 6, -0.5, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.ellipse(px + 38, py + 14, 10, 6, 0.5, 0, Math.PI * 2); ctx.fill(); }
+      else { ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(px + 30, py + 16, 13, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#ff6b35'; ctx.beginPath(); ctx.arc(px + 30, py + 16, 6, 0, Math.PI * 2); ctx.fill(); }
+    }
+    ctx.fillStyle = '#dff5cd'; ctx.font = 'bold 13px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('GARDEN — growth: ' + growth + ' / 4 to next harvest  •  harvested: ' + harvested + ' / ' + TARGET_HARVEST, 360, 140);
+  }
+
+  function draw(dt) {
+    ctx.clearRect(0, 0, W, H);
+    // Sky / soil backdrop
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#123a22'); grad.addColorStop(1, '#0a1f10');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    drawGardenBed();
+    // Lanes
+    for (var i = 0; i < 4; i++) {
+      var x = laneX(i);
+      var flashing = flashLane[i] === 1 && performance.now() - flashTime[i] < 150;
+      ctx.fillStyle = flashing ? LANES[i].color : 'rgba(255,255,255,0.07)';
+      ctx.fillRect(x + 4, 150, LANE_W - 8, 340);
+      ctx.strokeStyle = LANES[i].color; ctx.lineWidth = 2; ctx.strokeRect(x + 4, 150, LANE_W - 8, 340);
+      ctx.fillStyle = '#f2ffe9'; ctx.font = 'bold 15px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText(LANES[i].label, laneCenter(i), 172);
+      ctx.font = '11px Verdana'; ctx.fillText(LANES[i].name, laneCenter(i), 188);
+    }
+    // Beat pulse on the hit line
+    var pulse = 0;
+    if (state === 'playing' && audioCtx) {
+      var phase = (nowSongTime() % BEAT) / BEAT;
+      pulse = 1 - phase;
+    }
+    ctx.fillStyle = 'rgba(255,224,102,' + (0.25 + pulse * 0.5) + ')';
+    ctx.fillRect(56, HIT_Y - 3, 608, 6);
+    ctx.fillStyle = '#ffe066'; ctx.font = 'bold 13px Verdana'; ctx.textAlign = 'left';
+    ctx.fillText('▶ HARVEST LINE — hit here, on the beat', 60, HIT_Y + 28);
+    // Notes
+    if (state === 'playing') {
+      var t = nowSongTime();
+      for (var n = 0; n < notes.length; n++) {
+        var note = notes[n];
+        if (note.judged) continue;
+        var ht = beatToTime(note.beat);
+        var lead = 1.35; // seconds a note is visible before its beat
+        var prog = (t - (ht - lead)) / lead;
+        if (prog < 0 || prog > 1.35) continue;
+        var y = 150 + prog * (HIT_Y - 150);
+        // Glow when near the line
+        if (Math.abs(ht - t) < 0.28) { ctx.fillStyle = 'rgba(255,224,102,0.35)'; ctx.beginPath(); ctx.arc(laneCenter(note.lane), y, 32, 0, Math.PI * 2); ctx.fill(); }
+        drawNoteIcon(note, laneCenter(note.lane), y);
+      }
+    }
+    // Particles and floats
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p]; pt.life -= dt; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 220 * dt;
+      if (pt.life <= 0) { particles.splice(p, 1); continue; }
+      ctx.globalAlpha = Math.max(0, pt.life / 0.7); ctx.fillStyle = pt.color; ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    }
+    for (var f = floats.length - 1; f >= 0; f--) {
+      var fl = floats[f]; fl.life -= dt; fl.y -= 45 * dt;
+      if (fl.life <= 0) { floats.splice(f, 1); continue; }
+      ctx.globalAlpha = Math.max(0, fl.life); ctx.fillStyle = fl.color; ctx.font = 'bold 17px Verdana'; ctx.textAlign = 'center'; ctx.fillText(fl.text, fl.x, fl.y); ctx.globalAlpha = 1;
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(0, 150, W, 340);
+      ctx.fillStyle = '#dff5cd'; ctx.font = 'bold 20px Verdana'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and grow on the beat!', 360, 330);
+    }
+    if (state === 'playing') {
+      ctx.fillStyle = '#dff5cd'; ctx.font = 'bold 14px Verdana'; ctx.textAlign = 'left';
+      ctx.fillText('Beat ' + Math.max(0, beatCount) + ' / ' + totalBeats + '  •  Song time: ' + Math.max(0, nowSongTime()).toFixed(1) + 's', 60, 510);
+      ctx.textAlign = 'right'; ctx.fillText('Combo x' + combo, 660, 510);
+    }
+  }
+
+  var lastTs = 0;
+  function loop(ts) {
+    var dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016;
+    lastTs = ts;
+    if (state === 'playing') {
+      var t = nowSongTime();
+      // Auto-miss notes that have passed the window.
+      for (var i = 0; i < notes.length; i++) {
+        var n = notes[i];
+        if (!n.judged && t - beatToTime(n.beat) > 0.28) {
+          registerMiss(n);
+          if (state !== 'playing') break;
+        }
+      }
+    }
+    draw(dt);
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Controls: keyboard + mouse + touch ----------
+  document.addEventListener('keydown', function(e) {
+    if (e.repeat) return;
+    var k = e.key.toLowerCase();
+    for (var i = 0; i < LANES.length; i++) {
+      if (LANES[i].key === k) { tryHit(i); return; }
+    }
+    if ((k === ' ' || k === 'enter') && state === 'title') { startGame(); }
+    if (k === 'enter' && (state === 'win' || state === 'over')) { startGame(); }
+  });
+  canvas.addEventListener('mousedown', function(e) {
+    if (state !== 'playing') return;
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (W / rect.width);
+    var lane = Math.floor((x - LANE_X0) / LANE_W);
+    if (lane >= 0 && lane < 4) tryHit(lane);
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if (state !== 'playing') return;
+    var rect = canvas.getBoundingClientRect();
+    for (var t = 0; t < e.changedTouches.length; t++) {
+      var touch = e.changedTouches[t];
+      var x = (touch.clientX - rect.left) * (W / rect.width);
+      var lane = Math.floor((x - LANE_X0) / LANE_W);
+      if (lane >= 0 && lane < 4) tryHit(lane);
+    }
+  }, { passive: false });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', resetToMenu);
+  document.getElementById('titleScreen').addEventListener('click', function(e) {
+    if (e.target && e.target.id === 'startBtn') return;
+  });
+
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

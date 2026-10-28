@@ -66,6 +66,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0059 | Synth Surfer | Rhythm / Wave Riding | Space / J / K strike peaks, mouse click, touch tap | [Play](./../games/game-0059.html) |
 | 0060 | Boomerang Bay | Precision / Boomerang Throw | Mouse/touch drag aim and release, Arrow Keys aim, Space throw | [Play](./../games/game-0060.html) |
 
+| 0061 | Frostbite Frontier | Arcade / Ice Rescue | Arrow Keys / WASD slide, mouse/touch swipe | [Play](./../games/game-0061.html) |
+| 0062 | Glyph Grove | Puzzle / Rune Path Logic | Mouse/touch drag path, Arrow Keys, Space/Enter | [Play](./../games/game-0062.html) |
+| 0063 | Railway Rendezvous | Strategy / Train Yard Scheduler | Click/tap junctions and trains, 1/2/3 switch, Space pause | [Play](./../games/game-0063.html) |
+| 0064 | Beat Botanist | Rhythm / Garden Groove | D/F/J/K, mouse click, touch tap beds | [Play](./../games/game-0064.html) |
+| 0065 | Magnet Minefield | Arcade / Polarity Action | WASD / Arrow Keys move, Space flip polarity, mouse/touch | [Play](./../games/game-0065.html) |
+| 0066 | Clockwork Courier | Puzzle / Gear Route Logic | Click/tap gears, Arrow Keys, Space/R rotate | [Play](./../games/game-0066.html) |
+| 0067 | Desert Drone Dash | Arcade / Canyon Racer | WASD steer, Space boost, mouse/touch | [Play](./../games/game-0067.html) |
+| 0068 | Orbit Orchard | Strategy / Asteroid Farming | Click/tap asteroids, Arrow Keys select, Space start | [Play](./../games/game-0068.html) |
+| 0069 | Echo Chamber | Rhythm / Memory Echo | Click/tap tiles, 1-4 keys, mouse/touch | [Play](./../games/game-0069.html) |
+| 0070 | Lantern Labyrinth | Puzzle / Mirror Light Maze | Click/tap place and flip mirrors, R rotate | [Play](./../games/game-0070.html) |
+
 ## Batch notes
 
 - Batch 001: 10 games, produced in one cycle.
@@ -74,5 +85,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 004: 10 games, produced in one cycle.
 - Batch 005: 10 games, produced in one cycle.
 - Batch 006: 10 games, produced in one cycle.
+- Batch 007: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 - Next volume starts at game 0101 in `catalogs/readme-002.md`, after this volume reaches 100 entries.

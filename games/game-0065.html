@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Magnet Minefield — Polarity Action</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0a0e1a; color:#e8ecf8; font-family:Arial, Helvetica, sans-serif; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; }
+  h1 { font-size:clamp(22px,4vw,36px); letter-spacing:2px; margin:10px 0 4px; text-align:center; }
+  h1 span.r { color:#ff5a5a; } h1 span.b { color:#4db8ff; }
+  #wrap { position:relative; width:min(96vw,760px); }
+  canvas { display:block; width:100%; height:auto; aspect-ratio:760/520; background:radial-gradient(circle at 50% 40%, #16203a 0%, #0a0e1a 70%); border:3px solid #2a3a5f; border-radius:14px; touch-action:none; }
+  #hud { display:flex; justify-content:space-between; gap:8px; width:min(96vw,760px); margin:0 0 8px; font-weight:bold; font-size:15px; flex-wrap:wrap; }
+  #hud div { background:#16203a; border:1px solid #2a3a5f; border-radius:8px; padding:6px 12px; }
+  #pol { color:#ff8a8a; } #pol.neg { color:#7cc7ff; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:rgba(5,8,18,0.88); border-radius:14px; text-align:center; padding:20px; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { font-size:30px; }
+  .overlay p { max-width:520px; line-height:1.55; font-size:15px; color:#c7d0e8; }
+  .overlay .keys { background:#16203a; border:1px solid #2a3a5f; border-radius:10px; padding:12px 16px; text-align:left; }
+  button { cursor:pointer; font-size:18px; font-weight:bold; padding:12px 26px; border:none; border-radius:10px; background:#ffb020; color:#1a1200; box-shadow:0 4px 0 #b97a00; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b97a00; }
+  button.small { font-size:15px; padding:9px 18px; }
+  #flipBtn { background:#4db8ff; color:#06121f; box-shadow:0 4px 0 #1d6fb3; }
+  #controls { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; justify-content:center; }
+  #msg { min-height:22px; font-weight:bold; color:#ffd75e; text-align:center; margin-top:6px; }
+  .legend { font-size:14px; line-height:1.6; }
+  .dot { display:inline-block; width:14px; height:14px; border-radius:50%; vertical-align:middle; margin:0 4px; }
+</style>
+</head>
+<body>
+<h1>MAGNET <span class="r">MINE</span><span class="b">FIELD</span></h1>
+<div id="hud">
+  <div>Score: <span id="score">0</span></div>
+  <div>Lives: <span id="lives">♥♥♥</span></div>
+  <div>Level: <span id="level">1 / 3</span> &nbsp; Collected: <span id="got">0</span>/<span id="need">8</span></div>
+  <div>Polarity: <span id="pol">POSITIVE (+)</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="760" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🧲 Magnet Minefield</h2>
+    <p>You are a roaming magnet in a field of charged orbs and live mines. Flip your polarity to pull in the orbs you need — but the wrong flip pulls the mines straight toward you!</p>
+    <div class="keys">
+      <strong>How to Play</strong><br>
+      Move: <b>WASD / Arrow keys</b>, mouse move, or touch-drag<br>
+      Flip polarity: <b>Space / X</b>, mouse click, or the Flip button<br>
+      <span class="legend"><span class="dot" style="background:#ff5a5a"></span>Red orbs = POSITIVE &nbsp; <span class="dot" style="background:#4db8ff"></span>Blue orbs = NEGATIVE<br>
+      Matching polarity orbs are ATTRACTED to you — collect them.<br>
+      Opposite polarity orbs are REPELLED — they push away.<br>
+      Mines are pulled in when their polarity matches yours. Flip away to push mines back, but then your target orbs push away too!</span>
+    </div>
+    <p>Collect the quota on all 3 levels to WIN. Touching a mine costs a life. You have 3 lives.</p>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p>Final Score: <strong id="finalScore">0</strong></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+<div id="controls">
+  <button id="flipBtn" class="small">⇄ Flip Polarity (Space)</button>
+  <button id="pauseBtn" class="small">⏸ Pause</button>
+</div>
+<div id="msg"></div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var gotEl = document.getElementById('got');
+  var needEl = document.getElementById('need');
+  var polEl = document.getElementById('pol');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+
+  // ---- Audio: procedural only, created after user interaction ----
+  var audioCtx = null;
+  function ensureAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch(e) {}
+  }
+  function sfx(kind){
+    if (kind === 'collect') { beep(660, 0.12, 'sine', 0.14); setTimeout(function(){ beep(990, 0.14, 'sine', 0.12); }, 60); }
+    else if (kind === 'flip') { beep(320, 0.1, 'square', 0.08); setTimeout(function(){ beep(520, 0.1, 'square', 0.08); }, 70); }
+    else if (kind === 'hit') { beep(140, 0.35, 'sawtooth', 0.18); setTimeout(function(){ beep(80, 0.3, 'sawtooth', 0.15); }, 80); }
+    else if (kind === 'level') { [523,659,784].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.18, 'triangle', 0.14); }, i*110); }); }
+    else if (kind === 'win') { [523,659,784,1047,1319].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.14); }, i*130); }); }
+    else if (kind === 'lose') { [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.22, 'sawtooth', 0.12); }, i*140); }); }
+  }
+
+  // ---- Game state ----
+  var state = 'title'; // title | playing | paused | over | win
+  var player, orbs, mines, particles, keys, mouse, lastTime;
+  var score, lives, level, collected, quota, combo, invulnUntil, spawnTimer, elapsed;
+
+  function resetGame(){
+    score = 0; lives = 3; level = 1; combo = 0; elapsed = 0;
+    player = { x: W/2, y: H/2, vx: 0, vy: 0, r: 20, polarity: 1, speed: 300 };
+    keys = {}; mouse = { x: W/2, y: H/2, active: false };
+    particles = []; spawnTimer = 0;
+    startLevel();
+    updateHUD();
+  }
+  function startLevel(){
+    quota = 6 + level * 2; // 8, 10, 12
+    collected = 0;
+    orbs = []; mines = [];
+    var nOrbs = 10 + level * 2;
+    for (var i = 0; i < nOrbs; i++) orbs.push(spawnOrb());
+    var nMines = 4 + level * 2;
+    for (var j = 0; j < nMines; j++) mines.push(spawnMine());
+    invulnUntil = performance.now() + 1200;
+    msg('Level ' + level + ' — collect ' + quota + ' matching orbs!');
+    updateHUD();
+  }
+  function rand(min, max){ return min + Math.random() * (max - min); }
+  function spawnOrb(){
+    var p = randomEdgePos(30);
+    return { x: p.x, y: p.y, vx: rand(-30,30), vy: rand(-30,30), r: 13, polarity: Math.random() < 0.5 ? 1 : -1, pulse: rand(0, Math.PI*2), kind: 'orb' };
+  }
+  function spawnMine(){
+    var p = randomEdgePos(40);
+    return { x: p.x, y: p.y, vx: rand(-20,20), vy: rand(-20,20), r: 17, polarity: Math.random() < 0.5 ? 1 : -1, spin: rand(0, Math.PI*2), kind: 'mine' };
+  }
+  function randomEdgePos(m){
+    // Spawn away from the player so nothing is unfair at birth.
+    for (var t = 0; t < 20; t++) {
+      var x = rand(m, W - m), y = rand(m, H - m);
+      var dx = x - player.x, dy = y - player.y;
+      if (dx*dx + dy*dy > 160*160) return { x: x, y: y };
+    }
+    return { x: m, y: m };
+  }
+  function msg(t){ msgEl.textContent = t; }
+  function updateHUD(){
+    scoreEl.textContent = score;
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    levelEl.textContent = level + ' / 3';
+    gotEl.textContent = collected; needEl.textContent = quota;
+    if (player.polarity === 1) { polEl.textContent = 'POSITIVE (+)'; polEl.className = ''; }
+    else { polEl.textContent = 'NEGATIVE (−)'; polEl.className = 'neg'; }
+  }
+  function flipPolarity(){
+    if (state !== 'playing') return;
+    player.polarity *= -1;
+    sfx('flip');
+    burst(player.x, player.y, player.polarity === 1 ? '#ff8a8a' : '#7cc7ff', 14);
+    updateHUD();
+  }
+  function burst(x, y, color, n){
+    for (var i = 0; i < (n || 10); i++) {
+      var a = rand(0, Math.PI*2), s = rand(40, 160);
+      particles.push({ x: x, y: y, vx: Math.cos(a)*s, vy: Math.sin(a)*s, life: 0.5, color: color });
+    }
+  }
+
+  // ---- Update ----
+  function update(dt){
+    elapsed += dt;
+    var accel = 1400;
+    var kx = 0, ky = 0;
+    if (keys['arrowleft'] || keys['a']) kx -= 1;
+    if (keys['arrowright'] || keys['d']) kx += 1;
+    if (keys['arrowup'] || keys['w']) ky -= 1;
+    if (keys['arrowdown'] || keys['s']) ky += 1;
+    if (kx || ky) {
+      var len = Math.sqrt(kx*kx + ky*ky);
+      player.vx += (kx/len) * accel * dt;
+      player.vy += (ky/len) * accel * dt;
+      mouse.active = false;
+    } else if (mouse.active) {
+      // Gentle steering toward the pointer.
+      var dx = mouse.x - player.x, dy = mouse.y - player.y;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if (d > 8) { player.vx += (dx/d) * accel * 0.6 * dt; player.vy += (dy/d) * accel * 0.6 * dt; }
+    }
+    player.vx *= Math.pow(0.12, dt); player.vy *= Math.pow(0.12, dt);
+    // Clamp speed.
+    var sp = Math.sqrt(player.vx*player.vx + player.vy*player.vy);
+    if (sp > player.speed) { player.vx = player.vx/sp*player.speed; player.vy = player.vy/sp*player.speed; }
+    player.x += player.vx * dt; player.y += player.vy * dt;
+    player.x = Math.max(player.r, Math.min(W - player.r, player.x));
+    player.y = Math.max(player.r, Math.min(H - player.r, player.y));
+
+    // Polarity physics: matching polarity attracts, opposite repels.
+    // Mines: matching polarity pulls them in (danger), opposite pushes them away.
+    function applyForce(e, strength, attractOnly){
+      var dx = player.x - e.x, dy = player.y - e.y;
+      var d2 = dx*dx + dy*dy, d = Math.sqrt(d2) || 1;
+      var same = (e.polarity === player.polarity);
+      var dir = same ? 1 : -1; // 1 = toward player, -1 = away
+      if (attractOnly && !same) dir = 0;
+      var range = 260;
+      if (d < range) {
+        var f = strength * (1 - d / range) * dir;
+        e.vx += (dx/d) * f * dt; e.vy += (dy/d) * f * dt;
+      }
+    }
+    orbs.forEach(function(o){
+      o.pulse += dt * 4;
+      applyForce(o, 900, false);
+      o.vx *= Math.pow(0.4, dt); o.vy *= Math.pow(0.4, dt);
+      o.x += o.vx * dt; o.y += o.vy * dt;
+      if (o.x < o.r || o.x > W - o.r) o.vx *= -1;
+      if (o.y < o.r || o.y > H - o.r) o.vy *= -1;
+      o.x = Math.max(o.r, Math.min(W - o.r, o.x));
+      o.y = Math.max(o.r, Math.min(H - o.r, o.y));
+    });
+    mines.forEach(function(m){
+      m.spin += dt * 2;
+      applyForce(m, 620, false);
+      m.vx *= Math.pow(0.5, dt); m.vy *= Math.pow(0.5, dt);
+      // Slow ambient drift so mines never sit still.
+      m.vx += Math.sin(elapsed + m.spin) * 8 * dt;
+      m.x += m.vx * dt; m.y += m.vy * dt;
+      if (m.x < m.r || m.x > W - m.r) m.vx *= -1;
+      if (m.y < m.r || m.y > H - m.r) m.vy *= -1;
+      m.x = Math.max(m.r, Math.min(W - m.r, m.x));
+      m.y = Math.max(m.r, Math.min(H - m.r, m.y));
+    });
+
+    // Collect orbs that touch the player while matching polarity.
+    // Opposite orbs bounce off harmlessly and give no points.
+    for (var i = orbs.length - 1; i >= 0; i--) {
+      var o = orbs[i];
+      var dx = o.x - player.x, dy = o.y - player.y;
+      var rr = o.r + player.r;
+      if (dx*dx + dy*dy < rr*rr) {
+        if (o.polarity === player.polarity) {
+          orbs.splice(i, 1);
+          collected++; combo++;
+          var pts = 100 + Math.min(combo, 10) * 10;
+          score += pts;
+          burst(o.x, o.y, o.polarity === 1 ? '#ff5a5a' : '#4db8ff', 16);
+          sfx('collect');
+          msg('Collected! +' + pts + ' (combo x' + combo + ')');
+          if (collected >= quota) { advanceLevel(); return; }
+          updateHUD();
+        } else {
+          // Repel: shove it away and reset combo only slightly.
+          var d = Math.sqrt(dx*dx + dy*dy) || 1;
+          o.vx = (dx/d) * 260; o.vy = (dy/d) * 260;
+          combo = 0;
+        }
+      }
+    }
+
+    // Mine collision.
+    var now = performance.now();
+    if (now > invulnUntil) {
+      for (var j = mines.length - 1; j >= 0; j--) {
+        var m = mines[j];
+        var mdx = m.x - player.x, mdy = m.y - player.y;
+        var mrr = m.r + player.r - 4;
+        if (mdx*mdx + mdy*mdy < mrr*mrr) {
+          mines.splice(j, 1);
+          lives--; combo = 0;
+          burst(player.x, player.y, '#ffd75e', 26);
+          sfx('hit');
+          if (lives <= 0) { gameOver(false); return; }
+          msg('Mine hit! ' + lives + (lives === 1 ? ' life' : ' lives') + ' left — flip to push mines away!');
+          invulnUntil = performance.now() + 1500;
+          player.x = W/2; player.y = H/2; player.vx = 0; player.vy = 0;
+          updateHUD();
+          break;
+        }
+      }
+    }
+
+    // Keep the field stocked: replace collected orbs over time.
+    spawnTimer -= dt;
+    if (spawnTimer <= 0 && orbs.length < 14) { orbs.push(spawnOrb()); spawnTimer = 1.2; }
+    if (mines.length < 4 + level) { mines.push(spawnMine()); }
+
+    // Particles.
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx * dt; particles[p].y += particles[p].vy * dt;
+      particles[p].life -= dt;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    updateHUD();
+  }
+
+  function advanceLevel(){
+    if (level >= 3) { gameOver(true); return; }
+    level++;
+    sfx('level');
+    msg('Level ' + level + ' cleared the quota! Mines get faster — good luck!');
+    startLevel();
+  }
+  function gameOver(won){
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 You Win!' : '💥 Game Over';
+    endText.textContent = won
+      ? 'You cleared all 3 levels of the Magnet Minefield. Master of polarity!'
+      : 'The mines got you. Flip smarter next time — match orbs, repel mines.';
+    finalScore.textContent = score;
+    endScreen.classList.remove('hidden');
+    if (won) sfx('win'); else sfx('lose');
+  }
+  function startGame(){
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    msg('Level 1 — flip to attract matching orbs!');
+  }
+
+  // ---- Draw ----
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    // Faint grid + field lines for a lab feel.
+    ctx.strokeStyle = 'rgba(80,110,170,0.15)'; ctx.lineWidth = 1;
+    for (var gx = 0; gx <= W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+    for (var gy = 0; gy <= H; gy += 40) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+    // Attraction range ring.
+    ctx.strokeStyle = player.polarity === 1 ? 'rgba(255,90,90,0.25)' : 'rgba(77,184,255,0.25)';
+    ctx.lineWidth = 2; ctx.setLineDash([6, 8]);
+    ctx.beginPath(); ctx.arc(player.x, player.y, 150, 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Field lines from player to nearby matching orbs / dangerous mines.
+    orbs.concat(mines).forEach(function(e){
+      var dx = e.x - player.x, dy = e.y - player.y;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if (d < 260) {
+        var same = (e.polarity === player.polarity);
+        ctx.strokeStyle = same ? 'rgba(255,215,94,0.35)' : 'rgba(150,170,210,0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(e.x, e.y); ctx.stroke();
+      }
+    });
+
+    // Orbs.
+    orbs.forEach(function(o){
+      var col = o.polarity === 1 ? '#ff5a5a' : '#4db8ff';
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(o.x, o.y, o.r + Math.sin(o.pulse) * 2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(o.polarity === 1 ? '+' : '−', o.x, o.y);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(o.x, o.y, o.r + 4, 0, Math.PI*2); ctx.stroke();
+    });
+
+    // Mines: spiky dark circles with polarity sign.
+    mines.forEach(function(m){
+      ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.spin);
+      ctx.fillStyle = '#2b2f3a'; ctx.strokeStyle = m.polarity === 1 ? '#ff8a8a' : '#7cc7ff'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (var s = 0; s < 12; s++) {
+        var a = (s / 12) * Math.PI * 2;
+        var r = (s % 2 === 0) ? m.r + 6 : m.r - 2;
+        var px = Math.cos(a) * r, py = Math.sin(a) * r;
+        if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(m.polarity === 1 ? '+' : '−', m.x, m.y);
+    });
+
+    // Player magnet: horseshoe-ish disc with polarity colour.
+    var blink = (performance.now() < invulnUntil && state === 'playing') ? (Math.floor(performance.now() / 120) % 2 === 0) : false;
+    if (!blink) {
+      ctx.fillStyle = player.polarity === 1 ? '#ff5a5a' : '#4db8ff';
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(player.polarity === 1 ? '+' : '−', player.x, player.y);
+      // Magnet tips.
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath(); ctx.arc(player.x - 13, player.y - 13, 4, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(player.x + 13, player.y + 13, 4, 0, Math.PI*2); ctx.fill();
+    }
+
+    // Particles.
+    particles.forEach(function(p){
+      ctx.globalAlpha = Math.max(0, p.life * 2);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 34px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED', W/2, H/2);
+    }
+  }
+
+  // ---- Main loop ----
+  function loop(ts){
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min((ts - lastTime) / 1000, 0.05);
+    lastTime = ts;
+    if (state === 'playing') update(dt);
+    if (state !== 'title' || player) draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input: keyboard + mouse + touch ----
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === ' ' || k === 'x' || k === 'p') {
+      if (k === 'p') { togglePause(); }
+      else { e.preventDefault(); flipPolarity(); }
+    }
+    if (k === 'enter' && (state === 'title' || state === 'over' || state === 'win')) startGame();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+  function canvasPos(e){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  canvas.addEventListener('mousemove', function(e){ var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y; mouse.active = true; });
+  canvas.addEventListener('mousedown', function(e){ ensureAudio(); if (state === 'playing') flipPolarity(); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); ensureAudio(); var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y; mouse.active = true; }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); var p = canvasPos(e); mouse.x = p.x; mouse.y = p.y; mouse.active = true; }, { passive: false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); if (state === 'playing') flipPolarity(); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('flipBtn').addEventListener('click', function(){ ensureAudio(); flipPolarity(); });
+  function togglePause(){
+    if (state === 'playing') { state = 'paused'; document.getElementById('pauseBtn').textContent = '▶ Resume'; }
+    else if (state === 'paused') { state = 'playing'; document.getElementById('pauseBtn').textContent = '⏸ Pause'; }
+  }
+  document.getElementById('pauseBtn').addEventListener('click', function(){ ensureAudio(); togglePause(); });
+
+  resetGame();
+  state = 'title';
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

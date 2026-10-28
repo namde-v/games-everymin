@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Railway Rendezvous — Train Yard Scheduler</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #101820; color: #eef4f0; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 12px; min-height: 100vh; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin-bottom: 4px; text-align: center; }
+  .subtitle { color: #9fc7b8; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; width: 100%; max-width: 860px; }
+  .pill { background: #1d2f3a; border: 1px solid #3a5a4c; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .pill.warn { color: #ffcc66; }
+  .pill.bad { color: #ff7a7a; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { width: 100%; height: auto; display: block; background: #16241c; border: 2px solid #3a5a4c; border-radius: 10px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(8, 16, 12, 0.92); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 22px; text-align: center; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { font-size: 15px; line-height: 1.55; max-width: 560px; color: #cfe3d8; }
+  .overlay .small { font-size: 13px; color: #9fc7b8; }
+  button { background: #e8b23a; color: #1a1206; border: none; border-radius: 999px; padding: 13px 30px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffc94d; }
+  button.secondary { background: #2e4a3d; color: #eef4f0; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 10px; font-size: 13px; color: #cfe3d8; }
+  .dot { display: inline-block; width: 13px; height: 13px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+  #statusMsg { min-height: 20px; margin-top: 8px; font-size: 14px; color: #ffcc66; text-align: center; }
+  .keys { font-size: 13px; color: #9fc7b8; margin-top: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>RAILWAY RENDEZVOUS</h1>
+<div class="subtitle">Train Yard Scheduler &mdash; route every train to its matching station, on time, without a crash.</div>
+
+<div id="hud">
+  <div class="pill" id="hudScore">Score: 0</div>
+  <div class="pill" id="hudLives">Lives: 3</div>
+  <div class="pill" id="hudDelivered">Delivered: 0 / 15</div>
+  <div class="pill" id="hudLevel">Level: 1</div>
+  <div class="pill" id="hudState">Status: Ready</div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="540"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>RAILWAY RENDEZVOUS</h2>
+    <p><strong>How to Play:</strong> Trains roll in from the left, each carrying a coloured cargo lamp.
+    Route each train to the station of the SAME colour. Click a junction (the big circles) to flip its switch
+    before the train reaches it. Junction 1 picks the upper or lower half of the yard; Junctions 2 and 3 pick the
+    exact station. Click a moving train to hold it at a red signal, click again to release it &mdash; use this to stop a
+    fast train rear-ending a slow one. Every train has a timetable bar: deliver before it runs out.</p>
+    <p class="small">Keys: 1 flips Junction 1, 2 flips Junction 2, 3 flips Junction 3, Space pauses.
+    Mouse and touch work the same way. Deliver 15 trains to win. A crash, a wrong station, or a missed timetable costs a life.</p>
+    <button id="startBtn">Start Scheduling</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+
+<div id="statusMsg"></div>
+<div class="legend">
+  <span><span class="dot" style="background:#e5484d"></span>Station A &mdash; Red</span>
+  <span><span class="dot" style="background:#3a86ff"></span>Station B &mdash; Blue</span>
+  <span><span class="dot" style="background:#2fbf71"></span>Station C &mdash; Green</span>
+  <span><span class="dot" style="background:#f2c230"></span>Station D &mdash; Yellow</span>
+</div>
+<div class="keys">Click junctions to switch &middot; Click a train to hold / release &middot; Keys 1 / 2 / 3 switch, Space pauses</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var statusMsg = document.getElementById('statusMsg');
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudDelivered = document.getElementById('hudDelivered');
+  var hudLevel = document.getElementById('hudLevel');
+  var hudState = document.getElementById('hudState');
+
+  var STATIONS = [
+    { id: 'A', name: 'Station A', color: '#e5484d', colorName: 'Red', x: 790, y: 80 },
+    { id: 'B', name: 'Station B', color: '#3a86ff', colorName: 'Blue', x: 790, y: 180 },
+    { id: 'C', name: 'Station C', color: '#2fbf71', colorName: 'Green', x: 790, y: 300 },
+    { id: 'D', name: 'Station D', color: '#f2c230', colorName: 'Yellow', x: 790, y: 420 }
+  ];
+
+  var NODES = {
+    START: { x: -40, y: 240 },
+    J1: { x: 280, y: 240 },
+    MIDU: { x: 430, y: 130 },
+    MIDL: { x: 430, y: 350 },
+    J2U: { x: 560, y: 130 },
+    J2L: { x: 560, y: 350 },
+    STA: { x: 780, y: 80 },
+    STB: { x: 780, y: 180 },
+    STC: { x: 780, y: 300 },
+    STD: { x: 780, y: 420 }
+  };
+
+  var state = 'title';
+  var score = 0, lives = 3, delivered = 0, level = 1;
+  var trains = [], particles = [];
+  var spawnTimer = 0, trainCounter = 0, elapsed = 0, lastTime = 0;
+  var audioCtx = null;
+
+  var junctions = {
+    j1: { key: 'J1', x: 280, y: 240, dir: 'up', label: 'J1' },
+    j2u: { key: 'J2U', x: 560, y: 130, dir: 'up', label: 'J2' },
+    j2l: { key: 'J2L', x: 560, y: 350, dir: 'up', label: 'J3' }
+  };
+
+  function initAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundGood() { tone(660, 0.12, 'sine', 0.14); setTimeout(function () { tone(880, 0.18, 'sine', 0.14); }, 110); }
+  function soundBad() { tone(160, 0.25, 'sawtooth', 0.14); setTimeout(function () { tone(110, 0.3, 'sawtooth', 0.12); }, 130); }
+  function soundClick() { tone(440, 0.06, 'square', 0.07); }
+
+  function resetGame() {
+    score = 0; lives = 3; delivered = 0; level = 1;
+    trains = []; particles = [];
+    spawnTimer = 1.2; trainCounter = 0; elapsed = 0;
+    junctions.j1.dir = 'up'; junctions.j2u.dir = 'up'; junctions.j2l.dir = 'up';
+    setStatus('Yard open. First train inbound.');
+    updateHud();
+  }
+
+  function setStatus(msg) { statusMsg.textContent = msg; }
+
+  function updateHud() {
+    hudScore.textContent = 'Score: ' + score;
+    hudLives.textContent = 'Lives: ' + lives;
+    hudLives.className = 'pill' + (lives === 1 ? ' bad' : (lives === 2 ? ' warn' : ''));
+    hudDelivered.textContent = 'Delivered: ' + delivered + ' / 15';
+    hudLevel.textContent = 'Level: ' + level;
+    hudState.textContent = 'Status: ' + (state === 'playing' ? 'Running' : (state === 'paused' ? 'Paused' : (state === 'win' ? 'Yard Complete' : (state === 'over' ? 'Yard Closed' : 'Ready'))));
+  }
+
+  function spawnTrain() {
+    trainCounter++;
+    var dest = STATIONS[Math.floor(Math.random() * STATIONS.length)];
+    var speed = 72 + level * 6 + Math.random() * 32;
+    trains.push({
+      id: trainCounter, x: NODES.START.x, y: NODES.START.y,
+      node: 'START', target: 'J1',
+      color: dest.color, colorName: dest.colorName, dest: dest,
+      speed: speed, held: false, deadline: 26, maxDeadline: 26
+    });
+    setStatus('Train ' + trainCounter + ' inbound: deliver to ' + dest.colorName + ' (' + dest.name + ').');
+  }
+
+  function nextTarget(train) {
+    if (train.node === 'START') return 'J1';
+    if (train.node === 'J1') return junctions.j1.dir === 'up' ? 'MIDU' : 'MIDL';
+    if (train.node === 'MIDU') return 'J2U';
+    if (train.node === 'MIDL') return 'J2L';
+    if (train.node === 'J2U') return junctions.j2u.dir === 'up' ? 'STA' : 'STB';
+    if (train.node === 'J2L') return junctions.j2l.dir === 'up' ? 'STC' : 'STD';
+    return null;
+  }
+
+  function stationForNode(node) {
+    if (node === 'STA') return STATIONS[0];
+    if (node === 'STB') return STATIONS[1];
+    if (node === 'STC') return STATIONS[2];
+    if (node === 'STD') return STATIONS[3];
+    return null;
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 22; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 260, vy: (Math.random() - 0.5) * 260, life: 0.7, color: color });
+    }
+  }
+
+  function loseLife(reason) {
+    lives--;
+    soundBad();
+    setStatus(reason + ' Lives left: ' + lives + '.');
+    updateHud();
+    if (lives <= 0) endGame(false);
+  }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? 'Yard Complete! You Win!' : 'Game Over';
+    endText.textContent = won
+      ? 'All 15 trains delivered on schedule. Final score: ' + score + '. The yard runs like clockwork thanks to you.'
+      : 'The yard is closed after too many mishaps. Trains delivered: ' + delivered + '. Final score: ' + score + '. Try again and watch those junctions.';
+    endScreen.classList.remove('hidden');
+    updateHud();
+  }
+
+  function update(dt) {
+    elapsed += dt;
+    spawnTimer -= dt;
+    var interval = Math.max(1.9, 3.4 - level * 0.25);
+    if (spawnTimer <= 0) { spawnTrain(); spawnTimer = interval + Math.random() * 0.8; }
+
+    for (var i = trains.length - 1; i >= 0; i--) {
+      var t = trains[i];
+      t.deadline -= dt;
+      if (t.deadline <= 0) {
+        burst(t.x, t.y, '#ffcc66');
+        trains.splice(i, 1);
+        if (state === 'playing') loseLife('Train missed its timetable and was diverted away.');
+        continue;
+      }
+      if (t.held) continue;
+      var target = NODES[t.target];
+      var dx = target.x - t.x, dy = target.y - t.y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      var step = t.speed * dt;
+      if (dist <= step) {
+        t.x = target.x; t.y = target.y;
+        t.node = t.target;
+        var station = stationForNode(t.node);
+        if (station) {
+          trains.splice(i, 1);
+          if (station.id === t.dest.id) {
+            var bonus = Math.round(t.deadline) * 5;
+            score += 100 + bonus;
+            delivered++;
+            burst(t.x, t.y, t.color);
+            soundGood();
+            setStatus('Delivered to ' + station.name + '! +' + (100 + bonus) + ' points.');
+            if (delivered % 5 === 0) { level++; setStatus('Level up! Level ' + level + ': faster trains, tighter timetable.'); }
+            if (delivered >= 15) { updateHud(); endGame(true); return; }
+          } else {
+            burst(t.x, t.y, '#ff7a7a');
+            loseLife('Wrong station! That train belonged at ' + t.dest.name + ', not ' + station.name + '.');
+          }
+          continue;
+        }
+        t.target = nextTarget(t);
+      } else {
+        t.x += (dx / dist) * step;
+        t.y += (dy / dist) * step;
+      }
+    }
+
+    for (var j = trains.length - 1; j >= 0; j--) {
+      for (var k = j - 1; k >= 0; k--) {
+        var a = trains[j], b = trains[k];
+        var ddx = a.x - b.x, ddy = a.y - b.y;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < 42) {
+          burst((a.x + b.x) / 2, (a.y + b.y) / 2, '#ff7a7a');
+          trains.splice(j, 1);
+          var idx = trains.indexOf(b);
+          if (idx >= 0) trains.splice(idx, 1);
+          if (state === 'playing') loseLife('Collision in the yard! Two trains met on the same track.');
+          break;
+        }
+      }
+    }
+
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    updateHud();
+  }
+
+  function drawTrack(x1, y1, x2, y2) {
+    ctx.strokeStyle = '#5a6a5e'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.strokeStyle = '#8a9a8e'; ctx.lineWidth = 1.5; ctx.setLineDash([10, 10]);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function drawJunction(j) {
+    ctx.fillStyle = '#22384a';
+    ctx.beginPath(); ctx.arc(j.x, j.y, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#e8b23a'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(j.label, j.x, j.y - 1);
+    ctx.fillStyle = '#e8b23a'; ctx.font = '11px Arial';
+    ctx.fillText(j.dir === 'up' ? 'UP' : 'DOWN', j.x, j.y + 44);
+    ctx.strokeStyle = '#e8b23a'; ctx.lineWidth = 3; ctx.beginPath();
+    if (j.key === 'J1') {
+      ctx.moveTo(j.x, j.y);
+      if (j.dir === 'up') ctx.lineTo(j.x + 26, j.y - 20); else ctx.lineTo(j.x + 26, j.y + 20);
+    } else if (j.key === 'J2U') {
+      ctx.moveTo(j.x, j.y);
+      if (j.dir === 'up') ctx.lineTo(j.x + 26, j.y - 16); else ctx.lineTo(j.x + 26, j.y + 16);
+    } else {
+      ctx.moveTo(j.x, j.y);
+      if (j.dir === 'up') ctx.lineTo(j.x + 26, j.y - 16); else ctx.lineTo(j.x + 26, j.y + 16);
+    }
+    ctx.stroke();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#16241c'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#1d3a2a'; ctx.fillRect(0, 0, canvas.width, 36);
+    ctx.fillStyle = '#cfe3d8'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('YARD MAP  —  click a junction to flip its switch  •  click a train to hold / release it', 12, 18);
+
+    drawTrack(-10, 240, 280, 240);
+    drawTrack(280, 240, 430, 130); drawTrack(280, 240, 430, 350);
+    drawTrack(430, 130, 560, 130); drawTrack(430, 350, 560, 350);
+    drawTrack(560, 130, 780, 80); drawTrack(560, 130, 780, 180);
+    drawTrack(560, 350, 780, 300); drawTrack(560, 350, 780, 420);
+
+    STATIONS.forEach(function (s) {
+      ctx.fillStyle = s.color; ctx.fillRect(s.x - 8, s.y - 26, 74, 52);
+      ctx.fillStyle = '#101820'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(s.name, s.x + 29, s.y - 4);
+      ctx.font = '11px Arial'; ctx.fillText(s.colorName, s.x + 29, s.y + 13);
+    });
+
+    ctx.fillStyle = '#cfe3d8'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('DEPOT', 4, 262);
+
+    drawJunction(junctions.j1); drawJunction(junctions.j2u); drawJunction(junctions.j2l);
+
+    trains.forEach(function (t) {
+      var angle = 0;
+      var target = NODES[t.target];
+      if (target) angle = Math.atan2(target.y - t.y, target.x - t.x);
+      ctx.save();
+      ctx.translate(t.x, t.y); ctx.rotate(angle);
+      ctx.fillStyle = '#222e38'; ctx.fillRect(-26, -13, 52, 26);
+      ctx.fillStyle = t.color; ctx.fillRect(-26, -13, 30, 26);
+      ctx.fillStyle = '#eef4f0'; ctx.fillRect(8, -9, 14, 18);
+      ctx.fillStyle = t.held ? '#ff4d4d' : '#2fbf71';
+      ctx.beginPath(); ctx.arc(28, 0, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#0d1410'; ctx.fillRect(t.x - 26, t.y - 32, 52, 7);
+      ctx.fillStyle = t.deadline < 7 ? '#ff7a7a' : '#ffcc66';
+      ctx.fillRect(t.x - 26, t.y - 32, Math.max(0, 52 * (t.deadline / t.maxDeadline)), 7);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(t.colorName, t.x, t.y - 38);
+      if (t.held) { ctx.fillStyle = '#ff7a7a'; ctx.font = 'bold 11px Arial'; ctx.fillText('HELD', t.x, t.y + 30); }
+    });
+
+    particles.forEach(function (pt) {
+      ctx.globalAlpha = Math.max(0, pt.life / 0.7);
+      ctx.fillStyle = pt.color;
+      ctx.fillRect(pt.x - 3, pt.y - 3, 6, 6);
+      ctx.globalAlpha = 1;
+    });
+
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED — press Space to resume', canvas.width / 2, canvas.height / 2);
+    }
+  }
+
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime) / 1000);
+    lastTime = ts;
+    if (state === 'playing') update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function toggleJunction(j) {
+    j.dir = j.dir === 'up' ? 'down' : 'up';
+    soundClick();
+    setStatus(j.label + ' switched to ' + j.dir.toUpperCase() + '.');
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = evt.clientX !== undefined ? evt.clientX : (evt.touches && evt.touches[0].clientX);
+    var cy = evt.clientY !== undefined ? evt.clientY : (evt.touches && evt.touches[0].clientY);
+    return { x: (cx - rect.left) * (canvas.width / rect.width), y: (cy - rect.top) * (canvas.height / rect.height) };
+  }
+
+  function handleTap(evt) {
+    if (state !== 'playing') return;
+    if (evt.preventDefault) evt.preventDefault();
+    var p = canvasPos(evt);
+    var keys = ['j1', 'j2u', 'j2l'];
+    for (var i = 0; i < keys.length; i++) {
+      var j = junctions[keys[i]];
+      if (Math.sqrt((p.x - j.x) * (p.x - j.x) + (p.y - j.y) * (p.y - j.y)) < 36) { toggleJunction(j); return; }
+    }
+    for (var k = 0; k < trains.length; k++) {
+      var t = trains[k];
+      if (Math.abs(p.x - t.x) < 32 && Math.abs(p.y - t.y) < 26) {
+        t.held = !t.held; soundClick();
+        setStatus('Train ' + t.id + (t.held ? ' held at red signal.' : ' released.'));
+        return;
+      }
+    }
+  }
+
+  canvas.addEventListener('click', handleTap);
+  canvas.addEventListener('touchstart', handleTap, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); }, { passive: false });
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key === '1') { if (state === 'playing') toggleJunction(junctions.j1); }
+    else if (e.key === '2') { if (state === 'playing') toggleJunction(junctions.j2u); }
+    else if (e.key === '3') { if (state === 'playing') toggleJunction(junctions.j2l); }
+    else if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      if (state === 'playing') { state = 'paused'; updateHud(); }
+      else if (state === 'paused') { state = 'playing'; updateHud(); }
+    }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', function () {
+    initAudio(); soundGood();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHud();
+  });
+
+  document.getElementById('restartBtn').addEventListener('click', function () {
+    initAudio(); soundGood();
+    resetGame();
+    state = 'playing';
+    endScreen.classList.add('hidden');
+    titleScreen.classList.add('hidden');
+    updateHud();
+  });
+
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    state = 'title';
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    updateHud();
+  });
+
+  updateHud();
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
