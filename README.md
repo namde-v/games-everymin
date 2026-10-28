@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 460
-- **Latest game:** 0460 — Summit Skier
+- **Total games:** 470
+- **Latest game:** 0470 — Nebula Navigator
 - **Current volume:** 005 (Games 0401 to 0500)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -17,7 +17,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 | 004 | 0301–0400 (100, complete) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
-| 005 | 0401–0500 (60 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
+| 005 | 0401–0500 (70 so far) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -31,20 +31,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 046
+## Latest batch — Batch 047
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0451 | Prism Pilot | Arcade / Light-Beam Mirror Dodging | [Play](./games/game-0451.html) |
-| 0452 | Quartz Quest | Puzzle / Gem Vein Tracing | [Play](./games/game-0452.html) |
-| 0453 | River Ranger | Strategy / Watershed Flow Management | [Play](./games/game-0453.html) |
-| 0454 | Solar Scribe | Rhythm / Sunbeam Beat Tracing | [Play](./games/game-0454.html) |
-| 0455 | Tempest Surfer | Action / Wave-Surfing Rescue | [Play](./games/game-0455.html) |
-| 0456 | Umbra Unlocker | Puzzle / Shadow Lock Decoding | [Play](./games/game-0456.html) |
-| 0457 | Vapor Voyager | Strategy / Airship Trade Expedition | [Play](./games/game-0457.html) |
-| 0458 | Willow Whisperer | Rhythm / Wind-Chime Precision | [Play](./games/game-0458.html) |
-| 0459 | Xenon Xplorer | Arcade / Gravity-Slingshot Orbit | [Play](./games/game-0459.html) |
-| 0460 | Summit Skier | Action / Avalanche Slope Runner | [Play](./games/game-0460.html) |
+| 0461 | Ember Engineer | Strategy / Foundry Line Management | [Play](./games/game-0461.html) |
+| 0462 | Fjord Fisher | Arcade / Ice-Hole Fishing Reflex | [Play](./games/game-0462.html) |
+| 0463 | Glyph Gardener | Puzzle / Rune Garden Matching | [Play](./games/game-0463.html) |
+| 0464 | Harbor Harmonizer | Rhythm / Dock Bell Timing | [Play](./games/game-0464.html) |
+| 0465 | Iron Infiltrator | Action / Stealth Vault Runner | [Play](./games/game-0465.html) |
+| 0466 | Jungle Juggler | Arcade / Vine Fruit Catching | [Play](./games/game-0466.html) |
+| 0467 | Kepler Keeper | Puzzle / Orbital Ring Sorting | [Play](./games/game-0467.html) |
+| 0468 | Lagoon Legislator | Strategy / Reef Council Simulation | [Play](./games/game-0468.html) |
+| 0469 | Metronome Miner | Rhythm / Beat-Driven Digging | [Play](./games/game-0469.html) |
+| 0470 | Nebula Navigator | Action / Starfield Asteroid Weaving | [Play](./games/game-0470.html) |
 
 ## Quality standard
 

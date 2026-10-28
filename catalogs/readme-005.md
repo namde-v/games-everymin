@@ -71,6 +71,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0459 | Xenon Xplorer | Arcade / Gravity-Slingshot Orbit | Mouse/touch drag aim and release, Arrow Keys nudge | [Play](./../games/game-0459.html) |
 | 0460 | Summit Skier | Action / Avalanche Slope Runner | Space/Arrow Up/W jump, mouse/touch tap jump | [Play](./../games/game-0460.html) |
 
+| 0461 | Ember Engineer | Strategy / Foundry Line Management | Mouse/touch click molds, Space adjust heat, Arrow Keys select | [Play](./../games/game-0461.html) |
+| 0462 | Fjord Fisher | Arcade / Ice-Hole Fishing Reflex | Mouse/touch click ice holes and CAST, Space cast/reel, Arrow Keys move | [Play](./../games/game-0462.html) |
+| 0463 | Glyph Gardener | Puzzle / Rune Garden Matching | Mouse/touch click plots to plant, Space rotate, Arrow Keys select | [Play](./../games/game-0463.html) |
+| 0464 | Harbor Harmonizer | Rhythm / Dock Bell Timing | Mouse/touch click bells, Keys 1-4 ring bells, Space start | [Play](./../games/game-0464.html) |
+| 0465 | Iron Infiltrator | Action / Stealth Vault Runner | WASD/Arrow Keys move, mouse/touch tap to sneak, Space dash | [Play](./../games/game-0465.html) |
+| 0466 | Jungle Juggler | Arcade / Vine Fruit Catching | Arrow Keys move, mouse/touch drag swing, Space jump | [Play](./../games/game-0466.html) |
+| 0467 | Kepler Keeper | Puzzle / Orbital Ring Sorting | Mouse/touch tap rings to rotate, Arrow Keys select ring, Space rotate | [Play](./../games/game-0467.html) |
+| 0468 | Lagoon Legislator | Strategy / Reef Council Simulation | Mouse/touch tap policy cards, Arrow Keys select, Enter enact | [Play](./../games/game-0468.html) |
+| 0469 | Metronome Miner | Rhythm / Beat-Driven Digging | Space swing pickaxe on beat, mouse/touch tap canvas, Arrow Keys move | [Play](./../games/game-0469.html) |
+| 0470 | Nebula Navigator | Action / Starfield Asteroid Weaving | WASD/Arrow Keys steer, Space boost, mouse/touch tap shield | [Play](./../games/game-0470.html) |
+
 ## Batch notes
 
 - Batch 041: 10 games, produced in one cycle (0401–0410). Volume 005 opened at game 0401.
@@ -79,3 +90,4 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 044: 10 games, produced in one cycle (0431–0440).
 - Batch 045: 10 games, produced in one cycle (0441–0450).
 - Batch 046: 10 games, produced in one cycle (0451–0460).
+- Batch 047: 10 games, produced in one cycle (0461–0470).

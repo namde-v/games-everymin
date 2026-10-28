@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Iron Infiltrator — Stealth Vault Runner</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b0f14;color:#e8eef4;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+  h1{font-size:clamp(20px,4vw,32px);letter-spacing:.12em;text-transform:uppercase;color:#ffd166}
+  p.sub{color:#9fb3c8;margin:4px 0 10px;font-size:14px}
+  #wrap{position:relative;width:min(92vw,760px);aspect-ratio:760/520;background:#111826;border:3px solid #334155;border-radius:12px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.6)}
+  canvas{width:100%;height:100%;display:block;background:#16202e;touch-action:none}
+  #hud{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;gap:8px;padding:8px 10px;background:rgba(0,0,0,.55);font-weight:700;font-size:14px;z-index:3}
+  #hud span{white-space:nowrap}
+  #hud .warn{color:#ff6b6b}
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;background:rgba(5,10,18,.88);z-index:5}
+  #overlay.hidden{display:none}
+  #overlay h2{font-size:28px;margin-bottom:8px;color:#ffd166}
+  #overlay p{max-width:520px;line-height:1.55;color:#cbd5e1;margin:6px 0}
+  #overlay .keys{background:#1e293b;border:1px solid #475569;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:14px}
+  button{background:#ffd166;color:#111827;border:0;border-radius:999px;padding:12px 26px;font-size:17px;font-weight:800;cursor:pointer;margin-top:14px}
+  button:hover{filter:brightness(1.1)} button:active{transform:scale(.97)}
+  button.secondary{background:#e2e8f0}
+  #msg{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:7px 12px;border-radius:999px;font-size:13px;font-weight:700;z-index:4;min-height:20px}
+  #controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+  #controls button{padding:9px 14px;font-size:14px;margin:0}
+  .foot{color:#94a3b8;font-size:12px;margin-top:8px;text-align:center;max-width:700px}
+</style>
+</head>
+<body>
+<h1>Iron Infiltrator</h1>
+<p class="sub">Action / Stealth Vault Runner &mdash; slip past the guards, grab every keycard, reach the vault exit.</p>
+<div id="wrap">
+  <div id="hud">
+    <span id="hScore">Score: 0</span>
+    <span id="hKeys">Keycards: 0 / 3</span>
+    <span id="hLives">Lives: 3</span>
+    <span id="hAlert">Status: Hidden</span>
+  </div>
+  <canvas id="game" width="760" height="520"></canvas>
+  <div id="msg"></div>
+  <div id="overlay">
+    <h2 id="ovTitle">IRON INFILTRATOR</h2>
+    <p id="ovText">You are inside a high-security vault facility. Guards sweep the halls with vision cones and laser grids pulse on and off. Collect all 3 keycards, then escape through the glowing EXIT door.</p>
+    <div class="keys"><strong>How to Play:</strong><br>
+      Move: WASD / Arrow keys &bull; or drag with mouse / touch &bull; or tap / click a spot to walk toward it.<br>
+      Avoid yellow vision cones and red active lasers. Getting spotted or zapped costs a life.<br>
+      Keycards open the exit. Finish fast and unseen for bonus points.</div>
+    <button id="startBtn">▶ Start Infiltration</button>
+  </div>
+</div>
+<div id="controls">
+  <button id="muteBtn">🔊 Sound: On</button>
+  <button id="restartBtn">↻ Restart</button>
+</div>
+<p class="foot">Stealth tip: wait for a guard to look away and for lasers to blink off before crossing a corridor. Detection fills fast in a cone, but stepping out breaks line of sight.</p>
+<script>
+(function(){
+  const canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+  const W=760,H=520, HUDH=38;
+  const overlay=document.getElementById('overlay'), ovTitle=document.getElementById('ovTitle'), ovText=document.getElementById('ovText');
+  const startBtn=document.getElementById('startBtn'), restartBtn=document.getElementById('restartBtn'), muteBtn=document.getElementById('muteBtn');
+  const hScore=document.getElementById('hScore'), hKeys=document.getElementById('hKeys'), hLives=document.getElementById('hLives'), hAlert=document.getElementById('hAlert'), msgEl=document.getElementById('msg');
+  let state='title', score=0, lives=3, keys=0, alert=0, time=0, last=0, soundOn=true;
+  let keysDown={}, target=null, dragging=false, dragX=0, dragY=0;
+  let audioCtx=null;
+  function beep(freq,dur,type,vol){
+    if(!soundOn||!audioCtx) return;
+    try{
+      const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type||'sine'; o.frequency.value=freq;
+      g.gain.setValueAtTime(vol||0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function initAudio(){
+    if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+    if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+  }
+  const startPos={x:52,y:452};
+  const player={x:startPos.x,y:startPos.y,r:12,speed:175};
+  // Walls: interior vault blocks that block movement and sight.
+  const walls=[
+    {x:130,y:120,w:180,h:22},{x:400,y:120,w:180,h:22},{x:130,y:250,w:22,h:180},
+    {x:330,y:250,w:220,h:22},{x:620,y:120,w:22,h:300},{x:130,y:430,w:420,h:22},
+    {x:240,y:330,w:180,h:22}
+  ];
+  const keycards=[
+    {x:610,y:80,taken:false},{x:80,y:180,taken:false},{x:420,y:380,taken:false}
+  ];
+  const exitDoor={x:700,y:452,w:44,h:44};
+  const guards=[
+    {x:220,y:90,dir:1,angle:Math.PI/2,range:150,fov:0.75,patrol:[220,520],axis:'x',speed:45,pause:0},
+    {x:480,y:300,dir:-1,angle:-Math.PI/2,range:150,fov:0.75,patrol:[360,620],axis:'x',speed:55,pause:0},
+    {x:660,y:220,dir:1,angle:Math.PI,range:140,fov:0.8,patrol:[150,360],axis:'y',speed:40,pause:0},
+    {x:300,y:180,dir:1,angle:0,range:130,fov:0.7,patrol:[150,230],axis:'y',speed:50,pause:0}
+  ];
+  // Lasers pulse: on for part of a cycle, off for the rest.
+  const lasers=[
+    {x:170,y:130,w:10,h:290,period:3.2,phase:0},
+    {x:560,y:150,w:10,h:250,period:4.0,phase:1.4},
+    {x:180,y:300,w:360,h:10,period:3.6,phase:0.8}
+  ];
+  function laserOn(l,t){ return (t+l.phase)%l.period < l.period*0.55; }
+  function showMsg(t){ msgEl.textContent=t; clearTimeout(showMsg._t); showMsg._t=setTimeout(()=>{msgEl.textContent='';},2200); }
+  function hitWall(nx,ny,r){
+    if(nx<r||nx>W-r||ny<HUDH+r||ny>H-r) return true;
+    for(const w of walls){
+      if(nx+r>w.x && nx-r<w.x+w.w && ny+r>w.y && ny-r<w.y+w.h) return true;
+    }
+    return false;
+  }
+  function blockedSight(ax,ay,bx,by){
+    // Sample the segment; a wall hit blocks vision.
+    for(let i=0;i<=20;i++){
+      const x=ax+(bx-ax)*i/20, y=ay+(by-ay)*i/20;
+      for(const w of walls){ if(x>w.x&&x<w.x+w.w&&y>w.y&&y<w.y+w.h) return true; }
+    }
+    return false;
+  }
+  function reset(full){
+    player.x=startPos.x; player.y=startPos.y; target=null;
+    if(full){ score=0; lives=3; keys=0; keycards.forEach(k=>k.taken=false); time=0; }
+    alert=0; updateHud('Hidden');
+  }
+  function updateHud(status){
+    hScore.textContent='Score: '+score;
+    hKeys.textContent='Keycards: '+keys+' / 3';
+    hLives.textContent='Lives: '+lives;
+    if(status){ hAlert.textContent='Status: '+status; hAlert.className = status.indexOf('SPOTTED')>=0 ? 'warn' : ''; }
+  }
+  function caught(reason){
+    lives--; alert=0;
+    beep(140,0.35,'sawtooth',0.12);
+    showMsg(reason+' — life lost!');
+    player.x=startPos.x; player.y=startPos.y; target=null;
+    updateHud('Hidden');
+    if(lives<=0) gameOver();
+  }
+  function gameOver(){
+    state='over'; overlay.classList.remove('hidden');
+    ovTitle.textContent='MISSION FAILED';
+    ovText.textContent='The vault alarms caught you. Final score: '+score+'. Keycards collected: '+keys+' of 3. Try a quieter route.';
+    startBtn.textContent='↻ Try Again';
+  }
+  function win(){
+    state='win';
+    const timeBonus=Math.max(0, 600-Math.floor(time)*5);
+    score+=timeBonus+300;
+    overlay.classList.remove('hidden');
+    ovTitle.textContent='VAULT BREACHED — YOU ESCAPED!';
+    ovText.textContent='You slipped out with all 3 keycards in '+Math.floor(time)+' seconds. Time bonus +'+timeBonus+'. Final score: '+score+'.';
+    startBtn.textContent='↻ Play Again';
+    beep(660,0.2,'sine',0.12); setTimeout(()=>beep(880,0.25,'sine',0.12),160); setTimeout(()=>beep(1100,0.35,'sine',0.12),320);
+    updateHud('Escaped!');
+  }
+  function startGame(){
+    initAudio(); beep(520,0.15,'triangle',0.1);
+    reset(true); state='playing'; overlay.classList.add('hidden');
+    showMsg('Stay out of the yellow cones. Grab 3 keycards.');
+    last=performance.now(); requestAnimationFrame(loop);
+  }
+  function loop(now){
+    if(state!=='playing') return;
+    const dt=Math.min(0.05,(now-last)/1000); last=now; time+=dt;
+    let mx=0,my=0;
+    if(keysDown['arrowleft']||keysDown['a']) mx-=1;
+    if(keysDown['arrowright']||keysDown['d']) mx+=1;
+    if(keysDown['arrowup']||keysDown['w']) my-=1;
+    if(keysDown['arrowdown']||keysDown['s']) my+=1;
+    if(mx||my){
+      const len=Math.hypot(mx,my); mx/=len; my/=len; target=null;
+    } else if(target){
+      const dx=target.x-player.x, dy=target.y-player.y, d=Math.hypot(dx,dy);
+      if(d<8) target=null; else { mx=dx/d; my=dy/d; }
+    } else if(dragging){
+      const dx=dragX-player.x, dy=dragY-player.y, d=Math.hypot(dx,dy);
+      if(d>10){ mx=dx/d; my=dy/d; }
+    }
+    const nx=player.x+mx*player.speed*dt, ny=player.y+my*player.speed*dt;
+    if(!hitWall(nx,player.y,player.r)) player.x=nx;
+    if(!hitWall(player.x,ny,player.r)) player.y=ny;
+    // Guards patrol and sweep.
+    for(const g of guards){
+      if(g.axis==='x'){
+        g.x+=g.dir*g.speed*dt;
+        if(g.x<g.patrol[0]){g.x=g.patrol[0];g.dir=1;}
+        if(g.x>g.patrol[1]){g.x=g.patrol[1];g.dir=-1;}
+        g.angle = g.dir>0 ? 0 : Math.PI;
+      } else {
+        g.y+=g.dir*g.speed*dt;
+        if(g.y<g.patrol[0]){g.y=g.patrol[0];g.dir=1;}
+        if(g.y>g.patrol[1]){g.y=g.patrol[1];g.dir=-1;}
+        g.angle = g.dir>0 ? Math.PI/2 : -Math.PI/2;
+      }
+      // Add a gentle sweep so cones are not perfectly static.
+      const sweep=Math.sin(time*0.9+g.x*0.01)*0.25;
+      const dx=player.x-g.x, dy=player.y-g.y, dist=Math.hypot(dx,dy);
+      const ang=Math.atan2(dy,dx); let diff=ang-(g.angle+sweep);
+      while(diff>Math.PI) diff-=Math.PI*2; while(diff<-Math.PI) diff+=Math.PI*2;
+      if(dist<g.range && Math.abs(diff)<g.fov && !blockedSight(g.x,g.y,player.x,player.y)){
+        alert+=dt*1.6;
+        if(alert>=1){ caught('SPOTTED by a guard'); return; }
+      } else {
+        alert=Math.max(0,alert-dt*0.7);
+      }
+    }
+    // Lasers.
+    for(const l of lasers){
+      if(laserOn(l,time) && player.x+l.r>0){
+        if(player.x+player.r>l.x && player.x-player.r<l.x+l.w && player.y+player.r>l.y && player.y-player.r<l.y+l.h){
+          caught('ZAPPED by a laser grid'); return;
+        }
+      }
+    }
+    // Keycards.
+    for(const k of keycards){
+      if(!k.taken && Math.hypot(player.x-k.x,player.y-k.y)<28){
+        k.taken=true; keys++; score+=100; beep(980,0.15,'triangle',0.1);
+        showMsg('Keycard secured! ('+keys+'/3)');
+        if(keys===3) showMsg('All keycards! Head to the glowing EXIT door.');
+      }
+    }
+    // Exit.
+    if(keys===3 && player.x+player.r>exitDoor.x && player.x-player.r<exitDoor.x+exitDoor.w && player.y+player.r>exitDoor.y && player.y-player.r<exitDoor.y+exitDoor.h){
+      win(); return;
+    }
+    updateHud(alert>0.35 ? 'SPOTTED!' : (alert>0 ? 'Suspicious…' : 'Hidden'));
+    draw();
+    requestAnimationFrame(loop);
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // Floor tiles.
+    ctx.fillStyle='#16202e'; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='rgba(255,255,255,0.05)'; ctx.lineWidth=1;
+    for(let x=0;x<W;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for(let y=HUDH;y<H;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+    // Walls.
+    ctx.fillStyle='#3b4a5f'; ctx.strokeStyle='#64748b'; ctx.lineWidth=2;
+    for(const w of walls){ ctx.fillRect(w.x,w.y,w.w,w.h); ctx.strokeRect(w.x,w.y,w.w,w.h); }
+    // Exit door.
+    const open=keys===3;
+    ctx.fillStyle=open?'#22c55e':'#475569';
+    ctx.fillRect(exitDoor.x,exitDoor.y,exitDoor.w,exitDoor.h);
+    ctx.fillStyle='#0b0f14'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(open?'EXIT':'LOCKED', exitDoor.x+22, exitDoor.y+27);
+    // Keycards.
+    for(const k of keycards){
+      if(k.taken) continue;
+      ctx.fillStyle='#ffd166'; ctx.fillRect(k.x-10,k.y-7,20,14);
+      ctx.fillStyle='#111827'; ctx.font='bold 11px sans-serif'; ctx.fillText('KEY',k.x,k.y+4);
+    }
+    // Lasers.
+    for(const l of lasers){
+      const on=laserOn(l,time);
+      ctx.fillStyle=on?'rgba(239,68,68,0.9)':'rgba(239,68,68,0.18)';
+      ctx.fillRect(l.x,l.y,l.w,l.h);
+      if(on){ ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fillRect(l.x,l.y,l.w,2); }
+    }
+    // Guard vision cones.
+    for(const g of guards){
+      const sweep=Math.sin(time*0.9+g.x*0.01)*0.25;
+      ctx.fillStyle='rgba(250,204,21,0.20)';
+      ctx.beginPath(); ctx.moveTo(g.x,g.y);
+      ctx.arc(g.x,g.y,g.range,g.angle+sweep-g.fov,g.angle+sweep+g.fov);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle='#e2e8f0'; ctx.beginPath(); ctx.arc(g.x,g.y,11,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#0f172a'; ctx.beginPath(); ctx.arc(g.x+Math.cos(g.angle+sweep)*5,g.y+Math.sin(g.angle+sweep)*5,4,0,Math.PI*2); ctx.fill();
+    }
+    // Player.
+    ctx.fillStyle='#38bdf8'; ctx.beginPath(); ctx.arc(player.x,player.y,player.r,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#0b0f14'; ctx.font='bold 13px sans-serif'; ctx.fillText('🕵',player.x,player.y+5);
+    // Alert meter.
+    if(alert>0){
+      ctx.fillStyle='#1f2937'; ctx.fillRect(player.x-22,player.y-30,44,8);
+      ctx.fillStyle=alert>0.6?'#ef4444':'#facc15'; ctx.fillRect(player.x-22,player.y-30,44*alert,8);
+    }
+    ctx.textAlign='left';
+  }
+  function canvasPos(e){
+    const r=canvas.getBoundingClientRect();
+    const cx=(e.touches?e.touches[0].clientX:e.clientX), cy=(e.touches?e.touches[0].clientY:e.clientY);
+    return {x:(cx-r.left)*W/r.width, y:(cy-r.top)*H/r.height};
+  }
+  document.addEventListener('keydown',function(e){
+    const k=e.key.toLowerCase();
+    if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k)>=0) e.preventDefault();
+    keysDown[k]=true;
+    if(state==='playing' && (k==='r')) reset(false);
+  });
+  document.addEventListener('keyup',function(e){ keysDown[e.key.toLowerCase()]=false; });
+  canvas.addEventListener('mousedown',function(e){ const p=canvasPos(e); target=p; dragging=true; dragX=p.x; dragY=p.y; });
+  canvas.addEventListener('mousemove',function(e){ if(dragging){ const p=canvasPos(e); dragX=p.x; dragY=p.y; } });
+  document.addEventListener('mouseup',function(){ dragging=false; });
+  canvas.addEventListener('click',function(e){ const p=canvasPos(e); target=p; });
+  canvas.addEventListener('touchstart',function(e){ e.preventDefault(); const p=canvasPos(e); target=p; dragging=true; dragX=p.x; dragY=p.y; },{passive:false});
+  canvas.addEventListener('touchmove',function(e){ e.preventDefault(); const p=canvasPos(e); dragX=p.x; dragY=p.y; },{passive:false});
+  canvas.addEventListener('touchend',function(){ dragging=false; });
+  startBtn.addEventListener('click',startGame);
+  restartBtn.addEventListener('click',function(){ if(state==='playing'||state==='title'){ reset(true); updateHud('Hidden'); draw(); } else startGame(); });
+  muteBtn.addEventListener('click',function(){ soundOn=!soundOn; muteBtn.textContent=soundOn?'🔊 Sound: On':'🔇 Sound: Off'; });
+  draw(); updateHud('Hidden');
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Harbor Harmonizer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1e2d; color: #eaf6ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin: 6px 0 2px; text-align: center; }
+  .sub { color: #9fd8ff; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: min(680px, 96vw); margin-bottom: 8px; }
+  .stat { background: #12344a; border: 1px solid #2a5a7a; border-radius: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; min-width: 110px; text-align: center; }
+  .stat span { color: #ffd166; }
+  #wrap { position: relative; width: min(680px, 96vw); }
+  canvas { width: 100%; height: 520px; display: block; background: linear-gradient(#163a52, #0d2b3d 55%, #0a2233); border: 2px solid #2a5a7a; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(4, 20, 32, 0.88); border-radius: 14px; padding: 22px; text-align: center; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 28px; }
+  .overlay p { color: #cfeaff; line-height: 1.55; font-size: 15px; max-width: 520px; }
+  .keys { background: #0f2f44; border: 1px solid #2a5a7a; border-radius: 10px; padding: 10px 14px; font-size: 14px; line-height: 1.6; }
+  button { background: #ffd166; color: #1a2b00; border: none; border-radius: 999px; padding: 13px 26px; font-size: 17px; font-weight: 800; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #5bc0eb; color: #032033; box-shadow: 0 4px 0 #2a7a9a; }
+  #bells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: min(680px, 96vw); margin-top: 10px; }
+  .bell { background: #1d4e6b; border: 2px solid #4a86ab; border-radius: 12px; padding: 14px 4px; text-align: center; font-weight: 800; cursor: pointer; user-select: none; }
+  .bell small { display: block; font-weight: 500; color: #bfe6ff; margin-top: 3px; }
+  .bell.hit { background: #ffd166; color: #222; border-color: #fff; }
+  #msg { height: 26px; font-weight: 800; color: #ffd166; text-align: center; margin-top: 8px; font-size: 17px; }
+  #combo { color: #9fd8ff; font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>⚓ Harbor Harmonizer</h1>
+<div class="sub">Ring the dock bells in time — guide every ship safely into harbor.</div>
+<div id="hud">
+  <div class="stat">Score: <span id="score">0</span></div>
+  <div class="stat">Lives: <span id="lives">♥♥♥</span></div>
+  <div class="stat">Ship: <span id="ship">1</span> / 10</div>
+  <div class="stat">Level: <span id="level">1</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="680" height="520"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>⚓ Harbor Harmonizer</h2>
+    <p>Ships are approaching the harbor, each sounding a signal pattern. Ring the matching dock bells <b>exactly when each note reaches the golden line</b> to guide them in.</p>
+    <div class="keys">
+      <b>How to Play:</b><br>
+      Keys <b>A S D F</b> — or tap / click the four bells below — or tap a bell lane on the canvas.<br>
+      Perfect hits score 100, Good hits score 50. Miss a note and you lose a life.<br>
+      Guide all <b>10 ships</b> to win. Lose all 3 lives and the harbor closes.
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">Harbor Master!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<div id="msg"></div>
+<div id="combo"></div>
+<div id="bells">
+  <div class="bell" data-lane="0">🔔 BRASS<br><small>Key A</small></div>
+  <div class="bell" data-lane="1">🔔 COPPER<br><small>Key S</small></div>
+  <div class="bell" data-lane="2">🔔 STEEL<br><small>Key D</small></div>
+  <div class="bell" data-lane="3">🔔 SILVER<br><small>Key F</small></div>
+</div>
+<script>
+(function(){
+  var cv = document.getElementById('game');
+  var ctx = cv.getContext('2d');
+  var W = 680, H = 520;
+  var HIT_Y = 430, LANE_W = 130, LEFT = 80;
+  var LANES = ['BRASS','COPPER','STEEL','SILVER'];
+  var COLORS = ['#ffd166','#ff8fa3','#5bc0eb','#a3e635'];
+  var KEYS = ['a','s','d','f'];
+  var score = 0, lives = 3, shipIndex = 1, level = 1, combo = 0, bestCombo = 0;
+  var playing = false, notes = [], spawnTimer = 0, notesInShip = 0, notesHit = 0, notesTotal = 0;
+  var particles = [], flashLane = -1, flashUntil = 0, shipX = -120, shipBob = 0, lastTime = 0;
+  var audioCtx = null;
+  var scoreEl = document.getElementById('score'), livesEl = document.getElementById('lives');
+  var shipEl = document.getElementById('ship'), levelEl = document.getElementById('level');
+  var msgEl = document.getElementById('msg'), comboEl = document.getElementById('combo');
+  var titleScreen = document.getElementById('titleScreen'), endScreen = document.getElementById('endScreen');
+
+  function ensureAudio(){
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol){
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.22, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function bellSound(lane){
+    var base = [523, 659, 784, 1046][lane];
+    tone(base, 0.7, 'sine', 0.25); tone(base * 2, 0.35, 'triangle', 0.08); tone(base * 0.5, 0.5, 'sine', 0.1);
+  }
+  function setMsg(t){ msgEl.textContent = t; }
+  function updateHud(){
+    scoreEl.textContent = score;
+    livesEl.textContent = lives > 0 ? '♥'.repeat(lives) : '—';
+    shipEl.textContent = Math.min(shipIndex, 10);
+    levelEl.textContent = level;
+    comboEl.textContent = combo > 1 ? 'Combo x' + combo + '  •  Best combo ' + bestCombo : '';
+  }
+  function newShip(){
+    notes = []; spawnTimer = 0;
+    notesTotal = 6 + level * 2; // ship signal length grows with level
+    if (notesTotal > 18) notesTotal = 18;
+    notesInShip = 0; notesHit = 0;
+    shipX = -140;
+    setMsg('Ship ' + shipIndex + ' approaching — listen for its signal!');
+  }
+  function startGame(){
+    ensureAudio();
+    score = 0; lives = 3; shipIndex = 1; level = 1; combo = 0; bestCombo = 0;
+    playing = true; particles = [];
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    newShip(); updateHud(); lastTime = performance.now();
+  }
+  function endGame(win){
+    playing = false;
+    endScreen.classList.remove('hidden');
+    document.getElementById('endTitle').textContent = win ? '🏆 Harbor Master!' : '🌊 Harbor Closed';
+    document.getElementById('endText').textContent = win
+      ? 'All 10 ships docked safely! Final score ' + score + ' with a best combo of ' + bestCombo + '.'
+      : 'The harbor closed after ship ' + shipIndex + '. Final score ' + score + '. Try again, bell-ringer!';
+    if (win) { tone(523,0.4,'sine',0.2); setTimeout(function(){tone(659,0.4,'sine',0.2);},150); setTimeout(function(){tone(784,0.6,'sine',0.2);},300); }
+  }
+  function spawnNote(){
+    var lane = Math.floor(Math.random() * 4);
+    // Avoid three identical lanes in a row so patterns stay musical
+    if (notes.length >= 2) {
+      var recent = notes.slice(-2);
+      if (recent[0].lane === lane && recent[1].lane === lane) lane = (lane + 1 + Math.floor(Math.random()*3)) % 4;
+    }
+    notes.push({ lane: lane, y: -30, speed: 150 + level * 28 + Math.random() * 30, hit: false });
+    notesInShip++;
+  }
+  function laneX(lane){ return LEFT + lane * LANE_W + LANE_W / 2; }
+  function hitLane(lane){
+    if (!playing) return;
+    bellSound(lane);
+    flashLane = lane; flashUntil = performance.now() + 140;
+    var el = document.querySelector('.bell[data-lane="' + lane + '"]');
+    if (el) { el.classList.add('hit'); setTimeout(function(){ el.classList.remove('hit'); }, 140); }
+    var best = null, bestDist = 9999;
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (n.lane === lane && !n.hit) { var d = Math.abs(n.y - HIT_Y); if (d < bestDist) { bestDist = d; best = n; } }
+    }
+    if (best && bestDist < 70) {
+      best.hit = true; notesHit++;
+      var perfect = bestDist < 28;
+      score += perfect ? 100 : 50; combo++; if (combo > bestCombo) bestCombo = combo;
+      setMsg(perfect ? 'PERFECT! 🔔 +100' : 'Good timing! +50');
+      for (var p = 0; p < 10; p++) particles.push({ x: laneX(lane), y: HIT_Y, vx: (Math.random()-0.5)*180, vy: -Math.random()*160, life: 0.6, color: COLORS[lane] });
+      if (notesHit >= notesTotal && notesInShip >= notesTotal) {
+        setMsg('Ship ' + shipIndex + ' docked safely! ⚓');
+        score += 200; combo = 0;
+        shipIndex++;
+        if (shipIndex > 10) { updateHud(); endGame(true); return; }
+        if (shipIndex % 3 === 1) level++;
+        setTimeout(function(){ if (playing) newShip(); }, 900);
+      }
+    } else {
+      combo = 0; lives--;
+      setMsg(lives > 0 ? 'Missed the beat! A life is lost.' : 'Missed the beat!');
+      if (lives <= 0) { updateHud(); endGame(false); return; }
+    }
+    updateHud();
+  }
+  function drawShip(){
+    var x = shipX, y = 118 + Math.sin(shipBob) * 5;
+    ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = '#5b3a1e'; ctx.beginPath(); ctx.moveTo(-70, 0); ctx.lineTo(70, 0); ctx.lineTo(50, 32); ctx.lineTo(-50, 32); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#eaf6ff'; ctx.fillRect(-22, -42, 44, 42); ctx.fillStyle = '#ffd166'; ctx.fillRect(-22, -42, 44, 8);
+    ctx.fillStyle = '#ff8fa3'; ctx.fillRect(34, -30, 26, 30);
+    ctx.fillStyle = '#12344a'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('SHIP ' + shipIndex, 0, -14);
+    ctx.restore();
+  }
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    // Sea and sky
+    ctx.fillStyle = '#7ec8e3'; ctx.fillRect(0, 0, W, 150);
+    ctx.fillStyle = '#2f6f8f'; ctx.fillRect(0, 150, W, H - 150);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    for (var w = 0; w < 8; w++) { var wx = (w * 110 + (performance.now()/50 % 110)) % (W + 60) - 30; ctx.beginPath(); ctx.ellipse(wx, 170 + (w % 3) * 60, 26, 5, 0, 0, Math.PI * 2); ctx.fill(); }
+    // Lighthouse and dock
+    ctx.fillStyle = '#d94f3d'; ctx.fillRect(28, 40, 30, 110); ctx.fillStyle = '#fff'; ctx.fillRect(28, 70, 30, 18); ctx.fillRect(28, 110, 30, 18);
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(43, 34, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#8a5a2b'; ctx.fillRect(0, 150, W, 14);
+    drawShip();
+    // Lanes
+    for (var l = 0; l < 4; l++) {
+      var x = LEFT + l * LANE_W;
+      ctx.fillStyle = l === flashLane && performance.now() < flashUntil ? 'rgba(255,209,102,0.35)' : 'rgba(255,255,255,0.08)';
+      ctx.fillRect(x, 170, LANE_W - 8, 330);
+      ctx.fillStyle = COLORS[l]; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(LANES[l], x + (LANE_W - 8) / 2, 190);
+    }
+    // Hit line
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(LEFT - 6, HIT_Y, LANE_W * 4, 4);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left'; ctx.fillText('◄ HIT LINE', LEFT - 2, HIT_Y - 8);
+    // Notes
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      ctx.save(); ctx.translate(laneX(n.lane), n.y);
+      ctx.fillStyle = COLORS[n.lane]; ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#0b1e2d'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🔔', 0, 1);
+      ctx.restore();
+    }
+    // Bell targets
+    for (var j = 0; j < 4; j++) {
+      ctx.fillStyle = COLORS[j]; ctx.beginPath(); ctx.arc(laneX(j), HIT_Y + 52, 30, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#0b1e2d'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(KEYS[j].toUpperCase(), laneX(j), HIT_Y + 52);
+    }
+    // Particles
+    particles = particles.filter(function(p){ return p.life > 0; });
+    particles.forEach(function(p){ ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
+    // Progress
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(20, 500, W - 40, 10);
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(20, 500, (W - 40) * (notesTotal ? notesHit / notesTotal : 0), 10);
+    if (!playing) {
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
+    }
+  }
+  function loop(now){
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016); lastTime = now;
+    if (playing) {
+      shipBob += dt * 2;
+      if (shipX < 300) shipX += dt * 90;
+      spawnTimer -= dt;
+      if (notesInShip < notesTotal && spawnTimer <= 0) { spawnNote(); spawnTimer = 0.55 - level * 0.03; if (spawnTimer < 0.32) spawnTimer = 0.32; }
+      for (var i = notes.length - 1; i >= 0; i--) {
+        var n = notes[i]; n.y += n.speed * dt;
+        if (n.y > HIT_Y + 90 && !n.hit) {
+          notes.splice(i, 1); combo = 0; lives--;
+          setMsg(lives > 0 ? 'A note sailed past! Life lost.' : 'A note sailed past!');
+          if (lives <= 0) { updateHud(); endGame(false); }
+          else updateHud();
+        } else if (n.hit) { notes.splice(i, 1); }
+      }
+      particles.forEach(function(p){ p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 200 * dt; p.life -= dt; });
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase(); var idx = KEYS.indexOf(k);
+    if (idx >= 0) { e.preventDefault(); hitLane(idx); }
+  });
+  cv.addEventListener('mousedown', function(e){
+    var r = cv.getBoundingClientRect(); var x = (e.clientX - r.left) * (W / r.width);
+    var lane = Math.floor((x - LEFT) / LANE_W);
+    if (lane >= 0 && lane < 4) hitLane(lane);
+  });
+  cv.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    var r = cv.getBoundingClientRect(); var t = e.touches[0];
+    var x = (t.clientX - r.left) * (W / r.width);
+    var lane = Math.floor((x - LEFT) / LANE_W);
+    if (lane >= 0 && lane < 4) hitLane(lane);
+  }, { passive: false });
+  document.querySelectorAll('.bell').forEach(function(el){
+    el.addEventListener('click', function(){ hitLane(parseInt(el.getAttribute('data-lane'), 10)); });
+    el.addEventListener('touchstart', function(e){ e.preventDefault(); hitLane(parseInt(el.getAttribute('data-lane'), 10)); }, { passive: false });
+  });
+  updateHud(); draw(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

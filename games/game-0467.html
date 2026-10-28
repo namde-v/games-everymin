@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Kepler Keeper</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; min-height: 100vh; background: #070b1a; color: #eef2ff; font-family: system-ui, -apple-system, Segoe UI, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 12px; }
+  h1 { margin: 4px 0 2px; font-size: 26px; letter-spacing: 1px; color: #ffd166; text-align: center; }
+  .sub { color: #9fb3ff; font-size: 13px; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; max-width: 560px; margin-bottom: 8px; }
+  .pill { background: #141d3d; border: 1px solid #2c3f7a; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 700; }
+  .pill.warn { background: #4a1620; border-color: #e74c3c; color: #ffb3ab; }
+  #targets { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; min-height: 30px; }
+  .target { display: flex; align-items: center; gap: 6px; background: #111936; border: 1px solid #2c3f7a; border-radius: 10px; padding: 5px 9px; font-size: 13px; }
+  .target.done { border-color: #2ecc71; background: #0f2e1d; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #fff; display: inline-block; }
+  #wrap { position: relative; width: min(92vw, 540px); aspect-ratio: 1; }
+  canvas { width: 100%; height: 100%; display: block; background: radial-gradient(circle at 50% 50%, #0d1530 0%, #070b1a 70%); border: 2px solid #2c3f7a; border-radius: 16px; touch-action: none; }
+  #overlay { position: absolute; inset: 0; background: rgba(4, 7, 18, 0.92); border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 10px; }
+  #overlay.hidden { display: none; }
+  #overlay h2 { margin: 0; font-size: 30px; color: #ffd166; }
+  #overlay p { margin: 0; font-size: 14px; line-height: 1.55; color: #d7e0ff; max-width: 420px; }
+  #overlay .big { font-size: 18px; font-weight: 800; color: #fff; }
+  button { cursor: pointer; border: 0; border-radius: 12px; padding: 11px 18px; font-size: 16px; font-weight: 800; background: #ffd166; color: #1a1200; }
+  button:hover { filter: brightness(1.08); }
+  button:active { transform: scale(0.97); }
+  button.secondary { background: #2c3f7a; color: #fff; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; max-width: 560px; }
+  #controls button { font-size: 14px; padding: 10px 13px; }
+  #controls button.active { outline: 3px solid #ffd166; background: #fff3c4; }
+  #msg { min-height: 22px; margin-top: 8px; font-weight: 700; color: #ffd166; text-align: center; }
+  .keys { font-size: 12px; color: #9fb3ff; text-align: center; margin-top: 4px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>KEPLER KEEPER</h1>
+<div class="sub">Rotate the rings. Dock the right satellite. Beat the decay.</div>
+
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Lives: <span id="lives">♥♥♥</span></div>
+  <div class="pill">Level: <span id="level">1</span> / 5</div>
+  <div class="pill" id="timePill">Time: <span id="time">75</span>s</div>
+  <div class="pill">Aligned: <span id="progress">0 / 2</span></div>
+</div>
+
+<div id="targets"></div>
+
+<div id="wrap">
+  <canvas id="game" width="540" height="540"></canvas>
+  <div id="overlay">
+    <h2>KEPLER KEEPER</h2>
+    <p class="big">Save the satellites before their orbits decay!</p>
+    <p><b>How to Play:</b> Each ring carries coloured satellites. A target colour is shown for every ring. Rotate a ring until the satellite sitting in the gold dock at the top matches that ring's target colour. A matched ring locks with a green glow.</p>
+    <p>Watch out: as orbits decay, unlocked rings slowly drift on their own. Finish every ring before the timer runs out, or you lose a life. Clear all 5 levels to win.</p>
+    <p><b>Controls:</b> Tap a ring (or press 1-4) to select it, then rotate with the on-screen arrows, Arrow keys / A D, or swipe-style taps. Up / Down changes the selected ring.</p>
+    <button id="startBtn">Start Mission</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="sel0" class="secondary">Ring 1</button>
+  <button id="sel1" class="secondary">Ring 2</button>
+  <button id="sel2" class="secondary">Ring 3</button>
+  <button id="sel3" class="secondary">Ring 4</button>
+  <button id="rotL">⟲ Rotate Left</button>
+  <button id="rotR">Rotate Right ⟳</button>
+</div>
+<div id="msg"></div>
+<div class="keys">Keyboard: 1-4 select &nbsp;|&nbsp; ← → or A / D rotate &nbsp;|&nbsp; ↑ ↓ change ring &nbsp;|&nbsp; Enter start / restart<br>Mouse / touch: tap a ring to select it, then tap the rotate buttons.</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var startBtn = document.getElementById('startBtn');
+  var msgEl = document.getElementById('msg');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var timeEl = document.getElementById('time');
+  var timePill = document.getElementById('timePill');
+  var progressEl = document.getElementById('progress');
+  var targetsEl = document.getElementById('targets');
+
+  var PALETTE = [
+    { name: 'Red', code: '#e74c3c' },
+    { name: 'Green', code: '#2ecc71' },
+    { name: 'Blue', code: '#3498db' },
+    { name: 'Gold', code: '#f1c40f' },
+    { name: 'Violet', code: '#9b59b6' },
+    { name: 'Cyan', code: '#1abc9c' }
+  ];
+
+  // One entry per level: rings, seconds, drift interval in ms.
+  var LEVELS = [
+    { rings: 2, time: 75, drift: 9000 },
+    { rings: 3, time: 70, drift: 7000 },
+    { rings: 3, time: 60, drift: 5500 },
+    { rings: 4, time: 65, drift: 5000 },
+    { rings: 4, time: 55, drift: 4000 }
+  ];
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, lives = 3, levelIndex = 0, rotations = 0;
+  var rings = [], targets = [], selected = 0;
+  var timeLeft = 75, lastTick = 0, lastDrift = 0, driftMs = 9000;
+  var pulse = 0, flash = '';
+
+  // ---- Audio: created only after a user gesture ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime + (when || 0);
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function sndRotate() { tone(320, 0.08, 'triangle', 0.10); }
+  function sndLock() { tone(523, 0.12, 'sine', 0.14); tone(659, 0.12, 'sine', 0.14, 0.09); tone(784, 0.18, 'sine', 0.14, 0.18); }
+  function sndBad() { tone(160, 0.18, 'sawtooth', 0.08); }
+  function sndWin() { [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.22, 'triangle', 0.14, i * 0.13); }); }
+  function sndLose() { [392, 330, 262, 196].forEach(function (f, i) { tone(f, 0.22, 'sawtooth', 0.08, i * 0.14); }); }
+
+  function shuffle(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+    }
+    return a;
+  }
+
+  function dockColor(ring) {
+    var n = ring.colors.length;
+    var idx = ((0 - ring.offset) % n + n) % n;
+    return ring.colors[idx];
+  }
+
+  function setupLevel() {
+    var cfg = LEVELS[levelIndex];
+    timeLeft = cfg.time;
+    driftMs = cfg.drift;
+    rotations = 0;
+    selected = 0;
+    rings = [];
+    var palette = shuffle(PALETTE).slice(0, 4);
+    var targetOrder = shuffle(palette);
+    for (var r = 0; r < cfg.rings; r++) {
+      // Each ring: 4 colours, each twice, shuffled into 8 slots.
+      var slots = [];
+      palette.forEach(function (c) { slots.push(c); slots.push(c); });
+      slots = shuffle(slots);
+      var ring = { colors: slots, offset: Math.floor(Math.random() * 8), locked: false, retro: (levelIndex >= 2 && r === cfg.rings - 1) };
+      // Never start already solved.
+      if (dockColor(ring).name === targetOrder[r].name) { ring.offset = (ring.offset + 1) % 8; }
+      rings.push(ring);
+    }
+    targets = targetOrder.slice(0, cfg.rings);
+    lastDrift = performance.now();
+    msgEl.textContent = 'Level ' + (levelIndex + 1) + ': dock every ring in its target colour!';
+    updateHUD();
+  }
+
+  function alignedCount() {
+    var n = 0;
+    rings.forEach(function (r) { if (r.locked) n++; });
+    return n;
+  }
+
+  function rotateSelected(dir) {
+    if (state !== 'playing') return;
+    var ring = rings[selected];
+    if (!ring) return;
+    if (ring.locked) { sndBad(); msgEl.textContent = 'That ring is locked in place. Select another ring.'; return; }
+    var step = ring.retro ? -dir : dir;
+    ring.offset = ((ring.offset + step) % 8 + 8) % 8;
+    rotations++;
+    sndRotate();
+    if (dockColor(ring).name === targets[selected].name) {
+      ring.locked = true;
+      score += 100;
+      flash = 'Ring ' + (selected + 1) + ' locked!';
+      sndLock();
+      // Advance selection to the next unlocked ring, if any.
+      var next = -1;
+      for (var i = 0; i < rings.length; i++) { if (!rings[i].locked) { next = i; break; } }
+      if (next >= 0) selected = next;
+      if (alignedCount() === rings.length) {
+        completeLevel();
+      } else {
+        msgEl.textContent = flash + ' ' + alignedCount() + ' of ' + rings.length + ' rings docked.';
+      }
+    }
+    updateHUD();
+  }
+
+  function completeLevel() {
+    var timeBonus = Math.max(0, Math.round(timeLeft) * 5);
+    var moveBonus = Math.max(0, 200 - rotations * 10);
+    score += timeBonus + moveBonus;
+    msgEl.textContent = 'Level cleared! Time bonus +' + timeBonus + ', efficiency bonus +' + moveBonus + '.';
+    sndWin();
+    if (levelIndex + 1 >= LEVELS.length) {
+      state = 'won';
+      showEnd('MISSION COMPLETE!', 'You kept every orbit stable, Keeper. Final score: ' + score + '. All 5 levels cleared before decay won.');
+    } else {
+      levelIndex++;
+      setTimeout(function () {
+        if (state === 'playing') { setupLevel(); }
+      }, 1400);
+    }
+    updateHUD();
+  }
+
+  function loseLife() {
+    lives--;
+    if (lives <= 0) {
+      state = 'over';
+      sndLose();
+      showEnd('GAME OVER', 'The orbits decayed beyond recovery. Final score: ' + score + '. Press Restart and keep the fleet flying.');
+    } else {
+      sndBad();
+      msgEl.textContent = 'Orbit decayed! A life is lost. Rebuilding level ' + (levelIndex + 1) + '...';
+      setupLevel();
+    }
+    updateHUD();
+  }
+
+  function showEnd(title, body) {
+    overlay.classList.remove('hidden');
+    overlay.innerHTML = '';
+    var h = document.createElement('h2'); h.textContent = title;
+    var p = document.createElement('p'); p.className = 'big'; p.textContent = body;
+    var hint = document.createElement('p');
+    hint.textContent = 'How to play: select a ring, rotate it until the satellite in the gold dock at the top matches the ring target colour. Locked rings glow green. Beat the timer across 5 levels.';
+    var btn = document.createElement('button'); btn.textContent = 'Restart';
+    btn.addEventListener('click', function () { startGame(); });
+    overlay.appendChild(h); overlay.appendChild(p); overlay.appendChild(hint); overlay.appendChild(btn);
+    updateHUD();
+  }
+
+  function startGame() {
+    ensureAudio();
+    score = 0; lives = 3; levelIndex = 0; state = 'playing';
+    overlay.classList.add('hidden');
+    setupLevel();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives)) + (lives <= 0 ? '' : '');
+    if (lives <= 0) livesEl.textContent = '—';
+    levelEl.textContent = Math.min(levelIndex + 1, LEVELS.length);
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+    timePill.classList.toggle('warn', state === 'playing' && timeLeft <= 10);
+    progressEl.textContent = alignedCount() + ' / ' + rings.length;
+    targetsEl.innerHTML = '';
+    targets.forEach(function (t, i) {
+      var box = document.createElement('div');
+      box.className = 'target' + (rings[i] && rings[i].locked ? ' done' : '');
+      var dot = document.createElement('span');
+      dot.className = 'dot'; dot.style.background = t.code;
+      var label = document.createElement('span');
+      label.textContent = 'Ring ' + (i + 1) + ': ' + t.name + (rings[i] && rings[i].locked ? ' ✓' : '') + (rings[i] && rings[i].retro ? ' (retro)' : '');
+      box.appendChild(dot); box.appendChild(label);
+      targetsEl.appendChild(box);
+    });
+    for (var i = 0; i < 4; i++) {
+      var b = document.getElementById('sel' + i);
+      if (!b) continue;
+      b.style.display = (i < rings.length) ? '' : 'none';
+      b.classList.toggle('active', i === selected);
+    }
+  }
+
+  function selectRing(i) {
+    if (i < 0 || i >= rings.length) return;
+    selected = i;
+    ensureAudio();
+    updateHUD();
+  }
+
+  // ---- Input: keyboard, mouse, touch ----
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && state !== 'playing') { startGame(); return; }
+    if (state !== 'playing') return;
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { e.preventDefault(); rotateSelected(-1); }
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { e.preventDefault(); rotateSelected(1); }
+    else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); selectRing((selected - 1 + rings.length) % rings.length); }
+    else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); selectRing((selected + 1) % rings.length); }
+    else if (e.key >= '1' && e.key <= '4') { selectRing(parseInt(e.key, 10) - 1); }
+  });
+
+  function pickRingFromEvent(clientX, clientY) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (canvas.width / rect.width);
+    var y = (clientY - rect.top) * (canvas.height / rect.height);
+    var dx = x - 270, dy = y - 270;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 30) return -1;
+    var idx = Math.round((dist - 62) / 55);
+    if (idx >= 0 && idx < rings.length) selectRing(idx);
+    return idx;
+  }
+
+  canvas.addEventListener('mousedown', function (e) { pickRingFromEvent(e.clientX, e.clientY); });
+  canvas.addEventListener('click', function (e) { pickRingFromEvent(e.clientX, e.clientY); });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (e.touches && e.touches.length) pickRingFromEvent(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+
+  startBtn.addEventListener('click', function () { startGame(); });
+  document.getElementById('rotL').addEventListener('click', function () { ensureAudio(); rotateSelected(-1); });
+  document.getElementById('rotR').addEventListener('click', function () { ensureAudio(); rotateSelected(1); });
+  for (var bi = 0; bi < 4; bi++) {
+    (function (idx) {
+      document.getElementById('sel' + idx).addEventListener('click', function () { selectRing(idx); });
+    })(bi);
+  }
+
+  // ---- Drawing ----
+  function draw() {
+    ctx.clearRect(0, 0, 540, 540);
+    var cx = 270, cy = 270;
+    // Starfield.
+    for (var s = 0; s < 70; s++) {
+      var sx = (s * 97) % 540, sy = (s * 149) % 540;
+      ctx.fillStyle = (s % 5 === 0) ? '#ffd166' : '#5a6ea8';
+      ctx.beginPath(); ctx.arc(sx, sy, (s % 3) + 1, 0, Math.PI * 2); ctx.fill();
+    }
+    // Planet core.
+    var grad = ctx.createRadialGradient(cx - 10, cy - 12, 4, cx, cy, 46);
+    grad.addColorStop(0, '#7fb8ff'); grad.addColorStop(0.6, '#2c5aa8'); grad.addColorStop(1, '#0d1b3d');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(cx, cy, 44, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#eef2ff'; ctx.font = 'bold 11px system-ui, Arial';
+    ctx.textAlign = 'center'; ctx.fillText('KEPLER', cx, cy - 2); ctx.fillText('CORE', cx, cy + 12);
+
+    rings.forEach(function (ring, ri) {
+      var radius = 62 + ri * 55;
+      var isSel = (ri === selected && state === 'playing');
+      ctx.strokeStyle = ring.locked ? '#2ecc71' : (isSel ? '#ffd166' : '#33467e');
+      ctx.lineWidth = ring.locked ? 4 : (isSel ? 3 : 2);
+      ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
+      if (ring.locked) {
+        ctx.strokeStyle = 'rgba(46, 204, 113, 0.55)'; ctx.lineWidth = 10;
+        ctx.beginPath(); ctx.arc(cx, cy, radius, -Math.PI / 2 - 0.32, -Math.PI / 2 + 0.32); ctx.stroke();
+      }
+      // Gold dock marker at the top of this ring.
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - radius - 14);
+      ctx.lineTo(cx - 8, cy - radius - 2);
+      ctx.lineTo(cx + 8, cy - radius - 2);
+      ctx.closePath(); ctx.fill();
+      // Satellites.
+      ring.colors.forEach(function (col, j) {
+        var angle = -Math.PI / 2 + ((j + ring.offset) * Math.PI / 4);
+        var sx2 = cx + Math.cos(angle) * radius;
+        var sy2 = cy + Math.sin(angle) * radius;
+        var isDock = (((j + ring.offset) % 8 + 8) % 8) === 0;
+        ctx.fillStyle = col.code;
+        ctx.beginPath(); ctx.arc(sx2, sy2, isDock ? 15 : 11, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = isDock ? 3 : 1.5; ctx.stroke();
+        if (isDock) {
+          ctx.fillStyle = '#0b1026'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+          ctx.fillText('◆', sx2, sy2 + 3);
+        }
+      });
+      // Retro indicator.
+      if (ring.retro) {
+        ctx.fillStyle = '#ff9f43'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'left';
+        ctx.fillText('RETRO', cx + radius * 0.72, cy - radius * 0.72);
+      }
+    });
+
+    if (state === 'playing') {
+      // Decay bar: shrinking orbit warning at the bottom.
+      var cfg = LEVELS[levelIndex];
+      var frac = Math.max(0, timeLeft / cfg.time);
+      ctx.fillStyle = '#1a2447'; ctx.fillRect(40, 512, 460, 12);
+      ctx.fillStyle = frac > 0.3 ? '#2ecc71' : '#e74c3c';
+      ctx.fillRect(40, 512, 460 * frac, 12);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('ORBIT STABILITY', 270, 508);
+    }
+  }
+
+  // ---- Main loop ----
+  var lastFrame = performance.now();
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = (now - lastFrame) / 1000;
+    lastFrame = now;
+    pulse += dt;
+    if (state === 'playing') {
+      timeLeft -= dt;
+      if (timeLeft <= 0) { timeLeft = 0; updateHUD(); loseLife(); }
+      else if (now - lastDrift >= driftMs) {
+        lastDrift = now;
+        var open = [];
+        rings.forEach(function (r, i) { if (!r.locked) open.push(i); });
+        if (open.length) {
+          var victim = open[Math.floor(Math.random() * open.length)];
+          var dir = Math.random() < 0.5 ? 1 : -1;
+          rings[victim].offset = ((rings[victim].offset + dir) % 8 + 8) % 8;
+          if (victim === selected) msgEl.textContent = 'Decay drift nudged Ring ' + (victim + 1) + '! Re-align it.';
+        }
+      }
+      if (Math.ceil(timeLeft) !== Math.ceil(timeLeft + dt)) updateHUD();
+    }
+    draw();
+  }
+
+  setupLevel();
+  state = 'title';
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

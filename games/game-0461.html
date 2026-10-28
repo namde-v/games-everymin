@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ember Engineer — Foundry Line Management</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#140c08;color:#ffe9c9;font-family:Arial,Helvetica,sans-serif;text-align:center}
+  h1{margin:10px 0 2px;color:#ffb347;letter-spacing:1px}
+  p.sub{margin:0 0 10px;color:#d8b48a}
+  #hud{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:8px auto;max-width:940px}
+  .pill{background:#2b1a10;border:2px solid #7a4a1f;border-radius:20px;padding:7px 14px;font-weight:bold}
+  .pill b{color:#ffd166}
+  #wrap{position:relative;width:940px;max-width:96vw;margin:0 auto}
+  canvas{width:100%;height:auto;background:#1e120a;border:3px solid #7a4a1f;border-radius:12px;display:block;touch-action:none}
+  .overlay{position:absolute;inset:0;background:rgba(10,5,2,.92);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;z-index:5}
+  .overlay h2{color:#ffb347;font-size:34px;margin:6px 0}
+  .overlay p{max-width:620px;line-height:1.55;color:#f3ddba}
+  button{cursor:pointer;border:0;border-radius:10px;padding:11px 18px;margin:5px;font-size:16px;font-weight:bold;background:#ff8c2e;color:#1c0f05}
+  button:hover{background:#ffb347}
+  button.sel{background:#ffd166;outline:3px solid #fff2cc}
+  button.small{padding:8px 12px;font-size:14px}
+  #controls{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;max-width:940px;margin:10px auto}
+  .group{background:#241509;border:1px solid #5a3a1e;border-radius:12px;padding:8px 10px}
+  .group span{display:block;font-size:12px;letter-spacing:1px;color:#d8a06a;margin-bottom:5px}
+  #orders{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;max-width:940px;margin:0 auto 8px}
+  .order{background:#3a2310;border:2px solid #ffb347;border-radius:10px;padding:7px 10px;min-width:150px;text-align:left;font-size:13px}
+  .order .bar{height:8px;background:#553522;border-radius:5px;overflow:hidden;margin-top:5px}
+  .order .bar i{display:block;height:100%;background:#ff8c2e}
+  .hot{color:#ff6b35}.ok{color:#7dff8a}
+  #msg{min-height:22px;font-weight:bold;color:#ffd166}
+</style>
+</head>
+<body>
+<h1>🔥 EMBER ENGINEER 🔥</h1>
+<p class="sub">Strategy / Foundry Line Management — route molten metal, balance heat, fulfil orders on time.</p>
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Lives: <b id="lives">♥♥♥</b></div>
+  <div class="pill">Orders Done: <b id="done">0</b> / 20</div>
+  <div class="pill">Level: <b id="level">1</b></div>
+  <div class="pill">Heat: <b id="heatTxt">1000°C</b></div>
+  <div class="pill">Metal: <b id="metalTxt">Copper</b></div>
+  <div class="pill">Mold: <b id="moldTxt">Blade</b></div>
+</div>
+<div id="orders"></div>
+<div id="msg">Choose a metal, heat it to the order target, pick a mold, then POUR.</div>
+<div id="wrap">
+  <canvas id="game" width="940" height="520"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>EMBER ENGINEER</h2>
+    <p><b>How to Play:</b> Orders arrive at the top. Each order wants a metal, a mold shape, and a target temperature. Select the metal, use Heat + / − to reach the target range, select the mold, and press POUR. The casting cools in the mold — a pour inside the target range fulfils a matching order for points. A pour outside the range is a defect and costs a life. An expired order also costs a life.</p>
+    <p>Keyboard: <b>1/2/3</b> metal · <b>←/→</b> mold · <b>↑/↓</b> heat · <b>Space</b> pour &nbsp;|&nbsp; Mouse / touch: tap the buttons and the molds on the canvas.</p>
+    <p><b>Win</b> by fulfilling 20 orders. <b>Game Over</b> if you lose all 3 lives. Good luck, engineer!</p>
+    <button id="startBtn">▶ START THE FOUNDRY</button>
+  </div>
+  <div class="overlay" id="endScreen" style="display:none">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ RESTART INSTANTLY</button>
+  </div>
+</div>
+<div id="controls">
+  <div class="group"><span>METAL (1/2/3)</span>
+    <button class="metalBtn sel small" data-m="Copper">Copper</button>
+    <button class="metalBtn small" data-m="Iron">Iron</button>
+    <button class="metalBtn small" data-m="Obsidian">Obsidian</button>
+  </div>
+  <div class="group"><span>MOLD (← →)</span>
+    <button class="moldBtn sel small" data-m="Blade">Blade</button>
+    <button class="moldBtn small" data-m="Gear">Gear</button>
+    <button class="moldBtn small" data-m="Plate">Plate</button>
+  </div>
+  <div class="group"><span>HEAT (↑ ↓)</span>
+    <button id="heatDown" class="small">− Heat</button>
+    <button id="heatUp" class="small">+ Heat</button>
+  </div>
+  <div class="group"><span>POUR (SPACE)</span>
+    <button id="pourBtn">🫙 POUR METAL</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById("game"), ctx=cv.getContext("2d");
+var metals={Copper:{min:850,max:1100,col:"#e08a3c"},Iron:{min:1100,max:1350,col:"#c9d1d9"},Obsidian:{min:1250,max:1450,col:"#7a5cff"}};
+var molds=["Blade","Gear","Plate"];
+var S={running:false,over:false,score:0,lives:3,done:0,level:1,heat:1000,metal:"Copper",mold:"Blade",orders:[],castings:{Blade:null,Gear:null,Plate:null},time:0,last:0,flash:"",flashT:0};
+var audioCtx=null;
+function audio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx&&audioCtx.state==="suspended"){audioCtx.resume();} return audioCtx; }
+function beep(f,d,type,vol){ var a=audio(); if(!a) return; var o=a.createOscillator(),g=a.createGain(); o.type=type||"sine"; o.frequency.value=f; g.gain.setValueAtTime(vol||0.12,a.currentTime); g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d); o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+d); }
+function rnd(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
+function newOrder(){
+  var m=pick(Object.keys(metals)), info=metals[m];
+  var target=rnd(info.min+40, info.max-40);
+  var tol=Math.max(45, 90-(S.level*6));
+  var ttl=Math.max(18, 42-S.level*2.5);
+  return {metal:m, mold:pick(molds), target:target, tol:tol, t:ttl, max:ttl};
+}
+function spawnOrder(){ if(S.orders.length<3) S.orders.push(newOrder()); }
+function updateHUD(){
+  document.getElementById("score").textContent=S.score;
+  document.getElementById("lives").textContent="♥".repeat(Math.max(0,S.lives));
+  document.getElementById("done").textContent=S.done;
+  document.getElementById("level").textContent=S.level;
+  document.getElementById("heatTxt").textContent=S.heat+"°C";
+  document.getElementById("metalTxt").textContent=S.metal;
+  document.getElementById("moldTxt").textContent=S.mold;
+  document.querySelectorAll(".metalBtn").forEach(function(b){ b.classList.toggle("sel", b.dataset.m===S.metal); });
+  document.querySelectorAll(".moldBtn").forEach(function(b){ b.classList.toggle("sel", b.dataset.m===S.mold); });
+  var box=document.getElementById("orders"); box.innerHTML="";
+  S.orders.forEach(function(o){
+    var d=document.createElement("div"); d.className="order";
+    d.innerHTML="<b>"+o.metal+" "+o.mold+"</b><br>Target "+o.target+"°C ±"+o.tol+"<br>"+Math.ceil(o.t)+"s left<div class='bar'><i style='width:"+(o.t/o.max*100)+"%'></i></div>";
+    box.appendChild(d);
+  });
+}
+function setMsg(t){ document.getElementById("msg").textContent=t; S.flash=t; S.flashT=3; }
+function pour(){
+  if(!S.running||S.over) return;
+  if(S.castings[S.mold]){ setMsg("That mold is still cooling — wait for it to finish."); beep(160,0.15,"square",0.08); return; }
+  var info=metals[S.metal];
+  S.castings[S.mold]={metal:S.metal, heat:S.heat, cool:2.6, pouredAt:S.time};
+  beep(520,0.18,"triangle",0.14); setTimeout(function(){beep(300,0.25,"sawtooth",0.08);},120);
+  setMsg("Poured "+S.metal+" at "+S.heat+"°C into the "+S.mold+" mold — cooling…");
+}
+function resolveCasting(moldName, c){
+  var idx=-1, best=null;
+  for(var i=0;i<S.orders.length;i++){ var o=S.orders[i]; if(o.metal===c.metal && o.mold===moldName){ idx=i; best=o; break; } }
+  if(best && Math.abs(c.heat-best.target)<=best.tol){
+    S.orders.splice(idx,1); S.done++; S.score+=100+Math.max(0,Math.round((best.t-best.max)*-1))+50;
+    setMsg("Perfect casting! "+c.metal+" "+moldName+" fulfilled an order. +150 points.");
+    beep(880,0.2,"sine",0.14); setTimeout(function(){beep(1100,0.25,"sine",0.12);},120);
+    if(S.done>=20){ winGame(); return; }
+    if(S.done%5===0){ S.level++; setMsg("Level up! Level "+S.level+" — orders arrive faster and tolerances tighten."); }
+  } else if(best){
+    S.lives--; setMsg("DEFECT! "+c.heat+"°C was outside "+best.target+"°C ±"+best.tol+" for that order. Life lost.");
+    beep(140,0.4,"sawtooth",0.14); S.orders.splice(idx,1);
+    if(S.lives<=0){ endGame(false); return; }
+  } else {
+    setMsg("Casting finished, but no matching order was waiting — it goes to scrap. Watch the order board.");
+    beep(440,0.15,"triangle",0.08);
+  }
+  spawnOrder();
+}
+function winGame(){ S.running=false; S.over=true; showEnd("🏆 FOUNDRY MASTER — YOU WIN!", "You fulfilled 20 orders with a final score of "+S.score+" at Level "+S.level+". The line runs perfectly under your watch."); beep(660,0.2,"sine",0.14); setTimeout(function(){beep(880,0.2,"sine",0.14);},180); setTimeout(function(){beep(1320,0.35,"sine",0.14);},360); }
+function endGame(won){ S.running=false; S.over=true; showEnd(won?"🏆 YOU WIN!":"💥 GAME OVER — LINE SHUTDOWN", won?"Victory!":"You ran out of lives with "+S.done+" orders fulfilled and "+S.score+" points. Restart and keep the furnaces burning."); }
+function showEnd(t,txt){ document.getElementById("endTitle").textContent=t; document.getElementById("endText").textContent=txt; document.getElementById("endScreen").style.display="flex"; updateHUD(); }
+function startGame(){
+  audio();
+  S.running=true; S.over=false; S.score=0; S.lives=3; S.done=0; S.level=1; S.heat=1000; S.metal="Copper"; S.mold="Blade"; S.orders=[]; S.castings={Blade:null,Gear:null,Plate:null}; S.time=0;
+  for(var i=0;i<3;i++) S.orders.push(newOrder());
+  document.getElementById("titleScreen").style.display="none";
+  document.getElementById("endScreen").style.display="none";
+  setMsg("Foundry running! Fill the first order: "+S.orders[0].metal+" "+S.orders[0].mold+" at "+S.orders[0].target+"°C.");
+  beep(523,0.15,"sine",0.12);
+  S.last=performance.now(); requestAnimationFrame(loop);
+}
+function draw(){
+  ctx.clearRect(0,0,940,520);
+  ctx.fillStyle="#241509"; ctx.fillRect(0,0,940,520);
+  ctx.fillStyle="#ffb347"; ctx.font="bold 22px Arial"; ctx.fillText("FOUNDRY FLOOR", 24, 34);
+  ctx.fillStyle="#d8b48a"; ctx.font="14px Arial"; ctx.fillText("Heat drifts down slowly — keep it near the order target before you pour.", 24, 58);
+  // Furnace
+  var flame=Math.min(120, Math.max(15,(S.heat-600)/8));
+  ctx.fillStyle="#3a2310"; ctx.fillRect(40,110,230,190);
+  ctx.fillStyle="#ff6b35"; ctx.beginPath(); ctx.moveTo(70,290); ctx.lineTo(140,290-flame); ctx.lineTo(210,290); ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#ffd166"; ctx.beginPath(); ctx.moveTo(100,290); ctx.lineTo(140,290-flame*0.6); ctx.lineTo(180,290); ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.font="bold 16px Arial"; ctx.fillText("FURNACE  "+S.heat+"°C", 55, 330);
+  ctx.fillStyle="#ffe9c9"; ctx.font="14px Arial"; ctx.fillText(S.metal+" range: "+metals[S.metal].min+"–"+metals[S.metal].max+"°C", 55, 354);
+  // Thermometer
+  ctx.fillStyle="#553522"; ctx.fillRect(300,110,26,190);
+  var hgt=Math.min(190, Math.max(0,(S.heat-500)/1000*190));
+  ctx.fillStyle=S.heat>1400?"#ff2222":"#ff8c2e"; ctx.fillRect(300,300-hgt,26,hgt);
+  ctx.fillStyle="#ffe9c9"; ctx.font="13px Arial"; ctx.fillText("HEAT", 292, 322);
+  // Ladle / stream
+  ctx.fillStyle=metals[S.metal].col; ctx.fillRect(390,150,130,26);
+  ctx.fillStyle="#ffe9c9"; ctx.font="bold 15px Arial"; ctx.fillText("LADLE: "+S.metal, 390, 140);
+  ctx.fillStyle="#d8b48a"; ctx.font="13px Arial"; ctx.fillText("Selected mold: "+S.mold, 390, 200);
+  ctx.fillText("Tip: pour inside ± tolerance,", 390, 224); ctx.fillText("not just inside the metal range.", 390, 244);
+  // Molds
+  molds.forEach(function(m,i){
+    var x=560+i*120, y=150, c=S.castings[m];
+    ctx.fillStyle=(S.mold===m)?"#ffd166":"#7a4a1f"; ctx.fillRect(x-4,y-4,104,124);
+    ctx.fillStyle="#2b1a10"; ctx.fillRect(x,y,96,116);
+    ctx.fillStyle="#ffe9c9"; ctx.font="bold 15px Arial"; ctx.fillText(m, x+8, y+24);
+    if(c){
+      ctx.fillStyle=metals[c.metal].col; ctx.fillRect(x+10,y+40,76,40);
+      ctx.fillStyle="#fff"; ctx.font="13px Arial"; ctx.fillText("cooling…", x+10, y+98);
+      ctx.fillStyle="#553522"; ctx.fillRect(x+10,y+104,76,8); ctx.fillStyle="#7dff8a"; ctx.fillRect(x+10,y+104,76*(1-c.cool/2.6),8);
+    } else {
+      ctx.fillStyle="#8a6a45"; ctx.font="13px Arial"; ctx.fillText("empty mold", x+8, y+70);
+      ctx.fillText("click to select", x+8, y+90);
+    }
+  });
+  ctx.fillStyle="#ffe9c9"; ctx.font="14px Arial"; ctx.fillText("Click a mold on the floor, or use ← → keys, to select it.", 560, 300);
+  // Order strip on canvas
+  ctx.fillStyle="#ffb347"; ctx.font="bold 17px Arial"; ctx.fillText("LIVE ORDERS", 40, 400);
+  S.orders.forEach(function(o,i){
+    var x=40+i*300;
+    ctx.fillStyle="#3a2310"; ctx.fillRect(x,412,284,72);
+    ctx.fillStyle="#ffe9c9"; ctx.font="bold 14px Arial"; ctx.fillText(o.metal+" "+o.mold+" — "+o.target+"°C ±"+o.tol, x+10, 436);
+    ctx.font="13px Arial"; ctx.fillText(Math.ceil(o.t)+"s left", x+10, 458);
+    ctx.fillStyle="#553522"; ctx.fillRect(x+10,464,264,10); ctx.fillStyle="#ff8c2e"; ctx.fillRect(x+10,464,264*(o.t/o.max),10);
+  });
+  if(S.flashT>0){ ctx.fillStyle="#ffd166"; ctx.font="bold 16px Arial"; ctx.fillText(S.flash, 24, 500); }
+}
+function loop(now){
+  if(!S.running) return;
+  var dt=Math.min(0.05,(now-S.last)/1000||0.016); S.last=now; S.time+=dt;
+  if(S.flashT>0) S.flashT-=dt;
+  S.heat=Math.max(550, S.heat-dt*4);
+  for(var i=S.orders.length-1;i>=0;i--){
+    S.orders[i].t-=dt;
+    if(S.orders[i].t<=0){
+      S.orders.splice(i,1); S.lives--; setMsg("Order expired! A customer walked away — life lost."); beep(180,0.4,"sawtooth",0.13);
+      if(S.lives<=0){ endGame(false); updateHUD(); draw(); return; }
+      spawnOrder();
+    }
+  }
+  if(S.orders.length<3 && Math.random()<dt*0.35) spawnOrder();
+  molds.forEach(function(m){
+    var c=S.castings[m]; if(c){ c.cool-=dt; if(c.cool<=0){ S.castings[m]=null; resolveCasting(m,c); } }
+  });
+  updateHUD(); draw();
+  if(S.running) requestAnimationFrame(loop);
+}
+document.getElementById("startBtn").addEventListener("click", startGame);
+document.getElementById("restartBtn").addEventListener("click", startGame);
+document.getElementById("pourBtn").addEventListener("click", pour);
+document.getElementById("heatUp").addEventListener("click", function(){ S.heat=Math.min(1500,S.heat+50); beep(700,0.08,"sine",0.07); updateHUD(); draw(); });
+document.getElementById("heatDown").addEventListener("click", function(){ S.heat=Math.max(550,S.heat-50); beep(400,0.08,"sine",0.07); updateHUD(); draw(); });
+document.querySelectorAll(".metalBtn").forEach(function(b){ b.addEventListener("click", function(){ S.metal=b.dataset.m; updateHUD(); draw(); }); });
+document.querySelectorAll(".moldBtn").forEach(function(b){ b.addEventListener("click", function(){ S.mold=b.dataset.m; updateHUD(); draw(); }); });
+document.addEventListener("keydown", function(e){
+  if(e.key===" "){ e.preventDefault(); if(!S.running&&!S.over) startGame(); else pour(); }
+  if(e.key==="Enter" && (!S.running)) startGame();
+  if(e.key==="1") S.metal="Copper"; if(e.key==="2") S.metal="Iron"; if(e.key==="3") S.metal="Obsidian";
+  if(e.key==="ArrowLeft") S.mold=molds[(molds.indexOf(S.mold)+2)%3];
+  if(e.key==="ArrowRight") S.mold=molds[(molds.indexOf(S.mold)+1)%3];
+  if(e.key==="ArrowUp"){ e.preventDefault(); S.heat=Math.min(1500,S.heat+50); }
+  if(e.key==="ArrowDown"){ e.preventDefault(); S.heat=Math.max(550,S.heat-50); }
+  updateHUD(); draw();
+});
+cv.addEventListener("mousedown", function(e){
+  var r=cv.getBoundingClientRect(), x=(e.clientX-r.left)*(940/r.width);
+  molds.forEach(function(m,i){ var mx=560+i*120; if(x>=mx-4 && x<=mx+100){ S.mold=m; updateHUD(); draw(); } });
+});
+cv.addEventListener("touchstart", function(e){ e.preventDefault(); var t=e.touches[0]; var r=cv.getBoundingClientRect(), x=(t.clientX-r.left)*(940/r.width); molds.forEach(function(m,i){ var mx=560+i*120; if(x>=mx-4 && x<=mx+100){ S.mold=m; updateHUD(); draw(); } }); }, {passive:false});
+document.addEventListener("touchstart", function(){}, {passive:true});
+updateHUD(); draw();
+})();
+</script>
+</body>
+</html>
