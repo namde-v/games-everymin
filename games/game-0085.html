@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Anchor Aim — Precision Anchor Toss</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #0b1d2e; overflow: hidden; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #eaf6ff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #wrap { position: relative; width: min(96vw, 900px); }
+  #hud { display: flex; justify-content: space-between; gap: 8px; padding: 8px 4px; font-size: 16px; font-weight: bold; flex-wrap: wrap; }
+  #hud span { background: #123a56; padding: 6px 12px; border-radius: 8px; border: 1px solid #2f7aa8; }
+  #hud .warn { background: #5a2a1a; border-color: #c96a3a; }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 900 / 560; background: linear-gradient(#7ec8e8, #2f7aa8 42%, #123a56 43%, #0d2b45); border: 3px solid #2f7aa8; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(4, 20, 34, 0.86); border-radius: 12px; padding: 20px; gap: 12px; }
+  .overlay.hidden { display: none; }
+  h1 { font-size: 42px; letter-spacing: 2px; color: #ffd166; text-shadow: 2px 2px 0 #7a4a00; }
+  h2 { font-size: 34px; color: #ffd166; }
+  p { max-width: 620px; line-height: 1.5; font-size: 16px; }
+  .howto { background: #123a56; border: 1px solid #2f7aa8; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 15px; line-height: 1.6; }
+  button { font-size: 20px; font-weight: bold; padding: 12px 28px; border-radius: 10px; border: none; background: #ffd166; color: #3a2700; cursor: pointer; }
+  button:hover { background: #ffe08a; }
+  button:active { transform: scale(0.97); }
+  #msg { min-height: 24px; font-size: 18px; font-weight: bold; color: #ffd166; }
+  .small { font-size: 13px; opacity: 0.85; }
+  @media (max-width: 600px) { h1 { font-size: 30px; } p { font-size: 14px; } #hud { font-size: 13px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span id="scoreHud">Score: 0 / 300</span>
+    <span id="throwsHud">Throws left: 12</span>
+    <span id="windHud">Wind: 0</span>
+    <span id="statusHud">Status: Aiming</span>
+  </div>
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h1>&#9875; ANCHOR AIM</h1>
+    <p>Toss your anchor across the harbour and drop it inside the moving target rings. Chain length and wind bend every throw — judge both, or splash out!</p>
+    <div class="howto">
+      <strong>How to Play:</strong><br>
+      &#8226; <strong>Mouse / Touch:</strong> press and drag anywhere to aim the arc, release to throw.<br>
+      &#8226; <strong>Arrow Keys:</strong> Left / Right change angle, Up / Down change power.<br>
+      &#8226; <strong>Space:</strong> throw the anchor. <strong>R:</strong> restart instantly.<br>
+      &#8226; Land in the centre ring for 100 points, middle ring for 50, outer ring for 25.<br>
+      &#8226; Wind pushes the anchor sideways mid-flight. Reach <strong>300 points in 12 throws</strong> to win!
+    </div>
+    <button id="startBtn">Start Game</button>
+    <p class="small">Best played with sound on — audio starts only after you press Start.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="finalScore"></p>
+    <button id="restartBtn">Play Again (R)</button>
+  </div>
+  <div id="msg"></div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 900, H = 560;
+  var WATER_Y = 300;
+  var SHIP_X = 110, SHIP_Y = 240;
+  var TARGET_SCORE = 300, MAX_THROWS = 12;
+
+  var scoreHud = document.getElementById('scoreHud');
+  var throwsHud = document.getElementById('throwsHud');
+  var windHud = document.getElementById('windHud');
+  var statusHud = document.getElementById('statusHud');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+
+  var state = 'title'; // title | aiming | flying | splash | over
+  var score = 0, throwsLeft = MAX_THROWS, throwCount = 0;
+  var angle = -0.62, power = 62; // radians, 0-100
+  var wind = 0, windTimer = 0;
+  var rings = [];
+  var anchor = null;
+  var particles = [];
+  var messageTimer = 0;
+  var audioCtx = null, muted = false;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio unavailable */ }
+  }
+  function splashSound() { beep(180, 0.35, 'triangle', 0.25); beep(90, 0.5, 'sine', 0.2); }
+  function hitSound() { beep(660, 0.12, 'square', 0.12); setTimeout(function(){ beep(880, 0.18, 'square', 0.12); }, 90); }
+  function winSound() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.15); }, i * 130); }); }
+
+  function newWind() {
+    wind = Math.round(rand(-6, 6));
+    windTimer = rand(4, 8);
+  }
+  function resetRings() {
+    rings = [
+      { x: rand(520, 700), y: WATER_Y + 118, r: 62, vx: rand(14, 26) * (Math.random() < 0.5 ? -1 : 1), bob: rand(0, 6) },
+      { x: rand(380, 560), y: WATER_Y + 62, r: 48, vx: rand(20, 34) * (Math.random() < 0.5 ? -1 : 1), bob: rand(0, 6) },
+      { x: rand(640, 800), y: WATER_Y + 168, r: 40, vx: rand(24, 38) * (Math.random() < 0.5 ? -1 : 1), bob: rand(0, 6) }
+    ];
+  }
+  function resetGame() {
+    score = 0; throwsLeft = MAX_THROWS; throwCount = 0;
+    angle = -0.62; power = 62;
+    newWind(); resetRings();
+    anchor = null; particles = [];
+    state = 'aiming';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    setMessage('Aim with drag or arrows, then throw!');
+    updateHud();
+  }
+  function setMessage(text) { msgEl.textContent = text; messageTimer = 3.2; }
+  function updateHud() {
+    scoreHud.textContent = 'Score: ' + score + ' / ' + TARGET_SCORE;
+    throwsHud.textContent = 'Throws left: ' + throwsLeft;
+    throwsHud.className = throwsLeft <= 3 ? 'warn' : '';
+    windHud.textContent = 'Wind: ' + (wind > 0 ? '+' + wind + ' right' : (wind < 0 ? wind + ' left' : 'calm'));
+    statusHud.textContent = 'Status: ' + (state === 'aiming' ? 'Aiming' : state === 'flying' ? 'Anchor flying!' : state === 'splash' ? 'Splash!' : 'Game Over');
+  }
+  function throwAnchor() {
+    if (state !== 'aiming' || throwsLeft <= 0) return;
+    initAudio();
+    throwsLeft--; throwCount++;
+    var speed = 5 + power * 0.11;
+    anchor = {
+      x: SHIP_X + 30, y: SHIP_Y + 10,
+      vx: Math.cos(angle) * speed * 10,
+      vy: Math.sin(angle) * speed * 10,
+      trail: [], sunk: false, scored: false
+    };
+    state = 'flying';
+    beep(320, 0.15, 'sine', 0.12);
+    updateHud();
+  }
+  function spawnSplash(x, y, big) {
+    var n = big ? 26 : 10;
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: rand(-90, 90), vy: rand(-160, -20), life: rand(0.4, 0.9), max: 0.9, size: rand(2, 6) });
+    }
+  }
+  function ringScore(ring, x, y) {
+    var d = Math.hypot(x - ring.x, y - ring.y);
+    if (d <= ring.r * 0.35) return 100;
+    if (d <= ring.r * 0.7) return 50;
+    if (d <= ring.r) return 25;
+    return 0;
+  }
+  function finishThrow(pts, ring) {
+    state = 'splash';
+    if (pts > 0) {
+      score += pts;
+      hitSound();
+      setMessage(pts === 100 ? 'BULLSEYE! +100 — dead centre!' : (pts === 50 ? 'Nice shot! +50' : 'On target! +25'));
+      spawnSplash(anchor.x, anchor.y, true);
+    } else {
+      splashSound();
+      setMessage('Splash! No points — watch the wind and ring drift.');
+      spawnSplash(anchor.x, anchor.y, false);
+    }
+    anchor.sunk = true;
+    updateHud();
+    setTimeout(function () {
+      anchor = null;
+      if (score >= TARGET_SCORE) { endGame(true); return; }
+      if (throwsLeft <= 0) { endGame(false); return; }
+      state = 'aiming';
+      updateHud();
+    }, 1100);
+  }
+  function endGame(won) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    endTitle.textContent = won ? 'YOU WIN!' : 'Game Over';
+    endText.textContent = won
+      ? 'The harbour is yours! You reached the target with throws to spare.'
+      : 'Out of throws. The rings drift on — try again, captain!';
+    finalScore.textContent = 'Final score: ' + score + ' / ' + TARGET_SCORE + ' in ' + throwCount + ' throws.';
+    if (won) winSound(); else beep(160, 0.5, 'sawtooth', 0.12);
+    updateHud();
+  }
+
+  // --- Input: mouse drag to aim, release to throw ---
+  var dragging = false, dragStart = null;
+  function canvasPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function onDown(e) {
+    if (state !== 'aiming') return;
+    e.preventDefault();
+    dragging = true; dragStart = canvasPos(e);
+  }
+  function onMove(e) {
+    if (!dragging || state !== 'aiming') return;
+    e.preventDefault();
+    var p = canvasPos(e);
+    var dx = p.x - (SHIP_X + 30), dy = p.y - (SHIP_Y + 10);
+    if (Math.hypot(dx, dy) < 10) return;
+    angle = clamp(Math.atan2(dy, dx), -1.45, -0.08);
+    power = clamp(Math.hypot(dx, dy) / 4.2, 20, 100);
+    updateHud();
+  }
+  function onUp(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    dragging = false;
+    if (state === 'aiming') throwAnchor();
+  }
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('mouseleave', function () { dragging = false; });
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp, { passive: false });
+  canvas.addEventListener('touchcancel', function () { dragging = false; });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') resetGame(); return; }
+    if (state === 'title') { if (e.key === 'Enter' || e.key === ' ') { initAudio(); resetGame(); } return; }
+    if (state === 'over') { if (e.key === 'Enter' || e.key === ' ') resetGame(); return; }
+    if (state !== 'aiming') return;
+    if (e.key === 'ArrowLeft') { angle = clamp(angle - 0.05, -1.45, -0.08); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { angle = clamp(angle + 0.05, -1.45, -0.08); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { power = clamp(power + 4, 20, 100); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { power = clamp(power - 4, 20, 100); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); throwAnchor(); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', function () { initAudio(); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function () { initAudio(); resetGame(); });
+
+  // --- Drawing ---
+  function drawShip() {
+    ctx.save();
+    ctx.translate(SHIP_X, SHIP_Y);
+    ctx.fillStyle = '#6b3f1d';
+    ctx.beginPath(); ctx.moveTo(-55, 0); ctx.lineTo(60, 0); ctx.lineTo(42, 34); ctx.lineTo(-38, 34); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(-8, -42, 6, 44);
+    ctx.fillStyle = '#eaf6ff'; ctx.beginPath(); ctx.moveTo(-2, -40); ctx.lineTo(34, -28); ctx.lineTo(-2, -14); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 13px Arial'; ctx.fillText('YOU', -18, 20);
+    ctx.restore();
+  }
+  function drawAim() {
+    if (state !== 'aiming') return;
+    var speed = 5 + power * 0.11;
+    var vx = Math.cos(angle) * speed * 10, vy = Math.sin(angle) * speed * 10;
+    var x = SHIP_X + 30, y = SHIP_Y + 10;
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    for (var t = 0; t < 1.6; t += 0.09) {
+      var px = x + vx * t + 0.5 * wind * 6 * t * t;
+      var py = y + vy * t + 0.5 * 420 * t * t;
+      if (py > WATER_Y + 190) break;
+      ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(angle) * power, y + Math.sin(angle) * power); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 14px Arial';
+    ctx.fillText('Power ' + Math.round(power) + '%', x + 10, y - 18);
+  }
+  function drawRings(time) {
+    rings.forEach(function (r) {
+      var bobY = r.y + Math.sin(time / 500 + r.bob) * 4;
+      ctx.strokeStyle = '#ff5d5d'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(r.x, bobY, r.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(r.x, bobY, r.r * 0.7, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(r.x, bobY, r.r * 0.35, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('100', r.x, bobY - r.r - 8);
+      ctx.textAlign = 'left';
+    });
+  }
+  function drawAnchor() {
+    if (!anchor) return;
+    ctx.strokeStyle = '#c9d6e3'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(SHIP_X + 30, SHIP_Y + 10);
+    anchor.trail.forEach(function (p) { ctx.lineTo(p.x, p.y); });
+    ctx.lineTo(anchor.x, anchor.y); ctx.stroke();
+    ctx.save(); ctx.translate(anchor.x, anchor.y);
+    ctx.strokeStyle = '#3a3a3a'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-14, 4); ctx.lineTo(14, 4); ctx.moveTo(-14, 4); ctx.quadraticCurveTo(-18, 20, -6, 18); ctx.moveTo(14, 4); ctx.quadraticCurveTo(18, 20, 6, 18); ctx.stroke();
+    ctx.restore();
+  }
+  function drawWater(time) {
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    for (var i = 0; i < 26; i++) {
+      var wx = ((i * 71 + time / 40) % 940) - 20;
+      var wy = WATER_Y + 20 + (i % 5) * 34 + Math.sin(time / 600 + i) * 3;
+      ctx.beginPath(); ctx.ellipse(wx, wy, 22, 4, 0, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  function drawParticles(dt) {
+    particles = particles.filter(function (p) { return p.life > 0; });
+    particles.forEach(function (p) {
+      p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt;
+      ctx.fillStyle = 'rgba(180,225,255,' + Math.max(p.life / p.max, 0) + ')';
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  var last = 0;
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    var dt = Math.min((ts - last) / 1000 || 0, 0.05); last = ts;
+    var time = ts;
+
+    if (state !== 'title' && state !== 'over') {
+      windTimer -= dt;
+      if (windTimer <= 0) newWind();
+      rings.forEach(function (r) {
+        r.x += r.vx * dt;
+        if (r.x < 300) { r.x = 300; r.vx = Math.abs(r.vx); }
+        if (r.x > 850) { r.x = 850; r.vx = -Math.abs(r.vx); }
+      });
+    }
+    if (messageTimer > 0) { messageTimer -= dt; if (messageTimer <= 0) msgEl.textContent = ''; }
+
+    // Sky, sun, clouds, sea
+    ctx.clearRect(0, 0, W, H);
+    var sky = ctx.createLinearGradient(0, 0, 0, WATER_Y);
+    sky.addColorStop(0, '#7ec8e8'); sky.addColorStop(1, '#2f7aa8');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, WATER_Y);
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(810, 70, 34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.ellipse(200, 70, 46, 16, 0, 0, Math.PI * 2); ctx.ellipse(250, 62, 36, 13, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#123a56'; ctx.fillRect(0, WATER_Y, W, H - WATER_Y);
+    ctx.fillStyle = 'rgba(47,122,168,0.6)'; ctx.fillRect(0, WATER_Y, W, 10);
+
+    drawWater(time);
+    drawShip();
+    drawRings(time);
+    drawAim();
+
+    if (anchor && state === 'flying') {
+      anchor.trail.push({ x: anchor.x, y: anchor.y });
+      if (anchor.trail.length > 40) anchor.trail.shift();
+      anchor.vy += 420 * dt;
+      anchor.vx += wind * 6 * dt;
+      anchor.x += anchor.vx * dt;
+      anchor.y += anchor.vy * dt;
+      if (anchor.y >= WATER_Y + 6 || anchor.x < 0 || anchor.x > W) {
+        anchor.y = Math.min(anchor.y, WATER_Y + 190);
+        var best = 0, bestRing = null;
+        rings.forEach(function (r) {
+          var s = ringScore(r, anchor.x, anchor.y);
+          if (s > best) { best = s; bestRing = r; }
+        });
+        finishThrow(best, bestRing);
+      }
+    }
+    drawAnchor();
+    drawParticles(dt);
+    updateHud();
+  }
+
+  resetRings(); newWind(); updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cymbal Storm — Rhythm Percussion Timing</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0b18; font-family: Arial, Helvetica, sans-serif; color: #fff; }
+  #wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 20%, #2a1a4d 0%, #0b0b18 60%); }
+  canvas { display: block; background: linear-gradient(180deg, #14142e 0%, #0d0d22 70%, #1a1030 100%); border: 2px solid #ffd700; border-radius: 12px; box-shadow: 0 0 40px rgba(255,215,0,.25); touch-action: none; max-width: 96vw; max-height: 96vh; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; background: rgba(5,5,15,.82); z-index: 5; }
+  .overlay.hidden { display: none; }
+  h1 { font-size: clamp(34px, 8vw, 64px); letter-spacing: 3px; color: #ffd700; text-shadow: 0 0 24px rgba(255,215,0,.7), 2px 2px 0 #7a3cff; margin-bottom: 6px; }
+  .tagline { font-size: 15px; color: #c9b8ff; margin-bottom: 18px; letter-spacing: 1px; }
+  .card { background: rgba(255,255,255,.08); border: 1px solid rgba(255,215,0,.4); border-radius: 14px; padding: 18px 22px; max-width: 560px; width: 100%; text-align: left; line-height: 1.55; font-size: 15px; }
+  .card h2 { color: #ffd700; font-size: 18px; margin-bottom: 8px; text-align: center; }
+  .card ul { padding-left: 20px; }
+  .card li { margin: 4px 0; }
+  .card b { color: #ffe98a; }
+  button { margin-top: 20px; padding: 14px 42px; font-size: 20px; font-weight: bold; letter-spacing: 1px; color: #1a1030; background: #ffd700; border: none; border-radius: 999px; cursor: pointer; box-shadow: 0 6px 0 #b8860b, 0 0 24px rgba(255,215,0,.5); }
+  button:active { transform: translateY(4px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #c9b8ff; box-shadow: 0 6px 0 #6a4fd0; }
+  #resultTitle { font-size: clamp(32px, 7vw, 54px); color: #ffd700; margin-bottom: 10px; }
+  #resultText { font-size: 17px; line-height: 1.6; max-width: 520px; }
+  .big { font-size: 22px; font-weight: bold; color: #fff; }
+  .hint { margin-top: 14px; font-size: 13px; color: #aaa; }
+  @media (max-width: 600px) { .card { font-size: 14px; padding: 14px 16px; } button { padding: 12px 32px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="640" height="760"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h1>CYMBAL STORM</h1>
+    <div class="tagline">Rhythm / Percussion Timing &mdash; Feel the beat. Strike the crash.</div>
+    <div class="card">
+      <h2>How to Play</h2>
+      <ul>
+        <li>Cymbal crashes fall down <b>two lanes</b> in sync with a procedural beat.</li>
+        <li>Strike each cymbal <b>exactly as it crosses the glowing hit line</b> near the bottom.</li>
+        <li><b>Perfect</b> (dead centre) = 300 pts &middot; <b>Good</b> = 150 pts &middot; <b>Early / Late</b> = 50 pts.</li>
+        <li>Consecutive hits build your <b>combo</b> &mdash; every 10 combo adds a bonus. A miss breaks the combo and costs a life.</li>
+        <li><b>Win:</b> survive the whole song and reach the final crash. <b>Game Over:</b> lose all 5 lives.</li>
+        <li><b>Controls:</b> <b>D</b> or <b>J</b> = left lane, <b>F</b> or <b>K</b> = right lane. Or <b>click / tap</b> the left or right lane. Space also restarts after a game ends.</li>
+      </ul>
+    </div>
+    <button id="startBtn" type="button">START THE STORM</button>
+    <div class="hint">Audio starts only after you press Start. Headphones recommended. No downloads needed.</div>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div id="resultTitle">SONG COMPLETE!</div>
+    <div id="resultText"></div>
+    <button id="restartBtn" type="button">PLAY AGAIN</button>
+    <div class="hint">Press Space or tap Play Again for an instant restart.</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var resultTitle = document.getElementById('resultTitle');
+  var resultText = document.getElementById('resultText');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+
+  var W = canvas.width, H = canvas.height;
+  var HIT_Y = 640;
+  var LANE_X = [200, 440];
+  var LANE_W = 150;
+  var NOTE_SPEED = 340; // pixels per second
+  var TRAVEL_TIME = (HIT_Y - (-60)) / NOTE_SPEED;
+  var PERFECT_MS = 70, GOOD_MS = 130, OK_MS = 210;
+  var MAX_LIVES = 5;
+  var BPM = 128;
+  var BEAT = 60 / BPM;
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, combo = 0, bestCombo = 0, lives = MAX_LIVES;
+  var notes = [], particles = [], popups = [], flashes = [];
+  var songTime = 0, lastTime = 0, spawnIndex = 0, noteId = 0;
+  var hits = 0, perfects = 0, goods = 0, oks = 0, misses = 0;
+  var beatPulse = 0, lastBeat = -1;
+  var audioCtx = null, masterGain = null, musicOn = false, nextBeatTime = 0;
+
+  // ---- Song chart: [beat offset, lane] — a driving 128 BPM pattern ----
+  // Bars of 4 beats; pattern mixes singles, alternating lanes, and doubles.
+  var chart = [];
+  (function buildChart() {
+    var bars = [
+      [0,0],[1,1],[2,0],[3,1],
+      [0,0],[1,0],[2,1],[3,1],
+      [0,0],[1,1],[2,1],[3,0],
+      [0,0],[0,1],[2,0],[3,1],
+      [0,0],[1,1],[2,0],[2,1],[3,0],
+      [0,1],[1,0],[2,1],[3,1],
+      [0,0],[1,0],[1,1],[2,1],[3,0],
+      [0,0],[1,1],[2,0],[3,0],[3,1],
+      [0,1],[1,1],[2,0],[3,1],
+      [0,0],[0,1],[1,0],[2,1],[3,1],[3,0],
+      [0,0],[1,1],[2,1],[3,0],
+      [0,0],[1,0],[2,0],[2,1],[3,1],
+      [0,1],[1,0],[2,1],[3,0],[3,1],
+      [0,0],[1,1],[2,0],[3,1],
+      [0,0],[0,1],[1,1],[2,0],[3,1]
+    ];
+    // bars array is grouped in fours per bar above for readability; flatten with bar index
+    var flat = [];
+    // Rebuild deterministically: each group of 4 entries is one bar.
+    for (var b = 0; b < 15; b++) {
+      for (var i = 0; i < 4; i++) {
+        var e = bars[b * 4 + i];
+        // +5 beat lead-in so the first notes fall from the top instead of
+        // spawning already on the hit line when the song starts.
+        if (e) flat.push([b * 4 + e[0] + 5, e[1]]);
+      }
+    }
+    // Add a closing flourish: doubles on the final two beats
+    flat.push([65, 0]); flat.push([65, 1]); flat.push([66, 0]); flat.push([66, 1]);
+    flat.sort(function (a, b) { return a[0] - b[0]; });
+    chart = flat;
+  })();
+  var SONG_END_BEAT = 68;
+  var TARGET_SCORE = 5000;
+
+  // ---- Procedural audio: created only after user interaction ----
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.55;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function noiseBuffer(seconds) {
+    var len = Math.floor(audioCtx.sampleRate * seconds);
+    var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    var data = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    return buf;
+  }
+  function playCymbal(volume) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var src = audioCtx.createBufferSource();
+    src.buffer = noiseBuffer(0.9);
+    var hp = audioCtx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 5200;
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(volume, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.85);
+    src.connect(hp); hp.connect(g); g.connect(masterGain);
+    src.start(t);
+  }
+  function playKick() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, t);
+    osc.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+    g.gain.setValueAtTime(0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    osc.connect(g); g.connect(masterGain);
+    osc.start(t); osc.stop(t + 0.25);
+  }
+  function playHat() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var src = audioCtx.createBufferSource();
+    src.buffer = noiseBuffer(0.08);
+    var hp = audioCtx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 7000;
+    var g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    src.connect(hp); hp.connect(g); g.connect(masterGain);
+    src.start(t);
+  }
+  function playMiss() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, t);
+    osc.frequency.exponentialRampToValueAtTime(110, t + 0.25);
+    g.gain.setValueAtTime(0.18, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    osc.connect(g); g.connect(masterGain);
+    osc.start(t); osc.stop(t + 0.3);
+  }
+  function playWin() {
+    if (!audioCtx) return;
+    [523, 659, 784, 1047].forEach(function (f, i) {
+      var t = audioCtx.currentTime + i * 0.14;
+      var osc = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      osc.type = 'triangle'; osc.frequency.value = f;
+      g.gain.setValueAtTime(0.25, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      osc.connect(g); g.connect(masterGain);
+      osc.start(t); osc.stop(t + 0.42);
+    });
+  }
+
+  function resetGame() {
+    score = 0; combo = 0; bestCombo = 0; lives = MAX_LIVES;
+    notes = []; particles = []; popups = []; flashes = [];
+    songTime = 0; spawnIndex = 0; noteId = 0;
+    hits = 0; perfects = 0; goods = 0; oks = 0; misses = 0;
+    beatPulse = 0; lastBeat = -1; musicOn = false;
+  }
+
+  function startGame() {
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    musicOn = true;
+    nextBeatTime = 0;
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function laneFromX(x) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (x - rect.left) * (canvas.width / rect.width);
+    return cx < W / 2 ? 0 : 1;
+  }
+
+  function strike(lane) {
+    if (state !== 'playing') return;
+    // Find the closest unresolved note in this lane within the OK window
+    var best = null, bestAbs = Infinity;
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (n.lane !== lane || n.judged) continue;
+      var diffMs = (songTime - n.hitTime) * 1000;
+      var a = Math.abs(diffMs);
+      if (a < bestAbs) { bestAbs = a; best = n; }
+    }
+    if (!best || bestAbs > OK_MS) {
+      // Empty strike: small combo penalty-free whiff, still makes a cymbal sound
+      playCymbal(0.12);
+      flashes.push({ lane: lane, t: 0, empty: true });
+      return;
+    }
+    best.judged = true;
+    var diffMs = (songTime - best.hitTime) * 1000;
+    var label, pts;
+    if (bestAbs <= PERFECT_MS) { label = 'PERFECT!'; pts = 300; perfects++; }
+    else if (bestAbs <= GOOD_MS) { label = 'GOOD'; pts = 150; goods++; }
+    else { label = diffMs < 0 ? 'EARLY' : 'LATE'; pts = 50; oks++; }
+    combo++; hits++;
+    if (combo > bestCombo) bestCombo = combo;
+    if (combo > 0 && combo % 10 === 0) pts += 200;
+    score += pts;
+    playCymbal(0.45);
+    popups.push({ x: LANE_X[lane], y: HIT_Y - 70, text: label + ' +' + pts, t: 0, perfect: label === 'PERFECT!' });
+    flashes.push({ lane: lane, t: 0, empty: false });
+    burst(LANE_X[lane], HIT_Y, label === 'PERFECT!' ? '#ffd700' : '#c9b8ff', 18);
+  }
+
+  function burst(x, y, color, count) {
+    for (var i = 0; i < count; i++) {
+      var a = Math.random() * Math.PI * 2;
+      var sp = 80 + Math.random() * 220;
+      particles.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, life: 0.6 + Math.random() * 0.4, t: 0, color: color, size: 2 + Math.random() * 4 });
+    }
+  }
+
+  function missNote(n) {
+    n.judged = true;
+    misses++;
+    combo = 0;
+    lives--;
+    playMiss();
+    popups.push({ x: LANE_X[n.lane], y: HIT_Y - 70, text: 'MISS', t: 0, perfect: false });
+    if (lives <= 0) endGame(false);
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    musicOn = false;
+    if (won) playWin();
+    endScreen.classList.remove('hidden');
+    if (won) {
+      resultTitle.textContent = 'SONG COMPLETE!';
+      resultTitle.style.color = '#ffd700';
+    } else {
+      resultTitle.textContent = 'GAME OVER';
+      resultTitle.style.color = '#ff6b6b';
+    }
+    resultText.innerHTML =
+      '<span class="big">Score: ' + score + '</span><br>' +
+      'Hits: ' + hits + ' &middot; Perfect: ' + perfects + ' &middot; Good: ' + goods + ' &middot; Early/Late: ' + oks + '<br>' +
+      'Misses: ' + misses + ' &middot; Best combo: ' + bestCombo + ' &middot; Lives left: ' + Math.max(0, lives) + '<br>' +
+      (won ? 'You rode the whole storm to the final crash. Encore!' : 'The storm got away from you. Tap Play Again and keep time!');
+  }
+
+  function update(dt) {
+    songTime += dt;
+    var beat = Math.floor(songTime / BEAT);
+    if (beat !== lastBeat) {
+      lastBeat = beat;
+      beatPulse = 1;
+      if (musicOn) {
+        if (beat % 2 === 0) playKick(); else playHat();
+      }
+    }
+    beatPulse = Math.max(0, beatPulse - dt * 3);
+
+    // Spawn notes so they arrive on their beat
+    while (spawnIndex < chart.length && chart[spawnIndex][0] * BEAT - TRAVEL_TIME <= songTime) {
+      var c = chart[spawnIndex];
+      notes.push({ id: noteId++, lane: c[1], hitTime: c[0] * BEAT, judged: false });
+      spawnIndex++;
+    }
+    // Miss detection
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (!n.judged && songTime - n.hitTime > OK_MS / 1000) missNote(n);
+    }
+    notes = notes.filter(function (n) { return !n.judged || songTime - n.hitTime < 0.3; });
+    // Remove fully resolved notes shortly after judgement for visual fade
+    notes = notes.filter(function (n) { return !(n.judged && songTime - n.hitTime > 0.25); });
+
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var p = particles[j];
+      p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 320 * dt;
+      if (p.t >= p.life) particles.splice(j, 1);
+    }
+    for (var k = popups.length - 1; k >= 0; k--) {
+      popups[k].t += dt;
+      if (popups[k].t > 0.9) popups.splice(k, 1);
+    }
+    for (var f = flashes.length - 1; f >= 0; f--) {
+      flashes[f].t += dt;
+      if (flashes[f].t > 0.25) flashes.splice(f, 1);
+    }
+
+    // Win: every chart note spawned and resolved, song time past the end
+    if (state === 'playing' && spawnIndex >= chart.length && notes.length === 0 && songTime > SONG_END_BEAT * BEAT + 0.5) {
+      endGame(true);
+    }
+  }
+
+  function drawCymbal(x, y, r, glow) {
+    ctx.save();
+    if (glow) { ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 28; }
+    var grad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+    grad.addColorStop(0, '#fff7cc');
+    grad.addColorStop(0.4, '#ffd700');
+    grad.addColorStop(0.8, '#c99700');
+    grad.addColorStop(1, '#7a5a00');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, r * 0.62, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, r * 0.22, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(x - r * 0.35, y - r * 0.35, r * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Lanes
+    for (var l = 0; l < 2; l++) {
+      var x = LANE_X[l];
+      ctx.fillStyle = 'rgba(255,255,255,.05)';
+      ctx.fillRect(x - LANE_W / 2, 60, LANE_W, H - 60);
+      ctx.strokeStyle = 'rgba(201,184,255,.35)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - LANE_W / 2, 60, LANE_W, H - 60);
+      ctx.fillStyle = '#c9b8ff';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(l === 0 ? 'LEFT  [D / J]' : 'RIGHT  [F / K]', x, 88);
+    }
+    // Beat pulse rings on hit line
+    ctx.save();
+    ctx.globalAlpha = 0.25 + beatPulse * 0.5;
+    ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 3 + beatPulse * 4;
+    ctx.beginPath(); ctx.moveTo(60, HIT_Y); ctx.lineTo(W - 60, HIT_Y); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('HIT LINE', W / 2, HIT_Y + 34);
+
+    // Notes
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      var y = -60 + (songTime - (n.hitTime - TRAVEL_TIME)) * NOTE_SPEED;
+      var dist = Math.abs(y - HIT_Y);
+      var near = dist < 90;
+      drawCymbal(LANE_X[n.lane], y, near ? 42 : 36, near);
+      if (near) {
+        ctx.fillStyle = 'rgba(255,215,0,.25)';
+        ctx.beginPath(); ctx.arc(LANE_X[n.lane], y, 52, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    // Lane flashes
+    for (var f = 0; f < flashes.length; f++) {
+      var fl = flashes[f];
+      ctx.globalAlpha = 1 - fl.t / 0.25;
+      ctx.fillStyle = fl.empty ? 'rgba(255,255,255,.15)' : 'rgba(255,215,0,.35)';
+      ctx.fillRect(LANE_X[fl.lane] - LANE_W / 2, HIT_Y - 60, LANE_W, 120);
+      ctx.globalAlpha = 1;
+    }
+    // Hit pads
+    for (var p = 0; p < 2; p++) {
+      ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(LANE_X[p], HIT_Y, 48, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Particles
+    for (var j = 0; j < particles.length; j++) {
+      var pt = particles[j];
+      ctx.globalAlpha = 1 - pt.t / pt.life;
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Popups
+    for (var k = 0; k < popups.length; k++) {
+      var pp = popups[k];
+      ctx.globalAlpha = 1 - pp.t / 0.9;
+      ctx.fillStyle = pp.perfect ? '#ffd700' : '#fff';
+      ctx.font = 'bold 24px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(pp.text, pp.x, pp.y - pp.t * 40);
+    }
+    ctx.globalAlpha = 1;
+
+    // HUD
+    ctx.fillStyle = 'rgba(0,0,0,.55)';
+    ctx.fillRect(0, 0, W, 54);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 19px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('SCORE ' + score, 18, 34);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = combo >= 10 ? '#ffd700' : '#fff';
+    ctx.fillText('COMBO x' + combo, W / 2, 34);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = lives <= 2 ? '#ff6b6b' : '#fff';
+    var hearts = '';
+    for (var h = 0; h < lives; h++) hearts += '♥';
+    ctx.fillText('LIVES ' + hearts + '  (' + lives + ')', W - 18, 34);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#c9b8ff'; ctx.font = '14px Arial';
+    var remaining = Math.max(0, chart.length - hits - misses);
+    ctx.fillText('Song progress: ' + (chart.length - remaining) + ' / ' + chart.length + ' crashes  •  Target: ' + TARGET_SCORE + ' pts', W / 2, H - 18);
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    draw();
+    if (state === 'playing') requestAnimationFrame(loop);
+    else draw();
+  }
+
+  // ---- Controls: keyboard, mouse, touch ----
+  document.addEventListener('keydown', function (e) {
+    if (state === 'playing') {
+      if (e.key === 'd' || e.key === 'D' || e.key === 'j' || e.key === 'J') strike(0);
+      else if (e.key === 'f' || e.key === 'F' || e.key === 'k' || e.key === 'K') strike(1);
+    } else if ((state === 'won' || state === 'over') && (e.key === ' ' || e.key === 'Enter')) {
+      e.preventDefault();
+      startGame();
+    }
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    if (state === 'playing') strike(laneFromX(e.clientX));
+  });
+  canvas.addEventListener('click', function (e) {
+    if (state === 'playing') { /* mousedown already handled the strike */ }
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state === 'playing') {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        strike(laneFromX(e.changedTouches[i].clientX));
+      }
+    }
+  }, { passive: false });
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+
+  // Idle attract screen behind the title overlay
+  draw();
+})();
+</script>
+</body>
+</html>

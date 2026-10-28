@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Span Solver — Bridge Logic Puzzle</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #0e1a2b; color: #eaf2ff;
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center; padding: 14px;
+  }
+  h1 { margin: 6px 0 2px; font-size: 30px; letter-spacing: 1px; text-align: center; }
+  .tag { color: #9fd8ff; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #hud {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px;
+  }
+  #hud span, #hud button {
+    background: #162f4d; border: 1px solid #3a5f86; color: #eaf2ff;
+    border-radius: 8px; padding: 7px 11px; font-size: 14px;
+  }
+  #hud button { cursor: pointer; background: #1d4a73; font-weight: bold; }
+  #hud button:hover { background: #2a6396; }
+  #hud button.danger { background: #7a2730; border-color: #a34a55; }
+  #wrap { position: relative; width: min(720px, 96vw); }
+  canvas {
+    width: 100%; height: auto; display: block; background: #12263f;
+    border: 2px solid #3a5f86; border-radius: 12px; touch-action: none;
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(8, 18, 32, 0.92); border-radius: 12px; padding: 22px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; margin: 0 0 8px; color: #ffd166; }
+  .overlay p { max-width: 520px; line-height: 1.55; margin: 6px 0; font-size: 15px; }
+  .overlay ul { text-align: left; max-width: 540px; line-height: 1.6; font-size: 14px; }
+  .big {
+    margin-top: 14px; padding: 12px 26px; font-size: 18px; font-weight: bold;
+    border: 0; border-radius: 10px; background: #ffd166; color: #1a2a3a; cursor: pointer;
+  }
+  .big:hover { background: #ffe08a; }
+  .small { margin-top: 10px; padding: 9px 18px; font-size: 14px; cursor: pointer;
+    border-radius: 8px; border: 1px solid #3a5f86; background: #1d4a73; color: #fff; }
+  #status { min-height: 22px; margin-top: 8px; font-size: 15px; color: #ffd166; text-align: center; }
+  #legend { font-size: 13px; color: #b9d2ea; text-align: center; max-width: 700px; line-height: 1.5; }
+  kbd { background: #233a55; border: 1px solid #4a6d94; border-radius: 4px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<h1>Span Solver</h1>
+<div class="tag">Puzzle / Bridge Logic &mdash; a Hashi-style island network puzzle</div>
+
+<div id="hud" aria-label="Game status">
+  <span>Bridges: <b id="bridgeCount">0</b></span>
+  <span>Islands done: <b id="islandCount">0 / 10</b></span>
+  <span>Moves: <b id="moveCount">0</b></span>
+  <span id="netStatus">Network: not connected</span>
+  <button id="undoBtn" type="button">Undo</button>
+  <button id="clearBtn" type="button">Clear Bridges</button>
+  <button id="hintBtn" type="button">Hint</button>
+  <button id="giveUpBtn" type="button" class="danger">Give Up</button>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="720" height="500"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Span Solver</h2>
+    <p><b>Connect every island with bridges.</b> The number on an island is exactly how many bridges must touch it. Build one single connected network &mdash; no crossings, no loose ends &mdash; to win.</p>
+    <ul>
+      <li><b>How to play:</b> Click or tap an island, then click or tap a second island in the same row or column to add a bridge. Click the same pair again to cycle 1 bridge &rarr; 2 bridges &rarr; no bridge. Drag from one island to another works too.</li>
+      <li><b>Rules:</b> At most 2 bridges between a pair. A bridge may not pass through another island and may not cross another bridge. Green = island complete, red = too many bridges, white = still needs bridges.</li>
+      <li><b>Controls:</b> Mouse / touch click or drag between islands. <kbd>&uarr;</kbd> <kbd>&darr;</kbd> <kbd>&larr;</kbd> <kbd>&rarr;</kbd> select an island, <kbd>Enter</kbd> / <kbd>Space</kbd> adds a bridge in the last arrow direction, <kbd>U</kbd> undo, <kbd>R</kbd> restart, <kbd>G</kbd> give up.</li>
+      <li><b>Win:</b> Every island shows its exact number and all islands are joined into one network. <b>Game Over:</b> Press Give Up (or run out of ideas) and the puzzle ends &mdash; then restart instantly.</li>
+    </ul>
+    <button id="startBtn" class="big" type="button">Start Puzzle</button>
+    <p>One hand-crafted puzzle. No timers, no luck &mdash; pure logic.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="endDetail"></p>
+    <button id="restartBtn" class="big" type="button">Restart Puzzle</button>
+    <button id="againBtn" class="small" type="button">Play Again</button>
+  </div>
+</div>
+
+<div id="status">Press Start, then connect the islands.</div>
+<p id="legend">Tip: start with the 4s in the middle &mdash; they need the most bridges. A 1 on a corner can only reach one neighbour. If a bridge would cross another, it is blocked.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endDetail = document.getElementById('endDetail');
+  var statusEl = document.getElementById('status');
+  var bridgeEl = document.getElementById('bridgeCount');
+  var islandEl = document.getElementById('islandCount');
+  var moveEl = document.getElementById('moveCount');
+  var netEl = document.getElementById('netStatus');
+
+  // Island layout on a grid: x = column, y = row. Number = required bridges.
+  // Neighbour-only graph, hand-designed so a full solution exists and is connected.
+  var islands = [
+    { id: 0, gx: 0, gy: 0, need: 2 },
+    { id: 1, gx: 2, gy: 0, need: 3 },
+    { id: 2, gx: 4, gy: 0, need: 3 },
+    { id: 3, gx: 6, gy: 0, need: 2 },
+    { id: 4, gx: 0, gy: 2, need: 2 },
+    { id: 5, gx: 2, gy: 2, need: 4 },
+    { id: 6, gx: 4, gy: 2, need: 4 },
+    { id: 7, gx: 6, gy: 2, need: 2 },
+    { id: 8, gx: 2, gy: 4, need: 2 },
+    { id: 9, gx: 4, gy: 4, need: 2 }
+  ];
+
+  function px(gx) { return 80 + gx * 90; }
+  function py(gy) { return 80 + gy * 85; }
+  function key(a, b) { return a < b ? a + '-' + b : b + '-' + a; }
+
+  var bridges = {};   // "a-b" -> 0, 1 or 2
+  var moves = 0;
+  var started = false;
+  var finished = false;
+  var selected = null;      // island id selected by click / keyboard
+  var pending = null;       // first island of a keyboard pair, if any
+  var lastDir = 'right';    // last arrow direction, used by Enter / Space
+  var keyboardIndex = 0;
+  var undoStack = [];
+  var dragFrom = null;
+  var pulse = 0;
+
+  // ---- Audio: procedural Web Audio, created only after user interaction ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is decorative */ }
+  }
+  function playPlace() { tone(520, 0.12, 'triangle', 0.14); }
+  function playRemove() { tone(260, 0.12, 'triangle', 0.10); }
+  function playError() { tone(140, 0.22, 'sawtooth', 0.10); }
+  function playWin() {
+    [523, 659, 784, 1047].forEach(function (f, i) {
+      setTimeout(function () { tone(f, 0.35, 'triangle', 0.14); }, i * 130);
+    });
+  }
+  function playLose() {
+    [330, 262, 196, 131].forEach(function (f, i) {
+      setTimeout(function () { tone(f, 0.3, 'sawtooth', 0.08); }, i * 140);
+    });
+  }
+
+  // ---- Puzzle logic ----
+  function degree(id) {
+    var total = 0;
+    Object.keys(bridges).forEach(function (k) {
+      var parts = k.split('-');
+      if (Number(parts[0]) === id || Number(parts[1]) === id) total += bridges[k];
+    });
+    return total;
+  }
+  function totalBridges() {
+    var total = 0;
+    Object.keys(bridges).forEach(function (k) { total += bridges[k]; });
+    return total;
+  }
+  function islandBetween(a, b) {
+    var A = islands[a], B = islands[b];
+    for (var i = 0; i < islands.length; i++) {
+      var c = islands[i];
+      if (c.id === a || c.id === b) continue;
+      if (A.gy === B.gy && c.gy === A.gy && c.gx > Math.min(A.gx, B.gx) && c.gx < Math.max(A.gx, B.gx)) return true;
+      if (A.gx === B.gx && c.gx === A.gx && c.gy > Math.min(A.gy, B.gy) && c.gy < Math.max(A.gy, B.gy)) return true;
+    }
+    return false;
+  }
+  function segmentsCross(a, b, c, d) {
+    // Proper crossing of two axis-aligned segments that share no island.
+    if (a === c || a === d || b === c || b === d) return false;
+    var A = islands[a], B = islands[b], C = islands[c], D = islands[d];
+    var horiz1 = A.gy === B.gy, horiz2 = C.gy === D.gy;
+    if (horiz1 === horiz2) return false;
+    var h = horiz1 ? [A, B] : [C, D];
+    var v = horiz1 ? [C, D] : [A, B];
+    var hy = h[0].gy;
+    var hx1 = Math.min(h[0].gx, h[1].gx), hx2 = Math.max(h[0].gx, h[1].gx);
+    var vx = v[0].gx;
+    var vy1 = Math.min(v[0].gy, v[1].gy), vy2 = Math.max(v[0].gy, v[1].gy);
+    return vx > hx1 && vx < hx2 && hy > vy1 && hy < vy2;
+  }
+  function wouldCross(a, b) {
+    var keys = Object.keys(bridges);
+    for (var i = 0; i < keys.length; i++) {
+      if (!bridges[keys[i]]) continue;
+      var p = keys[i].split('-');
+      if (segmentsCross(a, b, Number(p[0]), Number(p[1]))) return true;
+    }
+    return false;
+  }
+  function canConnect(a, b) {
+    if (a === b) return false;
+    var A = islands[a], B = islands[b];
+    if (A.gx !== B.gx && A.gy !== B.gy) return false;
+    if (islandBetween(a, b)) return false;
+    if (wouldCross(a, b)) return false;
+    return true;
+  }
+  function snapshot() { undoStack.push(JSON.stringify(bridges)); if (undoStack.length > 200) undoStack.shift(); }
+
+  function tryBridge(a, b) {
+    if (!started || finished) return;
+    if (!canConnect(a, b)) {
+      statusEl.textContent = 'That bridge is not allowed: islands must share a row or column, with nothing in between and no crossings.';
+      playError();
+      return;
+    }
+    var k = key(a, b);
+    snapshot();
+    var old = bridges[k] || 0;
+    var next = (old + 1) % 3; // 0 -> 1 -> 2 -> 0, so clicking again removes bridges
+    if (next === 0) delete bridges[k]; else bridges[k] = next;
+    moves++;
+    if (next > old) playPlace(); else playRemove();
+    if (degree(a) > islands[a].need || degree(b) > islands[b].need) {
+      statusEl.textContent = 'Careful: that island now has more bridges than its number allows.';
+    } else {
+      statusEl.textContent = 'Bridge updated. Keep going — match every number.';
+    }
+    updateHud();
+    checkEnd();
+  }
+
+  function isConnected() {
+    var seen = {}, stack = [0];
+    seen[0] = true;
+    while (stack.length) {
+      var cur = stack.pop();
+      Object.keys(bridges).forEach(function (k) {
+        if (!bridges[k]) return;
+        var p = k.split('-').map(Number);
+        var other = p[0] === cur ? p[1] : (p[1] === cur ? p[0] : null);
+        if (other !== null && !seen[other]) { seen[other] = true; stack.push(other); }
+      });
+    }
+    return Object.keys(seen).length === islands.length;
+  }
+  function satisfiedCount() {
+    var n = 0;
+    islands.forEach(function (is) { if (degree(is.id) === is.need) n++; });
+    return n;
+  }
+  function updateHud() {
+    bridgeEl.textContent = totalBridges();
+    islandEl.textContent = satisfiedCount() + ' / ' + islands.length;
+    moveEl.textContent = moves;
+    netEl.textContent = isConnected() ? 'Network: connected' : 'Network: not connected';
+  }
+  function checkEnd() {
+    if (finished) return;
+    if (satisfiedCount() === islands.length) {
+      if (isConnected()) {
+        finished = true;
+        endTitle.textContent = 'You Win!';
+        endText.textContent = 'Every island has exactly its number of bridges, and all ten islands form one connected network.';
+        endDetail.textContent = 'Bridges: ' + totalBridges() + '  |  Moves: ' + moves;
+        endScreen.classList.remove('hidden');
+        statusEl.textContent = 'Puzzle solved! Brilliant bridging.';
+        playWin();
+      } else {
+        statusEl.textContent = 'All numbers match, but the network is split — rearrange bridges so everything joins into one network.';
+      }
+    }
+  }
+  function gameOver(reason) {
+    if (!started || finished) return;
+    finished = true;
+    endTitle.textContent = 'Game Over';
+    endText.textContent = reason;
+    endDetail.textContent = 'Islands completed: ' + satisfiedCount() + ' / ' + islands.length + '  |  Bridges: ' + totalBridges() + '  |  Moves: ' + moves;
+    endScreen.classList.remove('hidden');
+    statusEl.textContent = 'Game over. Press Restart to try again.';
+    playLose();
+  }
+  function restart() {
+    bridges = {}; moves = 0; selected = null; pending = null;
+    undoStack = []; finished = false; keyboardIndex = 0;
+    endScreen.classList.add('hidden');
+    if (!started) { titleScreen.classList.remove('hidden'); }
+    updateHud();
+    statusEl.textContent = started ? 'Fresh puzzle — connect the islands.' : 'Press Start, then connect the islands.';
+  }
+  function startGame() {
+    ensureAudio();
+    started = true; finished = false;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    restart();
+    started = true;
+    statusEl.textContent = 'Go! Click an island, then another in the same row or column.';
+    tone(440, 0.15, 'triangle', 0.12);
+  }
+  function hint() {
+    if (!started || finished) return;
+    ensureAudio();
+    // Find an unsatisfied island with an aligned neighbour that still needs bridges.
+    for (var i = 0; i < islands.length; i++) {
+      var is = islands[i];
+      if (degree(is.id) >= is.need) continue;
+      for (var j = 0; j < islands.length; j++) {
+        if (i === j) continue;
+        if (canConnect(i, j) && degree(j) < islands[j].need) {
+          selected = i;
+          statusEl.textContent = 'Hint: island ' + is.need + ' (top-left area) still needs bridges — try its highlighted neighbour in the same row or column.';
+          tone(660, 0.15, 'sine', 0.10);
+          updateHud();
+          return;
+        }
+      }
+    }
+    statusEl.textContent = 'No obvious hint: every island is at or over its number. Try removing a bridge (click the pair again).';
+  }
+  function undo() {
+    if (!undoStack.length || finished) return;
+    bridges = JSON.parse(undoStack.pop());
+    moves++;
+    updateHud();
+    statusEl.textContent = 'Undone. Moves: ' + moves + '.';
+  }
+
+  // ---- Input: mouse / touch / keyboard ----
+  function islandAt(cx, cy) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (cx - rect.left) * (canvas.width / rect.width);
+    var y = (cy - rect.top) * (canvas.height / rect.height);
+    for (var i = 0; i < islands.length; i++) {
+      var dx = x - px(islands[i].gx), dy = y - py(islands[i].gy);
+      if (dx * dx + dy * dy <= 34 * 34) return islands[i].id;
+    }
+    return null;
+  }
+  function pickIsland(id) {
+    if (!started || finished) return;
+    ensureAudio();
+    if (selected === null) { selected = id; statusEl.textContent = 'Island selected — now pick a second island in the same row or column.'; return; }
+    if (selected === id) { selected = null; return; }
+    var first = selected;
+    selected = null;
+    tryBridge(first, id);
+  }
+  canvas.addEventListener('mousedown', function (e) {
+    var id = islandAt(e.clientX, e.clientY);
+    if (id !== null) { dragFrom = id; selected = id; }
+  });
+  canvas.addEventListener('mouseup', function (e) {
+    if (dragFrom === null) return;
+    var id = islandAt(e.clientX, e.clientY);
+    var from = dragFrom; dragFrom = null;
+    if (id !== null && id !== from) { selected = null; tryBridge(from, id); }
+    else if (id !== null) { selected = id; }
+    else { selected = null; }
+  });
+  canvas.addEventListener('click', function (e) {
+    // Click without a drag also selects; mouseup already handled a drag pair.
+    if (dragFrom !== null) return;
+    var id = islandAt(e.clientX, e.clientY);
+    if (id === null) { selected = null; }
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (!e.touches.length) return;
+    var t = e.touches[0];
+    var id = islandAt(t.clientX, t.clientY);
+    if (id !== null) { dragFrom = id; selected = id; }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) {
+    e.preventDefault();
+    if (dragFrom === null) return;
+    var t = e.changedTouches[0];
+    var id = islandAt(t.clientX, t.clientY);
+    var from = dragFrom; dragFrom = null;
+    if (id !== null && id !== from) { selected = null; tryBridge(from, id); }
+    else if (id !== null) { selected = id; }
+    else { selected = null; }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (!started) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startGame(); }
+      return;
+    }
+    if (finished) {
+      if (e.key === 'r' || e.key === 'R' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); started = true; finished = false; restart(); started = true;
+        endScreen.classList.add('hidden');
+        statusEl.textContent = 'Fresh puzzle — connect the islands.';
+      }
+      return;
+    }
+    var order = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      var dir = e.key.replace('Arrow', '').toLowerCase();
+      lastDir = dir;
+      var cur = islands[keyboardIndex];
+      var best = null, bestDist = 1e9;
+      islands.forEach(function (is) {
+        if (is.id === cur.id) return;
+        var ok = (dir === 'left' && is.gy === cur.gy && is.gx < cur.gx) ||
+                 (dir === 'right' && is.gy === cur.gy && is.gx > cur.gx) ||
+                 (dir === 'up' && is.gx === cur.gx && is.gy < cur.gy) ||
+                 (dir === 'down' && is.gx === cur.gx && is.gy > cur.gy);
+        if (!ok) return;
+        var d = Math.abs(is.gx - cur.gx) + Math.abs(is.gy - cur.gy);
+        if (d < bestDist) { bestDist = d; best = is; }
+      });
+      if (best) { keyboardIndex = best.id; selected = best.id; }
+      statusEl.textContent = 'Selected island ' + islands[keyboardIndex].need + '. Press Enter or Space to bridge in the ' + lastDir + ' direction.';
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      ensureAudio();
+      var curIs = islands[keyboardIndex];
+      var target = null, td = 1e9;
+      islands.forEach(function (is) {
+        if (is.id === curIs.id) return;
+        var ok = (lastDir === 'left' && is.gy === curIs.gy && is.gx < curIs.gx) ||
+                 (lastDir === 'right' && is.gy === curIs.gy && is.gx > curIs.gx) ||
+                 (lastDir === 'up' && is.gx === curIs.gx && is.gy < curIs.gy) ||
+                 (lastDir === 'down' && is.gx === curIs.gx && is.gy > curIs.gy);
+        if (!ok) return;
+        var d = Math.abs(is.gx - curIs.gx) + Math.abs(is.gy - curIs.gy);
+        if (d < td) { td = d; target = is; }
+      });
+      if (target) { tryBridge(curIs.id, target.id); }
+      else { statusEl.textContent = 'No island in the ' + lastDir + ' direction. Move with an arrow key first.'; playError(); }
+    } else if (e.key === 'r' || e.key === 'R') {
+      restart();
+    } else if (e.key === 'u' || e.key === 'U') {
+      undo();
+    } else if (e.key === 'g' || e.key === 'G') {
+      gameOver('You gave up on this puzzle. Every island can still be solved — restart and try a different bridge order.');
+    }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', function () {
+    ensureAudio(); started = true; finished = false; restart(); started = true;
+    statusEl.textContent = 'Fresh puzzle — connect the islands.';
+  });
+  document.getElementById('againBtn').addEventListener('click', function () {
+    ensureAudio(); started = true; finished = false; restart(); started = true;
+    statusEl.textContent = 'Fresh puzzle — connect the islands.';
+  });
+  document.getElementById('undoBtn').addEventListener('click', function () { ensureAudio(); undo(); });
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (!started || finished) return;
+    ensureAudio(); snapshot(); bridges = {}; moves++; updateHud();
+    statusEl.textContent = 'All bridges cleared.';
+  });
+  document.getElementById('hintBtn').addEventListener('click', hint);
+  document.getElementById('giveUpBtn').addEventListener('click', function () {
+    ensureAudio();
+    gameOver('You gave up on this puzzle. Restart and try a different bridge order — start with the 4s in the middle.');
+  });
+
+  // ---- Rendering with a requestAnimationFrame loop ----
+  function drawBridge(a, b, count) {
+    var A = islands[a], B = islands[b];
+    var x1 = px(A.gx), y1 = py(A.gy), x2 = px(B.gx), y2 = py(B.gy);
+    ctx.strokeStyle = '#7fd4ff'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    if (count === 1) {
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    } else {
+      var off = 7;
+      if (y1 === y2) {
+        ctx.beginPath(); ctx.moveTo(x1, y1 - off); ctx.lineTo(x2, y2 - off); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x1, y1 + off); ctx.lineTo(x2, y2 + off); ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.moveTo(x1 - off, y1); ctx.lineTo(x2 - off, y2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x1 + off, y1); ctx.lineTo(x2 + off, y2); ctx.stroke();
+      }
+    }
+  }
+  function draw() {
+    pulse += 0.03;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // faint grid dots
+    ctx.fillStyle = '#1c3a5c';
+    for (var gx = 0; gx <= 6; gx += 1) {
+      for (var gy = 0; gy <= 4; gy += 1) {
+        ctx.beginPath(); ctx.arc(px(gx), py(gy), 2, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    Object.keys(bridges).forEach(function (k) {
+      if (!bridges[k]) return;
+      var p = k.split('-').map(Number);
+      drawBridge(p[0], p[1], bridges[k]);
+    });
+    islands.forEach(function (is) {
+      var x = px(is.gx), y = py(is.gy);
+      var deg = degree(is.id);
+      var fill = '#eaf2ff';
+      if (deg === is.need) fill = '#4ade80';
+      else if (deg > is.need) fill = '#f87171';
+      ctx.beginPath(); ctx.arc(x, y, 28, 0, Math.PI * 2);
+      ctx.fillStyle = '#0e1a2b'; ctx.fill();
+      ctx.lineWidth = selected === is.id ? 4 + Math.sin(pulse * 2) * 1.2 : 3;
+      ctx.strokeStyle = selected === is.id ? '#ffd166' : '#7fd4ff';
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, 23, 0, Math.PI * 2);
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.fillStyle = '#0e1a2b';
+      ctx.font = 'bold 22px Arial, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(is.need), x, y + 1);
+      // small degree progress under the island
+      ctx.fillStyle = '#9fd8ff'; ctx.font = '12px Arial, sans-serif';
+      ctx.fillText(deg + ' / ' + is.need, x, y + 40);
+    });
+    requestAnimationFrame(draw);
+  }
+  updateHud();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

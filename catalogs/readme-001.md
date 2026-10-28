@@ -87,6 +87,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0078 | Pulse Paddler | Precision / Timed River Paddle | Arrow Keys / A/D steer, Space stroke, mouse/touch drag | [Play](./../games/game-0078.html) |
 | 0079 | Starlight Sniper | Precision / Constellation Aim | Mouse/touch aim and shoot, Arrow Keys | [Play](./../games/game-0079.html) |
 | 0080 | Glacier Gardener | Strategy / Ice Farm Sim | Click/tap plots, Arrow Keys, Space harvest | [Play](./../games/game-0080.html) |
+| 0081 | Ashen Aviator | Arcade / Smoke-Ring Flight | Arrow Keys / WASD thrust, mouse/touch hold | [Play](./../games/game-0081.html) |
+| 0082 | Sundial Sleuth | Puzzle / Shadow Deduction | Click/tap dial to rotate, Arrow Keys, Enter/Space rotate | [Play](./../games/game-0082.html) |
+| 0083 | Hive Herald | Strategy / Bee Colony Routing | Click/tap patches, 1-5 assign, Space advance day | [Play](./../games/game-0083.html) |
+| 0084 | Cymbal Storm | Rhythm / Percussion Timing | D/F/J/K, mouse click, touch tap lanes | [Play](./../games/game-0084.html) |
+| 0085 | Anchor Aim | Precision / Anchor Toss | Mouse/touch drag aim and release, Arrow Keys, Space throw | [Play](./../games/game-0085.html) |
+| 0086 | Tidepool Tumble | Arcade / Crab Pearl Catch | Arrow Keys / A/D move, mouse/touch drag | [Play](./../games/game-0086.html) |
+| 0087 | Span Solver | Puzzle / Bridge Logic | Click/tap/drag between islands, Arrow Keys, Enter/Space add bridge | [Play](./../games/game-0087.html) |
+| 0088 | Windmill Warden | Simulation / Wind Farm Management | Mouse/touch click place/rotate, 1-3 select, R repair, N next day | [Play](./../games/game-0088.html) |
+| 0089 | Frost Flute | Rhythm / Melody Memory | 1-4 / A/S/D/F notes, mouse click, touch tap pads | [Play](./../games/game-0089.html) |
+| 0090 | Castle Cartographer | Strategy / Map Expansion | Click/tap tiles and grid, Arrow Keys, Enter/Space place, R rotate | [Play](./../games/game-0090.html) |
 
 ## Batch notes
 
@@ -98,5 +108,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 006: 10 games, produced in one cycle.
 - Batch 007: 10 games, produced in one cycle.
 - Batch 008: 10 games, produced in one cycle.
+- Batch 009: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 - Next volume starts at game 0101 in `catalogs/readme-002.md`, after this volume reaches 100 entries.

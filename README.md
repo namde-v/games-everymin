@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 80
-- **Latest game:** 0080 — Glacier Gardener
+- **Total games:** 90
+- **Latest game:** 0090 — Castle Cartographer
 - **Current volume:** 001 (Games 0001 to 0100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -13,7 +13,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 | Volume | Games | Catalog |
 |--------|-------|---------|
-| 001 | 0001–0080 (80 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
+| 001 | 0001–0090 (90 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -27,20 +27,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 008
+## Latest batch — Batch 009
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0071 | Tempest Trawler | Arcade / Storm Fishing | [Play](./games/game-0071.html) |
-| 0072 | Mosaic Mason | Puzzle / Mosaic Tile Logic | [Play](./games/game-0072.html) |
-| 0073 | Portside Planner | Strategy / Dock Scheduler | [Play](./games/game-0073.html) |
-| 0074 | Drumline Dunes | Rhythm / Desert Beat Timing | [Play](./games/game-0074.html) |
-| 0075 | Cinder Sprint | Arcade / Lava Lane Runner | [Play](./games/game-0075.html) |
-| 0076 | Knot Garden | Puzzle / Rope Untangle Logic | [Play](./games/game-0076.html) |
-| 0077 | Junkyard Tycoon | Strategy / Scrap Recycling Sim | [Play](./games/game-0077.html) |
-| 0078 | Pulse Paddler | Precision / Timed River Paddle | [Play](./games/game-0078.html) |
-| 0079 | Starlight Sniper | Precision / Constellation Aim | [Play](./games/game-0079.html) |
-| 0080 | Glacier Gardener | Strategy / Ice Farm Sim | [Play](./games/game-0080.html) |
+| 0081 | Ashen Aviator | Arcade / Smoke-Ring Flight | [Play](./games/game-0081.html) |
+| 0082 | Sundial Sleuth | Puzzle / Shadow Deduction | [Play](./games/game-0082.html) |
+| 0083 | Hive Herald | Strategy / Bee Colony Routing | [Play](./games/game-0083.html) |
+| 0084 | Cymbal Storm | Rhythm / Percussion Timing | [Play](./games/game-0084.html) |
+| 0085 | Anchor Aim | Precision / Anchor Toss | [Play](./games/game-0085.html) |
+| 0086 | Tidepool Tumble | Arcade / Crab Pearl Catch | [Play](./games/game-0086.html) |
+| 0087 | Span Solver | Puzzle / Bridge Logic | [Play](./games/game-0087.html) |
+| 0088 | Windmill Warden | Simulation / Wind Farm Management | [Play](./games/game-0088.html) |
+| 0089 | Frost Flute | Rhythm / Melody Memory | [Play](./games/game-0089.html) |
+| 0090 | Castle Cartographer | Strategy / Map Expansion | [Play](./games/game-0090.html) |
 
 ## Quality standard
 
