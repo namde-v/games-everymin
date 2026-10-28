@@ -1,0 +1,17 @@
+# Game Catalog: Volume 006 (Games 0501 to 0600)
+
+Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets, or assets — all CSS and JavaScript are inline, audio is procedural Web Audio, graphics are Canvas 2D / DOM.
+
+| # | Game Title | Genre | Controls | Direct Link |
+|---|------------|-------|----------|-------------|
+
+| 0501 | Vault Voyager | Arcade / Gravity Vault Runner | Arrow Keys/WASD move and flip gravity, Space jump, mouse/touch steer | [Play](./../games/game-0501.html) |
+| 0502 | Whispering Willow | Puzzle / Botanical Pattern Logic | Mouse/touch click grid tiles, Arrow Keys select, Enter plant | [Play](./../games/game-0502.html) |
+| 0503 | Xenon Xenolith | Strategy / Alien Crystal Colony Simulation | Mouse/touch click grid to place, Keys select building, Arrow Keys select | [Play](./../games/game-0503.html) |
+| 0504 | Yodel Yard | Rhythm / Alpine Echo Timing | Keys play notes on beat, mouse/touch tap notes, Arrow Keys select | [Play](./../games/game-0504.html) |
+| 0505 | Zenith Zookeeper | Strategy / Sky Zoo Management | Mouse/touch click habitats and creatures, Arrow Keys select, Keys feed/enrich | [Play](./../games/game-0505.html) |
+| 0506 | Saffron Sorcerer | Puzzle / Potion Mixing Logic | Mouse/touch click ingredients, Keys select, Enter brew | [Play](./../games/game-0506.html) |
+| 0507 | Brine Breaker | Arcade / Tide Wave Dodger | Arrow Keys/Space surf and jump, mouse/touch tap to jump | [Play](./../games/game-0507.html) |
+| 0508 | Cobalt Cartographer | Puzzle / Map Tile Rotation | Mouse/touch click tiles to rotate, Arrow Keys select, Enter rotate | [Play](./../games/game-0508.html) |
+| 0509 | Mirage Drummer | Rhythm / Desert Drum Timing | Keys strike drums on beat, mouse/touch tap drums, Arrow Keys select | [Play](./../games/game-0509.html) |
+| 0510 | Pyro Plant Planner | Strategy / Volcano Power Plant Simulation | Mouse/touch click valves and turbines, Arrow Keys select, Keys adjust flow | [Play](./../games/game-0510.html) |

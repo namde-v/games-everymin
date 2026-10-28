@@ -4,9 +4,9 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 500
-- **Latest game:** 0500 — Tempest Tactician
-- **Current volume:** 005 (Games 0401 to 0500) — complete; next volume 006 opens at game 0501
+- **Total games:** 510
+- **Latest game:** 0510 — Pyro Plant Planner
+- **Current volume:** 006 (Games 0501 to 0600) — in progress (10 of 100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
 ## Volume index
@@ -18,6 +18,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 | 004 | 0301–0400 (100, complete) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
 | 005 | 0401–0500 (100, complete) | [catalogs/readme-005.md](./catalogs/readme-005.md) |
+| 006 | 0501–0600 (10 so far) | [catalogs/readme-006.md](./catalogs/readme-006.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -31,20 +32,21 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 050
+## Latest batch — Batch 051
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0491 | Kelp Keeper | Strategy / Underwater Farm Management | [Play](./games/game-0491.html) |
-| 0492 | Lantern Labyrinth | Puzzle / Light Maze | [Play](./games/game-0492.html) |
-| 0493 | Meteor Mechanic | Arcade / Asteroid Repair Action | [Play](./games/game-0493.html) |
-| 0494 | Nightingale Navigator | Strategy / Star Chart Navigation | [Play](./games/game-0494.html) |
-| 0495 | Obsidian Oracle | Puzzle / Rune Prophecy Logic | [Play](./games/game-0495.html) |
-| 0496 | Prism Pilot | Arcade / Color Refraction Shooter | [Play](./games/game-0496.html) |
-| 0497 | Quarry Quest | Strategy / Mining Tycoon | [Play](./games/game-0497.html) |
-| 0498 | Ripple Racer | Rhythm / Wave Surf Timing | [Play](./games/game-0498.html) |
-| 0499 | Solar Shepherd | Strategy / Orbit Herding Simulation | [Play](./games/game-0499.html) |
-| 0500 | Tempest Tactician | Strategy / Storm Battle Tactics | [Play](./games/game-0500.html) |
+| 0501 | Vault Voyager | Arcade / Gravity Vault Runner | [Play](./games/game-0501.html) |
+| 0502 | Whispering Willow | Puzzle / Botanical Pattern Logic | [Play](./games/game-0502.html) |
+| 0503 | Xenon Xenolith | Strategy / Alien Crystal Colony Simulation | [Play](./games/game-0503.html) |
+| 0504 | Yodel Yard | Rhythm / Alpine Echo Timing | [Play](./games/game-0504.html) |
+| 0505 | Zenith Zookeeper | Strategy / Sky Zoo Management | [Play](./games/game-0505.html) |
+| 0506 | Saffron Sorcerer | Puzzle / Potion Mixing Logic | [Play](./games/game-0506.html) |
+| 0507 | Brine Breaker | Arcade / Tide Wave Dodger | [Play](./games/game-0507.html) |
+| 0508 | Cobalt Cartographer | Puzzle / Map Tile Rotation | [Play](./games/game-0508.html) |
+| 0509 | Mirage Drummer | Rhythm / Desert Drum Timing | [Play](./games/game-0509.html) |
+| 0510 | Pyro Plant Planner | Strategy / Volcano Power Plant Simulation | [Play](./games/game-0510.html) |
+
 
 ## Quality standard
 
