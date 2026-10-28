@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Avalanche Architect — Game 0610</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0b1626;color:#eaf4ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:12px}
+  h1{font-size:26px;letter-spacing:.5px;text-align:center}
+  .sub{text-align:center;color:#9fc3e8;font-size:13px;margin:4px 0 10px}
+  #wrap{position:relative;width:min(96vw,760px)}
+  canvas{display:block;width:100%;height:520px;background:linear-gradient(180deg,#dfeefb 0%,#bcd9f2 28%,#8fb8dd 55%,#5f8fb8 78%,#3d6a94 100%);border:3px solid #eaf4ff;border-radius:14px;touch-action:none}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:10px 0}
+  .pill{background:#162f4d;border:1px solid #3d6a94;border-radius:999px;padding:7px 12px;font-size:14px;font-weight:700}
+  .pill b{color:#ffd166}
+  #controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:10px}
+  button{background:#ffd166;color:#14213d;border:0;border-radius:10px;padding:10px 16px;font-size:15px;font-weight:800;cursor:pointer}
+  button.secondary{background:#2a4a6b;color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .overlay{position:absolute;inset:0;background:rgba(6,18,34,.88);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px;gap:10px}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:32px;color:#ffd166}
+  .overlay p{max-width:560px;line-height:1.55;color:#d6e8fa}
+  .overlay ul{text-align:left;color:#d6e8fa;line-height:1.6;max-width:560px}
+  .big{font-size:18px;font-weight:800}
+  #angleRow{font-size:13px;color:#cfe4f7;text-align:center;margin-top:2px}
+  kbd{background:#fff;color:#111;padding:1px 6px;border-radius:5px;font-weight:700}
+</style>
+</head>
+<body>
+<h1>🏔️ Avalanche Architect</h1>
+<p class="sub">Game 0610 &middot; Precision &middot; Design the slope. Save the village.</p>
+<div id="wrap">
+  <canvas id="game" width="760" height="520" aria-label="Avalanche Architect game canvas"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>AVALANCHE ARCHITECT</h2>
+    <p class="big">A wall of snow is coming down the mountain. The village below is in its path.</p>
+    <ul>
+      <li><b>BUILD:</b> Click or tap the snowy slope to place a snow barrier. You have 14 barriers.</li>
+      <li><b>ANGLE:</b> Press <kbd>Q</kbd> / <kbd>E</kbd>, or the Angle buttons, to tilt the next barrier. A good angle deflects snow sideways, past the village.</li>
+      <li><b>ADJUST:</b> Drag a barrier to move it before you release the avalanche. Click a barrier while holding <kbd>Shift</kbd> to remove it.</li>
+      <li><b>RELEASE:</b> Press <kbd>Space</kbd> or the Release button. Snow that rolls safely past the village scores points. Snow that hits the village costs health.</li>
+      <li><b>WIN:</b> Survive all three snow waves with village health remaining. <b>LOSE:</b> Village health reaches zero.</li>
+      <li>Controls: mouse, touch, arrow keys to nudge the selected barrier, <kbd>R</kbd> to restart.</li>
+    </ul>
+    <button id="startBtn" type="button">▶ Start Game</button>
+    <p>How to play is above — build smart, angle carefully, then release!</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="finalScore" class="big"></p>
+    <button id="restartBtn" type="button">↻ Restart Instantly</button>
+  </div>
+</div>
+
+<div id="hud" role="status" aria-live="polite">
+  <span class="pill">Score: <b id="score">0</b></span>
+  <span class="pill">Village Health: <b id="lives">100</b></span>
+  <span class="pill">Barriers Left: <b id="barriers">14</b></span>
+  <span class="pill">Wave: <b id="wave">0 / 3</b></span>
+  <span class="pill">Status: <b id="status">Title Screen</b></span>
+</div>
+<div id="controls">
+  <button id="angleLeftBtn" class="secondary" type="button">⟲ Angle −15°</button>
+  <button id="angleRightBtn" class="secondary" type="button">Angle +15° ⟳</button>
+  <button id="releaseBtn" type="button" disabled>🌨 Release Avalanche (Space)</button>
+  <button id="clearBtn" class="secondary" type="button">Clear Barriers</button>
+</div>
+<p id="angleRow">Next barrier angle: <b id="angleLabel">−30°</b> &middot; Selected barrier: drag to move &middot; Shift + click a barrier to remove it</p>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var barriersEl = document.getElementById('barriers');
+  var waveEl = document.getElementById('wave');
+  var statusEl = document.getElementById('status');
+  var angleLabel = document.getElementById('angleLabel');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+  var releaseBtn = document.getElementById('releaseBtn');
+
+  var state = 'title'; // title, build, avalanche, win, over
+  var score = 0, health = 100, wave = 0, totalWaves = 3;
+  var barriers = [], particles = [], selected = -1, dragging = -1;
+  var nextAngle = -30, maxBarriers = 14;
+  var village = {x: 330, w: 100};
+  var audioCtx = null, rumbleOn = false;
+
+  function audio(){
+    if(!audioCtx){
+      try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ return null; }
+    }
+    if(audioCtx && audioCtx.state === 'suspended'){ audioCtx.resume(); }
+    return audioCtx;
+  }
+  function tone(freq, dur, type, vol){
+    var ac = audio(); if(!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+  function placeSound(){ tone(520, 0.12, 'triangle', 0.15); tone(780, 0.1, 'sine', 0.1); }
+  function hitSound(){ tone(110, 0.18, 'sawtooth', 0.14); }
+  function deflectSound(){ tone(300, 0.08, 'square', 0.07); }
+  function winSound(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f,0.25,'triangle',0.15); }, i*130); }); }
+  function loseSound(){ [330,262,196,131].forEach(function(f,i){ setTimeout(function(){ tone(f,0.3,'sawtooth',0.12); }, i*150); }); }
+
+  function setStatus(t){ statusEl.textContent = t; }
+  function updateHUD(){
+    scoreEl.textContent = score; livesEl.textContent = Math.max(0, health);
+    barriersEl.textContent = Math.max(0, maxBarriers - barriers.length);
+    waveEl.textContent = wave + ' / ' + totalWaves;
+    angleLabel.textContent = nextAngle + '°';
+  }
+  function canvasPos(e){
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX);
+    var cy = (e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  function barrierAt(p){
+    for(var i = barriers.length - 1; i >= 0; i--){
+      var b = barriers[i];
+      if(Math.abs(p.x - b.x) < 42 && Math.abs(p.y - b.y) < 22) return i;
+    }
+    return -1;
+  }
+  function placeBarrier(p){
+    if(state !== 'build') return;
+    if(p.y > 445 || p.y < 40) return;
+    if(barriers.length >= maxBarriers){ setStatus('No barriers left — release the avalanche!'); return; }
+    barriers.push({x: p.x, y: p.y, angle: nextAngle});
+    selected = barriers.length - 1; placeSound(); updateHUD();
+    setStatus('Barrier placed — angle ' + nextAngle + '°');
+  }
+  function releaseAvalanche(){
+    if(state !== 'build') return;
+    state = 'avalanche'; wave = 1; releaseBtn.disabled = true;
+    spawnWave(); setStatus('Avalanche released — wave 1!');
+    tone(90, 0.6, 'sawtooth', 0.12);
+  }
+  function spawnWave(){
+    particles = [];
+    var n = 34 + wave * 10;
+    for(var i = 0; i < n; i++){
+      particles.push({
+        x: 60 + Math.random() * 620, y: -20 - Math.random() * 260,
+        vx: (Math.random() - 0.5) * 0.6, vy: 1.6 + Math.random() * 1.2,
+        r: 5 + Math.random() * 7, done: false
+      });
+    }
+  }
+  function reflect(p, b){
+    // Reflect velocity across a barrier line at angle b.angle (degrees).
+    var a = b.angle * Math.PI / 180;
+    var nx = -Math.sin(a), ny = Math.cos(a);
+    var dot = p.vx * nx + p.vy * ny;
+    if(dot < 0){
+      p.vx -= 2 * dot * nx; p.vy -= 2 * dot * ny;
+      p.vx *= 0.92; p.vy *= 0.92;
+      p.x += nx * 3; p.y += ny * 3;
+      deflectSound();
+      return true;
+    }
+    return false;
+  }
+  function update(){
+    if(state !== 'avalanche') return;
+    var alive = 0;
+    particles.forEach(function(p){
+      if(p.done) return;
+      alive++;
+      p.vy += 0.045; p.x += p.vx; p.y += p.vy;
+      if(p.x < p.r){ p.x = p.r; p.vx = Math.abs(p.vx); }
+      if(p.x > W - p.r){ p.x = W - p.r; p.vx = -Math.abs(p.vx); }
+      barriers.forEach(function(b){
+        var dx = p.x - b.x, dy = p.y - b.y;
+        var a = b.angle * Math.PI / 180;
+        var lx = Math.cos(a), ly = Math.sin(a);
+        var along = dx * lx + dy * ly;
+        var perp = -dx * Math.sin(a) + dy * Math.cos(a);
+        if(Math.abs(along) < 46 && Math.abs(perp) < p.r + 6){ reflect(p, b); }
+      });
+      if(p.y > H - 8){
+        p.done = true;
+        if(p.x >= village.x && p.x <= village.x + village.w){
+          health -= 6; hitSound(); setStatus('The village was hit! Protect it!');
+          if(health <= 0){ endGame(false); return; }
+        } else {
+          score += 25; setStatus('Snow rolled safely past the village!');
+        }
+        updateHUD();
+      }
+    });
+    if(alive === 0 && state === 'avalanche'){
+      if(wave < totalWaves){
+        wave++; spawnWave(); setStatus('Wave ' + wave + ' incoming — hold the line!');
+        updateHUD();
+      } else {
+        endGame(true);
+      }
+    }
+    updateHUD();
+  }
+  function endGame(won){
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 You Win!' : '💥 Game Over';
+    endText.textContent = won
+      ? 'Every wave rolled safely past the village. You are a master Avalanche Architect!'
+      : 'The village could not withstand the avalanche. Rebuild the slope and try a new design.';
+    finalScore.textContent = 'Final Score: ' + score + '  •  Village Health: ' + Math.max(0, health);
+    endScreen.classList.remove('hidden');
+    setStatus(won ? 'Victory!' : 'Game Over');
+    if(won) winSound(); else loseSound();
+  }
+  function startGame(){
+    audio(); // Audio starts only after this user interaction.
+    score = 0; health = 100; wave = 0; barriers = []; particles = [];
+    selected = -1; nextAngle = -30; state = 'build';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    releaseBtn.disabled = false; setStatus('Build phase — place barriers, then release!');
+    updateHUD(); tone(660, 0.15, 'triangle', 0.14);
+  }
+  function drawSlope(){
+    ctx.fillStyle = '#e8f2fb';
+    ctx.beginPath(); ctx.moveTo(0, 70); ctx.lineTo(W, 40); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    for(var i = 0; i < 26; i++){
+      var sx = (i * 97) % W, sy = 60 + ((i * 53) % 360);
+      ctx.beginPath(); ctx.arc(sx, sy, 10 + (i % 4) * 4, 0, Math.PI * 2); ctx.fill();
+    }
+    // Danger lane shading toward the village.
+    ctx.fillStyle = 'rgba(255,120,80,0.12)';
+    ctx.fillRect(village.x - 20, 0, village.w + 40, H);
+  }
+  function drawVillage(){
+    var vx = village.x, vw = village.w, vy = H - 66;
+    ctx.fillStyle = '#7a4a21'; ctx.fillRect(vx, vy, vw, 66);
+    ctx.fillStyle = '#ffd166';
+    for(var i = 0; i < 4; i++){ ctx.fillRect(vx + 10 + i * 24, vy + 12, 14, 18); }
+    ctx.fillStyle = '#c0392b';
+    ctx.beginPath(); ctx.moveTo(vx - 4, vy); ctx.lineTo(vx + vw / 2, vy - 26); ctx.lineTo(vx + vw + 4, vy); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('VILLAGE', vx + vw / 2, vy + 52);
+    ctx.fillStyle = health > 40 ? '#2ecc71' : '#e74c3c';
+    ctx.fillRect(vx, vy - 8, vw * Math.max(0, health) / 100, 5);
+    ctx.textAlign = 'left';
+  }
+  function drawBarriers(){
+    barriers.forEach(function(b, i){
+      var a = b.angle * Math.PI / 180;
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(a);
+      ctx.fillStyle = i === selected ? '#ffd166' : '#2c5f8a';
+      ctx.fillRect(-42, -7, 84, 14);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(-42, -7, 84, 4);
+      ctx.restore();
+      ctx.fillStyle = '#123'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(b.angle + '°', b.x, b.y - 14); ctx.textAlign = 'left';
+    });
+  }
+  function drawParticles(){
+    particles.forEach(function(p){
+      if(p.done) return;
+      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#9fc3e8'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    });
+  }
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    drawSlope(); drawVillage(); drawBarriers(); drawParticles();
+    if(state === 'build'){
+      ctx.fillStyle = 'rgba(11,22,38,0.75)'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('BUILD PHASE — click the slope to place a barrier, then release the avalanche', W / 2, 28);
+      ctx.textAlign = 'left';
+    }
+    if(state === 'avalanche'){
+      ctx.fillStyle = 'rgba(11,22,38,0.75)'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('WAVE ' + wave + ' — deflect the snow away from the village!', W / 2, 28);
+      ctx.textAlign = 'left';
+    }
+  }
+  function loop(){ update(); draw(); requestAnimationFrame(loop); }
+
+  function onPointerDown(e){
+    if(state !== 'build') return;
+    var p = canvasPos(e);
+    var idx = barrierAt(p);
+    if(idx >= 0){
+      if(e.shiftKey){
+        barriers.splice(idx, 1); selected = -1; tone(220, 0.1, 'square', 0.1); updateHUD();
+      } else {
+        selected = idx; dragging = idx;
+      }
+    } else {
+      placeBarrier(p);
+    }
+  }
+  function onPointerMove(e){
+    if(dragging < 0 || state !== 'build') return;
+    var p = canvasPos(e);
+    barriers[dragging].x = Math.max(46, Math.min(W - 46, p.x));
+    barriers[dragging].y = Math.max(40, Math.min(445, p.y));
+  }
+  function onPointerUp(){ dragging = -1; }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  releaseBtn.addEventListener('click', releaseAvalanche);
+  document.getElementById('angleLeftBtn').addEventListener('click', function(){
+    nextAngle = Math.max(-75, nextAngle - 15);
+    if(selected >= 0) barriers[selected].angle = nextAngle;
+    updateHUD(); tone(440, 0.07, 'sine', 0.08);
+  });
+  document.getElementById('angleRightBtn').addEventListener('click', function(){
+    nextAngle = Math.min(75, nextAngle + 15);
+    if(selected >= 0) barriers[selected].angle = nextAngle;
+    updateHUD(); tone(520, 0.07, 'sine', 0.08);
+  });
+  document.getElementById('clearBtn').addEventListener('click', function(){
+    if(state !== 'build') return;
+    barriers = []; selected = -1; updateHUD(); setStatus('Barriers cleared — design again!');
+  });
+  canvas.addEventListener('mousedown', onPointerDown);
+  canvas.addEventListener('mousemove', onPointerMove);
+  canvas.addEventListener('mouseup', onPointerUp);
+  canvas.addEventListener('click', function(e){ if(state === 'build' && barrierAt(canvasPos(e)) < 0){ /* placement handled on mousedown */ } });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); onPointerDown(e); }, {passive: false});
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); onPointerMove(e); }, {passive: false});
+  canvas.addEventListener('touchend', onPointerUp);
+  document.addEventListener('keydown', function(e){
+    if(e.key === ' ' || e.key === 'Spacebar'){ e.preventDefault(); releaseAvalanche(); }
+    if(e.key === 'q' || e.key === 'Q'){ nextAngle = Math.max(-75, nextAngle - 15); updateHUD(); }
+    if(e.key === 'e' || e.key === 'E'){ nextAngle = Math.min(75, nextAngle + 15); updateHUD(); }
+    if(e.key === 'r' || e.key === 'R'){ if(state === 'win' || state === 'over' || state === 'build') startGame(); }
+    if(selected >= 0 && state === 'build'){
+      if(e.key === 'ArrowLeft') barriers[selected].x = Math.max(46, barriers[selected].x - 8);
+      if(e.key === 'ArrowRight') barriers[selected].x = Math.min(W - 46, barriers[selected].x + 8);
+      if(e.key === 'ArrowUp') barriers[selected].y = Math.max(40, barriers[selected].y - 8);
+      if(e.key === 'ArrowDown') barriers[selected].y = Math.min(445, barriers[selected].y + 8);
+    }
+  });
+  document.addEventListener('touchstart', function(){ /* touch support registered on document as well */ }, {passive: true});
+  updateHUD(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

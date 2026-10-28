@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Vineyard Ventures — Game 0603</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1d2b1a; color: #f5ecd7; font-family: Georgia, serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 26px; color: #e8c96a; text-shadow: 2px 2px 0 #000; margin: 6px 0 2px; text-align: center; }
+  .sub { font-size: 13px; color: #cfe3b0; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; font-size: 14px; }
+  .pill { background: #2f4429; border: 2px solid #7a9a52; border-radius: 12px; padding: 4px 10px; }
+  .pill b { color: #ffe28a; }
+  #wrap { position: relative; width: 620px; max-width: 96vw; }
+  canvas { width: 100%; height: auto; background: #6d8f4e; border: 4px solid #4a3220; border-radius: 10px; display: block; touch-action: none; }
+  #overlay { position: absolute; inset: 0; background: rgba(20,30,15,0.92); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
+  #overlay h2 { color: #e8c96a; font-size: 30px; margin-bottom: 10px; }
+  #overlay p { font-size: 14px; line-height: 1.55; max-width: 440px; margin-bottom: 8px; }
+  #overlay .small { font-size: 12.5px; color: #cfe3b0; }
+  button { cursor: pointer; font-family: inherit; }
+  #startBtn, #restartBtn { background: #7a1f2b; color: #fff; border: 3px solid #e8c96a; border-radius: 10px; font-size: 20px; padding: 10px 30px; margin-top: 12px; }
+  #startBtn:hover, #restartBtn:hover { background: #a32a38; }
+  #toolbar { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+  .tool { background: #3d5a34; color: #fff; border: 2px solid #9dbb72; border-radius: 8px; padding: 7px 12px; font-size: 14px; }
+  .tool.sel { background: #e8c96a; color: #2a1c08; border-color: #fff; font-weight: bold; }
+  #msg { min-height: 22px; margin-top: 6px; font-size: 14px; color: #ffe28a; text-align: center; }
+  #orders { margin-top: 6px; font-size: 13px; color: #e8e8c8; text-align: center; max-width: 620px; }
+  .ord { display: inline-block; background: #3d2f22; border: 1px solid #c9a86a; border-radius: 8px; padding: 3px 8px; margin: 2px; }
+  .ord.done { background: #2f5a2a; }
+  .ord.expired { background: #5a2020; text-decoration: line-through; opacity: 0.6; }
+</style>
+</head>
+<body>
+<h1>&#127803; Vineyard Ventures</h1>
+<div class="sub">Game 0603 &middot; Strategy / Simulation &middot; Grow grapes, fill orders, beat the Harvest Festival!</div>
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Coins: <b id="coins">40</b></div>
+  <div class="pill">Bottles: <b id="bottles">0</b></div>
+  <div class="pill">Orders: <b id="ordersDone">0</b>/6</div>
+  <div class="pill">Lives: <b id="lives">&#10084;&#10084;&#10084;</b></div>
+  <div class="pill">Season: <b id="season">Spring</b></div>
+  <div class="pill">Time left: <b id="clock">--</b></div>
+  <div class="pill">Workers free: <b id="workers">3</b></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="620" height="420"></canvas>
+  <div id="overlay">
+    <h2>Vineyard Ventures</h2>
+    <p><b>How to Play:</b> You run a hillside vineyard through four seasons. Pick a tool below, then tap a field plot to use it.</p>
+    <p><b>Plant</b> (10 coins) seeds a row &middot; <b>Water</b> (free) speeds growth &middot; <b>Worker</b> assigns a helper that doubles growth &middot; <b>Harvest</b> turns ripe purple rows into wine bottles.</p>
+    <p>Wine orders arrive each season. Press <b>Deliver Order</b> when you have enough bottles. Fill <b>6 orders</b> before the Harvest Festival ends to <b>WIN</b>. Let 3 orders expire and the vineyard goes bust &mdash; <b>Game Over</b>.</p>
+    <p class="small">Keys: 1 Plant, 2 Water, 3 Worker, 4 Harvest, D Deliver, Arrow keys move cursor, Enter applies tool, R restarts. Mouse and touch work too.</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+</div>
+<div id="toolbar">
+  <button class="tool sel" data-tool="plant">1 &#127793; Plant (10c)</button>
+  <button class="tool" data-tool="water">2 &#128167; Water</button>
+  <button class="tool" data-tool="worker">3 &#128105; Worker</button>
+  <button class="tool" data-tool="harvest">4 &#9986; Harvest</button>
+  <button class="tool" id="deliverBtn">D &#127863; Deliver Order</button>
+</div>
+<div id="msg">Welcome, vintner! Press Start and plant your first row.</div>
+<div id="orders"></div>
+
+<script>
+(function () {
+  var cv = document.getElementById('game');
+  var ctx = cv.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var msgEl = document.getElementById('msg');
+  var ordersEl = document.getElementById('orders');
+  var COLS = 4, ROWS = 3, PLOTS = 12;
+  var SEASONS = ['Spring', 'Summer', 'Autumn', 'Festival'];
+  var SEASON_LEN = 30; // seconds per season
+  var WIN_ORDERS = 6;
+
+  var state = null;
+  var tool = 'plant';
+  var cursor = 0;
+  var raf = 0, lastT = 0, acc = 0;
+  var audioCtx = null, muted = false;
+
+  function newState() {
+    var plots = [];
+    for (var i = 0; i < PLOTS; i++) plots.push({ stage: 0, water: 0, worker: false, ripe: false });
+    return {
+      running: false, over: false, won: false,
+      score: 0, coins: 40, bottles: 0, lives: 3, ordersDone: 0,
+      workersFree: 3, seasonIdx: 0, seasonTime: SEASON_LEN,
+      plots: plots, orders: [], nextOrderIn: 6, orderSeq: 0, flash: ''
+    };
+  }
+
+  function beep(freq, dur, type) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function chord() { beep(523, 0.25, 'triangle'); setTimeout(function () { beep(659, 0.25, 'triangle'); }, 90); setTimeout(function () { beep(784, 0.35, 'triangle'); }, 180); }
+
+  function setMsg(t) { msgEl.textContent = t; }
+  function say(t) { setMsg(t); }
+
+  function newOrder() {
+    state.orderSeq++;
+    var need = 2 + Math.floor(Math.random() * 3); // 2-4 bottles
+    var reward = need * 15 + 10;
+    state.orders.push({ id: state.orderSeq, need: need, reward: reward, ttl: 26, status: 'open' });
+    say('New order #' + state.orderSeq + ': ' + need + ' bottles for ' + reward + ' coins!');
+    beep(880, 0.15, 'square');
+  }
+
+  function applyTool(idx) {
+    if (!state.running || state.over) return;
+    var p = state.plots[idx];
+    if (tool === 'plant') {
+      if (p.stage > 0) { say('That row is already planted. Water or harvest it instead.'); return; }
+      if (state.coins < 10) { say('Not enough coins! Deliver an order to earn more.'); beep(160, 0.2, 'sawtooth'); return; }
+      state.coins -= 10; p.stage = 1; p.water = 0.4; p.worker = false; p.ripe = false;
+      say('Planted row ' + (idx + 1) + '. Water it and give it a worker to grow faster!');
+      beep(440, 0.15, 'triangle');
+    } else if (tool === 'water') {
+      if (p.stage === 0) { say('Plant a row first, then water it.'); return; }
+      if (p.ripe) { say('Already ripe! Harvest it.'); return; }
+      p.water = 1; say('Row ' + (idx + 1) + ' watered. Growth boosted!');
+      beep(660, 0.12, 'sine');
+    } else if (tool === 'worker') {
+      if (p.stage === 0) { say('Plant a row first, then send a worker.'); return; }
+      if (p.worker) { say('A worker is already on row ' + (idx + 1) + '.'); return; }
+      if (state.workersFree <= 0) { say('No free workers! Harvest a row to free one up.'); return; }
+      p.worker = true; state.workersFree--; say('Worker assigned to row ' + (idx + 1) + '. Growth doubled!');
+      beep(550, 0.15, 'triangle');
+    } else if (tool === 'harvest') {
+      if (!p.ripe) { say('Row ' + (idx + 1) + ' is not ripe yet. Keep watering!'); return; }
+      var gain = 2 + (p.water > 0.5 ? 1 : 0);
+      state.bottles += gain; state.score += 20;
+      if (p.worker) { p.worker = false; state.workersFree++; }
+      state.plots[idx] = { stage: 0, water: 0, worker: false, ripe: false };
+      say('Harvested row ' + (idx + 1) + ': +' + gain + ' bottles of wine!');
+      chord();
+    }
+    updateHUD();
+  }
+
+  function deliverOrder() {
+    if (!state.running || state.over) return;
+    var open = null;
+    for (var i = 0; i < state.orders.length; i++) if (state.orders[i].status === 'open') { open = state.orders[i]; break; }
+    if (!open) { say('No open orders right now. Keep growing!'); return; }
+    if (state.bottles < open.need) { say('Order #' + open.id + ' needs ' + open.need + ' bottles; you have ' + state.bottles + '.'); beep(160, 0.2, 'sawtooth'); return; }
+    state.bottles -= open.need; state.coins += open.reward; state.score += open.reward + 50;
+    open.status = 'done'; state.ordersDone++;
+    say('Order #' + open.id + ' delivered! +' + open.reward + ' coins. (' + state.ordersDone + '/' + WIN_ORDERS + ')');
+    chord();
+    if (state.ordersDone >= WIN_ORDERS) endGame(true);
+    updateHUD();
+  }
+
+  function endGame(won) {
+    state.over = true; state.running = false; state.won = won;
+    cancelAnimationFrame(raf);
+    overlay.innerHTML = '<h2>' + (won ? '&#127881; You Win!' : '&#128546; Game Over') + '</h2>' +
+      '<p>' + (won ? 'You filled ' + WIN_ORDERS + ' orders before the Harvest Festival! Your vineyard is the talk of the valley.' : 'Three orders expired and the vineyard went bust. The festival moves on without you.') + '</p>' +
+      '<p>Final score: <b>' + state.score + '</b> &middot; Orders filled: ' + state.ordersDone + ' &middot; Coins: ' + state.coins + '</p>' +
+      '<button id="restartBtn">Restart</button>';
+    overlay.style.display = 'flex';
+    document.getElementById('restartBtn').addEventListener('click', startGame);
+    if (won) chord(); else beep(220, 0.4, 'sawtooth');
+  }
+
+  function tick(dt) {
+    if (!state.running || state.over) return;
+    state.seasonTime -= dt;
+    state.nextOrderIn -= dt;
+    if (state.nextOrderIn <= 0) { newOrder(); state.nextOrderIn = 14 + Math.random() * 8; }
+    for (var i = 0; i < state.orders.length; i++) {
+      var o = state.orders[i];
+      if (o.status === 'open') {
+        o.ttl -= dt;
+        if (o.ttl <= 0) {
+          o.status = 'expired'; state.lives--;
+          say('Order #' + o.id + ' expired! You lost a life. Lives left: ' + state.lives);
+          beep(140, 0.35, 'sawtooth');
+          if (state.lives <= 0) { updateHUD(); endGame(false); return; }
+        }
+      }
+    }
+    // Growth: water decays, worker doubles speed, autumn boosts ripening
+    for (var j = 0; j < state.plots.length; j++) {
+      var p = state.plots[j];
+      if (p.stage > 0 && !p.ripe) {
+        var rate = 0.10 + p.water * 0.14 + (p.worker ? 0.16 : 0);
+        if (state.seasonIdx === 2) rate += 0.08; // autumn sun
+        p.stage += rate * dt;
+        p.water = Math.max(0, p.water - 0.03 * dt);
+        if (p.stage >= 4) { p.ripe = true; p.stage = 4; }
+      }
+    }
+    if (state.seasonTime <= 0) {
+      state.seasonIdx++;
+      if (state.seasonIdx >= SEASONS.length) { updateHUD(); endGame(state.ordersDone >= WIN_ORDERS); return; }
+      state.seasonTime = SEASON_LEN;
+      say(SEASONS[state.seasonIdx] + ' has arrived! ' + (state.seasonIdx === 2 ? 'Autumn sun ripens grapes faster.' : 'Keep planting and delivering.'));
+      beep(700, 0.2, 'triangle');
+    }
+    updateHUD();
+  }
+
+  function updateHUD() {
+    document.getElementById('score').textContent = state.score;
+    document.getElementById('coins').textContent = state.coins;
+    document.getElementById('bottles').textContent = state.bottles;
+    document.getElementById('ordersDone').textContent = state.ordersDone;
+    document.getElementById('lives').textContent = '\u2764'.repeat(Math.max(0, state.lives));
+    document.getElementById('season').textContent = SEASONS[Math.min(state.seasonIdx, 3)];
+    document.getElementById('clock').textContent = Math.max(0, Math.ceil(state.seasonTime)) + 's';
+    document.getElementById('workers').textContent = state.workersFree;
+    var html = '';
+    for (var i = 0; i < state.orders.length; i++) {
+      var o = state.orders[i];
+      html += '<span class="ord ' + o.status + '">#' + o.id + ': ' + o.need + ' bottles &middot; ' + o.reward + 'c' + (o.status === 'open' ? ' &middot; ' + Math.ceil(o.ttl) + 's' : ' &middot; ' + o.status) + '</span>';
+    }
+    ordersEl.innerHTML = html || '<span class="ord">No orders yet — your first order arrives soon.</span>';
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    // Sky tint by season
+    var sky = ['#a8d8a0', '#ffe9a0', '#f7c873', '#e8b4a0'][Math.min(state.seasonIdx, 3)];
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, cv.width, 60);
+    ctx.fillStyle = '#5d3a1a'; ctx.font = 'bold 15px Georgia'; ctx.textAlign = 'left';
+    ctx.fillText(SEASONS[Math.min(state.seasonIdx, 3)] + ' at the vineyard', 14, 26);
+    ctx.font = '13px Georgia';
+    ctx.fillText('Tap a plot with the selected tool. Ripe rows glow purple.', 14, 46);
+    // Plots
+    var pw = 140, ph = 100, gap = 12, ox = 14, oy = 72;
+    for (var r = 0; r < ROWS; r++) {
+      for (var c = 0; c < COLS; c++) {
+        var idx = r * COLS + c;
+        var x = ox + c * (pw + gap), y = oy + r * (ph + gap);
+        var p = state.plots[idx];
+        ctx.fillStyle = '#7a5a33'; ctx.fillRect(x - 3, y - 3, pw + 6, ph + 6);
+        ctx.fillStyle = p.ripe ? '#5a2a6e' : (p.stage > 0 ? '#4a7a34' : '#8a6a42');
+        ctx.fillRect(x, y, pw, ph);
+        // soil rows
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        for (var k = 0; k < 3; k++) ctx.fillRect(x + 8, y + 14 + k * 28, pw - 16, 4);
+        if (p.stage > 0) {
+          // vine growth: small circles along rows, purple when ripe
+          var n = Math.min(6, Math.floor(p.stage * 2));
+          for (var v = 0; v < n; v++) {
+            ctx.beginPath();
+            ctx.arc(x + 14 + v * 22, y + 26 + (v % 3) * 26, p.ripe ? 9 : 6, 0, Math.PI * 2);
+            ctx.fillStyle = p.ripe ? '#b45ae0' : '#2f8a2f';
+            ctx.fill();
+          }
+          if (p.worker) { ctx.font = '20px serif'; ctx.fillText('\u{1F468}\u200D\u{1F33E}', x + pw - 34, y + 24); }
+          if (p.water > 0.5) { ctx.font = '16px serif'; ctx.fillText('\u{1F4A7}', x + 6, y + 22); }
+          if (p.ripe) { ctx.font = 'bold 13px Georgia'; ctx.fillStyle = '#ffe28a'; ctx.textAlign = 'center'; ctx.fillText('RIPE!', x + pw / 2, y + ph - 8); ctx.textAlign = 'left'; }
+        } else {
+          ctx.font = '13px Georgia'; ctx.fillStyle = '#f5ecd7'; ctx.textAlign = 'center';
+          ctx.fillText('Empty field', x + pw / 2, y + ph / 2);
+          ctx.fillText('Plant here (10c)', x + pw / 2, y + ph / 2 + 18);
+          ctx.textAlign = 'left';
+        }
+        if (idx === cursor && state.running) {
+          ctx.strokeStyle = '#ffe28a'; ctx.lineWidth = 4;
+          ctx.strokeRect(x - 3, y - 3, pw + 6, ph + 6);
+        }
+      }
+    }
+  }
+
+  function loop(t) {
+    if (!state.running) return;
+    if (!lastT) lastT = t;
+    var dt = Math.min(0.1, (t - lastT) / 1000);
+    lastT = t; acc += dt;
+    if (acc >= 0.25) { tick(acc); acc = 0; }
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+
+  function plotFromEvent(e) {
+    var rect = cv.getBoundingClientRect();
+    var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    var sx = cv.width / rect.width, sy = cv.height / rect.height;
+    var px = (clientX - rect.left) * sx, py = (clientY - rect.top) * sy;
+    var pw = 140, ph = 100, gap = 12, ox = 14, oy = 72;
+    for (var r = 0; r < ROWS; r++) for (var c = 0; c < COLS; c++) {
+      var x = ox + c * (pw + gap), y = oy + r * (ph + gap);
+      if (px >= x && px <= x + pw && py >= y && py <= y + ph) return r * COLS + c;
+    }
+    return -1;
+  }
+
+  function setTool(t) {
+    tool = t;
+    var btns = document.querySelectorAll('.tool[data-tool]');
+    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('sel', btns[i].getAttribute('data-tool') === t);
+  }
+
+  function startGame() {
+    state = newState();
+    state.running = true;
+    overlay.style.display = 'none';
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    newOrder();
+    say('Spring has begun! Plant your first row, then water it.');
+    updateHUD(); draw();
+    lastT = 0; acc = 0;
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(loop);
+    chord();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('deliverBtn').addEventListener('click', deliverOrder);
+  var toolBtns = document.querySelectorAll('.tool[data-tool]');
+  for (var i = 0; i < toolBtns.length; i++) {
+    (function (b) {
+      b.addEventListener('click', function () { setTool(b.getAttribute('data-tool')); });
+    })(toolBtns[i]);
+  }
+  cv.addEventListener('mousedown', function (e) { var idx = plotFromEvent(e); if (idx >= 0) { cursor = idx; applyTool(idx); draw(); } });
+  cv.addEventListener('click', function (e) { var idx = plotFromEvent(e); if (idx >= 0) { cursor = idx; } });
+  cv.addEventListener('touchstart', function (e) { e.preventDefault(); var idx = plotFromEvent(e); if (idx >= 0) { cursor = idx; applyTool(idx); draw(); } }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === '1') setTool('plant');
+    else if (e.key === '2') setTool('water');
+    else if (e.key === '3') setTool('worker');
+    else if (e.key === '4') setTool('harvest');
+    else if (e.key === 'd' || e.key === 'D') deliverOrder();
+    else if (e.key === 'r' || e.key === 'R') { if (state && state.over) startGame(); }
+    else if (e.key === 'ArrowRight') { cursor = Math.min(PLOTS - 1, cursor + 1); draw(); }
+    else if (e.key === 'ArrowLeft') { cursor = Math.max(0, cursor - 1); draw(); }
+    else if (e.key === 'ArrowDown') { cursor = Math.min(PLOTS - 1, cursor + COLS); draw(); }
+    else if (e.key === 'ArrowUp') { cursor = Math.max(0, cursor - COLS); draw(); }
+    else if (e.key === 'Enter') { applyTool(cursor); draw(); }
+  });
+
+  state = newState();
+  updateHUD(); draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Desert Caravan Co. — Game 0607</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;background:#2b1d0e;color:#fff7e6;font-family:Arial,Helvetica,sans-serif;text-align:center}
+  h1{margin:10px 0 2px;color:#ffd166} p{margin:6px 12px;line-height:1.45}
+  #wrap{max-width:860px;margin:0 auto;padding:10px}
+  #hud{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:10px 0}
+  .pill{background:#5a3a1a;border:2px solid #ffd166;border-radius:20px;padding:7px 12px;font-weight:bold}
+  .pill b{color:#ffd166}
+  canvas{background:linear-gradient(#f7c873,#e89b4a);border:4px solid #7a4a1e;border-radius:12px;display:block;margin:0 auto;max-width:100%;height:auto;touch-action:none}
+  #panel{background:#4a2c12;border-radius:12px;padding:12px;margin-top:10px}
+  button{background:#ffd166;color:#3a2208;border:0;border-radius:10px;padding:10px 16px;margin:4px;font-size:16px;font-weight:bold;cursor:pointer}
+  button:hover{background:#fff0a8} button:disabled{opacity:.4;cursor:not-allowed}
+  #msg{min-height:44px;font-size:17px} #log{font-size:14px;color:#ffe9b8;min-height:22px}
+  .overlay{position:fixed;inset:0;background:rgba(20,10,0,.88);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}
+  .card{background:#4a2c12;border:3px solid #ffd166;border-radius:16px;max-width:560px;padding:22px;text-align:left}
+  .card h2{margin-top:0;text-align:center;color:#ffd166}
+  .hidden{display:none!important}
+  .goods{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:8px 0}
+  .good{background:#2b1d0e;border:1px solid #ffd166;border-radius:8px;padding:6px 10px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🐪 Desert Caravan Co.</h1>
+  <p>Lead your caravan across the dunes to the Far City — and turn a profit.</p>
+  <div id="hud">
+    <div class="pill">💰 Gold: <b id="gold">100</b></div>
+    <div class="pill">💧 Water: <b id="water">100</b></div>
+    <div class="pill">🐫 Stamina: <b id="stam">100</b></div>
+    <div class="pill">📦 Cargo: <b id="cargo">0</b></div>
+    <div class="pill">📍 Place: <b id="place">Home Oasis</b></div>
+    <div class="pill">🗓️ Day: <b id="day">1</b></div>
+    <div class="pill">⭐ Score: <b id="score">0</b></div>
+  </div>
+  <canvas id="game" width="820" height="420"></canvas>
+  <div id="panel">
+    <div id="msg">Welcome, caravan master! Choose a route and trade wisely.</div>
+    <div class="goods" id="goods"></div>
+    <div id="actions"></div>
+    <div id="log">Tip: buy cheap at one oasis, sell dear at the next. Rest restores stamina, wells restore water.</div>
+    <p style="font-size:13px">Keys: 1–4 travel &nbsp;|&nbsp; B buy &nbsp;|&nbsp; S sell &nbsp;|&nbsp; W refill water &nbsp;|&nbsp; R rest &nbsp;|&nbsp; Enter start / restart &nbsp;|&nbsp; Click or tap a glowing oasis to travel.</p>
+  </div>
+</div>
+
+<div id="titleScreen" class="overlay"><div class="card">
+  <h2>🐪 Desert Caravan Co.</h2>
+  <p><b>How to Play:</b> You start at Home Oasis with 100 gold, full water and camel stamina. Travel oasis to oasis toward the Far City in the east. Every leg costs water and stamina.</p>
+  <p>At each oasis, <b>buy goods cheap</b> (dates, spice, silk) and <b>sell them where prices are high</b>. Refill water at wells and rest your camels when stamina is low — but resting costs a day and water still matters.</p>
+  <p><b>WIN:</b> Reach the Far City with <b>180 gold or more</b> (a real profit!). <b>GAME OVER:</b> Run out of water or stamina in the open desert.</p>
+  <p>Use the buttons, click/tap an oasis on the map, or use keys 1–4, B, S, W, R.</p>
+  <div style="text-align:center"><button id="startBtn" style="font-size:20px;padding:14px 26px">▶ Start Caravan</button></div>
+</div></div>
+
+<div id="endScreen" class="overlay hidden"><div class="card" style="text-align:center">
+  <h2 id="endTitle">Journey Complete</h2>
+  <p id="endText"></p>
+  <p id="endStats"></p>
+  <button id="restartBtn" style="font-size:20px;padding:14px 26px">↻ Restart Instantly</button>
+</div></div>
+
+<script>
+const canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+let audioCtx=null;
+function beep(f,d=0.12,type='sine'){ if(!audioCtx) return; const o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.type=type;o.frequency.value=f; g.gain.setValueAtTime(0.15,audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d); o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+d); }
+function sound(kind){ if(kind==='coin'){beep(880,.1);setTimeout(()=>beep(1320,.12),80);} else if(kind==='bad'){beep(160,.25,'sawtooth');} else if(kind==='win'){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,.25),i*130));} else beep(440,.1); }
+
+const PLACES=[
+ {name:'Home Oasis',x:70,y:300,prices:{dates:8,spice:22,silk:40}},
+ {name:'Mirage Wells',x:250,y:180,prices:{dates:12,spice:18,silk:46}},
+ {name:'Salt Flats',x:430,y:290,prices:{dates:6,spice:30,silk:38}},
+ {name:'Canyon Pass',x:600,y:170,prices:{dates:14,spice:26,silk:55}},
+ {name:'Far City',x:760,y:280,prices:{dates:16,spice:34,silk:70}}
+];
+const GOODS=['dates','spice','silk'];
+let S;
+function reset(){
+  S={at:0,gold:100,water:100,stam:100,day:1,score:0,cargo:{dates:0,spice:0,silk:0},moving:false,px:70,py:300,tx:70,ty:300,state:'title',done:false};
+  updateHUD(); renderActions(); $('msg').textContent='Welcome, caravan master! Choose a route and trade wisely.';
+}
+function cargoCount(){ return S.cargo.dates+S.cargo.spice+S.cargo.silk; }
+function updateHUD(){
+  $('gold').textContent=S.gold; $('water').textContent=S.water; $('stam').textContent=S.stam;
+  $('cargo').textContent=cargoCount(); $('place').textContent=PLACES[S.at].name; $('day').textContent=S.day; $('score').textContent=S.score;
+  $('goods').innerHTML=GOODS.map(g=>'<div class="good">'+g+' — buy '+PLACES[S.at].prices[g]+'g · hold '+S.cargo[g]+'</div>').join('');
+}
+function renderActions(){
+  const a=$('actions'); if(S.state!=='play'){a.innerHTML='';return;}
+  let h='';
+  PLACES.forEach((p,i)=>{ if(i!==S.at) h+='<button data-go="'+i+'">➡ Travel to '+p.name+' ('+(Math.abs(i-S.at)*18)+'💧, '+(Math.abs(i-S.at)*12)+'🐫)</button>'; });
+  h+='<br><button id="buyBtn">Buy Dates (B)</button> <button id="sellBtn">Sell All (S)</button> <button id="waterBtn">Refill Water −15g (W)</button> <button id="restBtn">Rest +35 Stamina (R)</button>';
+  a.innerHTML=h;
+  a.querySelectorAll('[data-go]').forEach(b=>b.addEventListener('click',()=>travel(+b.dataset.go)));
+  $('buyBtn').addEventListener('click',buy); $('sellBtn').addEventListener('click',sellAll);
+  $('waterBtn').addEventListener('click',refill); $('restBtn').addEventListener('click',rest);
+}
+function setMsg(t){ $('msg').textContent=t; }
+function buy(){
+  if(S.state!=='play')return;
+  const g=GOODS[S.day%3]; const price=PLACES[S.at].prices[g];
+  if(cargoCount()>=12){setMsg('Camels are fully loaded! Sell first.');sound('bad');return;}
+  if(S.gold<price){setMsg('Not enough gold to buy '+g+'.');sound('bad');return;}
+  S.gold-=price; S.cargo[g]++; S.score+=5; setMsg('Bought 1 '+g+' for '+price+' gold. Sell it where it costs more!'); sound('coin'); updateHUD();
+}
+function sellAll(){
+  if(S.state!=='play')return; let earned=0;
+  GOODS.forEach(g=>{ earned+=S.cargo[g]*PLACES[S.at].prices[g]; S.cargo[g]=0; });
+  if(!earned){setMsg('Nothing to sell. Buy goods first!');sound('bad');return;}
+  S.gold+=earned; S.score+=earned; setMsg('Sold your cargo for '+earned+' gold!'); sound('coin'); updateHUD(); if(S.at===4&&S.gold>=180){ endGame(true); }
+}
+function refill(){
+  if(S.state!=='play')return;
+  if(S.gold<15){setMsg('Need 15 gold to refill water.');sound('bad');return;}
+  S.gold-=15; S.water=100; setMsg('Waterskins refilled to 100!'); sound('coin'); updateHUD();
+}
+function rest(){
+  if(S.state!=='play')return; S.stam=Math.min(100,S.stam+35); S.day++; setMsg('Camels rested. Stamina restored, a day passes.'); sound('coin'); updateHUD();
+}
+function travel(i){
+  if(S.state!=='play'||S.moving||i===S.at)return;
+  const dist=Math.abs(i-S.at), wCost=dist*18, sCost=dist*12;
+  if(S.water<wCost||S.stam<sCost){setMsg('Not enough water or stamina for that leg! Refill or rest first.');sound('bad');return;}
+  S.water-=wCost; S.stam-=sCost; S.day+=dist; S.moving=true; S.tx=PLACES[i].x; S.ty=PLACES[i].y; S.dest=i;
+  setMsg('Travelling to '+PLACES[i].name+'…'); sound('coin');
+}
+function arrive(){
+  S.moving=false; S.at=S.dest; S.score+=20;
+  if(S.at===4){
+    if(S.gold>=180){ endGame(true); } else { setMsg('You reached the Far City with only '+S.gold+' gold. Sell cargo here — silk pays 70g!'); sellHint(); }
+  } else setMsg('Arrived at '+PLACES[S.at].name+'. Trade, refill, rest, then press on east!');
+  updateHUD(); renderActions();
+}
+function sellHint(){ $('log').textContent='At the Far City, press Sell All to turn cargo into gold — you need 180 gold to win.'; }
+function endGame(win){
+  S.state='over'; S.done=true;
+  $('endScreen').classList.remove('hidden');
+  if(win){ $('endTitle').textContent='🏆 YOU WIN!'; $('endText').textContent='Your caravan reached the Far City with a handsome profit. The merchants sing your name!'; sound('win'); }
+  else { $('endTitle').textContent='💀 GAME OVER'; $('endText').textContent=S.water<=0?'Your waterskins ran dry in the open desert.':'Your camels collapsed from exhaustion in the open desert.'; sound('bad'); }
+  $('endStats').textContent='Final gold: '+S.gold+' · Score: '+S.score+' · Days: '+S.day+' · Reached: '+PLACES[S.at].name;
+  renderActions();
+}
+function checkLose(){ if(S.water<=0||S.stam<=0){ endGame(false); return true; } return false; }
+function startGame(){
+  if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume();
+  reset(); S.state='play'; $('titleScreen').classList.add('hidden'); $('endScreen').classList.add('hidden'); renderActions(); setMsg('Your caravan sets out! Buy dates here, sell them further east.'); sound('coin');
+}
+function draw(){
+  ctx.clearRect(0,0,820,420);
+  ctx.fillStyle='#f7c873'; ctx.fillRect(0,0,820,420);
+  ctx.fillStyle='#e89b4a';
+  for(let i=0;i<40;i++){ const x=(i*173)%820, y=(i*97)%420; ctx.beginPath(); ctx.ellipse(x,y,26,10,0,0,7); ctx.fill(); }
+  ctx.strokeStyle='#7a4a1e'; ctx.lineWidth=4; ctx.beginPath(); PLACES.forEach((p,i)=>{ i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); }); ctx.stroke();
+  PLACES.forEach((p,i)=>{
+    const active=i===S.at, glow=S.state==='play'&&i!==S.at;
+    ctx.fillStyle=i===4?'#ffd166':'#2a9d8f'; ctx.beginPath(); ctx.arc(p.x,p.y,active?26:20,0,7); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 15px Arial'; ctx.textAlign='center';
+    ctx.fillText(i===4?'🏙️':(i===0?'🌴':'⛲'),p.x,p.y+5);
+    ctx.fillStyle='#2b1d0e'; ctx.font='bold 13px Arial'; ctx.fillText(p.name,p.x,p.y+(active?-34:32));
+    if(glow){ ctx.strokeStyle='#fff'; ctx.setLineDash([5,5]); ctx.beginPath(); ctx.arc(p.x,p.y,28,0,7); ctx.stroke(); ctx.setLineDash([]); }
+  });
+  const cx=S.px, cy=S.py;
+  ctx.font='34px Arial'; ctx.textAlign='center'; ctx.fillText('🐪',cx,cy-8);
+  ctx.fillStyle='#5a3a1a'; ctx.fillRect(cx-26,cy+8,52,10);
+  ctx.fillStyle='#ffd166'; ctx.font='bold 12px Arial'; ctx.fillText('YOU',cx,cy+34);
+  requestAnimationFrame(draw);
+}
+function step(){
+  if(S.moving){
+    const dx=S.tx-S.px, dy=S.ty-S.py, d=Math.hypot(dx,dy);
+    if(d<4){ S.px=S.tx; S.py=S.ty; arrive(); }
+    else { S.px+=dx/d*4; S.py+=dy/d*4; }
+  }
+  if(S.state==='play') checkLose();
+  requestAnimationFrame(step);
+}
+canvas.addEventListener('mousedown',e=>{
+  if(S.state!=='play')return; const r=canvas.getBoundingClientRect(), x=(e.clientX-r.left)*820/r.width, y=(e.clientY-r.top)*420/r.height;
+  PLACES.forEach((p,i)=>{ if(Math.hypot(p.x-x,p.y-y)<34) travel(i); });
+});
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault(); if(S.state!=='play')return; const t=e.touches[0], r=canvas.getBoundingClientRect(), x=(t.clientX-r.left)*820/r.width, y=(t.clientY-r.top)*420/r.height;
+  PLACES.forEach((p,i)=>{ if(Math.hypot(p.x-x,p.y-y)<38) travel(i); });
+},{passive:false});
+document.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='enter'){ if(S.state==='title'||S.state==='over') startGame(); return; }
+  if(S.state!=='play')return;
+  if(k>='1'&&k<='5') travel(+k-1);
+  else if(k==='b') buy(); else if(k==='s') sellAll(); else if(k==='w') refill(); else if(k==='r') rest();
+});
+document.addEventListener('click',e=>{ if(e.target.id==='startBtn'||e.target.id==='restartBtn') startGame(); });
+$('startBtn').addEventListener('click',startGame);
+$('restartBtn').addEventListener('click',startGame);
+reset(); requestAnimationFrame(draw); requestAnimationFrame(step);
+</script>
+</body>
+</html>

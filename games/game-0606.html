@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Clockwork Contraption — Puzzle Game</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #1a1408;
+    color: #f5e9c8;
+    font-family: Georgia, 'Times New Roman', serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 10px; user-select: none; overflow-x: hidden;
+  }
+  h1 { font-size: 26px; letter-spacing: 2px; color: #e8b84b; text-shadow: 0 2px 0 #000; margin: 6px 0 2px; text-align: center; }
+  .sub { font-size: 13px; color: #c9a86a; margin-bottom: 8px; text-align: center; }
+  #hud {
+    display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+    background: #2b2110; border: 2px solid #8a6b2f; border-radius: 10px;
+    padding: 7px 14px; margin-bottom: 8px; font-size: 15px; font-weight: bold;
+  }
+  #hud span { color: #e8b84b; }
+  #wrap { position: relative; width: min(96vw, 620px); }
+  canvas {
+    width: 100%; height: auto; display: block; background: #241a0c;
+    border: 3px solid #8a6b2f; border-radius: 12px; cursor: pointer;
+    touch-action: none;
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    background: rgba(20, 14, 4, 0.88); border-radius: 12px; text-align: center; padding: 20px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #e8b84b; font-size: 30px; letter-spacing: 1px; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #e8d9ae; max-width: 480px; }
+  .overlay .small { font-size: 13px; color: #c9a86a; }
+  button {
+    font-family: inherit; font-size: 18px; font-weight: bold; color: #241a0c;
+    background: linear-gradient(#ffd968, #e8a93b); border: 2px solid #7a5a1c;
+    border-radius: 10px; padding: 12px 30px; cursor: pointer; box-shadow: 0 3px 0 #7a5a1c;
+  }
+  button:active { transform: translateY(2px); box-shadow: 0 1px 0 #7a5a1c; }
+  button.small { font-size: 14px; padding: 8px 18px; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  #msg { min-height: 22px; font-size: 14px; color: #ffd968; margin-top: 6px; text-align: center; }
+  .legend { font-size: 12px; color: #c9a86a; margin-top: 8px; text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>⚙ CLOCKWORK CONTRAPTION ⚙</h1>
+<div class="sub">Route the power from the crank to the clock tower — one gear at a time.</div>
+
+<div id="hud">
+  <div>Level: <span id="hudLevel">1</span>/10</div>
+  <div>Score: <span id="hudScore">0</span></div>
+  <div>Moves: <span id="hudMoves">0</span></div>
+  <div>Lives: <span id="hudLives">♥♥♥</span></div>
+  <div>Status: <span id="hudStatus">Ready</span></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="620" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>⚙ CLOCKWORK CONTRAPTION ⚙</h2>
+    <p><b>How to Play:</b> Each machine has a hand crank (left) and a clock tower (right).
+    Between them sit gear sockets. Click or tap a socket to cycle its gear type:
+    straight gears pass power left-to-right, elbow gears turn it up or down.
+    The tower lights up only when a complete chain of meshing gears connects crank to tower.</p>
+    <p>Watch the gear direction arrows: neighbouring gears must spin opposite ways, and the chain
+    must actually reach the tower. Finish before you run out of moves or you lose a life.
+    Beat all 10 machines to win the game!</p>
+    <p class="small">Controls: Mouse / touch — tap a socket to rotate its gear. Keyboard — arrow keys move the selector,
+    Space or Enter rotates the selected gear, R restarts the level.</p>
+    <button id="startBtn">▶ START MACHINE</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ RESTART GAME</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button class="small" id="rotateBtn">Rotate Selected (Space)</button>
+  <button class="small" id="hintBtn">Hint (−25 pts)</button>
+  <button class="small" id="resetBtn">Reset Level</button>
+</div>
+<div id="msg"></div>
+<div class="legend">
+  🔧 Crank = power source &nbsp;•&nbsp; 🕰 Tower = goal &nbsp;•&nbsp; Gear types cycle: empty → straight → elbow ↻ → elbow ↺ → straight<br>
+  Keyboard: Arrows move selector • Space/Enter rotate • R reset • H hint
+</div>
+
+<script>
+'use strict';
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+var W = canvas.width, H = canvas.height;
+
+// ---------- Audio (procedural, only after user gesture) ----------
+var audioCtx = null;
+function initAudio() {
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+function tone(freq, dur, type, vol) {
+  if (!audioCtx) return;
+  var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type || 'square'; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfx(name) {
+  if (!audioCtx) return;
+  if (name === 'click') tone(520, 0.07, 'square', 0.06);
+  else if (name === 'gear') { tone(300, 0.08, 'triangle', 0.08); tone(440, 0.08, 'triangle', 0.06); }
+  else if (name === 'power') { tone(660, 0.15, 'sine', 0.1); tone(880, 0.2, 'sine', 0.1); }
+  else if (name === 'win') { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.25, 'triangle', 0.1); }, i * 130); }); }
+  else if (name === 'lose') { tone(220, 0.3, 'sawtooth', 0.08); tone(160, 0.4, 'sawtooth', 0.08); }
+}
+
+// ---------- Game state ----------
+var COLS = 5, ROWS = 4;
+var cell = 110, ox = 42, oy = 52;
+var grid = [];            // gear type per socket: 0 empty, 1 straight, 2 elbow-down, 3 elbow-up
+var sel = { c: 0, r: 0 };
+var level = 1, score = 0, moves = 0, lives = 3;
+var totalLevels = 10;
+var playing = false, powered = false, powerPath = [];
+var spin = 0;             // animation angle
+var msgTimer = 0;
+var solvedAt = 0;
+
+// Level layouts: fixed anchor tiles (crank at col -1 side, tower at col COLS side)
+// Each level defines: crankRow, towerRow, and blocked sockets (holes that cannot hold gears)
+var levels = [
+  { crank: 1, tower: 1, blocked: [[2, 0], [2, 3]], par: 6 },
+  { crank: 0, tower: 3, blocked: [[1, 1], [3, 2]], par: 8 },
+  { crank: 3, tower: 0, blocked: [[2, 1], [2, 2]], par: 8 },
+  { crank: 2, tower: 2, blocked: [[0, 0], [4, 3], [2, 1]], par: 10 },
+  { crank: 1, tower: 3, blocked: [[1, 2], [3, 0], [3, 3]], par: 10 },
+  { crank: 0, tower: 2, blocked: [[2, 0], [0, 3], [4, 1]], par: 12 },
+  { crank: 3, tower: 1, blocked: [[1, 1], [2, 2], [3, 1]], par: 12 },
+  { crank: 2, tower: 0, blocked: [[0, 1], [2, 3], [4, 2]], par: 13 },
+  { crank: 1, tower: 2, blocked: [[1, 0], [3, 3], [2, 1], [2, 2]], par: 14 },
+  { crank: 3, tower: 3, blocked: [[0, 0], [1, 2], [3, 1], [4, 0]], par: 15 }
+];
+
+function isBlocked(c, r) {
+  var b = levels[level - 1].blocked;
+  for (var i = 0; i < b.length; i++) if (b[i][0] === c && b[i][1] === r) return true;
+  return false;
+}
+
+function newLevel() {
+  grid = [];
+  for (var r = 0; r < ROWS; r++) {
+    grid[r] = [];
+    for (var c = 0; c < COLS; c++) grid[r][c] = 0;
+  }
+  moves = 0; powered = false; powerPath = [];
+  sel = { c: 0, r: levels[level - 1].crank };
+  setStatus('Build the chain!');
+  setMsg('Level ' + level + ' — connect the crank to the tower.');
+  updateHUD();
+}
+
+// Gear connection directions: 0=N,1=E,2=S,3=W
+// straight (1): connects E-W. elbow-down (2): connects N-E? We define:
+// type 2 "elbow ↻": connects W-S ; type 3 "elbow ↺": connects W-N.
+// For pathfinding we treat gears as undirected connectors between cells.
+function gearPorts(t) {
+  if (t === 1) return [1, 3];        // straight: E, W
+  if (t === 2) return [3, 2];        // elbow: W, S
+  if (t === 3) return [3, 0];        // elbow: W, N
+  return [];
+}
+var dOff = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+var opp = [2, 3, 0, 1];
+
+// Path: crank sits west of col 0 at crankRow; tower east of col COLS-1 at towerRow.
+function computePower() {
+  var L = levels[level - 1];
+  var visited = {}, queue = [];
+  // start: crank feeds into cell (0, crank) from the west (dir 1 = eastward into cell means cell must have W port)
+  var start = { c: 0, r: L.crank };
+  if (grid[start.r][start.c] === 0) return [];
+  if (gearPorts(grid[start.r][start.c]).indexOf(3) < 0) return [];
+  queue.push(start); visited[start.c + ',' + start.r] = true;
+  var path = [start];
+  while (queue.length) {
+    var cur = queue.shift();
+    var ports = gearPorts(grid[cur.r][cur.c]);
+    for (var i = 0; i < ports.length; i++) {
+      var d = ports[i];
+      var nc = cur.c + dOff[d][0], nr = cur.r + dOff[d][1];
+      // tower reached?
+      if (nc === COLS && nr === L.tower && d === 1) { path.push({ c: COLS, r: L.tower, tower: true }); return path; }
+      if (nc < 0 || nc >= COLS || nr < 0 || nr >= ROWS) continue;
+      if (grid[nr][nc] === 0) continue;
+      if (gearPorts(grid[nr][nc]).indexOf(opp[d]) < 0) continue;
+      var key = nc + ',' + nr;
+      if (visited[key]) continue;
+      visited[key] = true;
+      queue.push({ c: nc, r: nr });
+      path.push({ c: nc, r: nr });
+    }
+  }
+  return [];
+}
+
+function checkWin() {
+  var path = computePower();
+  var complete = path.length > 0 && path[path.length - 1].tower;
+  powered = complete;
+  powerPath = path;
+  if (complete) {
+    var par = levels[level - 1].par;
+    var bonus = Math.max(0, (par - moves) * 20) + 100;
+    score += bonus;
+    setStatus('POWERED!');
+    setMsg('Machine ' + level + ' running! +' + bonus + ' points.');
+    sfx('power'); setTimeout(function () { sfx('win'); }, 200);
+    solvedAt = Date.now();
+    updateHUD();
+    setTimeout(function () {
+      if (level >= totalLevels) endGame(true);
+      else { level++; newLevel(); }
+    }, 1600);
+  }
+  updateHUD();
+}
+
+function cycleGear(c, r) {
+  if (!playing || powered) return;
+  if (isBlocked(c, r)) { setMsg('That socket is jammed — pick another.'); sfx('click'); return; }
+  grid[r][c] = (grid[r][c] + 1) % 4;
+  moves++;
+  sfx('gear');
+  checkWin();
+  updateHUD();
+}
+
+function loseLife() {
+  lives--;
+  sfx('lose');
+  if (lives <= 0) { endGame(false); }
+  else {
+    setStatus('Life lost!');
+    setMsg('Out of moves! A life is lost. Lives left: ' + lives);
+    newLevel();
+  }
+  updateHUD();
+}
+
+function endGame(won) {
+  playing = false;
+  var es = document.getElementById('endScreen');
+  document.getElementById('endTitle').textContent = won ? '🏆 YOU WIN! 🏆' : '💥 GAME OVER 💥';
+  document.getElementById('endText').textContent = won
+    ? 'All 10 machines are humming! Final score: ' + score + ' in ' + moves + ' moves on the last machine.'
+    : 'The workshop falls silent. You reached machine ' + level + ' with a final score of ' + score + '. Try again!';
+  es.classList.remove('hidden');
+  if (won) sfx('win'); else sfx('lose');
+  setStatus(won ? 'Victory!' : 'Game Over');
+}
+
+function startGame() {
+  initAudio();
+  level = 1; score = 0; lives = 3;
+  document.getElementById('titleScreen').classList.add('hidden');
+  document.getElementById('endScreen').classList.add('hidden');
+  playing = true;
+  newLevel();
+  sfx('power');
+}
+
+function hint() {
+  if (!playing || powered) return;
+  score = Math.max(0, score - 25);
+  // Simple hint: highlight a socket on a shortest crank-to-tower route ignoring gears
+  var L = levels[level - 1];
+  // BFS over cells (ignoring gear types) from crank cell to tower cell
+  var prev = {}, q = [{ c: 0, r: L.crank }], seen = {};
+  seen['0,' + L.crank] = true;
+  var found = null;
+  while (q.length) {
+    var cur = q.shift();
+    if (cur.c === COLS - 1 && cur.r === L.tower) { found = cur; break; }
+    for (var d = 0; d < 4; d++) {
+      var nc = cur.c + dOff[d][0], nr = cur.r + dOff[d][1];
+      if (nc < 0 || nc >= COLS || nr < 0 || nr >= ROWS) continue;
+      if (isBlocked(nc, nr) || seen[nc + ',' + nr]) continue;
+      seen[nc + ',' + nr] = true; prev[nc + ',' + nr] = cur; q.push({ c: nc, r: nr });
+    }
+  }
+  if (found) {
+    var step = found;
+    while (prev[step.c + ',' + step.r] && prev[step.c + ',' + step.r].c !== 0) step = prev[step.c + ',' + step.r];
+    sel = { c: step.c, r: step.r };
+    setMsg('Hint: try the flashing socket (cost 25 pts).');
+    sfx('click');
+  } else setMsg('No route hint available.');
+  updateHUD();
+}
+
+// ---------- HUD helpers ----------
+function setStatus(s) { document.getElementById('hudStatus').textContent = s; }
+function setMsg(m) { document.getElementById('msg').textContent = m; }
+function updateHUD() {
+  document.getElementById('hudLevel').textContent = level;
+  document.getElementById('hudScore').textContent = score;
+  document.getElementById('hudMoves').textContent = moves;
+  document.getElementById('hudLives').textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+  var L = levels[level - 1];
+  if (playing && !powered && moves >= L.par + 6) { loseLife(); }
+}
+
+// ---------- Drawing ----------
+function cellCenter(c, r) { return { x: ox + c * cell + cell / 2, y: oy + r * cell + cell / 2 }; }
+
+function drawGear(x, y, radius, angle, poweredGear, dir) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.fillStyle = poweredGear ? '#ffd968' : '#b08d4f';
+  ctx.strokeStyle = '#5a4218';
+  ctx.lineWidth = 2;
+  var teeth = 8;
+  ctx.beginPath();
+  for (var i = 0; i < teeth * 2; i++) {
+    var a = (i / (teeth * 2)) * Math.PI * 2;
+    var rr = (i % 2 === 0) ? radius : radius * 0.78;
+    var px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, radius * 0.42, 0, Math.PI * 2);
+  ctx.fillStyle = '#241a0c'; ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, radius * 0.14, 0, Math.PI * 2);
+  ctx.fillStyle = poweredGear ? '#fff3c4' : '#e8d9ae'; ctx.fill();
+  // direction arrow
+  ctx.rotate(-angle);
+  ctx.fillStyle = poweredGear ? '#7a2e00' : '#3d2c10';
+  ctx.font = 'bold 15px Georgia';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(dir >= 0 ? '↻' : '↺', radius * 0.62, -radius * 0.62);
+  ctx.restore();
+}
+
+function drawConnector(x1, y1, x2, y2, on) {
+  ctx.strokeStyle = on ? '#ffd968' : '#6b5326';
+  ctx.lineWidth = on ? 5 : 3;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  spin += 0.008;
+  var L = levels[level - 1];
+  // background plate
+  ctx.fillStyle = '#2b2110';
+  ctx.fillRect(ox - 55, oy - 35, COLS * cell + 110, ROWS * cell + 70);
+  ctx.strokeStyle = '#8a6b2f'; ctx.lineWidth = 3;
+  ctx.strokeRect(ox - 55, oy - 35, COLS * cell + 110, ROWS * cell + 70);
+
+  var poweredSet = {};
+  powerPath.forEach(function (p) { poweredSet[p.c + ',' + p.r] = true; });
+
+  // sockets
+  for (var r = 0; r < ROWS; r++) {
+    for (var c = 0; c < COLS; c++) {
+      var ctr = cellCenter(c, r);
+      if (isBlocked(c, r)) {
+        ctx.fillStyle = '#17100a';
+        ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 40, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#54401c'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#8a6b2f'; ctx.font = 'bold 22px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('✕', ctr.x, ctr.y);
+        continue;
+      }
+      var isSel = playing && sel.c === c && sel.r === r;
+      ctx.fillStyle = isSel ? '#4a3512' : '#33260f';
+      ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 44, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = isSel ? '#ffd968' : '#8a6b2f'; ctx.lineWidth = isSel ? 3 : 2; ctx.stroke();
+      var t = grid[r][c];
+      if (t === 0) {
+        ctx.fillStyle = '#6b5326'; ctx.font = '13px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('empty', ctr.x, ctr.y);
+      } else {
+        var on = !!poweredSet[c + ',' + r];
+        var dir = (c + r) % 2 === 0 ? 1 : -1;
+        drawGear(ctr.x, ctr.y, 34, spin * dir, on, dir);
+        // port indicators
+        ctx.fillStyle = on ? '#ffd968' : '#c9a86a';
+        ctx.font = 'bold 13px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        gearPorts(t).forEach(function (d) {
+          var dx = dOff[d][0], dy = dOff[d][1];
+          ctx.fillText('●', ctr.x + dx * 48, ctr.y + dy * 48);
+        });
+      }
+    }
+  }
+
+  // crank
+  var crankCtr = { x: ox - 42, y: cellCenter(0, L.crank).y };
+  drawGear(crankCtr.x, crankCtr.y, 30, -spin, powered, -1);
+  ctx.fillStyle = '#e8d9ae'; ctx.font = 'bold 13px Georgia'; ctx.textAlign = 'center';
+  ctx.fillText('🔧', crankCtr.x, crankCtr.y - 46);
+  ctx.fillText('CRANK', crankCtr.x, crankCtr.y + 48);
+  drawConnector(crankCtr.x + 30, crankCtr.y, ox, crankCtr.y, powered);
+
+  // tower
+  var towerCtr = { x: ox + COLS * cell + 42, y: cellCenter(0, L.tower).y };
+  ctx.fillStyle = powered ? '#ffd968' : '#5a4a26';
+  ctx.fillRect(towerCtr.x - 26, towerCtr.y - 40, 52, 80);
+  ctx.strokeStyle = '#8a6b2f'; ctx.lineWidth = 2; ctx.strokeRect(towerCtr.x - 26, towerCtr.y - 40, 52, 80);
+  ctx.fillStyle = powered ? '#fff3c4' : '#c9a86a';
+  ctx.beginPath(); ctx.arc(towerCtr.x, towerCtr.y - 8, 18, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#241a0c'; ctx.font = 'bold 13px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(powered ? '◷' : '○', towerCtr.x, towerCtr.y - 8);
+  ctx.fillStyle = '#e8d9ae'; ctx.font = 'bold 13px Georgia';
+  ctx.fillText('🕰', towerCtr.x, towerCtr.y - 58);
+  ctx.fillText('TOWER', towerCtr.x, towerCtr.y + 58);
+  drawConnector(ox + COLS * cell, towerCtr.y, towerCtr.x - 26, towerCtr.y, powered);
+
+  // powered path glow
+  if (powered) {
+    ctx.fillStyle = 'rgba(255, 217, 104, 0.25)';
+    ctx.font = 'bold 18px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('✦ POWER FLOWING ✦', W / 2, 22);
+  } else {
+    ctx.fillStyle = '#c9a86a'; ctx.font = '13px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('Par ' + L.par + ' moves — exceed par by 6 and you lose a life', W / 2, 22);
+  }
+
+  // footer legend inside canvas
+  ctx.fillStyle = '#c9a86a'; ctx.font = '12px Georgia'; ctx.textAlign = 'center';
+  ctx.fillText('Tap a socket to cycle its gear: empty → straight → elbow → elbow', W / 2, H - 8);
+
+  requestAnimationFrame(draw);
+}
+
+// ---------- Input ----------
+function canvasPos(evt) {
+  var rect = canvas.getBoundingClientRect();
+  var x = (evt.clientX - rect.left) * (W / rect.width);
+  var y = (evt.clientY - rect.top) * (H / rect.height);
+  return { x: x, y: y };
+}
+function pickSocket(x, y) {
+  for (var r = 0; r < ROWS; r++)
+    for (var c = 0; c < COLS; c++) {
+      var ctr = cellCenter(c, r);
+      if (Math.abs(x - ctr.x) < cell / 2 && Math.abs(y - ctr.y) < cell / 2) return { c: c, r: r };
+    }
+  return null;
+}
+canvas.addEventListener('mousedown', function (e) {
+  initAudio();
+  var p = canvasPos(e), s = pickSocket(p.x, p.y);
+  if (s) { sel = s; cycleGear(s.c, s.r); }
+});
+canvas.addEventListener('click', function (e) { initAudio(); });
+canvas.addEventListener('touchstart', function (e) {
+  e.preventDefault();
+  initAudio();
+  var t = e.touches[0];
+  var p = canvasPos(t), s = pickSocket(p.x, p.y);
+  if (s) { sel = s; cycleGear(s.c, s.r); }
+}, { passive: false });
+document.addEventListener('keydown', function (e) {
+  if (!playing) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      var ts = document.getElementById('titleScreen');
+      if (!ts.classList.contains('hidden')) startGame();
+      else if (!document.getElementById('endScreen').classList.contains('hidden')) startGame();
+    }
+    return;
+  }
+  var L = levels[level - 1];
+  if (e.key === 'ArrowLeft') sel.c = Math.max(0, sel.c - 1);
+  else if (e.key === 'ArrowRight') sel.c = Math.min(COLS - 1, sel.c + 1);
+  else if (e.key === 'ArrowUp') sel.r = Math.max(0, sel.r - 1);
+  else if (e.key === 'ArrowDown') sel.r = Math.min(ROWS - 1, sel.r + 1);
+  else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); cycleGear(sel.c, sel.r); }
+  else if (e.key === 'r' || e.key === 'R') { newLevel(); setMsg('Level reset.'); }
+  else if (e.key === 'h' || e.key === 'H') hint();
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].indexOf(e.key) >= 0) e.preventDefault();
+  updateHUD();
+});
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+document.getElementById('rotateBtn').addEventListener('click', function () { initAudio(); cycleGear(sel.c, sel.r); });
+document.getElementById('hintBtn').addEventListener('click', function () { initAudio(); hint(); });
+document.getElementById('resetBtn').addEventListener('click', function () { initAudio(); if (playing) { newLevel(); setMsg('Level reset.'); } });
+
+// ---------- Boot ----------
+newLevel();
+playing = false;
+setStatus('Ready');
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

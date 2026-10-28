@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Coral Cipher — Underwater Code-Breaking</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #02121f; color: #eafcff; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 12px; }
+  #wrap { width: 100%; max-width: 720px; text-align: center; }
+  h1 { font-size: 34px; letter-spacing: 2px; color: #7fe7ff; text-shadow: 0 0 14px #1899b8; }
+  .tag { color: #9fd8c8; margin: 6px 0 12px; font-size: 15px; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0; font-weight: bold; font-size: 16px; }
+  #hud span { background: #0a2e44; border: 1px solid #2a7f9e; border-radius: 10px; padding: 8px 10px; flex: 1; }
+  #hud .warn { color: #ffb347; }
+  #hud .danger { color: #ff6b6b; }
+  canvas { width: 100%; height: auto; background: linear-gradient(#063a55, #02121f); border: 3px solid #2a7f9e; border-radius: 16px; display: block; touch-action: none; }
+  .overlay { position: relative; }
+  .panel { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; background: rgba(2, 18, 31, 0.88); border-radius: 16px; padding: 22px; }
+  .panel h2 { font-size: 30px; color: #7fe7ff; }
+  .panel p { line-height: 1.55; max-width: 520px; font-size: 15px; }
+  .panel .keys { font-size: 13px; color: #bfe9ff; background: #0a2e44; border-radius: 10px; padding: 10px 12px; }
+  button { cursor: pointer; border: none; border-radius: 12px; padding: 14px 26px; font-size: 18px; font-weight: bold; color: #02121f; background: #ffd166; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #7fe7ff; box-shadow: 0 4px 0 #1899b8; }
+  .hidden { display: none !important; }
+  .foot { margin-top: 10px; color: #8fb8c8; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🪸 CORAL CIPHER 🪸</h1>
+  <p class="tag">Underwater code-breaking &bull; Decode the coral glyphs before the tide timer runs out!</p>
+  <div id="hud">
+    <span id="scoreBox">Score: 0</span>
+    <span id="livesBox">Lives: ❤️❤️❤️</span>
+    <span id="roundBox">Round: 1 / 8</span>
+    <span id="timeBox">Tide: 45s</span>
+    <span id="statusBox">Status: Ready</span>
+  </div>
+  <div class="overlay">
+    <canvas id="game" width="700" height="520"></canvas>
+    <div id="titlePanel" class="panel">
+      <h2>Coral Cipher</h2>
+      <p><strong>How to Play:</strong> A secret coral sequence appears at the top of the reef.
+      Tap the glowing glyph tiles at the bottom, in the exact order, to rebuild the code.
+      Finish a sequence to score points and earn bonus tide time. A wrong glyph costs a life.
+      Decode all <strong>8 rounds</strong> to win. Lose all 3 lives, or let the tide timer hit zero, and the reef floods.</p>
+      <p class="keys">Mouse / Touch: tap a glyph tile &bull; Keyboard: press 1–6 to pick a glyph, Backspace to undo, R to restart &bull; Complete a sequence to advance.</p>
+      <button id="startBtn" type="button">▶ Start Diving</button>
+    </div>
+    <div id="endPanel" class="panel hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p id="endText">The reef is decoded.</p>
+      <button id="restartBtn" type="button">↻ Play Again (Restart)</button>
+    </div>
+  </div>
+  <p class="foot">Tip: longer rounds are worth more points. Watch the tide — every round adds a little pressure.</p>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var titlePanel = document.getElementById('titlePanel');
+  var endPanel = document.getElementById('endPanel');
+  var startBtn = document.getElementById('startBtn');
+  var restartBtn = document.getElementById('restartBtn');
+  var scoreBox = document.getElementById('scoreBox');
+  var livesBox = document.getElementById('livesBox');
+  var roundBox = document.getElementById('roundBox');
+  var timeBox = document.getElementById('timeBox');
+  var statusBox = document.getElementById('statusBox');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  // Six distinct coral glyphs: symbol, colour, name.
+  var GLYPHS = [
+    { s: '✦', c: '#ff8fa3', n: 'Star Coral' },
+    { s: '◐', c: '#ffd166', n: 'Moon Coral' },
+    { s: '▲', c: '#7fe7ff', n: 'Spike Coral' },
+    { s: '⬢', c: '#9dff8a', n: 'Hex Coral' },
+    { s: '❋', c: '#e0aaff', n: 'Bloom Coral' },
+    { s: '≈', c: '#ffb347', n: 'Wave Coral' }
+  ];
+
+  var state = 'title'; // title | playing | win | over
+  var score = 0, lives = 3, round = 1, totalRounds = 8;
+  var target = [], player = [], tide = 45, lastTime = 0, flash = '', flashUntil = 0;
+  var bubbles = [], fishX = 0;
+  for (var b = 0; b < 24; b++) {
+    bubbles.push({ x: Math.random() * 700, y: Math.random() * 520, r: 2 + Math.random() * 5, v: 12 + Math.random() * 28 });
+  }
+
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type) {
+    if (!audioCtx || state === 'title') { return; }
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio is optional */ }
+  }
+  function soundGood() { beep(660, 0.12, 'sine'); setTimeout(function () { beep(880, 0.16, 'sine'); }, 90); }
+  function soundBad() { beep(160, 0.25, 'sawtooth'); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.22, 'triangle'); }, i * 130); }); }
+
+  function sequenceLength() { return Math.min(3 + round, 7); }
+  function newRound() {
+    target = []; player = [];
+    var len = sequenceLength();
+    for (var i = 0; i < len; i++) { target.push(Math.floor(Math.random() * GLYPHS.length)); }
+    tide = Math.max(22, 48 - round * 2);
+    setStatus('Decode round ' + round + ' — ' + len + ' glyphs');
+  }
+  function setStatus(t) { statusBox.textContent = 'Status: ' + t; }
+  function setFlash(t, ms) { flash = t; flashUntil = performance.now() + ms; }
+
+  function pickGlyph(idx) {
+    if (state !== 'playing') { return; }
+    if (player.length >= target.length) { return; }
+    player.push(idx);
+    var pos = player.length - 1;
+    if (target[pos] !== idx) {
+      lives -= 1;
+      soundBad();
+      setFlash('Wrong glyph! A life washes away.', 1400);
+      setStatus('Wrong glyph — try the sequence again');
+      player = [];
+      if (lives <= 0) { endGame(false); }
+    } else if (player.length === target.length) {
+      var bonus = 100 + round * 50 + Math.floor(tide) * 2;
+      score += bonus;
+      tide = Math.min(60, tide + 6);
+      soundGood();
+      setFlash('Code cracked! +' + bonus + ' points', 1600);
+      if (round >= totalRounds) { endGame(true); }
+      else { round += 1; newRound(); }
+    } else {
+      beep(440 + idx * 60, 0.08, 'sine');
+      setStatus('Good so far… ' + player.length + ' / ' + target.length);
+    }
+    updateHud();
+  }
+  function undo() {
+    if (state !== 'playing') { return; }
+    player.pop(); beep(300, 0.07, 'sine'); updateHud();
+  }
+  function updateHud() {
+    scoreBox.textContent = 'Score: ' + score;
+    livesBox.textContent = 'Lives: ' + ('❤️'.repeat(Math.max(0, lives)) || '—');
+    roundBox.textContent = 'Round: ' + Math.min(round, totalRounds) + ' / ' + totalRounds;
+    timeBox.textContent = 'Tide: ' + Math.ceil(tide) + 's';
+    timeBox.className = tide <= 10 ? 'danger' : (tide <= 20 ? 'warn' : '');
+  }
+  function startGame() {
+    ensureAudio();
+    score = 0; lives = 3; round = 1;
+    titlePanel.classList.add('hidden');
+    endPanel.classList.add('hidden');
+    state = 'playing';
+    newRound(); updateHud(); soundGood();
+  }
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? '🏆 You Win! Reef Decoded!' : '🌊 Game Over — The Tide Won';
+    endText.textContent = won
+      ? 'You cracked all 8 coral codes. Final score: ' + score + '. The reef is safe!'
+      : 'Final score: ' + score + '. The coral code slipped away with the tide.';
+    endPanel.classList.remove('hidden');
+    if (won) { soundWin(); } else { soundBad(); }
+    updateHud();
+  }
+
+  function tileRect(i) {
+    var w = 96, h = 88, gap = 12;
+    var total = 6 * w + 5 * gap;
+    var x = (700 - total) / 2 + i * (w + gap);
+    return { x: x, y: 400, w: w, h: h };
+  }
+  function slotRect(i, n) {
+    var w = 62, h = 62, gap = 10;
+    var total = n * w + (n - 1) * gap;
+    var x = (700 - total) / 2 + i * (w + gap);
+    return { x: x, y: 118, w: w, h: h };
+  }
+  function drawGlyph(g, x, y, size) {
+    ctx.fillStyle = g.c;
+    ctx.font = 'bold ' + size + 'px Arial';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(g.s, x, y);
+  }
+  function draw() {
+    ctx.clearRect(0, 0, 700, 520);
+    // Sandy floor and seaweed silhouettes.
+    ctx.fillStyle = '#e8c98a';
+    ctx.beginPath(); ctx.moveTo(0, 486); ctx.quadraticCurveTo(350, 466, 700, 486); ctx.lineTo(700, 520); ctx.lineTo(0, 520); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#1f7a4d';
+    for (var s = 0; s < 6; s++) {
+      var sx = 30 + s * 118;
+      ctx.beginPath(); ctx.moveTo(sx, 490); ctx.quadraticCurveTo(sx + 12, 430, sx + 4, 400); ctx.quadraticCurveTo(sx + 20, 440, sx + 26, 490); ctx.closePath(); ctx.fill();
+    }
+    // Bubbles.
+    ctx.fillStyle = 'rgba(180,240,255,0.45)';
+    bubbles.forEach(function (bb) { ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, Math.PI * 2); ctx.fill(); });
+    // A passing fish.
+    ctx.fillStyle = '#ff8fa3';
+    ctx.beginPath(); ctx.ellipse(fishX, 60, 26, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(fishX - 24, 60); ctx.lineTo(fishX - 40, 48); ctx.lineTo(fishX - 40, 72); ctx.closePath(); ctx.fill();
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#eafcff';
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText(state === 'playing' ? 'SECRET CORAL CODE — memorise it, then rebuild it below' : 'CORAL CIPHER', 350, 32);
+    if (state === 'playing') {
+      // Target code: shown as filled glyphs for the first half of the round timer pressure,
+      // then as silhouettes — the player must remember the order. Actually keep it visible
+      // but require exact-order rebuilding, so the puzzle is pattern matching under time.
+      target.forEach(function (gi, i) {
+        var r = slotRect(i, target.length);
+        ctx.fillStyle = '#0a2e44'; ctx.strokeStyle = '#2a7f9e'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(r.x, r.y, r.w, r.h, 12); ctx.fill(); ctx.stroke();
+        drawGlyph(GLYPHS[gi], r.x + r.w / 2, r.y + r.h / 2, 34);
+      });
+      ctx.fillStyle = '#bfe9ff'; ctx.font = '16px Arial';
+      ctx.fillText('Your decoding:', 350, 205);
+      for (var p = 0; p < target.length; p++) {
+        var sr = slotRect(p, target.length);
+        var sy = 222;
+        ctx.fillStyle = p < player.length ? '#123b52' : '#0a2e44';
+        ctx.strokeStyle = p < player.length ? GLYPHS[player[p]].c : '#2a7f9e'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(sr.x, sy, sr.w, sr.h, 12); ctx.fill(); ctx.stroke();
+        if (p < player.length) { drawGlyph(GLYPHS[player[p]], sr.x + sr.w / 2, sy + sr.h / 2, 34); }
+        else { ctx.fillStyle = '#5f8aa0'; ctx.font = '22px Arial'; ctx.fillText('?', sr.x + sr.w / 2, sy + sr.h / 2 + 2); }
+      }
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 16px Arial';
+      ctx.fillText('Tap glyph tiles 1–6 in the exact code order', 350, 330);
+      // Tide bar.
+      ctx.fillStyle = '#0a2e44'; ctx.fillRect(60, 350, 580, 18);
+      ctx.fillStyle = tide <= 10 ? '#ff6b6b' : '#2ec4e6';
+      ctx.fillRect(60, 350, Math.max(0, 580 * tide / 60), 18);
+      ctx.fillStyle = '#eafcff'; ctx.font = '14px Arial';
+      ctx.fillText('Tide rising — ' + Math.ceil(tide) + 's left', 350, 386);
+    } else {
+      ctx.fillStyle = '#bfe9ff'; ctx.font = '17px Arial';
+      ctx.fillText('The reef hides its secrets in coral glyphs.', 350, 150);
+      ctx.fillText('Press Start, then rebuild each secret code in order.', 350, 180);
+    }
+    // Glyph palette tiles (always drawn; active during play).
+    GLYPHS.forEach(function (g, i) {
+      var r = tileRect(i);
+      ctx.fillStyle = state === 'playing' ? '#0f3a52' : '#0a2e44';
+      ctx.strokeStyle = g.c; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect(r.x, r.y, r.w, r.h, 14); ctx.fill(); ctx.stroke();
+      drawGlyph(g, r.x + r.w / 2, r.y + 36, 40);
+      ctx.fillStyle = '#eafcff'; ctx.font = 'bold 14px Arial';
+      ctx.fillText((i + 1) + ' · ' + g.n, r.x + r.w / 2, r.y + 72);
+    });
+    if (flash && performance.now() < flashUntil) {
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 20px Arial';
+      ctx.fillText(flash, 350, 96);
+    }
+  }
+  function loop(ts) {
+    if (!lastTime) { lastTime = ts; }
+    var dt = Math.min(0.05, (ts - lastTime) / 1000); lastTime = ts;
+    if (state === 'playing') {
+      tide -= dt;
+      fishX = (fishX + 28 * dt) % 760 - 30;
+      bubbles.forEach(function (bb) { bb.y -= bb.v * dt; if (bb.y < -10) { bb.y = 520; bb.x = Math.random() * 700; } });
+      if (tide <= 0) { tide = 0; updateHud(); endGame(false); }
+      else if (Math.ceil(tide) % 1 === 0) { updateHud(); }
+    } else {
+      fishX = (fishX + 12 * dt) % 760 - 30;
+      bubbles.forEach(function (bb) { bb.y -= bb.v * 0.4 * dt; if (bb.y < -10) { bb.y = 520; } });
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  function canvasPoint(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX - rect.left) * (700 / rect.width);
+    var cy = (evt.clientY - rect.top) * (520 / rect.height);
+    return { x: cx, y: cy };
+  }
+  function handlePoint(evt) {
+    if (state !== 'playing') { return; }
+    var p = canvasPoint(evt);
+    for (var i = 0; i < GLYPHS.length; i++) {
+      var r = tileRect(i);
+      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) { pickGlyph(i); break; }
+    }
+  }
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+  canvas.addEventListener('mousedown', handlePoint);
+  canvas.addEventListener('click', handlePoint);
+  canvas.addEventListener('touchstart', function (evt) {
+    evt.preventDefault();
+    if (evt.touches && evt.touches[0]) {
+      handlePoint({ clientX: evt.touches[0].clientX, clientY: evt.touches[0].clientY });
+    }
+  }, { passive: false });
+  document.addEventListener('keydown', function (evt) {
+    if (state === 'title' && (evt.key === 'Enter' || evt.key === ' ')) { startGame(); return; }
+    if ((state === 'win' || state === 'over') && (evt.key === 'r' || evt.key === 'R' || evt.key === 'Enter')) { startGame(); return; }
+    if (state !== 'playing') { return; }
+    var n = parseInt(evt.key, 10);
+    if (n >= 1 && n <= 6) { pickGlyph(n - 1); }
+    else if (evt.key === 'Backspace') { undo(); }
+    else if (evt.key === 'r' || evt.key === 'R') { startGame(); }
+  });
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
