@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Paper Plane Patrol</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #87ceeb; font-family: 'Segoe UI', Arial, sans-serif; }
+  #wrap { position: relative; width: 100%; height: 100%; }
+  canvas { display: block; width: 100%; height: 100%; background: linear-gradient(#6ec6f0, #bfe8ff 55%, #e8f7ff); touch-action: none; }
+  #hud { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(20,40,70,0.55); color: #fff; font-weight: bold; font-size: 16px; z-index: 5; }
+  #hud span { margin: 0 6px; }
+  #lives { color: #ffd166; letter-spacing: 2px; }
+  #status { color: #b8f1ff; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(10,30,60,0.72); color: #fff; text-align: center; padding: 20px; z-index: 10; }
+  .screen h1 { font-size: 46px; margin-bottom: 8px; text-shadow: 2px 2px 0 #1a5276; }
+  .screen h2 { font-size: 34px; margin-bottom: 10px; }
+  .screen p { max-width: 560px; line-height: 1.55; margin: 6px 0; font-size: 17px; }
+  .screen.hidden { display: none; }
+  button { margin-top: 14px; padding: 13px 30px; font-size: 19px; font-weight: bold; border: none; border-radius: 12px; background: #ffca28; color: #263238; cursor: pointer; box-shadow: 0 4px 0 #b28700; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #e3f2fd; color: #1565c0; box-shadow: 0 4px 0 #90a4ae; }
+  #howto { display: none; max-width: 560px; background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.4); border-radius: 12px; padding: 14px 18px; margin-top: 14px; text-align: left; line-height: 1.6; font-size: 15px; }
+  #howto.show { display: block; }
+  #howto b { color: #ffe082; }
+  .big { font-size: 60px; }
+  @media (max-width: 600px) { .screen h1 { font-size: 32px; } #hud { font-size: 13px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Rings: <span id="rings">0</span>/12</span>
+    <span>Lives: <span id="lives">&#9992;&#9992;&#9992;</span></span>
+    <span id="status">Ready</span>
+  </div>
+
+  <div id="title" class="screen">
+    <div class="big">&#9992;</div>
+    <h1>Paper Plane Patrol</h1>
+    <p>Glide your paper plane across the sky, thread every floating ring, ride the updrafts and dodge the downdrafts!</p>
+    <button id="startBtn">Start Flying</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <div id="howto">
+      <b>Goal:</b> Fly through all 12 golden rings to win. You have 3 crashes.<br>
+      <b>Controls:</b> Arrow Keys / WASD to climb and dive &middot; Mouse: move to steer &middot; Touch: drag to steer.<br>
+      <b>Physics:</b> Diving builds speed, pulling up trades speed for height. Green zones push you up, red zones drag you down.<br>
+      <b>Crashes:</b> Hitting a storm cloud, the ground, or stalling out costs a life. Fly through a ring to bank it as a checkpoint.
+    </div>
+  </div>
+
+  <div id="end" class="screen hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 960, H = 540;
+  var scoreEl = document.getElementById('score');
+  var ringsEl = document.getElementById('rings');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('title');
+  var endScreen = document.getElementById('end');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  // ---------- Audio (procedural, created only after user interaction) ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slideTo) { o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur); }
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function ringSound() { tone(660, 0.12, 'sine', 0.15); setTimeout(function () { tone(990, 0.18, 'sine', 0.15); }, 90); }
+  function crashSound() { tone(220, 0.35, 'sawtooth', 0.16, 55); }
+  function winSound() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.25, 'triangle', 0.16); }, i * 140); }); }
+  function loseSound() { [392, 330, 262, 196].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, 'triangle', 0.14); }, i * 160); }); }
+
+  // ---------- Game state ----------
+  var TOTAL_RINGS = 12;
+  var state = 'title'; // title | playing | won | over
+  var plane, rings, updrafts, downdrafts, storms, clouds, particles;
+  var keys = {};
+  var pointer = { active: false, x: 0, y: 0 };
+  var score, lives, ringsDone, checkpoint, camX, distance;
+
+  function makeWorld() {
+    rings = [];
+    var xs = [420, 780, 1150, 1520, 1900, 2280, 2650, 3020, 3400, 3780, 4150, 4520];
+    var ys = [300, 200, 330, 170, 290, 150, 310, 200, 330, 180, 300, 210];
+    for (var i = 0; i < TOTAL_RINGS; i++) {
+      rings.push({ x: xs[i], y: ys[i], r: 46, done: false, pulse: Math.random() * 6 });
+    }
+    updrafts = [
+      { x: 600, y: 120, w: 180, h: 300 }, { x: 1750, y: 100, w: 180, h: 320 },
+      { x: 2900, y: 120, w: 180, h: 300 }, { x: 4000, y: 110, w: 180, h: 310 }
+    ];
+    downdrafts = [
+      { x: 1000, y: 100, w: 160, h: 320 }, { x: 2450, y: 110, w: 160, h: 300 },
+      { x: 3600, y: 100, w: 160, h: 320 }
+    ];
+    storms = [
+      { x: 1350, y: 420, r: 42 }, { x: 2100, y: 430, r: 46 }, { x: 3250, y: 420, r: 44 }, { x: 4350, y: 410, r: 46 }
+    ];
+    clouds = [];
+    for (var c = 0; c < 26; c++) {
+      clouds.push({ x: Math.random() * 4800, y: 40 + Math.random() * 180, s: 0.6 + Math.random() * 0.9, v: 0.1 + Math.random() * 0.25 });
+    }
+    particles = [];
+  }
+
+  function resetGame() {
+    makeWorld();
+    score = 0; lives = 3; ringsDone = 0; distance = 0; camX = 0;
+    plane = { x: 120, y: 260, vx: 2.2, vy: 0, angle: 0 };
+    checkpoint = { x: 120, y: 260 };
+    updateHUD('Flying!');
+  }
+
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    ringsEl.textContent = ringsDone;
+    livesEl.textContent = '\u2708'.repeat(Math.max(0, lives));
+    if (status) { statusEl.textContent = status; }
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 30 + Math.random() * 20, color: color });
+    }
+  }
+
+  function crash(reason) {
+    lives--;
+    crashSound();
+    burst(plane.x, plane.y, '#ff5252', 26);
+    updateHUD('Crash! ' + reason);
+    if (lives <= 0) {
+      state = 'over';
+      loseSound();
+      endTitle.textContent = 'Game Over';
+      endText.textContent = 'Your paper plane ran out of flights. You scored ' + score + ' points and cleared ' + ringsDone + ' of ' + TOTAL_RINGS + ' rings. Try again!';
+      endScreen.classList.remove('hidden');
+      return;
+    }
+    // Respawn at last checkpoint with a gentle push
+    plane.x = checkpoint.x; plane.y = checkpoint.y;
+    plane.vx = 2.2; plane.vy = 0; plane.angle = 0;
+    camX = Math.max(0, plane.x - 200);
+    setTimeout(function () { if (state === 'playing') updateHUD('Flying!'); }, 1200);
+  }
+
+  function winGame() {
+    state = 'won';
+    winSound();
+    burst(plane.x, plane.y, '#ffd700', 50);
+    endTitle.textContent = 'You Win!';
+    endText.textContent = 'Patrol complete! You threaded all ' + TOTAL_RINGS + ' rings with ' + lives + ' flight(s) to spare. Final score: ' + score + '.';
+    endScreen.classList.remove('hidden');
+    updateHUD('Patrol Complete!');
+  }
+
+  // ---------- Update ----------
+  function update(dt) {
+    if (state !== 'playing') return;
+    var p = plane;
+
+    // Steering: keyboard
+    if (keys['arrowup'] || keys['w']) { p.vy -= 0.14; }
+    if (keys['arrowdown'] || keys['s']) { p.vy += 0.10; }
+    if (keys['arrowleft'] || keys['a']) { p.vx -= 0.06; }
+    if (keys['arrowright'] || keys['d']) { p.vx += 0.06; }
+    // Steering: pointer (mouse / touch) — plane eases toward pointer height
+    if (pointer.active) {
+      var targetY = pointer.y + camYAdjust();
+      var dy = targetY - p.y;
+      p.vy += dy * 0.004;
+      p.vx += 0.01;
+    }
+    function camYAdjust() { return 0; }
+
+    // Glide physics: gravity, drag, lift from forward speed
+    p.vy += 0.045;                       // gravity
+    p.vy -= Math.max(0, p.vx) * 0.012;   // lift while moving forward
+    p.vx *= 0.998;                       // gentle drag
+    if (p.vx < 1.2) { p.vx = 1.2; }      // a paper plane keeps drifting
+    if (p.vx > 6.5) { p.vx = 6.5; }
+    if (p.vy > 5) { p.vy = 5; }
+    if (p.vy < -4.5) { p.vy = -4.5; }
+
+    // Updrafts lift, downdrafts sink
+    updrafts.forEach(function (z) {
+      if (p.x > z.x && p.x < z.x + z.w && p.y > z.y && p.y < z.y + z.h) { p.vy -= 0.16; }
+    });
+    downdrafts.forEach(function (z) {
+      if (p.x > z.x && p.x < z.x + z.w && p.y > z.y && p.y < z.y + z.h) { p.vy += 0.15; }
+    });
+
+    // Stall warning: climbing too steeply at low speed
+    if (p.vy < -3.4 && p.vx < 2.0) {
+      updateHUD('Stalling! Dive to regain speed');
+    }
+
+    p.x += p.vx; p.y += p.vy;
+    distance += p.vx;
+    p.angle = Math.atan2(p.vy, p.vx * 1.6);
+
+    // Camera follows
+    camX = Math.max(0, p.x - 220);
+
+    // Ring collection
+    rings.forEach(function (r) {
+      if (!r.done) {
+        var dx = p.x - r.x, dy = p.y - r.y;
+        if (dx * dx + dy * dy < (r.r * r.r)) {
+          r.done = true;
+          ringsDone++;
+          score += 100 + Math.round(p.vx * 10);
+          checkpoint = { x: r.x, y: r.y };
+          ringSound();
+          burst(r.x, r.y, '#ffd700', 20);
+          updateHUD('Ring! ' + ringsDone + '/' + TOTAL_RINGS);
+          if (ringsDone >= TOTAL_RINGS) { winGame(); }
+        }
+      }
+    });
+
+    // Storm collisions
+    storms.forEach(function (s) {
+      var dx = p.x - s.x, dy = p.y - s.y;
+      if (dx * dx + dy * dy < (s.r + 12) * (s.r + 12)) { crash('Storm cloud!'); }
+    });
+
+    // Ground / ceiling
+    if (p.y > H - 26) { crash('Hit the ground!'); }
+    if (p.y < 12) { p.y = 12; p.vy = Math.abs(p.vy) * 0.5; }
+
+    // Drifting clouds
+    clouds.forEach(function (c) { c.x -= c.v; if (c.x < -120) { c.x = 4800; } });
+
+    // Particles
+    particles = particles.filter(function (pt) { pt.x += pt.vx; pt.y += pt.vy; pt.life--; return pt.life > 0; });
+
+    // Time pulse for rings
+    rings.forEach(function (r) { r.pulse += dt * 0.05; });
+  }
+
+  // ---------- Draw ----------
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky gradient is via CSS; draw sun and hills in world space
+    ctx.save();
+    ctx.translate(-camX * 0.3, 0);
+    ctx.fillStyle = 'rgba(255, 236, 139, 0.9)';
+    ctx.beginPath(); ctx.arc(820, 70, 42, 0, Math.PI * 2); ctx.fill();
+    clouds.forEach(function (c) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 26 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x + 24 * c.s, c.y + 6, 20 * c.s, 0, Math.PI * 2);
+      ctx.arc(c.x - 24 * c.s, c.y + 8, 18 * c.s, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(-camX, 0);
+
+    // Air currents
+    updrafts.forEach(function (z) {
+      ctx.fillStyle = 'rgba(102, 255, 153, 0.20)';
+      ctx.fillRect(z.x, z.y, z.w, z.h);
+      ctx.strokeStyle = 'rgba(0, 180, 90, 0.6)';
+      ctx.setLineDash([8, 8]);
+      ctx.strokeRect(z.x, z.y, z.w, z.h);
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(0, 150, 70, 0.8)';
+      ctx.font = 'bold 15px Arial';
+      ctx.fillText('UPDRAFT', z.x + 40, z.y + 22);
+      for (var i = 0; i < 3; i++) {
+        var ay = z.y + 40 + i * 90 + ((Date.now() / 30) % 90);
+        ctx.beginPath();
+        ctx.moveTo(z.x + 30 + i * 55, ay);
+        ctx.lineTo(z.x + 30 + i * 55, ay - 26);
+        ctx.strokeStyle = 'rgba(0, 150, 70, 0.5)';
+        ctx.stroke();
+      }
+    });
+    downdrafts.forEach(function (z) {
+      ctx.fillStyle = 'rgba(255, 120, 120, 0.20)';
+      ctx.fillRect(z.x, z.y, z.w, z.h);
+      ctx.strokeStyle = 'rgba(200, 40, 40, 0.6)';
+      ctx.setLineDash([8, 8]);
+      ctx.strokeRect(z.x, z.y, z.w, z.h);
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(180, 30, 30, 0.8)';
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText('DOWNDRAFT', z.x + 22, z.y + 22);
+    });
+
+    // Finish banner
+    ctx.fillStyle = '#1565c0';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('FINISH', 4520, 120);
+
+    // Rings
+    rings.forEach(function (r, i) {
+      if (r.done) {
+        ctx.strokeStyle = 'rgba(120, 200, 120, 0.7)';
+      } else {
+        var glow = 3 + Math.sin(r.pulse) * 1.5;
+        ctx.strokeStyle = '#ff8f00';
+        ctx.lineWidth = 5 + glow;
+      }
+      ctx.lineWidth = r.done ? 3 : 6;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = r.done ? 'rgba(120,200,120,0.5)' : '#fff176';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(i + 1), r.x, r.y + 6);
+      ctx.textAlign = 'left';
+    });
+
+    // Storm clouds
+    storms.forEach(function (s) {
+      ctx.fillStyle = '#455a64';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.arc(s.x - 28, s.y + 12, s.r * 0.7, 0, Math.PI * 2);
+      ctx.arc(s.x + 28, s.y + 12, s.r * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffeb3b';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(s.x - 4, s.y + 6);
+      ctx.lineTo(s.x - 14, s.y + 32);
+      ctx.lineTo(s.x - 2, s.y + 32);
+      ctx.lineTo(s.x - 12, s.y + 58);
+      ctx.stroke();
+    });
+
+    // Ground hills
+    ctx.fillStyle = '#66bb6a';
+    ctx.beginPath();
+    ctx.moveTo(camX - 50, H);
+    for (var gx = camX - 50; gx < camX + W + 100; gx += 40) {
+      ctx.lineTo(gx, H - 26 - Math.sin(gx * 0.01) * 8);
+    }
+    ctx.lineTo(camX + W + 100, H);
+    ctx.closePath(); ctx.fill();
+
+    // Paper plane
+    var p = plane;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.angle);
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#90a4ae';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(26, 0); ctx.lineTo(-16, -13); ctx.lineTo(-6, 0); ctx.lineTo(-16, 13);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#e53935';
+    ctx.beginPath();
+    ctx.moveTo(26, 0); ctx.lineTo(-6, 0); ctx.lineTo(-16, -13);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // Particles
+    particles.forEach(function (pt) {
+      ctx.fillStyle = pt.color;
+      ctx.globalAlpha = Math.max(0, pt.life / 50);
+      ctx.fillRect(pt.x - 2, pt.y - 2, 5, 5);
+      ctx.globalAlpha = 1;
+    });
+
+    ctx.restore();
+
+    // Trail hint on title-state idle: nothing extra needed
+  }
+
+  // ---------- Main loop ----------
+  var lastTime = 0;
+  function loop(timestamp) {
+    var dt = Math.min(32, timestamp - lastTime || 16);
+    lastTime = timestamp;
+    if (state === 'playing') { update(dt); }
+    if (plane) { draw(); }
+    requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Flying!');
+    tone(523, 0.15, 'triangle', 0.14);
+  }
+
+  // ---------- Input: keyboard, mouse, touch ----------
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].indexOf(k) !== -1) { e.preventDefault(); }
+    if (k === 'enter' && (state === 'title' || state === 'won' || state === 'over')) { startGame(); }
+    if (k === 'r' && (state === 'won' || state === 'over')) { startGame(); }
+  });
+  document.addEventListener('keyup', function (e) {
+    keys[e.key.toLowerCase()] = false;
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    pointer.active = true;
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+  });
+  canvas.addEventListener('mouseleave', function () { pointer.active = false; });
+  canvas.addEventListener('mousedown', function (e) {
+    ensureAudio();
+    var rect = canvas.getBoundingClientRect();
+    pointer.active = true;
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+  });
+  document.addEventListener('mouseup', function () { pointer.active = false; });
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio();
+    e.preventDefault();
+    var t = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    pointer.active = true;
+    pointer.x = (t.clientX - rect.left) * (W / rect.width);
+    pointer.y = (t.clientY - rect.top) * (H / rect.height);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    pointer.active = true;
+    pointer.x = (t.clientX - rect.left) * (W / rect.width);
+    pointer.y = (t.clientY - rect.top) * (H / rect.height);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointer.active = false; });
+
+  // Buttons
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function () {
+    document.getElementById('howto').classList.toggle('show');
+  });
+
+  // Resize canvas to fit while keeping internal resolution
+  function fitCanvas() {
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+  }
+  window.addEventListener('resize', fitCanvas);
+  fitCanvas();
+
+  // Boot: idle scene behind the title screen
+  resetGame();
+  state = 'title';
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

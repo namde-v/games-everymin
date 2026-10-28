@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 290
-- **Latest game:** 0290 — Discus Dynamo
+- **Total games:** 300
+- **Latest game:** 0300 — Lunar Leap
 - **Current volume:** 003 (Games 0201 to 0300)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -15,7 +15,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
-| 003 | 0201–0290 (90 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
+| 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -29,20 +29,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 029
+## Latest batch — Batch 030
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0281 | Deepsea Dispatch | Arcade / Underwater Parcel Dash | [Play](./games/game-0281.html) |
-| 0282 | Loom Logic | Puzzle / Weaving Pattern Logic | [Play](./games/game-0282.html) |
-| 0283 | Grove Guardian | Strategy / Orchard Management | [Play](./games/game-0283.html) |
-| 0284 | Cajon Cadence | Rhythm / Hand Drum Timing | [Play](./games/game-0284.html) |
-| 0285 | Boomerang Bounce | Precision / Boomerang Throw | [Play](./games/game-0285.html) |
-| 0286 | Skyline Swing | Arcade / Rooftop Grapple Swing | [Play](./games/game-0286.html) |
-| 0287 | Pollen Path | Puzzle / Bee Pathfinding Logic | [Play](./games/game-0287.html) |
-| 0288 | Subway Scheduler | Strategy / Transit Scheduling | [Play](./games/game-0288.html) |
-| 0289 | Synth Samba | Rhythm / Synth Beat Timing | [Play](./games/game-0289.html) |
-| 0290 | Discus Dynamo | Precision / Discus Throw | [Play](./games/game-0290.html) |
+| 0291 | Mirror Meadow | Puzzle / Light Reflection | [Play](./games/game-0291.html) |
+| 0292 | Photon Pilgrim | Arcade / Solar Wind Riding | [Play](./games/game-0292.html) |
+| 0293 | Cinderfield Cultivator | Strategy / Farm Simulation | [Play](./games/game-0293.html) |
+| 0294 | Metronome Maze | Rhythm / Beat Maze | [Play](./games/game-0294.html) |
+| 0295 | Paper Plane Patrol | Arcade / Gliding Flight | [Play](./games/game-0295.html) |
+| 0296 | Rune Relay | Puzzle / Sequence Logic | [Play](./games/game-0296.html) |
+| 0297 | Quarry Quest | Arcade / Digging Adventure | [Play](./games/game-0297.html) |
+| 0298 | Starlight Stitch | Puzzle / Constellation Drawing | [Play](./games/game-0298.html) |
+| 0299 | Lighthouse Ledger | Strategy / Lighthouse Management | [Play](./games/game-0299.html) |
+| 0300 | Lunar Leap | Precision / Low-Gravity Jumping | [Play](./games/game-0300.html) |
 
 
 ## Quality standard

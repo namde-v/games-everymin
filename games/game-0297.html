@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Quarry Quest</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #120d08; color: #ffe9c4; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 12px; min-height: 100vh; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #ffd34d; text-shadow: 2px 2px 0 #7a3b00; margin: 6px 0 2px; }
+  p.tag { color: #d8b98a; margin-bottom: 10px; font-size: 14px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 720px; margin-bottom: 8px; }
+  .pill { background: #2b1c10; border: 2px solid #8a5a22; border-radius: 20px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill.warn { color: #ff6b5e; border-color: #ff6b5e; }
+  #wrap { position: relative; width: 100%; max-width: 720px; }
+  canvas { display: block; width: 100%; height: auto; background: #1a120a; border: 4px solid #8a5a22; border-radius: 10px; touch-action: none; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,6,2,0.88); border-radius: 10px; padding: 20px; gap: 10px; }
+  #overlay.hidden { display: none; }
+  #overlay h2 { font-size: 32px; color: #ffd34d; }
+  #overlay p { max-width: 520px; line-height: 1.5; font-size: 15px; color: #f3dcb3; }
+  #overlay .howto { background: #241708; border: 1px solid #6b4420; border-radius: 8px; padding: 12px; text-align: left; font-size: 14px; }
+  button { background: #ffb703; color: #2b1600; border: 0; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #9a5b00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #e8d5a8; font-size: 15px; padding: 9px 16px; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  #msg { min-height: 22px; margin-top: 8px; font-weight: bold; color: #9dff8a; }
+  .dpad { display: grid; grid-template-columns: repeat(3, 52px); gap: 5px; margin-top: 8px; }
+  .dpad button { padding: 10px 0; font-size: 20px; }
+  .dpad .empty { visibility: hidden; }
+  @media (max-width: 600px) { h1 { font-size: 24px; } #overlay h2 { font-size: 26px; } }
+</style>
+</head>
+<body>
+<h1>⛏️ QUARRY QUEST ⛏️</h1>
+<p class="tag">Dig deep, grab the gems, and get out before your lantern fades.</p>
+
+<div id="hud">
+  <div class="pill">💎 Score: <span id="score">0</span></div>
+  <div class="pill">🎯 Gems: <span id="gems">0</span> / 12</div>
+  <div class="pill">❤️ Lives: <span id="lives">3</span></div>
+  <div class="pill" id="lampPill">🔦 Lantern: <span id="lamp">60</span>s</div>
+  <div class="pill">🪨 Depth: <span id="depth">1</span></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="720" height="480"></canvas>
+  <div id="overlay">
+    <h2 id="ovTitle">QUARRY QUEST</h2>
+    <p id="ovText">You are a brave miner with a flickering lantern. Dig tunnels, collect 12 gems, and dodge falling rocks before the light runs out.</p>
+    <div class="howto">
+      <strong>How to Play</strong><br>
+      • Move: Arrow keys / WASD, on-screen arrows, swipe, or tap a nearby tile.<br>
+      • Dig: walk into soft rock to tunnel through it. Solid dark rock cannot be dug.<br>
+      • Collect gems for 100 points. A rock on your head costs a life.<br>
+      • Lantern oil: grab oil cans to add 15 seconds. Reach 12 gems to win.<br>
+      • Watch out: loose rocks fall when the ground below them is dug away.
+    </div>
+    <button id="startBtn">▶ Start Digging</button>
+    <button class="secondary" id="howBtn">How to Play</button>
+  </div>
+</div>
+
+<div id="msg"></div>
+<div id="controls">
+  <div class="dpad">
+    <span class="empty"></span><button data-dir="up" aria-label="Up">▲</button><span class="empty"></span>
+    <button data-dir="left" aria-label="Left">◀</button><button data-dir="down" aria-label="Down">▼</button><button data-dir="right" aria-label="Right">▶</button>
+  </div>
+</div>
+<p style="color:#b99a72;font-size:13px;margin-top:8px;">Tip: dig sideways under a loose rock, then step away quickly. Gravity is not your friend.</p>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var ovTitle = document.getElementById('ovTitle');
+  var ovText = document.getElementById('ovText');
+  var startBtn = document.getElementById('startBtn');
+  var howBtn = document.getElementById('howBtn');
+  var msgEl = document.getElementById('msg');
+  var scoreEl = document.getElementById('score');
+  var gemsEl = document.getElementById('gems');
+  var livesEl = document.getElementById('lives');
+  var lampEl = document.getElementById('lamp');
+  var lampPill = document.getElementById('lampPill');
+  var depthEl = document.getElementById('depth');
+
+  var COLS = 18, ROWS = 12, TILE = 40;
+  var TARGET = 12;
+  var grid, player, rocks, score, gems, lives, lamp, state, lastTime, fallTimer, shake;
+  var keys = {};
+  var audioCtx = null;
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'square';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function rand(n) { return Math.floor(Math.random() * n); }
+  function buildLevel() {
+    grid = [];
+    for (var y = 0; y < ROWS; y++) {
+      var row = [];
+      for (var x = 0; x < COLS; x++) {
+        if (y === 0) row.push('sky');
+        else if (x === 0 || x === COLS - 1 || y === ROWS - 1) row.push('solid');
+        else if (Math.random() < 0.08) row.push('solid');
+        else if (Math.random() < 0.16) row.push('rock');
+        else if (Math.random() < 0.13) row.push('gem');
+        else if (Math.random() < 0.05) row.push('oil');
+        else row.push('dirt');
+      }
+      grid.push(row);
+    }
+    // Guarantee a safe start tunnel and plenty of gems.
+    for (var i = 0; i < 4; i++) grid[1][2 + i] = 'empty';
+    grid[1][1] = 'empty'; grid[2][1] = 'empty';
+    var placed = 0;
+    while (placed < 18) {
+      var gx = 2 + rand(COLS - 4), gy = 2 + rand(ROWS - 3);
+      if (grid[gy][gx] === 'dirt') { grid[gy][gx] = 'gem'; placed++; }
+    }
+    var oils = 0;
+    while (oils < 6) {
+      var ox = 2 + rand(COLS - 4), oy = 2 + rand(ROWS - 3);
+      if (grid[oy][ox] === 'dirt') { grid[oy][ox] = 'oil'; oils++; }
+    }
+    rocks = [];
+    for (var r = 0; r < 10; r++) {
+      var rx = 2 + rand(COLS - 4), ry = 2 + rand(ROWS - 4);
+      if (grid[ry][rx] === 'dirt') { grid[ry][rx] = 'empty'; rocks.push({ x: rx, y: ry, falling: false }); }
+    }
+  }
+
+  function reset() {
+    buildLevel();
+    player = { x: 1, y: 1, face: 1 };
+    score = 0; gems = 0; lives = 3; lamp = 60; state = 'playing';
+    lastTime = performance.now(); fallTimer = 0; shake = 0;
+    overlay.classList.add('hidden');
+    msgEl.textContent = 'Dig for gems. Mind the rocks above you.';
+    updateHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    gemsEl.textContent = gems;
+    livesEl.textContent = lives;
+    lampEl.textContent = Math.max(0, Math.ceil(lamp));
+    depthEl.textContent = player.y + 1;
+    lampPill.classList.toggle('warn', lamp <= 15);
+  }
+
+  function tileAt(x, y) {
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return 'solid';
+    return grid[y][x];
+  }
+  function rockAt(x, y) {
+    for (var i = 0; i < rocks.length; i++) if (rocks[i].x === x && rocks[i].y === y) return rocks[i];
+    return null;
+  }
+
+  function tryMove(dx, dy) {
+    if (state !== 'playing') return;
+    var nx = player.x + dx, ny = player.y + dy;
+    if (dx !== 0) player.face = dx;
+    var t = tileAt(nx, ny);
+    if (t === 'solid' || t === 'sky') { beep(110, 0.08, 'square'); return; }
+    if (rockAt(nx, ny)) { beep(90, 0.1, 'sawtooth'); return; }
+    player.x = nx; player.y = ny;
+    if (t === 'dirt' || t === 'rock') { grid[ny][nx] = 'empty'; score += 5; beep(220, 0.06, 'square'); }
+    if (t === 'gem') {
+      grid[ny][nx] = 'empty'; gems++; score += 100;
+      beep(660, 0.12, 'sine'); setTimeout(function() { beep(880, 0.14, 'sine'); }, 80);
+      msgEl.textContent = 'Gem found! ' + (TARGET - gems) + ' more to win.';
+      if (gems >= TARGET) endGame(true);
+    }
+    if (t === 'oil') {
+      grid[ny][nx] = 'empty'; lamp += 15; score += 25;
+      beep(520, 0.15, 'triangle');
+      msgEl.textContent = 'Lantern oil! +15 seconds of light.';
+    }
+    updateHud();
+  }
+
+  function hitPlayer() {
+    lives--; shake = 12; beep(140, 0.3, 'sawtooth');
+    msgEl.textContent = lives > 0 ? 'Ouch! A rock hit you. Be careful up there.' : 'Cave-in!';
+    // Push the player to a nearby safe empty tile.
+    var dirs = [[0,-1],[1,0],[-1,0],[0,1]];
+    for (var i = 0; i < dirs.length; i++) {
+      var nx = player.x + dirs[i][0], ny = player.y + dirs[i][1];
+      if (tileAt(nx, ny) === 'empty' && !rockAt(nx, ny)) { player.x = nx; player.y = ny; break; }
+    }
+    updateHud();
+    if (lives <= 0) endGame(false);
+  }
+
+  function updateRocks(dt) {
+    fallTimer += dt;
+    if (fallTimer < 0.12) return;
+    fallTimer = 0;
+    for (var i = 0; i < rocks.length; i++) {
+      var r = rocks[i];
+      var below = tileAt(r.x, r.y + 1);
+      var belowRock = rockAt(r.x, r.y + 1);
+      if (below === 'empty' && !belowRock) {
+        r.y++; r.falling = true;
+        if (r.x === player.x && r.y === player.y) { hitPlayer(); }
+      } else {
+        if (r.falling) { r.falling = false; shake = 4; beep(180, 0.08, 'square'); }
+      }
+    }
+  }
+
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    overlay.classList.remove('hidden');
+    ovTitle.textContent = won ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    ovText.textContent = won
+      ? 'You collected all ' + TARGET + ' gems with a score of ' + score + ' and escaped the quarry. Brilliant digging!'
+      : 'Your lantern faded or the cave got the better of you. Score: ' + score + ', gems: ' + gems + '. Try again!';
+    startBtn.textContent = '↻ Restart';
+    if (won) { beep(523, 0.15, 'sine'); setTimeout(function(){ beep(659, 0.15, 'sine'); }, 130); setTimeout(function(){ beep(784, 0.25, 'sine'); }, 260); }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (shake > 0) { ctx.save(); ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); shake *= 0.85; }
+    for (var y = 0; y < ROWS; y++) {
+      for (var x = 0; x < COLS; x++) {
+        var px = x * TILE, py = y * TILE, t = grid[y][x];
+        if (t === 'sky') { ctx.fillStyle = '#7ec8f7'; ctx.fillRect(px, py, TILE, TILE); }
+        else if (t === 'empty') { ctx.fillStyle = '#241708'; ctx.fillRect(px, py, TILE, TILE); }
+        else if (t === 'solid') {
+          ctx.fillStyle = '#3d3d46'; ctx.fillRect(px, py, TILE, TILE);
+          ctx.fillStyle = '#565664'; ctx.fillRect(px + 5, py + 5, 12, 12); ctx.fillRect(px + 22, py + 20, 12, 12);
+        } else {
+          ctx.fillStyle = t === 'rock' ? '#6b4a26' : '#8a5a2b'; ctx.fillRect(px, py, TILE, TILE);
+          ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(px + 3, py + 28, 34, 5);
+          ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(px + 4, py + 4, 18, 5);
+          if (t === 'gem') {
+            ctx.fillStyle = '#34e0ff'; ctx.beginPath();
+            ctx.moveTo(px + 20, py + 8); ctx.lineTo(px + 32, py + 18); ctx.lineTo(px + 20, py + 33); ctx.lineTo(px + 8, py + 18); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(px + 16, py + 13, 5, 5);
+          }
+          if (t === 'oil') {
+            ctx.fillStyle = '#ffcc00'; ctx.fillRect(px + 12, py + 12, 16, 18); ctx.fillStyle = '#222'; ctx.fillRect(px + 17, py + 7, 6, 6);
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.fillText('OIL', px + 9, py + 25);
+          }
+        }
+      }
+    }
+    rocks.forEach(function(r) {
+      var px = r.x * TILE, py = r.y * TILE;
+      ctx.fillStyle = '#9a9aa8'; ctx.beginPath(); ctx.arc(px + 20, py + 20, 17, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#6e6e7d'; ctx.beginPath(); ctx.arc(px + 14, py + 14, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#c9c9d6'; ctx.beginPath(); ctx.arc(px + 26, py + 13, 4, 0, Math.PI * 2); ctx.fill();
+    });
+    // Player: miner with helmet lamp.
+    var px = player.x * TILE, py = player.y * TILE;
+    ctx.fillStyle = '#2f6df6'; ctx.fillRect(px + 9, py + 18, 22, 17);
+    ctx.fillStyle = '#f2c49b'; ctx.beginPath(); ctx.arc(px + 20, py + 13, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd34d'; ctx.fillRect(px + 11, py + 5, 18, 6); ctx.fillStyle = '#fff7a0'; ctx.fillRect(px + 18, py + 6, 5, 4);
+    ctx.fillStyle = '#222'; ctx.fillRect(px + 8, py + 34, 8, 4); ctx.fillRect(px + 24, py + 34, 8, 4);
+    ctx.fillStyle = '#8a5a22'; ctx.fillRect(px + (player.face > 0 ? 30 : 2), py + 20, 8, 4);
+    // Lantern glow vignette.
+    var glow = ctx.createRadialGradient(px + 20, py + 20, 10, px + 20, py + 20, 130);
+    var alpha = Math.max(0.08, Math.min(0.32, lamp / 180));
+    glow.addColorStop(0, 'rgba(255,220,120,' + alpha + ')');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow; ctx.fillRect(px - 110, py - 110, 260, 260);
+    if (lamp <= 15) { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    if (shake > 0) ctx.restore();
+    ctx.fillStyle = '#ffe9c4'; ctx.font = 'bold 13px Arial';
+    ctx.fillText('Goal: ' + TARGET + ' gems  |  Oil adds light  |  Falling rocks hurt', 10, 472);
+  }
+
+  function loop(now) {
+    var dt = Math.min(0.1, (now - lastTime) / 1000);
+    lastTime = now;
+    if (state === 'playing') {
+      lamp -= dt;
+      if (lamp <= 0) { lamp = 0; updateHud(); endGame(false); }
+      else updateRocks(dt);
+      updateHud();
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  document.addEventListener('keydown', function(e) {
+    var k = e.key.toLowerCase();
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
+    if (state !== 'playing') {
+      if (k === 'enter' || k === ' ') { initAudio(); reset(); }
+      return;
+    }
+    if (k === 'arrowup' || k === 'w') tryMove(0, -1);
+    else if (k === 'arrowdown' || k === 's') tryMove(0, 1);
+    else if (k === 'arrowleft' || k === 'a') tryMove(-1, 0);
+    else if (k === 'arrowright' || k === 'd') tryMove(1, 0);
+  });
+
+  // Mouse: click a neighbouring tile to move/dig toward it.
+  canvas.addEventListener('click', function(e) {
+    initAudio();
+    if (state !== 'playing') return;
+    var rect = canvas.getBoundingClientRect();
+    var tx = Math.floor((e.clientX - rect.left) / rect.width * COLS);
+    var ty = Math.floor((e.clientY - rect.top) / rect.height * ROWS);
+    var dx = tx - player.x, dy = ty - player.y;
+    if (Math.abs(dx) + Math.abs(dy) === 1) tryMove(dx, dy);
+    else if (dx !== 0 || dy !== 0) tryMove(Math.abs(dx) > Math.abs(dy) ? Math.sign(dx) : 0, Math.abs(dx) > Math.abs(dy) ? 0 : Math.sign(dy));
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    var tx = Math.floor((e.clientX - rect.left) / rect.width * COLS);
+    var ty = Math.floor((e.clientY - rect.top) / rect.height * ROWS);
+    canvas.title = 'Tile ' + tx + ', ' + ty;
+  });
+
+  // Touch: swipe to move, tap a tile to step toward it.
+  var touchX = null, touchY = null;
+  canvas.addEventListener('touchstart', function(e) {
+    initAudio();
+    e.preventDefault();
+    var t = e.changedTouches[0];
+    touchX = t.clientX; touchY = t.clientY;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    if (state !== 'playing' || touchX === null) return;
+    var t = e.changedTouches[0];
+    var dx = t.clientX - touchX, dy = t.clientY - touchY;
+    if (Math.abs(dx) < 12 && Math.abs(dy) < 12) {
+      var rect = canvas.getBoundingClientRect();
+      var tx = Math.floor((t.clientX - rect.left) / rect.width * COLS);
+      var ty = Math.floor((t.clientY - rect.top) / rect.height * ROWS);
+      var mx = tx - player.x, my = ty - player.y;
+      if (Math.abs(mx) + Math.abs(my) >= 1) tryMove(Math.abs(mx) > Math.abs(my) ? Math.sign(mx) : 0, Math.abs(mx) > Math.abs(my) ? 0 : Math.sign(my));
+    } else if (Math.abs(dx) > Math.abs(dy)) tryMove(Math.sign(dx), 0);
+    else tryMove(0, Math.sign(dy));
+    touchX = null; touchY = null;
+  }, { passive: false });
+
+  document.querySelectorAll('.dpad button').forEach(function(b) {
+    b.addEventListener('click', function() {
+      initAudio();
+      var d = b.getAttribute('data-dir');
+      if (d === 'up') tryMove(0, -1);
+      if (d === 'down') tryMove(0, 1);
+      if (d === 'left') tryMove(-1, 0);
+      if (d === 'right') tryMove(1, 0);
+    });
+  });
+
+  startBtn.addEventListener('click', function() { initAudio(); beep(440, 0.1, 'square'); reset(); });
+  howBtn.addEventListener('click', function() {
+    ovText.textContent = 'Dig with arrows, WASD, swipe, taps, or the on-screen pad. Collect 12 gems, grab oil to refill your lantern, and stay clear of falling rocks. Solid dark rock cannot be dug.';
+  });
+
+  buildLevel();
+  player = { x: 1, y: 1, face: 1 };
+  score = 0; gems = 0; lives = 3; lamp = 60; state = 'title';
+  lastTime = performance.now();
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

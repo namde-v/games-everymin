@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Photon Pilgrim — Solar Wind Riding</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#030014; font-family:Arial, Helvetica, sans-serif; color:#fff; }
+  #wrap { position:relative; width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 50% 30%, #1a0a4a 0%, #030014 70%); }
+  canvas { display:block; background:linear-gradient(180deg, #05002a 0%, #0a0033 45%, #150040 100%); border:2px solid #7b2ff7; border-radius:12px; box-shadow:0 0 40px rgba(123,47,247,.6); max-width:96vw; max-height:92vh; touch-action:none; }
+  #hud { position:absolute; top:14px; left:50%; transform:translateX(-50%); display:flex; gap:18px; font-size:16px; font-weight:bold; text-shadow:0 0 8px #ffcc00; z-index:5; background:rgba(0,0,0,.45); padding:8px 16px; border-radius:20px; border:1px solid rgba(255,204,0,.4); }
+  #hud span { white-space:nowrap; }
+  #overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; background:rgba(2,0,20,.72); z-index:10; }
+  #overlay h1 { font-size:52px; color:#ffe066; text-shadow:0 0 24px #ffaa00, 0 0 60px #7b2ff7; letter-spacing:2px; margin-bottom:8px; }
+  #overlay h2 { font-size:26px; color:#a78bfa; margin-bottom:14px; }
+  #overlay p { max-width:560px; line-height:1.55; font-size:16px; color:#e9e5ff; margin-bottom:10px; }
+  #overlay .tag { color:#7dd3fc; font-weight:bold; }
+  button { margin-top:16px; padding:14px 34px; font-size:20px; font-weight:bold; border:none; border-radius:30px; cursor:pointer; background:linear-gradient(90deg,#f59e0b,#ef4444); color:#fff; box-shadow:0 0 22px rgba(245,158,11,.8); }
+  button:hover { transform:scale(1.05); }
+  button:active { transform:scale(.98); }
+  .keys { font-size:14px; color:#c4b5fd; margin-top:12px; }
+  .hidden { display:none !important; }
+  #status { color:#fde68a; font-weight:bold; }
+  @media (max-width:600px){ #overlay h1{font-size:36px;} #hud{font-size:13px; gap:10px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="600"></canvas>
+  <div id="hud">
+    <span>SCORE: <span id="score">0</span></span>
+    <span>LIVES: <span id="lives">♥♥♥</span></span>
+    <span>WIND: <span id="wind">Calm</span></span>
+    <span id="status">READY</span>
+  </div>
+  <div id="overlay">
+    <h1>☀ PHOTON PILGRIM</h1>
+    <h2>Solar Wind Riding</h2>
+    <p>Ride the solar wind across the void! Pilot your light-sail craft, <span class="tag">collect glowing photons</span> to charge your journey, and dodge tumbling asteroids and debris.</p>
+    <p><strong>How to Play:</strong> Steer with Arrow Keys / WASD, move with the mouse, or drag with touch. Wind gusts push you sideways — surf them, don't fight them! Grab photons for points, reach <strong>1500 points</strong> to WIN. You have 3 lives — one asteroid hit costs a life.</p>
+    <p class="keys">⌨ Arrow Keys / WASD &nbsp;|&nbsp; 🖱 Mouse move &nbsp;|&nbsp; 👆 Touch drag &nbsp;|&nbsp; P = Pause &nbsp;|&nbsp; R = Restart</p>
+    <button id="startBtn">▶ START JOURNEY</button>
+  </div>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var startBtn = document.getElementById('startBtn');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var windEl = document.getElementById('wind');
+  var statusEl = document.getElementById('status');
+
+  var W = canvas.width, H = canvas.height;
+  var running = false, paused = false, over = false, won = false;
+  var score = 0, lives = 3, frame = 0, rafId = null;
+  var keys = {};
+  var pointer = { x: W/2, y: H*0.7, active: false };
+  var wind = 0, windTimer = 0, windLabel = 'Calm';
+  var photons = [], rocks = [], stars = [], particles = [], gusts = [];
+  var player = { x: W/2, y: H*0.7, vx: 0, vy: 0, r: 18, inv: 0 };
+
+  // Procedural Web Audio - created only after user interaction
+  var audioCtx = null, master = null;
+  function initAudio(){
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      master = audioCtx.createGain();
+      master.gain.value = 0.18;
+      master.connect(audioCtx.destination);
+    } catch(e) {}
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.3, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(master); o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sndPickup(){ beep(880, 0.18, 'sine', 0.4); setTimeout(function(){ beep(1320, 0.22, 'sine', 0.35); }, 60); }
+  function sndHit(){ beep(140, 0.35, 'sawtooth', 0.5); }
+  function sndWin(){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.3, 'triangle', 0.4); }, i*130); }); }
+  function sndLose(){ [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ beep(f, 0.3, 'sawtooth', 0.4); }, i*140); }); }
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function reset(){
+    score = 0; lives = 3; frame = 0; over = false; won = false; paused = false;
+    player.x = W/2; player.y = H*0.7; player.vx = 0; player.vy = 0; player.inv = 0;
+    photons = []; rocks = []; stars = []; particles = []; gusts = []; wind = 0; windLabel = 'Calm';
+    for (var i=0;i<110;i++) stars.push({x:Math.random()*W, y:Math.random()*H, s:rand(0.6,2.4), tw:Math.random()*6.28});
+    updateHUD();
+  }
+  function updateHUD(){
+    scoreEl.textContent = score;
+    livesEl.textContent = lives > 0 ? '♥'.repeat(lives) : '—';
+    windEl.textContent = windLabel;
+    statusEl.textContent = won ? 'YOU WIN!' : over ? 'GAME OVER' : paused ? 'PAUSED' : running ? 'FLYING' : 'READY';
+  }
+  function spawnPhoton(){
+    photons.push({ x: rand(30, W-30), y: -20, vy: rand(1.2, 2.4), r: 9, pulse: Math.random()*6.28 });
+  }
+  function spawnRock(){
+    var r = rand(14, 30);
+    rocks.push({ x: rand(30, W-30), y: -40, vy: rand(1.6, 3.4), vx: rand(-0.8, 0.8), r: r, rot: Math.random()*6.28, vr: rand(-0.05, 0.05), verts: 8 });
+  }
+  function burst(x, y, color, n){
+    for (var i=0;i<n;i++){
+      var a = Math.random()*6.28, sp = rand(1, 4.5);
+      particles.push({ x:x, y:y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life: rand(20,45), color: color });
+    }
+  }
+  function showEnd(title, sub, btnText){
+    overlay.classList.remove('hidden');
+    overlay.querySelector('h1').textContent = title;
+    overlay.querySelector('h2').textContent = sub;
+    startBtn.textContent = btnText;
+  }
+  function startGame(){
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    reset();
+    running = true;
+    overlay.classList.add('hidden');
+    updateHUD();
+    if (rafId) cancelAnimationFrame(rafId);
+    loop();
+  }
+  function endGame(win){
+    running = false; over = !win; won = win;
+    updateHUD();
+    if (win) sndWin(); else sndLose();
+    showEnd(win ? '✦ YOU WIN! ✦' : '💥 GAME OVER', win ? 'You rode the solar wind to 1500 points, Pilgrim!' : 'Final score: ' + score + ' — the void claims another sail.', '↻ RESTART');
+  }
+
+  function update(){
+    frame++;
+    // Wind cycle: every ~5 seconds pick a new gust
+    windTimer--;
+    if (windTimer <= 0){
+      windTimer = rand(240, 380);
+      wind = rand(-2.2, 2.2);
+      if (wind > 1.2) windLabel = 'Gale →';
+      else if (wind < -1.2) windLabel = '← Gale';
+      else if (wind > 0.4) windLabel = 'Breeze →';
+      else if (wind < -0.4) windLabel = '← Breeze';
+      else windLabel = 'Calm';
+      gusts.push({ x: wind > 0 ? 0 : W, dir: wind > 0 ? 1 : -1, life: 90 });
+      updateHUD();
+    }
+    // Player movement: keyboard
+    var ax = 0, ay = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) ax -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) ax += 1;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) ay -= 1;
+    if (keys['ArrowDown'] || keys['s'] || keys['S']) ay += 1;
+    player.vx += ax * 0.45;
+    player.vy += ay * 0.45;
+    // Mouse / touch steering
+    if (pointer.active){
+      var dx = pointer.x - player.x, dy = pointer.y - player.y;
+      player.vx += dx * 0.02; player.vy += dy * 0.02;
+    }
+    // Solar wind pushes the craft
+    player.vx += wind * 0.02;
+    player.vx *= 0.96; player.vy *= 0.96;
+    player.x += player.vx; player.y += player.vy;
+    if (player.x < 20) { player.x = 20; player.vx = 0; }
+    if (player.x > W-20) { player.x = W-20; player.vx = 0; }
+    if (player.y < 50) { player.y = 50; player.vy = 0; }
+    if (player.y > H-20) { player.y = H-20; player.vy = 0; }
+    if (player.inv > 0) player.inv--;
+
+    // Spawns
+    if (frame % 55 === 0) spawnPhoton();
+    if (frame % 70 === 0) spawnRock();
+    if (frame % 240 === 0) spawnPhoton();
+
+    // Photons
+    for (var i = photons.length-1; i >= 0; i--){
+      var p = photons[i];
+      p.y += p.vy; p.pulse += 0.15;
+      p.x += wind * 0.3;
+      var d = Math.hypot(p.x - player.x, p.y - player.y);
+      if (d < p.r + player.r){
+        photons.splice(i,1);
+        score += 50;
+        burst(p.x, p.y, '#ffe066', 14);
+        sndPickup();
+        if (score >= 1500){ updateHUD(); endGame(true); return; }
+        continue;
+      }
+      if (p.y > H + 30) photons.splice(i,1);
+    }
+    // Rocks
+    for (var j = rocks.length-1; j >= 0; j--){
+      var r = rocks[j];
+      r.y += r.vy; r.x += r.vx + wind * 0.25; r.rot += r.vr;
+      var dd = Math.hypot(r.x - player.x, r.y - player.y);
+      if (dd < r.r + player.r - 4 && player.inv === 0){
+        rocks.splice(j,1);
+        lives--;
+        player.inv = 120;
+        burst(player.x, player.y, '#f87171', 26);
+        sndHit();
+        if (lives <= 0){ updateHUD(); endGame(false); return; }
+        updateHUD();
+        continue;
+      }
+      if (r.y > H + 50 || r.x < -50 || r.x > W + 50) rocks.splice(j,1);
+    }
+    // Particles & gusts
+    for (var k = particles.length-1; k >= 0; k--){
+      var pt = particles[k];
+      pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+      if (pt.life <= 0) particles.splice(k,1);
+    }
+    for (var g = gusts.length-1; g >= 0; g--){
+      var gu = gusts[g];
+      gu.x += gu.dir * 6; gu.life--;
+      if (gu.life <= 0) gusts.splice(g,1);
+    }
+    updateHUD();
+  }
+
+  function drawSailCraft(){
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    if (player.inv > 0 && Math.floor(frame/6) % 2 === 0) ctx.globalAlpha = 0.35;
+    // Light sail
+    ctx.fillStyle = 'rgba(167,139,250,0.55)';
+    ctx.beginPath();
+    ctx.moveTo(0, -6); ctx.lineTo(34, 14); ctx.lineTo(0, 26); ctx.lineTo(-34, 14); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#c4b5fd'; ctx.lineWidth = 1.5; ctx.stroke();
+    // Hull
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.moveTo(0, -16); ctx.lineTo(10, 10); ctx.lineTo(0, 18); ctx.lineTo(-10, 10); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff7ed';
+    ctx.beginPath(); ctx.arc(0, -2, 4.5, 0, 6.283); ctx.fill();
+    // Engine glow
+    ctx.fillStyle = '#22d3ee';
+    ctx.beginPath(); ctx.arc(0, 20, 3 + Math.sin(frame*0.4)*1.2, 0, 6.283); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw(){
+    ctx.clearRect(0, 0, W, H);
+    // Sun glow top-left
+    var grad = ctx.createRadialGradient(60, 40, 10, 60, 40, 260);
+    grad.addColorStop(0, 'rgba(255,200,60,0.5)');
+    grad.addColorStop(1, 'rgba(255,200,60,0)');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fde68a';
+    ctx.beginPath(); ctx.arc(60, 40, 26, 0, 6.283); ctx.fill();
+    // Stars
+    for (var i=0;i<stars.length;i++){
+      var s = stars[i];
+      ctx.globalAlpha = 0.5 + 0.5*Math.sin(frame*0.03 + s.tw);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(s.x, s.y, s.s, s.s);
+    }
+    ctx.globalAlpha = 1;
+    // Wind gust streaks
+    ctx.strokeStyle = 'rgba(125,211,252,0.35)'; ctx.lineWidth = 2;
+    for (var g=0; g<gusts.length; g++){
+      var gu = gusts[g];
+      for (var q=0;q<5;q++){
+        var gy = 60 + q*110 + (g*37 % 60);
+        ctx.beginPath(); ctx.moveTo(gu.x, gy); ctx.lineTo(gu.x + gu.dir*70, gy); ctx.stroke();
+      }
+    }
+    // Photons
+    for (var p=0;p<photons.length;p++){
+      var ph = photons[p];
+      var pr = ph.r + Math.sin(ph.pulse)*2;
+      ctx.fillStyle = 'rgba(255,224,102,0.3)';
+      ctx.beginPath(); ctx.arc(ph.x, ph.y, pr+8, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#ffe066';
+      ctx.beginPath(); ctx.arc(ph.x, ph.y, pr, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(ph.x, ph.y, pr*0.45, 0, 6.283); ctx.fill();
+    }
+    // Rocks
+    for (var r=0;r<rocks.length;r++){
+      var rk = rocks[r];
+      ctx.save(); ctx.translate(rk.x, rk.y); ctx.rotate(rk.rot);
+      ctx.fillStyle = '#78716c'; ctx.strokeStyle = '#44403c'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (var v=0; v<rk.verts; v++){
+        var ang = v/rk.verts*6.283;
+        var rr = rk.r * (0.8 + 0.25*Math.sin(v*2.7));
+        if (v===0) ctx.moveTo(Math.cos(ang)*rr, Math.sin(ang)*rr);
+        else ctx.lineTo(Math.cos(ang)*rr, Math.sin(ang)*rr);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#a8a29e';
+      ctx.beginPath(); ctx.arc(-rk.r*0.3, -rk.r*0.2, rk.r*0.25, 0, 6.283); ctx.fill();
+      ctx.restore();
+    }
+    // Particles
+    for (var k=0;k<particles.length;k++){
+      var pt = particles[k];
+      ctx.globalAlpha = Math.max(0, pt.life/45);
+      ctx.fillStyle = pt.color;
+      ctx.fillRect(pt.x, pt.y, 4, 4);
+    }
+    ctx.globalAlpha = 1;
+    drawSailCraft();
+    // Progress to win
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillRect(20, H-16, W-40, 8);
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(20, H-16, (W-40)*Math.min(1, score/1500), 8);
+    ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
+    ctx.fillText('Journey to 1500 pts', 20, H-22);
+  }
+
+  function loop(){
+    if (!running || paused) return;
+    update();
+    if (running) draw();
+    if (running) rafId = requestAnimationFrame(loop);
+  }
+
+  // Events: keyboard, mouse, touch
+  startBtn.addEventListener('click', startGame);
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if (e.key === 'p' || e.key === 'P'){
+      if (running && !over && !won){
+        paused = !paused; updateHUD();
+        if (!paused) loop();
+      }
+    }
+    if (e.key === 'r' || e.key === 'R'){ if (over || won) startGame(); }
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(e.key) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function(e){
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  });
+  canvas.addEventListener('mousedown', function(e){
+    initAudio();
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  });
+  canvas.addEventListener('mouseup', function(){ pointer.active = false; });
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault(); initAudio();
+    var t = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - rect.left) * (W / rect.width);
+    pointer.y = (t.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    var t = e.touches[0];
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - rect.left) * (W / rect.width);
+    pointer.y = (t.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); pointer.active = false; }, { passive: false });
+
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>

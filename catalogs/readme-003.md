@@ -99,6 +99,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0289 | Synth Samba | Rhythm / Synth Beat Timing | A/S/K/L synth lanes, mouse click pads, touch tap pads, Space start/restart | [Play](./../games/game-0289.html) |
 | 0290 | Discus Dynamo | Precision / Discus Throw | Mouse/touch drag spin and release, Arrow Keys angle/power, Space throw, R restart | [Play](./../games/game-0290.html) |
 
+| 0291 | Mirror Meadow | Puzzle / Light Reflection | Mouse/touch click mirrors to rotate, Arrow Keys select, Space/Enter rotate or place, R restart | [Play](./../games/game-0291.html) |
+| 0292 | Photon Pilgrim | Arcade / Solar Wind Riding | Arrow Keys / WASD steer, mouse move, touch drag, Space pause | [Play](./../games/game-0292.html) |
+| 0293 | Cinderfield Cultivator | Strategy / Farm Simulation | Mouse/touch click soil plots to plant, water and harvest, Arrow Keys move cursor | [Play](./../games/game-0293.html) |
+| 0294 | Metronome Maze | Rhythm / Beat Maze | Arrow Keys / WASD move on the beat, mouse/touch on-screen pad, Space start/restart | [Play](./../games/game-0294.html) |
+| 0295 | Paper Plane Patrol | Arcade / Gliding Flight | Arrow Keys / WASD climb and dive, mouse move to steer, touch drag, Space start/restart | [Play](./../games/game-0295.html) |
+| 0296 | Rune Relay | Puzzle / Sequence Logic | Mouse/touch tap runes in sequence, Keys 1-9 select, Enter start/restart | [Play](./../games/game-0296.html) |
+| 0297 | Quarry Quest | Arcade / Digging Adventure | Arrow Keys / WASD move and dig, mouse click neighbouring tile, touch swipe/on-screen arrows | [Play](./../games/game-0297.html) |
+| 0298 | Starlight Stitch | Puzzle / Constellation Drawing | Mouse/touch click stars in order, Arrow Keys move cursor, Enter/Space stitch, R restart | [Play](./../games/game-0298.html) |
+| 0299 | Lighthouse Ledger | Strategy / Lighthouse Management | Mouse drag / touch drag to aim beam, Left/Right Arrows rotate, click/tap ships to warn | [Play](./../games/game-0299.html) |
+| 0300 | Lunar Leap | Precision / Low-Gravity Jumping | Arrow Keys / WASD aim and jump, mouse/touch hold and release to leap, Space jump, R restart | [Play](./../games/game-0300.html) |
+
 ## Batch notes
 
 - Batch 021: 10 games, produced in one cycle. Volume 003 opened at game 0201.
@@ -110,4 +121,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 027: 10 games, produced in one cycle.
 - Batch 028: 10 games, produced in one cycle.
 - Batch 029: 10 games, produced in one cycle.
+- Batch 030: 10 games, produced in one cycle. Volume 003 complete at game 0300.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
