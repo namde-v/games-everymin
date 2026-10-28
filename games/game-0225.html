@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Catapult Canyon</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1210; font-family: Arial, Helvetica, sans-serif; }
+  #wrap { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #2b1a12 0%, #4a2c1a 55%, #1a1210 100%); }
+  canvas { display: block; background: linear-gradient(180deg, #87b5d6 0%, #cfe8f5 42%, #e8d9a8 62%, #c98f4e 100%); border: 3px solid #2b1a12; border-radius: 10px; max-width: 96vw; max-height: 92vh; touch-action: none; }
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; z-index: 5; pointer-events: none; }
+  .pill { background: rgba(20,12,8,0.85); color: #ffe9b0; padding: 7px 13px; border-radius: 999px; font-weight: bold; font-size: 14px; border: 2px solid #ffb347; white-space: nowrap; }
+  .pill b { color: #fff; }
+  #screen { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 10; background: rgba(15,8,5,0.62); padding: 16px; }
+  #panel { background: #fff7e0; border: 4px solid #8b4513; border-radius: 18px; max-width: 560px; width: 100%; padding: 26px 26px 22px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.55); }
+  #panel h1 { font-size: 40px; color: #7a2e0e; letter-spacing: 1px; margin-bottom: 4px; }
+  #panel h2 { font-size: 30px; color: #7a2e0e; margin-bottom: 10px; }
+  #panel p { color: #333; line-height: 1.55; font-size: 15px; margin: 8px 0; }
+  #panel .sub { font-size: 18px; font-weight: bold; color: #8b4513; }
+  #panel ul { text-align: left; margin: 12px auto; max-width: 460px; color: #333; line-height: 1.6; font-size: 14px; }
+  #panel li { margin: 4px 0; }
+  button { cursor: pointer; border: none; border-radius: 999px; background: #e76f00; color: #fff; font-size: 20px; font-weight: bold; padding: 13px 30px; margin-top: 14px; box-shadow: 0 4px 0 #9c3d00; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #9c3d00; }
+  button.secondary { background: #2f7a3d; box-shadow: 0 4px 0 #1c4d26; }
+  #msg { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); background: rgba(20,12,8,0.85); color: #fff; padding: 9px 18px; border-radius: 999px; font-size: 14px; font-weight: bold; z-index: 6; pointer-events: none; min-height: 20px; }
+  #powerbar { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); width: 240px; height: 14px; background: rgba(0,0,0,0.35); border-radius: 999px; overflow: hidden; z-index: 6; border: 2px solid rgba(255,255,255,0.7); }
+  #powerfill { height: 100%; width: 40%; background: linear-gradient(90deg, #7ed957, #ffcc00, #ff3300); }
+  @media (max-width: 600px) { #panel h1 { font-size: 32px; } .pill { font-size: 12px; padding: 6px 10px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="960" height="560"></canvas>
+  <div id="hud">
+    <div class="pill">Level: <b id="hudLevel">1 / 8</b></div>
+    <div class="pill">Score: <b id="hudScore">0</b></div>
+    <div class="pill">Rocks: <b id="hudRocks">3</b></div>
+    <div class="pill">Targets left: <b id="hudTargets">0</b></div>
+    <div class="pill">Status: <b id="hudStatus">Title</b></div>
+  </div>
+  <div id="powerbar"><div id="powerfill"></div></div>
+  <div id="msg">Drag from the catapult to aim, then release to launch.</div>
+  <div id="screen">
+    <div id="panel">
+      <h1>Catapult Canyon</h1>
+      <p class="sub">Precision Catapult Launch across 8 canyon levels</p>
+      <p>Knock every target off its canyon ledge before you run out of rocks. Watch the dotted trajectory preview, mind the wind and the gaps, and make every rock count.</p>
+      <ul>
+        <li><b>How to Play:</b> Press Start, then drag from the catapult to aim. The dotted line shows where your rock will fly. Release to launch.</li>
+        <li><b>Mouse / Touch:</b> Drag anywhere near the catapult to aim, release to fire. Longer drags mean more power.</li>
+        <li><b>Keyboard:</b> Up / Down arrows adjust angle, Left / Right arrows adjust power, Space launches, R restarts the level.</li>
+        <li><b>Scoring:</b> 100 points per target knocked off, plus a 250 point bonus for clearing a level with rocks to spare.</li>
+        <li><b>Win:</b> Clear all 8 levels. <b>Game Over:</b> You run out of rocks on a level without clearing it.</li>
+      </ul>
+      <button id="startBtn" type="button">Start Game</button>
+      <p style="font-size:12px;color:#777;">Tip: High arcs clear tall cliffs. Low, fast shots smash targets on low ledges.</p>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var hudLevel = document.getElementById('hudLevel');
+  var hudScore = document.getElementById('hudScore');
+  var hudRocks = document.getElementById('hudRocks');
+  var hudTargets = document.getElementById('hudTargets');
+  var hudStatus = document.getElementById('hudStatus');
+  var msgEl = document.getElementById('msg');
+  var powerFill = document.getElementById('powerfill');
+  var screenEl = document.getElementById('screen');
+  var panelEl = document.getElementById('panel');
+  var startBtn = document.getElementById('startBtn');
+
+  var state = 'title'; // title, playing, levelclear, win, gameover
+  var level = 1, score = 0, rocksLeft = 3;
+  var angle = -0.65, power = 0.62;
+  var dragging = false, dragX = 0, dragY = 0;
+  var rock = null, particles = [], targets = [], ledges = [];
+  var wind = 0, shake = 0, levelClearTimer = 0;
+  var audioCtx = null;
+
+  var CAT = { x: 130, y: 452 };
+  var GROUND = 500;
+  var ROCKS_PER_LEVEL = [3, 3, 4, 4, 5, 5, 6, 6];
+  var TARGET_COLORS = ['#d94f30', '#2f7a3d', '#e8a100', '#5b4bd4', '#c2185b'];
+
+  function setMsg(t) { msgEl.textContent = t; }
+  function setStatus(t) { hudStatus.textContent = t; }
+
+  function ensureAudio() {
+    try {
+      if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+      if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.18, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function launchSound() { beep(180, 0.25, 'triangle', 0.25); setTimeout(function(){ beep(320, 0.18, 'sine', 0.15); }, 60); }
+  function hitSound() { beep(520, 0.12, 'square', 0.20); setTimeout(function(){ beep(240, 0.22, 'sawtooth', 0.15); }, 70); }
+  function winSound() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'sine', 0.22); }, i * 130); }); }
+
+  // Level layouts: each ledge has x, y (top), width, and target offsets.
+  function buildLevel(n) {
+    targets = []; ledges = [];
+    var layouts = [
+      [{ x: 560, y: 400, w: 130, t: 1 }, { x: 740, y: 330, w: 130, t: 1 }],
+      [{ x: 520, y: 420, w: 120, t: 1 }, { x: 670, y: 330, w: 120, t: 1 }, { x: 820, y: 400, w: 110, t: 1 }],
+      [{ x: 500, y: 380, w: 110, t: 2 }, { x: 690, y: 300, w: 110, t: 1 }, { x: 830, y: 420, w: 110, t: 1 }],
+      [{ x: 480, y: 440, w: 100, t: 1 }, { x: 620, y: 330, w: 110, t: 2 }, { x: 790, y: 270, w: 110, t: 1 }],
+      [{ x: 470, y: 400, w: 100, t: 2 }, { x: 610, y: 300, w: 100, t: 1 }, { x: 740, y: 390, w: 100, t: 2 }, { x: 860, y: 310, w: 90, t: 1 }],
+      [{ x: 460, y: 350, w: 100, t: 2 }, { x: 600, y: 430, w: 110, t: 1 }, { x: 730, y: 280, w: 100, t: 2 }, { x: 850, y: 390, w: 90, t: 1 }],
+      [{ x: 450, y: 420, w: 95, t: 2 }, { x: 580, y: 300, w: 100, t: 2 }, { x: 710, y: 400, w: 95, t: 2 }, { x: 830, y: 270, w: 100, t: 2 }],
+      [{ x: 440, y: 360, w: 95, t: 2 }, { x: 560, y: 270, w: 95, t: 2 }, { x: 680, y: 390, w: 95, t: 2 }, { x: 800, y: 290, w: 95, t: 2 }, { x: 895, y: 400, w: 65, t: 1 }]
+    ];
+    var lay = layouts[n - 1] || layouts[0];
+    lay.forEach(function (L, li) {
+      ledges.push({ x: L.x, y: L.y, w: L.w, h: GROUND - L.y });
+      for (var i = 0; i < L.t; i++) {
+        var tx = L.x + L.w / 2 + (L.t === 2 ? (i === 0 ? -22 : 22) : 0);
+        targets.push({ x: tx, y: L.y - 22, vx: 0, vy: 0, alive: true, falling: false, ledge: li, r: 20, color: TARGET_COLORS[(li + i) % TARGET_COLORS.length], spin: 0 });
+      }
+    });
+    wind = (n >= 3) ? ((n % 2 === 0 ? -1 : 1) * (0.12 + 0.05 * n)) : 0;
+    rocksLeft = ROCKS_PER_LEVEL[n - 1] || 3;
+    rock = null; particles = [];
+    angle = -0.65; power = 0.62;
+    updateHud();
+  }
+
+  function remainingTargets() { return targets.filter(function (t) { return t.alive; }).length; }
+  function updateHud() {
+    hudLevel.textContent = level + ' / 8';
+    hudScore.textContent = score;
+    hudRocks.textContent = rocksLeft;
+    hudTargets.textContent = remainingTargets();
+    powerFill.style.width = Math.round(power * 100) + '%';
+  }
+
+  function showScreen(html, showStart) {
+    panelEl.innerHTML = html;
+    screenEl.style.display = 'flex';
+    var btn = panelEl.querySelector('button');
+    if (btn) { btn.addEventListener('click', onPrimaryButton); }
+    if (showStart) { /* start button handled by delegation below */ }
+  }
+  function hideScreen() { screenEl.style.display = 'none'; }
+
+  function showTitle() {
+    state = 'title'; setStatus('Title'); setMsg('Drag from the catapult to aim, then release to launch.');
+    panelEl.innerHTML = '<h1>Catapult Canyon</h1><p class="sub">Precision Catapult Launch across 8 canyon levels</p>' +
+      '<p>Knock every target off its canyon ledge before you run out of rocks. Watch the dotted trajectory preview and make every rock count.</p>' +
+      '<ul><li><b>How to Play:</b> Drag from the catapult to aim. The dotted line shows where your rock will fly. Release to launch.</li>' +
+      '<li><b>Mouse / Touch:</b> Drag near the catapult to aim, release to fire.</li>' +
+      '<li><b>Keyboard:</b> Up / Down adjust angle, Left / Right adjust power, Space launches, R restarts.</li>' +
+      '<li><b>Win:</b> Clear all 8 levels. <b>Game Over:</b> Rocks run out on a level without clearing it.</li></ul>' +
+      '<button id="startBtn" type="button">Start Game</button>';
+    screenEl.style.display = 'flex';
+    panelEl.querySelector('button').addEventListener('click', startGame);
+    updateHud();
+  }
+
+  function startGame() {
+    ensureAudio(); winSound();
+    level = 1; score = 0;
+    buildLevel(level);
+    state = 'playing'; setStatus('Playing'); hideScreen();
+    setMsg('Level 1: drag to aim, release to launch. Rocks: ' + rocksLeft);
+    updateHud();
+  }
+  function restartAll() { startGame(); }
+  function onPrimaryButton(e) {
+    var id = e.target.id || '';
+    if (id === 'nextBtn') { nextLevel(); }
+    else if (id === 'retryBtn') { retryLevel(); }
+    else { restartAll(); }
+  }
+
+  function nextLevel() {
+    ensureAudio();
+    if (level >= 8) { showWin(); return; }
+    level++; buildLevel(level);
+    state = 'playing'; setStatus('Playing'); hideScreen();
+    setMsg('Level ' + level + ': ' + remainingTargets() + ' targets, ' + rocksLeft + ' rocks.' + (wind !== 0 ? ' Wind: ' + (wind > 0 ? 'right' : 'left') : ''));
+    updateHud();
+  }
+  function retryLevel() {
+    ensureAudio(); buildLevel(level);
+    state = 'playing'; setStatus('Playing'); hideScreen();
+    setMsg('Level ' + level + ' restarted. ' + rocksLeft + ' rocks ready.');
+    updateHud();
+  }
+  function showWin() {
+    state = 'win'; setStatus('You Win!'); winSound();
+    panelEl.innerHTML = '<h2>You Win!</h2><p class="sub">Canyon Champion!</p><p>You cleared all 8 levels of Catapult Canyon.</p><p><b>Final Score: ' + score + '</b></p><button id="restartBtn" type="button" class="secondary">Play Again</button>';
+    screenEl.style.display = 'flex';
+    panelEl.querySelector('button').addEventListener('click', restartAll);
+  }
+  function showGameOver() {
+    state = 'gameover'; setStatus('Game Over'); beep(140, 0.5, 'sawtooth', 0.2);
+    panelEl.innerHTML = '<h2>Game Over</h2><p>Out of rocks on Level ' + level + ' with ' + remainingTargets() + ' target(s) still standing.</p><p><b>Score: ' + score + '</b></p><button id="restartBtn" type="button">Restart Game</button>';
+    screenEl.style.display = 'flex';
+    panelEl.querySelector('button').addEventListener('click', restartAll);
+  }
+  function showLevelClear() {
+    state = 'levelclear'; setStatus('Level Clear!'); winSound();
+    var bonus = rocksLeft * 50 + 200;
+    score += bonus;
+    panelEl.innerHTML = '<h2>Level ' + level + ' Clear!</h2><p>All targets knocked off the ledges.</p><p>Bonus: <b>' + bonus + '</b> &nbsp; Score: <b>' + score + '</b></p>' +
+      (level >= 8 ? '<button id="restartBtn" type="button" class="secondary">See Final Result</button>' : '<button id="nextBtn" type="button" class="secondary">Next Level</button>');
+    screenEl.style.display = 'flex';
+    panelEl.querySelector('button').addEventListener('click', function () { if (level >= 8) { showWin(); } else { nextLevel(); } });
+    updateHud();
+  }
+
+  function launch() {
+    if (state !== 'playing' || rock || rocksLeft <= 0) return;
+    ensureAudio(); launchSound();
+    rocksLeft--;
+    var speed = 9 + power * 11;
+    rock = { x: CAT.x + 18, y: CAT.y - 28, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r: 11 };
+    setMsg('Rock away! Rocks left: ' + rocksLeft);
+    updateHud();
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.touches && evt.touches.length ? evt.touches[0].clientX : evt.clientX);
+    var cy = (evt.touches && evt.touches.length ? evt.touches[0].clientY : evt.clientY);
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function aimFrom(pos) {
+    // Drag vector from catapult: pulling down-left aims up-right.
+    var dx = CAT.x - pos.x, dy = CAT.y - pos.y;
+    if (dx === 0 && dy === 0) return;
+    angle = Math.atan2(-dy, dx);
+    // Clamp to a useful upward arc: between -1.45 and -0.12 radians.
+    if (angle > -0.12) angle = -0.12;
+    if (angle < -1.45) angle = -1.45;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    power = Math.min(1, Math.max(0.25, dist / 260));
+    updateHud();
+  }
+
+  canvas.addEventListener('mousedown', function (e) {
+    if (state !== 'playing') return;
+    dragging = true; var p = canvasPos(e); dragX = p.x; dragY = p.y; aimFrom(p);
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    if (!dragging || state !== 'playing') return;
+    var p = canvasPos(e); dragX = p.x; dragY = p.y; aimFrom(p);
+  });
+  canvas.addEventListener('mouseup', function () {
+    if (!dragging) return; dragging = false;
+    if (state === 'playing') launch();
+  });
+  canvas.addEventListener('mouseleave', function () { dragging = false; });
+  canvas.addEventListener('touchstart', function (e) {
+    if (state !== 'playing') return;
+    e.preventDefault(); dragging = true; var p = canvasPos(e); aimFrom(p);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    if (!dragging || state !== 'playing') return;
+    e.preventDefault(); var p = canvasPos(e); aimFrom(p);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) {
+    e.preventDefault(); if (!dragging) return; dragging = false;
+    if (state === 'playing') launch();
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (state === 'playing') {
+      if (e.key === 'ArrowUp') { angle = Math.max(-1.45, angle - 0.06); e.preventDefault(); }
+      if (e.key === 'ArrowDown') { angle = Math.min(-0.12, angle + 0.06); e.preventDefault(); }
+      if (e.key === 'ArrowLeft') { power = Math.max(0.25, power - 0.06); e.preventDefault(); }
+      if (e.key === 'ArrowRight') { power = Math.min(1, power + 0.06); e.preventDefault(); }
+      if (e.key === ' ' || e.key === 'Spacebar') { launch(); e.preventDefault(); }
+      if (e.key === 'r' || e.key === 'R') { retryLevel(); }
+      updateHud();
+    } else if ((state === 'title' || state === 'win' || state === 'gameover') && e.key === 'Enter') {
+      startGame();
+    }
+  });
+  startBtn.addEventListener('click', startGame);
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 18; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 7, vy: -Math.random() * 5, life: 30 + Math.random() * 20, color: color });
+    }
+  }
+
+  function update() {
+    if (rock) {
+      rock.vy += 0.32; rock.vx += wind * 0.02;
+      rock.x += rock.vx; rock.y += rock.vy;
+      targets.forEach(function (t) {
+        if (!t.alive || t.falling) return;
+        var dx = rock.x - t.x, dy = rock.y - t.y;
+        if (dx * dx + dy * dy < (rock.r + t.r) * (rock.r + t.r)) {
+          t.falling = true; t.vx = rock.vx * 0.7 + 2; t.vy = -4;
+          score += 100; hitSound(); burst(t.x, t.y, t.color); shake = 8;
+          setMsg('Target smashed! +100 points.');
+        }
+      });
+      if (rock.y > GROUND + 20 || rock.x > W + 30 || rock.x < -30) { rock = null; checkTurnEnd(); }
+    }
+    targets.forEach(function (t) {
+      if (t.falling && t.alive) {
+        t.vy += 0.35; t.x += t.vx; t.y += t.vy; t.spin += 0.12;
+        if (t.y > GROUND + 40 || t.x > W + 40 || t.x < -40) {
+          t.alive = false; burst(t.x, Math.min(t.y, GROUND), t.color); updateHud(); checkTurnEnd();
+        }
+      }
+    });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    if (shake > 0) shake--;
+  }
+
+  function checkTurnEnd() {
+    if (state !== 'playing') return;
+    if (remainingTargets() === 0) {
+      if (rock === null) { setTimeout(function () { if (state === 'playing') showLevelClear(); }, 350); }
+      return;
+    }
+    if (rock === null && rocksLeft <= 0) {
+      // Give falling targets a moment to land before declaring game over.
+      var falling = targets.some(function (t) { return t.falling && t.alive; });
+      if (!falling) { setTimeout(function () { if (state === 'playing' && remainingTargets() > 0 && rocksLeft <= 0) showGameOver(); }, 400); }
+    }
+    updateHud();
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#cfe8f5'; ctx.fillRect(0, 0, W, 200);
+    ctx.fillStyle = '#e8d9a8'; ctx.fillRect(0, 200, W, 300);
+    // Sun, clouds, distant mesas.
+    ctx.fillStyle = '#ffcc33'; ctx.beginPath(); ctx.arc(850, 70, 34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    [[120, 70], [300, 50], [620, 90]].forEach(function (c) {
+      ctx.beginPath(); ctx.arc(c[0], c[1], 22, 0, Math.PI * 2); ctx.arc(c[0] + 24, c[1] - 6, 18, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.fillStyle = '#b5651d';
+    [[0, 420, 260, 80], [700, 440, 260, 60]].forEach(function (m) { ctx.fillRect(m[0], m[1], m[2], m[3]); });
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#6b4423'; ctx.fillRect(0, GROUND, W, 8);
+    if (wind !== 0) { ctx.fillStyle = '#333'; ctx.font = 'bold 14px Arial'; ctx.fillText('Wind: ' + (wind > 0 ? 'blowing right' : 'blowing left'), 20, 30); }
+  }
+
+  function drawLedgesAndTargets() {
+    ledges.forEach(function (L) {
+      ctx.fillStyle = '#a0522d'; ctx.fillRect(L.x, L.y, L.w, L.h);
+      ctx.fillStyle = '#cd853f'; ctx.fillRect(L.x, L.y, L.w, 12);
+      ctx.fillStyle = '#7a3b1e'; ctx.fillRect(L.x, L.y + 28, L.w, 4);
+    });
+    targets.forEach(function (t) {
+      if (!t.alive) return;
+      ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.spin || 0);
+      ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(0, 0, t.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', 0, 1);
+      ctx.restore();
+    });
+  }
+
+  function drawCatapult() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    // Wooden frame and wheels.
+    ctx.strokeStyle = '#5b2d0e'; ctx.lineWidth = 9; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(CAT.x - 30, CAT.y); ctx.lineTo(CAT.x + 10, CAT.y - 55); ctx.moveTo(CAT.x + 30, CAT.y); ctx.lineTo(CAT.x + 10, CAT.y - 55); ctx.stroke();
+    ctx.fillStyle = '#3a1c08'; ctx.beginPath(); ctx.arc(CAT.x - 30, CAT.y, 13, 0, Math.PI * 2); ctx.arc(CAT.x + 30, CAT.y, 13, 0, Math.PI * 2); ctx.fill();
+    // Arm pointing along current aim.
+    var ax = CAT.x + 10, ay = CAT.y - 55;
+    var armLen = 62;
+    var ex = ax + Math.cos(angle) * armLen, ey = ay + Math.sin(angle) * armLen;
+    ctx.strokeStyle = '#7a3b1e'; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.fillStyle = '#555'; ctx.beginPath(); ctx.arc(ex, ey, 12, 0, Math.PI * 2); ctx.fill();
+    if (!rock && state === 'playing') {
+      ctx.fillStyle = '#666'; ctx.beginPath(); ctx.arc(ex, ey, 10, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawTrajectory() {
+    if (state !== 'playing' || rock || !dragging) return;
+    var speed = 9 + power * 11;
+    var vx = Math.cos(angle) * speed, vy = Math.sin(angle) * speed;
+    var x = CAT.x + 28, y = CAT.y - 83, stepVy = vy;
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    for (var i = 0; i < 26; i++) {
+      stepVy += 0.32; x += vx; y += stepVy;
+      if (y > GROUND) break;
+      ctx.beginPath(); ctx.arc(x, y, i % 2 === 0 ? 5 : 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function drawRock() {
+    if (!rock) return;
+    ctx.fillStyle = '#666'; ctx.beginPath(); ctx.arc(rock.x, rock.y, rock.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#999'; ctx.beginPath(); ctx.arc(rock.x - 3, rock.y - 3, 4, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawParticles() {
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / 40);
+      ctx.fillStyle = p.color; ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    drawLedgesAndTargets();
+    drawCatapult();
+    drawTrajectory();
+    drawRock();
+    drawParticles();
+    if (state === 'playing' && !rock) {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Angle: ' + Math.round(-angle * 57) + ' deg   Power: ' + Math.round(power * 100) + '%', 20, H - 18);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  buildLevel(1);
+  updateHud();
+  showTitle();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sundial Solver</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0f172a;color:#fef3c7;font-family:Georgia,serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+  h1{margin:6px 0 2px;color:#fbbf24;text-align:center;font-size:32px;letter-spacing:1px}
+  p.sub{margin:0 0 10px;color:#cbd5e1;text-align:center}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:620px;margin:6px 0}
+  .pill{background:#1e293b;border:2px solid #b45309;border-radius:999px;padding:6px 12px;font-weight:bold;font-size:14px}
+  .pill b{color:#fde68a}
+  #status{color:#fde68a;min-height:22px;text-align:center;font-weight:bold}
+  #wrap{position:relative;width:min(94vw,560px)}
+  canvas{width:100%;height:auto;display:block;background:radial-gradient(circle at 50% 40%,#fef3c7 0%,#fde68a 18%,#e7c46a 45%,#8a6a2f 100%);border:4px solid #78350f;border-radius:18px;touch-action:none;cursor:pointer}
+  .overlay{position:absolute;inset:0;background:rgba(15,23,42,.94);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;gap:10px}
+  .hidden{display:none!important}
+  button{background:#f59e0b;color:#1e1b0b;border:0;border-radius:10px;padding:12px 22px;font-size:17px;font-weight:bold;cursor:pointer;box-shadow:0 4px 0 #92400e}
+  button:active{transform:translateY(3px);box-shadow:none}
+  button.secondary{background:#334155;color:#fff;box-shadow:0 4px 0 #0f172a}
+  .how{background:#1e293b;border:1px solid #475569;border-radius:12px;padding:12px;text-align:left;line-height:1.55;font-size:14px;color:#e2e8f0}
+  .how b{color:#fbbf24}
+  #controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+  .legend{max-width:620px;font-size:13px;color:#cbd5e1;text-align:center;line-height:1.5}
+  .legend b{color:#fde68a}
+  .sun{font-size:42px}
+</style>
+</head>
+<body>
+<h1>☀️ Sundial Solver</h1>
+<p class="sub">Rotate gnomons and mirrors so every shadow lands on its golden target.</p>
+
+<div id="hud">
+  <div class="pill">Puzzle: <b id="puzzleNo">1 / 6</b></div>
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Moves left: <b id="moves">14</b></div>
+  <div class="pill">Status: <b id="statusText">Ready</b></div>
+</div>
+<div id="status">Click a gnomon to rotate it 45° — or use Arrow Keys + Space.</div>
+
+<div id="wrap">
+  <canvas id="game" width="560" height="560" aria-label="Sundial puzzle board"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="sun">☀️ 🕰️</div>
+    <h2 style="margin:0;color:#fbbf24;font-size:28px">Sundial Solver</h2>
+    <p style="margin:0;color:#e2e8f0">Puzzle / Shadow Logic — 6 puzzles, one sun, many shadows.</p>
+    <div class="how">
+      <b>How to Play:</b><br>
+      • Each round shows a stone sundial with gnomons (circles) and mirrors (diamonds).<br>
+      • Every piece casts a shadow in the direction it points. A <b>gold diamond</b> marks where that shadow must fall.<br>
+      • <b>Click / tap</b> a piece to rotate it 45° clockwise. Rotate all pieces until every shadow touches its target at the same time.<br>
+      • <b>Arrow Keys</b> select a piece, <b>Space</b> rotates the selected piece, <b>R</b> resets the current puzzle.<br>
+      • Solve the puzzle before you run out of moves. Later puzzles add more pieces, mirrors, and tighter planning.
+    </div>
+    <button id="startBtn">▶ Start Game</button>
+    <div style="font-size:13px;color:#94a3b8">No downloads, no network — fully offline. Sound starts only after you press Start.</div>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <div class="sun">🏆 ☀️</div>
+    <h2 style="margin:0;color:#fbbf24">You Solved Them All!</h2>
+    <p id="winText" style="color:#e2e8f0">All 6 shadow puzzles solved. The sundial shines in perfect alignment.</p>
+    <button id="winRestartBtn">↻ Play Again</button>
+  </div>
+
+  <div id="overScreen" class="overlay hidden">
+    <div class="sun">🌑</div>
+    <h2 style="margin:0;color:#f87171">Game Over</h2>
+    <p id="overText" style="color:#e2e8f0">You ran out of moves before the shadows aligned. The sun has set on this puzzle.</p>
+    <button id="overRestartBtn">↻ Restart Game</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="resetBtn" class="secondary">↻ Reset Puzzle (R)</button>
+  <button id="nextBtn" class="secondary hidden">➜ Next Puzzle</button>
+  <button id="hintBtn" class="secondary">💡 Hint</button>
+</div>
+<p class="legend"><b>Controls:</b> Mouse click a piece to rotate • Touch tap a piece • Arrow Keys select • Space rotate • R reset<br>
+<b>Tip:</b> Count the steps: each click turns a piece one notch (45°). A solved piece glows gold — keep it still and fix the others.</p>
+
+<script>
+(function(){
+  var canvas=document.getElementById('game');
+  var ctx=canvas.getContext('2d');
+  var puzzleEl=document.getElementById('puzzleNo');
+  var scoreEl=document.getElementById('score');
+  var movesEl=document.getElementById('moves');
+  var statusTextEl=document.getElementById('statusText');
+  var statusEl=document.getElementById('status');
+  var titleScreen=document.getElementById('titleScreen');
+  var winScreen=document.getElementById('winScreen');
+  var overScreen=document.getElementById('overScreen');
+  var nextBtn=document.getElementById('nextBtn');
+
+  // Direction vectors: 0 East, 1 NE, 2 North, 3 NW, 4 West, 5 SW, 6 South, 7 SE
+  var DIRS=[[1,0],[0.707,-0.707],[0,-1],[-0.707,-0.707],[-1,0],[-0.707,0.707],[0,1],[0.707,0.707]];
+
+  // Each piece: x,y, start direction, target direction, kind (gnomon or mirror)
+  // Distances were chosen so every puzzle is solvable inside its move limit.
+  var PUZZLES=[
+    {name:'Dawn Dial',limit:14,pieces:[
+      {x:210,y:290,start:0,target:2,kind:'gnomon'},
+      {x:350,y:290,start:6,target:1,kind:'gnomon'}]},
+    {name:'Morning Trio',limit:16,pieces:[
+      {x:190,y:240,start:1,target:3,kind:'gnomon'},
+      {x:330,y:240,start:5,target:0,kind:'mirror'},
+      {x:260,y:360,start:7,target:1,kind:'gnomon'}]},
+    {name:'Noon Cross',limit:18,pieces:[
+      {x:190,y:260,start:0,target:4,kind:'gnomon'},
+      {x:340,y:260,start:2,target:5,kind:'mirror'},
+      {x:265,y:380,start:4,target:0,kind:'gnomon'}]},
+    {name:'Mirror Garden',limit:20,pieces:[
+      {x:180,y:230,start:6,target:1,kind:'mirror'},
+      {x:340,y:230,start:3,target:5,kind:'gnomon'},
+      {x:180,y:370,start:1,target:5,kind:'mirror'},
+      {x:340,y:370,start:7,target:2,kind:'gnomon'}]},
+    {name:'Fivefold Sun',limit:22,pieces:[
+      {x:170,y:230,start:0,target:2,kind:'gnomon'},
+      {x:350,y:230,start:5,target:1,kind:'mirror'},
+      {x:260,y:290,start:2,target:5,kind:'gnomon'},
+      {x:190,y:380,start:6,target:2,kind:'mirror'},
+      {x:340,y:380,start:4,target:6,kind:'gnomon'}]},
+    {name:'Grand Sundial',limit:26,pieces:[
+      {x:160,y:220,start:1,target:4,kind:'gnomon'},
+      {x:280,y:220,start:6,target:2,kind:'mirror'},
+      {x:390,y:220,start:3,target:0,kind:'gnomon'},
+      {x:160,y:370,start:7,target:4,kind:'mirror'},
+      {x:280,y:370,start:0,target:5,kind:'gnomon'},
+      {x:390,y:370,start:5,target:7,kind:'mirror'}]}
+  ];
+
+  var puzzleIndex=0, score=0, movesLeft=0, selected=0, started=false, solved=false, gameOver=false, pieces=[];
+  var audioCtx=null, animTime=0;
+
+  function beep(freq,dur,type){
+    if(!audioCtx) return;
+    try{
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type||'sine'; o.frequency.value=freq;
+      g.gain.setValueAtTime(0.12,audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function ensureAudio(){
+    if(!audioCtx){
+      try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){}
+    }
+    if(audioCtx && audioCtx.state==='suspended'){ audioCtx.resume(); }
+  }
+
+  function loadPuzzle(idx){
+    puzzleIndex=idx;
+    var p=PUZZLES[idx];
+    pieces=p.pieces.map(function(q){ return {x:q.x,y:q.y,dir:q.start,target:q.target,kind:q.kind}; });
+    movesLeft=p.limit; selected=0; solved=false; gameOver=false;
+    nextBtn.classList.add('hidden');
+    updateHUD(p.name+' — align every shadow');
+  }
+  function updateHUD(msg){
+    puzzleEl.textContent=(puzzleIndex+1)+' / '+PUZZLES.length;
+    scoreEl.textContent=score;
+    movesEl.textContent=movesLeft;
+    statusTextEl.textContent=solved?'Solved!':(gameOver?'Game Over':(started?'Playing':'Ready'));
+    if(msg) statusEl.textContent=msg;
+  }
+  function isSolved(){
+    return pieces.every(function(q){ return q.dir===q.target; });
+  }
+  function targetPos(q){
+    var d=DIRS[q.target];
+    return {x:q.x+d[0]*72, y:q.y+d[1]*72};
+  }
+  function shadowEnd(q){
+    var d=DIRS[q.dir];
+    return {x:q.x+d[0]*72, y:q.y+d[1]*72};
+  }
+
+  function rotatePiece(i){
+    if(!started||solved||gameOver) return;
+    if(movesLeft<=0) return;
+    pieces[i].dir=(pieces[i].dir+1)%8;
+    movesLeft--; selected=i;
+    beep(440+pieces[i].dir*40,0.12,'triangle');
+    if(isSolved()){
+      solved=true;
+      var bonus=100+movesLeft*10;
+      score+=bonus;
+      beep(523,0.15,'sine'); setTimeout(function(){beep(659,0.15,'sine');},130); setTimeout(function(){beep(784,0.25,'sine');},260);
+      updateHUD('Solved! '+PUZZLES[puzzleIndex].name+' complete. +'+bonus+' points.');
+      if(puzzleIndex===PUZZLES.length-1){
+        setTimeout(showWin,700);
+      }else{
+        nextBtn.classList.remove('hidden');
+        statusEl.textContent+=' Press Next Puzzle to continue.';
+      }
+    }else if(movesLeft<=0){
+      gameOver=true;
+      beep(180,0.4,'sawtooth');
+      updateHUD('Out of moves on this puzzle.');
+      setTimeout(showGameOver,600);
+    }else{
+      updateHUD(PUZZLES[puzzleIndex].name+' — '+pieces.filter(function(q){return q.dir===q.target;}).length+' of '+pieces.length+' shadows aligned.');
+    }
+  }
+
+  function showWin(){
+    document.getElementById('winText').textContent='All 6 shadow puzzles solved! Final score: '+score+'. The sundial shines in perfect alignment.';
+    winScreen.classList.remove('hidden');
+  }
+  function showGameOver(){
+    document.getElementById('overText').textContent='You ran out of moves on Puzzle '+(puzzleIndex+1)+' ('+PUZZLES[puzzleIndex].name+'). Score so far: '+score+'. Try again from the start.';
+    overScreen.classList.remove('hidden');
+  }
+  function startGame(){
+    ensureAudio();
+    score=0; titleScreen.classList.add('hidden'); winScreen.classList.add('hidden'); overScreen.classList.add('hidden');
+    started=true; loadPuzzle(0); beep(523,0.2,'sine');
+  }
+  function resetPuzzle(){
+    if(!started) return;
+    ensureAudio(); loadPuzzle(puzzleIndex); beep(330,0.12,'triangle');
+    updateHUD(PUZZLES[puzzleIndex].name+' reset. Align every shadow.');
+  }
+
+  function pickPiece(clientX,clientY){
+    var r=canvas.getBoundingClientRect();
+    var x=(clientX-r.left)*(canvas.width/r.width);
+    var y=(clientY-r.top)*(canvas.height/r.height);
+    var best=-1,bestD=1e9;
+    pieces.forEach(function(q,i){
+      var d=Math.hypot(q.x-x,q.y-y);
+      if(d<bestD){bestD=d;best=i;}
+    });
+    if(best>=0 && bestD<55) return best;
+    return -1;
+  }
+
+  canvas.addEventListener('click',function(e){
+    if(!started) return;
+    var i=pickPiece(e.clientX,e.clientY);
+    if(i>=0) rotatePiece(i);
+  });
+  canvas.addEventListener('touchstart',function(e){
+    if(!started) return;
+    e.preventDefault();
+    var t=e.touches[0];
+    var i=pickPiece(t.clientX,t.clientY);
+    if(i>=0) rotatePiece(i);
+  },{passive:false});
+  canvas.addEventListener('mousemove',function(e){
+    var i=pickPiece(e.clientX,e.clientY);
+    canvas.style.cursor=(i>=0)?'pointer':'default';
+  });
+
+  document.addEventListener('keydown',function(e){
+    if(!started){
+      if(e.key==='Enter'||e.key===' '){ e.preventDefault(); startGame(); }
+      return;
+    }
+    if(e.key==='ArrowRight'||e.key==='ArrowDown'){ selected=(selected+1)%pieces.length; beep(600,0.07,'sine'); updateHUD('Selected piece '+(selected+1)+' of '+pieces.length+'.'); e.preventDefault(); }
+    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){ selected=(selected-1+pieces.length)%pieces.length; beep(600,0.07,'sine'); updateHUD('Selected piece '+(selected+1)+' of '+pieces.length+'.'); e.preventDefault(); }
+    else if(e.key===' '){ e.preventDefault(); rotatePiece(selected); }
+    else if(e.key==='r'||e.key==='R'){ resetPuzzle(); }
+    else if(e.key==='Enter' && solved && puzzleIndex<PUZZLES.length-1){ loadPuzzle(puzzleIndex+1); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click',startGame);
+  document.getElementById('winRestartBtn').addEventListener('click',startGame);
+  document.getElementById('overRestartBtn').addEventListener('click',startGame);
+  document.getElementById('resetBtn').addEventListener('click',resetPuzzle);
+  document.getElementById('hintBtn').addEventListener('click',function(){
+    if(!started||solved||gameOver) return;
+    ensureAudio(); beep(880,0.12,'sine');
+    var unsolved=pieces.map(function(q,i){return q.dir===q.target?-1:i;}).filter(function(i){return i>=0;});
+    if(unsolved.length){
+      selected=unsolved[0];
+      var q=pieces[selected];
+      var steps=(q.target-q.dir+8)%8;
+      statusEl.textContent='Hint: piece '+(selected+1)+' needs '+steps+' more turn'+(steps===1?'':'s')+' to hit its target.';
+    }else{ statusEl.textContent='All shadows are aligned!'; }
+  });
+  nextBtn.addEventListener('click',function(){
+    if(solved && puzzleIndex<PUZZLES.length-1){ loadPuzzle(puzzleIndex+1); }
+  });
+
+  function draw(){
+    animTime+=0.016;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // Sundial plate
+    ctx.beginPath(); ctx.arc(280,300,215,0,Math.PI*2); ctx.fillStyle='#f5d67a'; ctx.fill();
+    ctx.lineWidth=5; ctx.strokeStyle='#78350f'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(280,300,180,0,Math.PI*2); ctx.lineWidth=2; ctx.strokeStyle='#b45309'; ctx.stroke();
+    // Hour marks
+    for(var h=0;h<12;h++){
+      var a=h*Math.PI/6-Math.PI/2;
+      var x1=280+Math.cos(a)*180, y1=300+Math.sin(a)*180;
+      var x2=280+Math.cos(a)*160, y2=300+Math.sin(a)*160;
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineWidth=3; ctx.strokeStyle='#78350f'; ctx.stroke();
+      ctx.fillStyle='#78350f'; ctx.font='bold 15px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(String(h===0?12:h),280+Math.cos(a)*140,300+Math.sin(a)*140);
+    }
+    // Sun in corner, gently pulsing
+    var pulse=1+Math.sin(animTime*2)*0.06;
+    ctx.beginPath(); ctx.arc(472,72,30*pulse,0,Math.PI*2); ctx.fillStyle='#fbbf24'; ctx.fill();
+    ctx.strokeStyle='#f59e0b'; ctx.lineWidth=3;
+    for(var s=0;s<8;s++){
+      var sa=s*Math.PI/4+animTime*0.25;
+      ctx.beginPath(); ctx.moveTo(472+Math.cos(sa)*38,72+Math.sin(sa)*38); ctx.lineTo(472+Math.cos(sa)*50,72+Math.sin(sa)*50); ctx.stroke();
+    }
+    ctx.fillStyle='#78350f'; ctx.font='bold 15px Georgia'; ctx.textAlign='left';
+    ctx.fillText(PUZZLES[puzzleIndex].name,24,34);
+    ctx.fillStyle='#92400e'; ctx.font='14px Georgia';
+    ctx.fillText('Sunlight from the top-right • shadows point where pieces point',24,54);
+
+    // Targets first, then shadows, then pieces
+    pieces.forEach(function(q){
+      var t=targetPos(q);
+      var hit=(q.dir===q.target);
+      ctx.save(); ctx.translate(t.x,t.y); ctx.rotate(Math.PI/4);
+      ctx.fillStyle=hit?'#fbbf24':'#94a3b8';
+      ctx.strokeStyle='#78350f'; ctx.lineWidth=2;
+      ctx.fillRect(-9,-9,18,18); ctx.strokeRect(-9,-9,18,18); ctx.restore();
+      if(hit){ ctx.beginPath(); ctx.arc(t.x,t.y,16+Math.sin(animTime*4)*2,0,Math.PI*2); ctx.strokeStyle='rgba(251,191,36,0.8)'; ctx.lineWidth=2; ctx.stroke(); }
+    });
+    pieces.forEach(function(q,i){
+      var e=shadowEnd(q);
+      var hit=(q.dir===q.target);
+      ctx.beginPath(); ctx.moveTo(q.x,q.y); ctx.lineTo(e.x,e.y);
+      ctx.strokeStyle=hit?'rgba(180,120,20,0.95)':'rgba(60,40,10,0.45)';
+      ctx.lineWidth=hit?7:5; ctx.setLineDash(q.kind==='mirror'?[8,5]:[]);
+      ctx.stroke(); ctx.setLineDash([]);
+    });
+    pieces.forEach(function(q,i){
+      var isSel=(i===selected && started && !solved);
+      if(isSel){
+        ctx.beginPath(); ctx.arc(q.x,q.y,30+Math.sin(animTime*5)*3,0,Math.PI*2);
+        ctx.strokeStyle='#dc2626'; ctx.lineWidth=3; ctx.stroke();
+      }
+      if(q.kind==='mirror'){
+        ctx.save(); ctx.translate(q.x,q.y); ctx.rotate(Math.PI/4);
+        ctx.fillStyle='#bae6fd'; ctx.strokeStyle='#0c4a6e'; ctx.lineWidth=3;
+        ctx.fillRect(-14,-14,28,28); ctx.strokeRect(-14,-14,28,28); ctx.restore();
+      }else{
+        ctx.beginPath(); ctx.arc(q.x,q.y,17,0,Math.PI*2); ctx.fillStyle='#fef3c7'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle='#78350f'; ctx.stroke();
+      }
+      var d=DIRS[q.dir];
+      ctx.beginPath(); ctx.moveTo(q.x,q.y); ctx.lineTo(q.x+d[0]*26,q.y+d[1]*26);
+      ctx.strokeStyle='#92400e'; ctx.lineWidth=4; ctx.stroke();
+      ctx.beginPath(); ctx.arc(q.x,q.y,5,0,Math.PI*2); ctx.fillStyle='#78350f'; ctx.fill();
+      ctx.fillStyle='#1e293b'; ctx.font='bold 12px Georgia'; ctx.textAlign='center';
+      ctx.fillText(String(i+1),q.x,q.y-26);
+    });
+    if(!started){
+      ctx.fillStyle='rgba(15,23,42,0.25)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+    requestAnimationFrame(draw);
+  }
+
+  loadPuzzle(0);
+  started=false;
+  updateHUD('Press Start to begin Puzzle 1.');
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

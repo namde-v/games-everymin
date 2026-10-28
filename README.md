@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 220
-- **Latest game:** 0220 — Lasso Legend
+- **Total games:** 230
+- **Latest game:** 0230 — Horseshoe Hero
 - **Current volume:** 003 (Games 0201 to 0300)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -15,7 +15,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
-| 003 | 0201–0220 (20 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
+| 003 | 0201–0230 (30 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -29,20 +29,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 022
+## Latest batch — Batch 023
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0211 | Glacier Glider | Arcade / Ice Gliding | [Play](./games/game-0211.html) |
-| 0212 | Glyph Garden | Puzzle / Symbol Matching Logic | [Play](./games/game-0212.html) |
-| 0213 | Observatory Overseer | Strategy / Telescope Scheduling | [Play](./games/game-0213.html) |
-| 0214 | Cello Cadence | Rhythm / Bow Timing | [Play](./games/game-0214.html) |
-| 0215 | Dart Dynamo | Precision / Dart Throwing | [Play](./games/game-0215.html) |
-| 0216 | Kite Kraze | Arcade / Kite Flying | [Play](./games/game-0216.html) |
-| 0217 | Prism Pathfinder | Puzzle / Light Prism Routing | [Play](./games/game-0217.html) |
-| 0218 | Apiary Architect | Strategy / Beehive Management | [Play](./games/game-0218.html) |
-| 0219 | Harmonica Highway | Rhythm / Harmonica Note Run | [Play](./games/game-0219.html) |
-| 0220 | Lasso Legend | Precision / Lasso Roping | [Play](./games/game-0220.html) |
+| 0221 | Tempest Trek | Arcade / Storm Runner | [Play](./games/game-0221.html) |
+| 0222 | Mosaic Matrix | Puzzle / Tile Pattern Logic | [Play](./games/game-0222.html) |
+| 0223 | Canyon Cartographer | Strategy / Map Expedition | [Play](./games/game-0223.html) |
+| 0224 | Banjo Bonanza | Rhythm / Banjo Picking | [Play](./games/game-0224.html) |
+| 0225 | Catapult Canyon | Precision / Catapult Launch | [Play](./games/game-0225.html) |
+| 0226 | Firefly Frenzy | Arcade / Firefly Catch | [Play](./games/game-0226.html) |
+| 0227 | Sundial Solver | Puzzle / Shadow Logic | [Play](./games/game-0227.html) |
+| 0228 | Glacier Guild | Strategy / Expedition Management | [Play](./games/game-0228.html) |
+| 0229 | Drumline Dash | Rhythm / Marching Beat | [Play](./games/game-0229.html) |
+| 0230 | Horseshoe Hero | Precision / Horseshoe Toss | [Play](./games/game-0230.html) |
 
 
 ## Quality standard
