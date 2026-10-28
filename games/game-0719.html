@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Starlight Archery Range</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#070b1e;color:#fff;font-family:Arial,Helvetica,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:10px;overflow-x:hidden}
+  h1{font-size:26px;letter-spacing:1px;color:#ffe27a;text-shadow:0 0 14px #ffcc33;margin:6px 0 2px;text-align:center}
+  p.sub{color:#b8c4ff;font-size:14px;margin-bottom:8px;text-align:center}
+  #wrap{position:relative;width:960px;max-width:98vw}
+  canvas{display:block;width:100%;height:auto;background:linear-gradient(#0b1233,#1a2355 55%,#2a1e4d);border:3px solid #ffe27a;border-radius:14px;touch-action:none;cursor:crosshair}
+  #hud{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;background:#141b3d;border:1px solid #3d4a8a;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-weight:bold;font-size:15px}
+  #hud span{white-space:nowrap}
+  #windbar{height:12px;background:#222a55;border-radius:6px;overflow:hidden;margin-top:4px}
+  #windfill{height:100%;width:50%;background:#7fd4ff;transition:width .3s,margin-left .3s}
+  #windlabel{font-size:13px;color:#aee6ff}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(3,6,22,.88);border-radius:14px;padding:24px;z-index:5}
+  .overlay h2{font-size:34px;color:#ffe27a;margin-bottom:10px}
+  .overlay p{max-width:620px;line-height:1.55;color:#dfe6ff;margin:6px 0;font-size:16px}
+  .overlay .small{font-size:14px;color:#b8c4ff}
+  button{margin-top:14px;padding:13px 26px;font-size:18px;font-weight:bold;border:none;border-radius:10px;background:#ffcc33;color:#1a1200;cursor:pointer;box-shadow:0 4px 0 #b8860b}
+  button:active{transform:translateY(3px);box-shadow:0 1px 0 #b8860b}
+  button.secondary{background:#3d4a8a;color:#fff;box-shadow:0 4px 0 #232a55}
+  #controls{margin-top:10px;color:#cbd5ff;font-size:14px;text-align:center;line-height:1.6;max-width:960px}
+  kbd{background:#222a55;border:1px solid #556;border-radius:4px;padding:1px 6px;color:#fff}
+  .hidden{display:none !important}
+  #aimHint{position:absolute;left:12px;bottom:12px;background:rgba(0,0,0,.55);padding:7px 10px;border-radius:8px;font-size:13px;color:#ffe9a8}
+</style>
+</head>
+<body>
+<h1>🏹 Starlight Archery Range</h1>
+<p class="sub">Aim at the moving stars. Read the wind. Every arrow counts.</p>
+<div id="wrap">
+  <div id="hud">
+    <span>⭐ Score: <span id="score">0</span> / 180</span>
+    <span>🏹 Arrows: <span id="arrows">12</span></span>
+    <span>🎯 Hits: <span id="hits">0</span></span>
+    <span>💨 Wind: <span id="windText">Calm</span></span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+  <div id="windlabel">Wind gauge — arrow shows push direction &amp; strength. Aim slightly into the wind!</div>
+  <div id="windbar"><div id="windfill"></div></div>
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="aimHint">Drag from the bow to aim, release to shoot — or use arrow keys + Space</div>
+
+  <div id="titleScreen" class="overlay">
+    <h2>⭐ Starlight Archery Range ⭐</h2>
+    <p><b>How to Play:</b> Moving star targets drift across the night sky. Drag from the bow (bottom-left) to set your angle and power, then release to loose an arrow. Wind gusts push your arrow sideways — watch the wind gauge and aim into the wind to compensate.</p>
+    <p>Small fast stars are worth <b>30 points</b>, medium stars <b>20</b>, and large slow stars <b>10</b>. Golden bonus stars are worth <b>50</b> but vanish quickly!</p>
+    <p>You have <b>12 arrows</b>. Reach <b>180 points</b> to win. If you run out of arrows first, the range closes.</p>
+    <p class="small">Mouse / Touch: drag &amp; release &nbsp;•&nbsp; Keyboard: ↑ ↓ aim, ← → power, Space shoot, R restart</p>
+    <button id="startBtn" type="button">▶ Start Archery</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p class="small">Press Restart to try a new night at the range — wind and stars will be different.</p>
+    <button id="restartBtn" type="button">↻ Restart Instantly</button>
+  </div>
+</div>
+<div id="controls">
+  <b>Controls:</b> <kbd>Mouse drag</kbd> / <kbd>Touch drag</kbd> aim &amp; release to shoot &nbsp;•&nbsp; <kbd>↑</kbd><kbd>↓</kbd> angle &nbsp;•&nbsp; <kbd>←</kbd><kbd>→</kbd> power &nbsp;•&nbsp; <kbd>Space</kbd> shoot &nbsp;•&nbsp; <kbd>R</kbd> restart &nbsp;•&nbsp; <kbd>M</kbd> sound on/off
+</div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var arrowsEl = document.getElementById('arrows');
+  var hitsEl = document.getElementById('hits');
+  var statusEl = document.getElementById('status');
+  var windTextEl = document.getElementById('windText');
+  var windFill = document.getElementById('windfill');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var W = 960, H = 540;
+  var bowX = 110, bowY = 440;
+  var running = false, gameOver = false;
+  var score = 0, arrowsLeft = 12, hits = 0;
+  var aimAngle = -0.62, aimPower = 0.72, aiming = false, dragX = 0, dragY = 0;
+  var arrow = null, particles = [], targets = [], starsBg = [];
+  var wind = 0, windTimer = 0, gustTimer = 0, spawnTimer = 0, time = 0;
+  var soundOn = true, audioCtx = null;
+
+  for (var i = 0; i < 90; i++) {
+    starsBg.push({x: Math.random()*W, y: Math.random()*H*0.72, r: Math.random()*1.8+0.4, tw: Math.random()*6.28});
+  }
+
+  function audio() {
+    if (!soundOn) return null;
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return null; } }
+    if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function tone(freq, dur, type, vol) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+  function shootSound(){ tone(220, 0.12, 'triangle', 0.15); setTimeout(function(){ tone(520, 0.08, 'sine', 0.08); }, 60); }
+  function hitSound(){ tone(880, 0.18, 'sine', 0.18); setTimeout(function(){ tone(1320, 0.22, 'sine', 0.14); }, 90); }
+  function winSound(){ [523,659,784,1046].forEach(function(f, idx){ setTimeout(function(){ tone(f, 0.35, 'sine', 0.16); }, idx*140); }); }
+  function loseSound(){ [330,262,196,131].forEach(function(f, idx){ setTimeout(function(){ tone(f, 0.3, 'triangle', 0.13); }, idx*150); }); }
+
+  function updateWindUI() {
+    var label = 'Calm';
+    if (wind > 1.4) label = 'Strong → East';
+    else if (wind > 0.5) label = 'Breeze → East';
+    else if (wind < -1.4) label = 'Strong ← West';
+    else if (wind < -0.5) label = 'Breeze ← West';
+    windTextEl.textContent = label + ' (' + (wind >= 0 ? '+' : '') + wind.toFixed(1) + ')';
+    var pct = 50 + wind * 22;
+    if (pct < 4) pct = 4; if (pct > 96) pct = 96;
+    windFill.style.width = '14%';
+    windFill.style.marginLeft = (pct - 7) + '%';
+    windFill.style.background = Math.abs(wind) > 1.4 ? '#ff9a7a' : '#7fd4ff';
+  }
+  function newWind() {
+    // Gusts change every few seconds, sometimes reversing.
+    wind = (Math.random()*2 - 1) * 2.2;
+    if (Math.random() < 0.2) wind = 0;
+    windTimer = 2.5 + Math.random()*2.5;
+    updateWindUI();
+  }
+  function spawnTarget() {
+    var roll = Math.random();
+    var kind, r, speed, points, life;
+    if (roll < 0.14) { kind='gold'; r=16; speed=55+Math.random()*45; points=50; life=4.5; }
+    else if (roll < 0.45) { kind='small'; r=14; speed=95+Math.random()*55; points=30; life=9; }
+    else if (roll < 0.78) { kind='med'; r=21; speed=60+Math.random()*40; points=20; life=11; }
+    else { kind='large'; r=29; speed=35+Math.random()*30; points=10; life=13; }
+    var dir = Math.random() < 0.5 ? 1 : -1;
+    targets.push({
+      x: dir === 1 ? -40 : W + 40, y: 70 + Math.random()*260,
+      vx: dir * speed, r: r, points: points, kind: kind, life: life, phase: Math.random()*6.28
+    });
+  }
+  function burst(x, y, color) {
+    for (var i = 0; i < 22; i++) {
+      particles.push({x:x, y:y, vx:(Math.random()-0.5)*260, vy:(Math.random()-0.5)*260, life:0.7, color:color});
+    }
+  }
+  function resetGame() {
+    score = 0; arrowsLeft = 12; hits = 0; aimAngle = -0.62; aimPower = 0.72;
+    arrow = null; targets = []; particles = []; gameOver = false;
+    newWind(); spawnTimer = 0.4;
+    for (var k = 0; k < 3; k++) spawnTarget();
+    updateHUD('Aiming — drag from the bow!');
+  }
+  function updateHUD(msg) {
+    scoreEl.textContent = score; arrowsEl.textContent = arrowsLeft; hitsEl.textContent = hits;
+    if (msg) statusEl.textContent = msg;
+  }
+  function endGame(won) {
+    gameOver = true; running = false;
+    endScreen.classList.remove('hidden');
+    if (won) { endTitle.textContent = '🏆 You Win! Master Archer!'; winSound(); }
+    else { endTitle.textContent = '🌙 Game Over — Range Closed'; loseSound(); }
+    endText.textContent = 'Final score: ' + score + ' points with ' + hits + ' star' + (hits === 1 ? '' : 's') + ' hit. ' +
+      (won ? 'You reached 180 points before your arrows ran out — brilliant shooting against the wind!' : 'You needed 180 points. Watch the wind gauge and aim into the gusts next time!');
+    statusEl.textContent = won ? 'You Win!' : 'Game Over';
+  }
+  function startGame() {
+    audio(); // AudioContext only after this user tap
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    running = true;
+    tone(660, 0.15, 'sine', 0.12);
+  }
+
+  function getPos(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function aimFromPos(p) {
+    // Drag vector away from bow sets angle/power; pull back like a bowstring.
+    var dx = bowX - p.x, dy = bowY - p.y;
+    // Default aim is up-right; dragging down-left increases power.
+    aimAngle = Math.atan2(-dy, Math.max(20, -dx * -1));
+    // Simpler robust mapping: angle from drag direction, clamped to upper-right quadrant.
+    var a = Math.atan2(p.y - bowY, p.x - bowX);
+    // We want shooting up-right, so mirror drag: pull down-left to shoot up-right.
+    var pullX = bowX - p.x, pullY = bowY - p.y;
+    var pull = Math.sqrt(pullX*pullX + pullY*pullY);
+    aimPower = Math.min(1, Math.max(0.25, pull / 220));
+    var raw = Math.atan2(-pullY, Math.max(30, pullX));
+    // Clamp between -1.35 (steep) and -0.15 (flat)
+    aimAngle = Math.max(-1.35, Math.min(-0.15, raw));
+    if (!isFinite(aimAngle)) aimAngle = -0.62;
+  }
+  function shoot() {
+    if (!running || gameOver || arrow || arrowsLeft <= 0) return;
+    arrowsLeft--;
+    var speed = 520 + aimPower * 480;
+    arrow = { x: bowX + 18, y: bowY - 8, vx: Math.cos(aimAngle) * speed, vy: Math.sin(aimAngle) * speed, rot: aimAngle, trail: [] };
+    shootSound();
+    updateHUD(arrowsLeft > 0 ? 'Arrow flying — watch the wind!' : 'Last arrow flying!');
+  }
+
+  canvas.addEventListener('mousedown', function(e){ if(!running||gameOver) return; aiming = true; var p = getPos(e); dragX = p.x; dragY = p.y; aimFromPos(p); });
+  canvas.addEventListener('mousemove', function(e){ if(!aiming) return; var p = getPos(e); dragX = p.x; dragY = p.y; aimFromPos(p); });
+  canvas.addEventListener('mouseup', function(e){ if(!aiming) return; aiming = false; shoot(); });
+  canvas.addEventListener('mouseleave', function(){ aiming = false; });
+  canvas.addEventListener('touchstart', function(e){ if(!running||gameOver) return; e.preventDefault(); aiming = true; var p = getPos(e); dragX = p.x; dragY = p.y; aimFromPos(p); }, {passive:false});
+  canvas.addEventListener('touchmove', function(e){ if(!aiming) return; e.preventDefault(); var p = getPos(e); dragX = p.x; dragY = p.y; aimFromPos(p); }, {passive:false});
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); if(!aiming) return; aiming = false; shoot(); }, {passive:false});
+  canvas.addEventListener('touchcancel', function(){ aiming = false; });
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === ' ') { e.preventDefault(); if (!running && !gameOver) startGame(); else shoot(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); aimAngle = Math.max(-1.35, aimAngle - 0.07); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); aimAngle = Math.min(-0.15, aimAngle + 0.07); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); aimPower = Math.max(0.25, aimPower - 0.07); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); aimPower = Math.min(1, aimPower + 0.07); }
+    if (e.key === 'r' || e.key === 'R') { if (running || gameOver) { endScreen.classList.add('hidden'); startGame(); } }
+    if (e.key === 'm' || e.key === 'M') { soundOn = !soundOn; statusEl.textContent = soundOn ? 'Sound on' : 'Sound off'; }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', function(){ startGame(); });
+
+  function drawStar(x, y, r, color, glow) {
+    ctx.save();
+    ctx.shadowColor = glow; ctx.shadowBlur = 18;
+    ctx.fillStyle = color; ctx.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var rad = (i % 2 === 0) ? r : r * 0.45;
+      var a = -Math.PI/2 + i * Math.PI/5;
+      var sx = x + Math.cos(a)*rad, sy = y + Math.sin(a)*rad;
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x, y, Math.max(2, r*0.18), 0, Math.PI*2); ctx.fill();
+  }
+  function drawBow() {
+    // Ground and bow
+    ctx.fillStyle = '#1d2b1a'; ctx.fillRect(0, 470, W, 70);
+    ctx.fillStyle = '#3a5a2e'; ctx.fillRect(0, 466, W, 6);
+    ctx.strokeStyle = '#8b5a2b'; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(bowX, bowY, 38, -1.2, 1.2); ctx.stroke();
+    ctx.strokeStyle = '#e8e8e8'; ctx.lineWidth = 1.5; ctx.beginPath();
+    var topX = bowX + Math.cos(-1.2)*38, topY = bowY + Math.sin(-1.2)*38;
+    var botX = bowX + Math.cos(1.2)*38, botY = bowY + Math.sin(1.2)*38;
+    var pull = aiming ? aimPower * 34 : 8;
+    var strX = bowX - pull, strY = bowY;
+    ctx.moveTo(topX, topY); ctx.lineTo(strX, strY); ctx.lineTo(botX, botY); ctx.stroke();
+    ctx.fillStyle = '#5b3a1e'; ctx.beginPath(); ctx.arc(bowX, bowY, 7, 0, Math.PI*2); ctx.fill();
+    // Aimed trajectory preview (dotted, wind-compensated hint)
+    if (running && !gameOver && !arrow) {
+      var speed = 520 + aimPower * 480;
+      var px = bowX + 18, py = bowY - 8, pvx = Math.cos(aimAngle)*speed, pvy = Math.sin(aimAngle)*speed;
+      ctx.fillStyle = 'rgba(255,226,122,0.9)';
+      for (var s = 0; s < 26; s++) {
+        var dt = 0.06;
+        pvy += 520*dt; pvx += wind*38*dt;
+        px += pvx*dt; py += pvy*dt;
+        if (s % 2 === 0) { ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill(); }
+        if (py > H || px > W) break;
+      }
+    }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Moon and background stars
+    ctx.fillStyle = '#f5e9b8'; ctx.beginPath(); ctx.arc(840, 80, 38, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0b1233'; ctx.beginPath(); ctx.arc(826, 70, 34, 0, Math.PI*2); ctx.fill();
+    starsBg.forEach(function(s){
+      var tw = 0.5 + 0.5*Math.sin(time*2 + s.tw);
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.35 + tw*0.65).toFixed(2) + ')';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+    });
+    // Wind streaks
+    ctx.strokeStyle = 'rgba(127,212,255,0.35)'; ctx.lineWidth = 2;
+    for (var w = 0; w < 5; w++) {
+      var wy = 60 + w*55 + Math.sin(time + w)*8;
+      var wx = ((time * (20 + Math.abs(wind)*30) * (wind >= 0 ? 1 : -1) + w*190) % (W+200)) - 100;
+      ctx.beginPath(); ctx.moveTo(wx, wy); ctx.lineTo(wx + wind*18 + (wind >= 0 ? 28 : -28), wy); ctx.stroke();
+    }
+    // Targets
+    targets.forEach(function(t){
+      var pulse = 1 + 0.12*Math.sin(time*5 + t.phase);
+      var col = t.kind === 'gold' ? '#ffd94d' : (t.kind === 'small' ? '#ff7ad9' : (t.kind === 'med' ? '#7ad9ff' : '#a8ffb0'));
+      drawStar(t.x, t.y + Math.sin(time*2 + t.phase)*6, t.r * pulse, col, col);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(t.points, t.x, t.y + t.r + 18);
+    });
+    // Arrow trail and arrow
+    if (arrow) {
+      ctx.strokeStyle = 'rgba(255,226,122,0.5)'; ctx.lineWidth = 3; ctx.beginPath();
+      arrow.trail.forEach(function(p, idx){ if (idx === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.stroke();
+      ctx.save(); ctx.translate(arrow.x, arrow.y); ctx.rotate(arrow.rot);
+      ctx.fillStyle = '#d8b36a'; ctx.fillRect(-20, -2, 40, 4);
+      ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(32, -5); ctx.lineTo(32, 5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ff5a5a'; ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(-30, -7); ctx.lineTo(-30, 7); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    // Particles
+    particles.forEach(function(p){
+      ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life / 0.7);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+    drawBow();
+    // Power meter
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(20, 20, 170, 18);
+    ctx.fillStyle = '#ffcc33'; ctx.fillRect(22, 22, 166 * aimPower, 14);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Power ' + Math.round(aimPower*100) + '%  •  Drag to aim', 20, 52);
+    if (!running && !gameOver) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start to begin the night shoot', W/2, 300);
+    }
+  }
+  function update(dt) {
+    time += dt;
+    if (!running || gameOver) return;
+    windTimer -= dt;
+    if (windTimer <= 0) newWind();
+    spawnTimer -= dt;
+    if (spawnTimer <= 0 && targets.length < 6) { spawnTarget(); spawnTimer = 1.1 + Math.random()*1.2; }
+    targets.forEach(function(t){ t.x += t.vx * dt; t.life -= dt; });
+    targets = targets.filter(function(t){ return t.life > 0 && t.x > -70 && t.x < W + 70; });
+    particles.forEach(function(p){ p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 120*dt; p.life -= dt; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    if (arrow) {
+      arrow.vy += 520 * dt;
+      arrow.vx += wind * 38 * dt;
+      arrow.x += arrow.vx * dt; arrow.y += arrow.vy * dt;
+      arrow.rot = Math.atan2(arrow.vy, arrow.vx);
+      arrow.trail.push({x: arrow.x, y: arrow.y});
+      if (arrow.trail.length > 22) arrow.trail.shift();
+      var hitIdx = -1;
+      targets.forEach(function(t, idx){
+        var dx = arrow.x - t.x, dy = arrow.y - t.y;
+        if (dx*dx + dy*dy < (t.r + 10)*(t.r + 10)) hitIdx = idx;
+      });
+      if (hitIdx >= 0) {
+        var t = targets[hitIdx];
+        score += t.points; hits++;
+        burst(t.x, t.y, t.kind === 'gold' ? '#ffd94d' : '#ffffff');
+        hitSound();
+        targets.splice(hitIdx, 1);
+        arrow = null;
+        updateHUD('Hit! +' + t.points + ' points');
+        if (score >= 180) { endGame(true); return; }
+      } else if (arrow.x < -40 || arrow.x > W + 40 || arrow.y > H + 20) {
+        arrow = null;
+        updateHUD('Missed — adjust for wind!');
+      }
+      if (!arrow && arrowsLeft <= 0 && score < 180) { endGame(false); return; }
+    } else {
+      if (arrowsLeft <= 0 && score < 180 && !gameOver) { endGame(false); }
+    }
+  }
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  updateWindUI();
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

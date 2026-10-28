@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Moonlit Kite Runner</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#070a1e;color:#eef2ff;font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:12px}
+  .wrap{width:min(920px,100%);text-align:center}
+  h1{font-size:28px;letter-spacing:1px;color:#ffe9a3;text-shadow:0 0 14px #f5c542;margin-bottom:6px}
+  p.sub{color:#b9c4ff;margin-bottom:10px}
+  #gameBox{position:relative;width:100%;max-width:900px;margin:0 auto;border:3px solid #2b356b;border-radius:16px;overflow:hidden;background:#0b1233;box-shadow:0 10px 40px rgba(0,0,0,.6)}
+  canvas{display:block;width:100%;height:520px;background:linear-gradient(#0b1233,#16224f)}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(4,7,24,.82);padding:20px;z-index:5}
+  .overlay.hidden{display:none}
+  .overlay h2{font-size:34px;color:#ffe9a3;margin-bottom:10px}
+  .overlay p{max-width:620px;line-height:1.6;color:#dbe2ff;margin:6px 0}
+  .big{font-size:20px;color:#fff}
+  button{margin-top:16px;padding:14px 28px;font-size:18px;font-weight:bold;border:0;border-radius:999px;background:#ffd54d;color:#1a1400;cursor:pointer;box-shadow:0 4px 0 #b98a00}
+  button:active{transform:translateY(3px);box-shadow:none}
+  button.secondary{background:#5b6cff;color:#fff;box-shadow:0 4px 0 #2c3aa8}
+  .hud{display:flex;justify-content:space-between;gap:8px;padding:10px 12px;background:#121a3d;font-weight:bold;flex-wrap:wrap}
+  .hud span{color:#ffe9a3}
+  .bar{height:10px;background:#222c5e;border-radius:99px;overflow:hidden;margin:8px 0 0}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,#ffd54d,#ff7a59);width:0%}
+  .keys{font-size:13px;color:#9aa8e8;margin-top:10px;line-height:1.5}
+  .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🪁 Moonlit Kite Runner</h1>
+  <p class="sub">Ride the night wind • Dodge storms • Catch every lantern</p>
+  <div id="gameBox">
+    <canvas id="cv" width="900" height="520"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>🪁 Moonlit Kite Runner</h2>
+      <p class="big">Fly 3000 metres to the Moon Festival!</p>
+      <p><strong>How to Play:</strong> Steer your kite with Arrow Keys / WASD, mouse, or touch-drag. Ride glowing wind gusts upward for a speed boost. Collect moon lanterns for points. Dodge storm clouds and tree tops — each hit costs a life. You have 3 lives.</p>
+      <p>💛 Lantern = +50 points &nbsp; 🌬️ Gust = boost &nbsp; ⛈️ Storm = -1 life &nbsp; 🌲 Tree = -1 life</p>
+      <p>Tip: Stay in the middle of the sky when storms stack up, and dive low only to grab a lantern.</p>
+      <div class="row"><button id="startBtn">▶ Start Flying</button></div>
+      <p class="keys">Keyboard: Arrows / WASD &nbsp;|&nbsp; Mouse: move to steer, click to dash &nbsp;|&nbsp; Touch: drag to steer</p>
+    </div>
+    <div class="overlay hidden" id="endScreen">
+      <h2 id="endTitle">Game Over</h2>
+      <p class="big" id="endText"></p>
+      <p id="endScore"></p>
+      <div class="row"><button id="restartBtn">↻ Play Again</button><button class="secondary" id="menuBtn">Back to Title</button></div>
+    </div>
+  </div>
+  <div class="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Lives: <span id="lives">❤️❤️❤️</span></div>
+    <div>Distance: <span id="dist">0</span> / 3000 m</div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <div class="bar"><i id="prog"></i></div>
+  <p class="keys">Collect 12 lanterns for a bonus life! Finish the distance before your lives run out to win.</p>
+</div>
+<script>
+(function(){
+  var cv=document.getElementById('cv');
+  var ctx=cv.getContext('2d');
+  var scoreEl=document.getElementById('score'), livesEl=document.getElementById('lives'),
+      distEl=document.getElementById('dist'), statusEl=document.getElementById('status'),
+      progEl=document.getElementById('prog'), titleScreen=document.getElementById('titleScreen'),
+      endScreen=document.getElementById('endScreen'), endTitle=document.getElementById('endTitle'),
+      endText=document.getElementById('endText'), endScore=document.getElementById('endScore');
+
+  var W=900, H=520, running=false, raf=0, last=0;
+  var player, keys={}, mouse={x:450,y:260,active:false}, touch={x:450,y:260,active:false};
+  var obstacles=[], lanterns=[], gusts=[], stars=[], trees=[], particles=[];
+  var score=0, lives=3, distance=0, lanternCount=0, speed=3.2, spawnT=0, gustT=0, invuln=0, dashT=0, flash=0;
+
+  function rnd(a,b){return a+Math.random()*(b-a)}
+  function initStars(){stars=[];for(var i=0;i<90;i++){stars.push({x:rnd(0,W),y:rnd(0,H*0.7),r:rnd(0.6,2.2),tw:rnd(0,6.28)})}}
+  function reset(){
+    player={x:150,y:260,vx:0,vy:0,tilt:0};
+    obstacles=[];lanterns=[];gusts=[];trees=[];particles=[];
+    score=0;lives=3;distance=0;lanternCount=0;speed=3.2;spawnT=0;gustT=0;invuln=0;dashT=0;flash=0;
+    initStars(); updateHUD('Flying — ride the wind!');
+  }
+  function updateHUD(s){ if(s) statusEl.textContent=s; scoreEl.textContent=score; distEl.textContent=Math.floor(distance); livesEl.textContent='❤️'.repeat(Math.max(0,lives))||'—'; progEl.style.width=Math.min(100,distance/3000*100)+'%'; }
+
+  // Audio - created only after user interaction
+  var AC=null, master=null;
+  function ensureAudio(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); master=AC.createGain(); master.gain.value=0.12; master.connect(AC.destination);}catch(e){} } if(AC&&AC.state==='suspended'){AC.resume();} }
+  function beep(freq,dur,type,vol){ if(!AC) return; try{ var o=AC.createOscillator(),g=AC.createGain(); o.type=type||'sine'; o.frequency.value=freq; g.gain.setValueAtTime(vol||0.2,AC.currentTime); g.gain.exponentialRampToValueAtTime(0.01,AC.currentTime+dur); o.connect(g); g.connect(master); o.start(); o.stop(AC.currentTime+dur);}catch(e){} }
+  function sfx(kind){ if(kind==='lantern'){beep(880,0.18,'sine',0.25);setTimeout(function(){beep(1320,0.22,'sine',0.2)},70);} else if(kind==='hit'){beep(140,0.3,'sawtooth',0.3);} else if(kind==='gust'){beep(300,0.25,'triangle',0.2);setTimeout(function(){beep(520,0.25,'triangle',0.15)},80);} else if(kind==='win'){[523,659,784,1046].forEach(function(f,i){setTimeout(function(){beep(f,0.35,'sine',0.25)},i*130)});} }
+
+  function spawn(){
+    // storm cloud or tree
+    var kind=Math.random()<0.55?'storm':'tree';
+    if(kind==='storm'){ obstacles.push({x:W+40,y:rnd(40,H-180),w:rnd(90,140),h:rnd(50,80),kind:'storm',drift:rnd(-0.4,0.4)}); }
+    else { trees.push({x:W+40,y:H-58,h:rnd(70,120),w:rnd(50,80)}); }
+    if(Math.random()<0.7){ lanterns.push({x:W+60,y:rnd(50,H-110),r:18,phase:rnd(0,6)}); }
+    if(Math.random()<0.45){ gusts.push({x:W+80,y:rnd(40,H-140),w:70,h:120,phase:rnd(0,6)}); }
+  }
+  function burst(x,y,color){ for(var i=0;i<16;i++){particles.push({x:x,y:y,vx:rnd(-3,3),vy:rnd(-3,3),life:30,color:color});} }
+
+  function drawKite(){
+    var p=player;
+    ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.tilt);
+    // string
+    ctx.strokeStyle='rgba(255,255,255,0.7)'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(-18,18); ctx.lineTo(-70,110); ctx.stroke();
+    // kite diamond
+    ctx.fillStyle='#ff5d73'; ctx.beginPath(); ctx.moveTo(0,-28); ctx.lineTo(26,0); ctx.lineTo(0,28); ctx.lineTo(-26,0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#ffd54d'; ctx.beginPath(); ctx.moveTo(0,-28); ctx.lineTo(26,0); ctx.lineTo(0,0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(0,0,4,0,6.29); ctx.fill();
+    // tail
+    ctx.strokeStyle='#ffd54d'; ctx.beginPath(); ctx.moveTo(-18,18); ctx.lineTo(-30,45); ctx.lineTo(-18,70); ctx.stroke();
+    ctx.restore();
+    if(invuln>0 && Math.floor(invuln/4)%2===0){ ctx.strokeStyle='rgba(255,233,163,0.9)'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,p.y,40,0,6.29); ctx.stroke(); }
+  }
+  function drawCloud(o){
+    ctx.fillStyle='#3a426e'; ctx.beginPath(); ctx.arc(o.x,o.y,26,0,6.29); ctx.arc(o.x+28,o.y-10,30,0,6.29); ctx.arc(o.x+58,o.y,26,0,6.29); ctx.arc(o.x+30,o.y+12,28,0,6.29); ctx.fill();
+    ctx.fillStyle='#ffd54d'; ctx.font='20px Arial'; ctx.fillText('⚡',o.x+18,o.y+8);
+    ctx.fillStyle='rgba(180,190,255,0.9)'; ctx.font='12px Arial'; ctx.fillText('STORM',o.x+8,o.y+34);
+  }
+
+  function loop(ts){
+    if(!running) return;
+    var dt=Math.min(32, ts-last||16); last=ts;
+    var f=dt/16.6;
+    // movement: keyboard
+    var ax=0, ay=0;
+    if(keys['ArrowLeft']||keys['a']||keys['A']) ax-=1;
+    if(keys['ArrowRight']||keys['d']||keys['D']) ax+=1;
+    if(keys['ArrowUp']||keys['w']||keys['W']) ay-=1;
+    if(keys['ArrowDown']||keys['s']||keys['S']) ay+=1;
+    if(ax||ay){ player.vx+=ax*0.55*f; player.vy+=ay*0.55*f; }
+    if(mouse.active){ player.x+=(mouse.x-player.x)*0.12*f; player.y+=(mouse.y-player.y)*0.12*f; }
+    if(touch.active){ player.x+=(touch.x-player.x)*0.18*f; player.y+=(touch.y-player.y)*0.18*f; }
+    // gentle wind sway + gravity feel
+    player.vy+=0.06*f; player.vy*=0.94; player.vx*=0.92;
+    player.x+=player.vx*f; player.y+=player.vy*f;
+    player.x=Math.max(30,Math.min(W-30,player.x)); player.y=Math.max(30,Math.min(H-40,player.y));
+    player.tilt=Math.max(-0.4,Math.min(0.4,player.vy*0.04));
+    if(dashT>0) dashT-=f;
+    var curSpeed=speed+(dashT>0?3:0);
+    distance+=curSpeed*0.55*f; speed=Math.min(6.5,3.2+distance/1200);
+    spawnT-=f; if(spawnT<=0){spawn(); spawnT=rnd(55,95);}
+    if(invuln>0) invuln-=f; if(flash>0) flash-=f;
+
+    // move world
+    obstacles.forEach(function(o){o.x-=curSpeed*f; o.y+=o.drift*f;});
+    trees.forEach(function(t){t.x-=curSpeed*f;});
+    lanterns.forEach(function(l){l.x-=curSpeed*f; l.phase+=0.08;});
+    gusts.forEach(function(g){g.x-=curSpeed*f; g.phase+=0.05;});
+    particles.forEach(function(pt){pt.x+=pt.vx; pt.y+=pt.vy; pt.life--;});
+    particles=particles.filter(function(pt){return pt.life>0});
+    obstacles=obstacles.filter(function(o){return o.x>-160});
+    trees=trees.filter(function(t){return t.x>-120});
+    lanterns=lanterns.filter(function(l){return l.x>-50});
+    gusts=gusts.filter(function(g){return g.x>-120});
+
+    // collisions
+    gusts.forEach(function(g){
+      if(Math.abs(player.x-g.x)<55 && Math.abs(player.y-g.y)<75){ player.vy-=1.6*f; score+=2; if(Math.random()<0.08) sfx('gust'); }
+    });
+    lanterns.forEach(function(l){
+      if(!l.taken && Math.hypot(player.x-l.x,player.y-l.y)<38){ l.taken=true; score+=50; lanternCount++; burst(l.x,l.y,'#ffd54d'); sfx('lantern'); if(lanternCount%12===0){lives=Math.min(5,lives+1); updateHUD('Bonus life! '+lanternCount+' lanterns');} }
+    });
+    lanterns=lanterns.filter(function(l){return !l.taken});
+    var hit=false;
+    obstacles.forEach(function(o){ if(invuln<=0 && Math.abs(player.x-(o.x+30))<58 && Math.abs(player.y-o.y)<48) hit=true; });
+    trees.forEach(function(t){ if(invuln<=0 && Math.abs(player.x-t.x)<42 && player.y > H-t.h-10) hit=true; });
+    if(hit){ lives--; invuln=90; flash=20; burst(player.x,player.y,'#ff5d73'); sfx('hit'); updateHUD(lives>0?'Ouch! Storm hit — keep flying!':''); if(lives<=0){ return endGame(false); } }
+
+    // draw
+    ctx.clearRect(0,0,W,H);
+    var grad=ctx.createLinearGradient(0,0,0,H); grad.addColorStop(0,'#0b1233'); grad.addColorStop(1,'#1c2a5e'); ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+    // moon
+    ctx.fillStyle='#ffe9a3'; ctx.beginPath(); ctx.arc(790,70,42,0,6.29); ctx.fill();
+    ctx.fillStyle='rgba(255,233,163,0.18)'; ctx.beginPath(); ctx.arc(790,70,64,0,6.29); ctx.fill();
+    stars.forEach(function(s){ s.tw+=0.03; ctx.fillStyle='rgba(255,255,255,'+(0.4+0.6*Math.abs(Math.sin(s.tw)))+')'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.29); ctx.fill(); });
+    // distant hills
+    ctx.fillStyle='#141f45'; ctx.beginPath(); ctx.moveTo(0,430); ctx.quadraticCurveTo(200,390,450,430); ctx.quadraticCurveTo(650,460,900,410); ctx.lineTo(900,520); ctx.lineTo(0,520); ctx.fill();
+    // gusts
+    gusts.forEach(function(g){ ctx.fillStyle='rgba(120,220,255,0.16)'; ctx.strokeStyle='rgba(120,220,255,0.7)'; ctx.beginPath(); ctx.ellipse(g.x,g.y,36,58+Math.sin(g.phase)*6,0,0,6.29); ctx.fill(); ctx.stroke(); ctx.fillStyle='#bfefff'; ctx.font='22px Arial'; ctx.fillText('🌬️',g.x-12,g.y+8); });
+    // lanterns
+    lanterns.forEach(function(l){ var bob=Math.sin(l.phase)*6; ctx.fillStyle='#ff9d3c'; ctx.beginPath(); ctx.ellipse(l.x,l.y+bob,16,20,0,0,6.29); ctx.fill(); ctx.fillStyle='#ffe9a3'; ctx.beginPath(); ctx.arc(l.x,l.y+bob,7,0,6.29); ctx.fill(); });
+    // trees
+    trees.forEach(function(t){ ctx.fillStyle='#1d5c33'; ctx.beginPath(); ctx.moveTo(t.x,t.y||H-58); ctx.lineTo(t.x-26,H); ctx.lineTo(t.x+26,H); ctx.closePath(); ctx.fill(); ctx.fillStyle='#2e8b4a'; ctx.beginPath(); ctx.arc(t.x,H-t.h+20,26,0,6.29); ctx.fill(); });
+    obstacles.forEach(drawCloud);
+    particles.forEach(function(pt){ ctx.fillStyle=pt.color; ctx.globalAlpha=Math.max(0,pt.life/30); ctx.fillRect(pt.x,pt.y,5,5); ctx.globalAlpha=1; });
+    drawKite();
+    if(flash>0){ ctx.fillStyle='rgba(255,80,80,0.18)'; ctx.fillRect(0,0,W,H); }
+    // finish flag marker
+    if(distance>2600){ ctx.fillStyle='#fff'; ctx.fillRect(850,120,4,120); ctx.fillStyle='#ff5d73'; ctx.beginPath(); ctx.moveTo(854,120); ctx.lineTo(900,135); ctx.lineTo(854,150); ctx.fill(); ctx.fillStyle='#fff'; ctx.font='bold 14px Arial'; ctx.fillText('FINISH',830,260); }
+    updateHUD();
+    if(distance>=3000){ return endGame(true); }
+    raf=requestAnimationFrame(loop);
+  }
+
+  function startGame(){
+    ensureAudio(); reset(); running=true; titleScreen.classList.add('hidden'); endScreen.classList.add('hidden'); last=performance.now(); cancelAnimationFrame(raf); raf=requestAnimationFrame(loop); sfx('gust');
+  }
+  function endGame(win){
+    running=false; cancelAnimationFrame(raf);
+    endScreen.classList.remove('hidden');
+    if(win){ endTitle.textContent='🏆 You Win!'; endText.textContent='You reached the Moon Festival! The kite soars over 3000 metres of night sky.'; sfx('win'); statusEl.textContent='Winner!'; }
+    else { endTitle.textContent='💥 Game Over'; endText.textContent='The storm brought your kite down. Try again — the moon is waiting!'; statusEl.textContent='Game Over'; }
+    endScore.textContent='Final Score: '+score+' • Distance: '+Math.floor(distance)+' m • Lanterns: '+lanternCount;
+    updateHUD();
+  }
+  function showMenu(){ running=false; cancelAnimationFrame(raf); endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); reset(); updateHUD('Ready'); }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', showMenu);
+
+  document.addEventListener('keydown', function(e){ keys[e.key]=true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].indexOf(e.key)>=0) e.preventDefault(); if(e.key===' '||e.key==='Enter'){ if(!running && !titleScreen.classList.contains('hidden')) startGame(); } if(e.key===' ' && running){ dashT=18; } });
+  document.addEventListener('keyup', function(e){ keys[e.key]=false; });
+  cv.addEventListener('mousemove', function(e){ var r=cv.getBoundingClientRect(); mouse.x=(e.clientX-r.left)/r.width*W; mouse.y=(e.clientY-r.top)/r.height*H; mouse.active=true; });
+  cv.addEventListener('mousedown', function(e){ ensureAudio(); dashT=18; var r=cv.getBoundingClientRect(); mouse.x=(e.clientX-r.left)/r.width*W; mouse.y=(e.clientY-r.top)/r.height*H; mouse.active=true; });
+  cv.addEventListener('mouseup', function(){ mouse.active=false; });
+  cv.addEventListener('mouseleave', function(){ mouse.active=false; });
+  cv.addEventListener('touchstart', function(e){ ensureAudio(); e.preventDefault(); var t=e.touches[0]; var r=cv.getBoundingClientRect(); touch.x=(t.clientX-r.left)/r.width*W; touch.y=(t.clientY-r.top)/r.height*H; touch.active=true; }, {passive:false});
+  cv.addEventListener('touchmove', function(e){ e.preventDefault(); var t=e.touches[0]; var r=cv.getBoundingClientRect(); touch.x=(t.clientX-r.left)/r.width*W; touch.y=(t.clientY-r.top)/r.height*H; touch.active=true; }, {passive:false});
+  cv.addEventListener('touchend', function(){ touch.active=false; });
+  // also allow whole-document touch steering for small screens
+  document.addEventListener('touchstart', function(){ ensureAudio(); }, {passive:true});
+
+  reset(); updateHUD('Ready — press Start');
+})();
+</script>
+</body>
+</html>

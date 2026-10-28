@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tide Drum Circle</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #041a2e; color: #eaf7ff; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+  #wrap { width: min(96vw, 560px); text-align: center; }
+  h1 { font-size: 34px; letter-spacing: 1px; color: #7fe7ff; text-shadow: 0 0 18px #0aa; margin: 10px 0 4px; }
+  p.sub { color: #bfe8ff; margin-bottom: 10px; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0; font-weight: bold; }
+  #hud div { background: #0a3552; border: 1px solid #2aa7c9; border-radius: 10px; padding: 8px 10px; flex: 1; font-size: 15px; }
+  #hud span { color: #ffd166; }
+  canvas { width: 100%; height: 460px; background: linear-gradient(#06283f, #0a4a6b 55%, #083d57); border: 3px solid #2aa7c9; border-radius: 16px; display: block; touch-action: none; }
+  #pads { display: flex; gap: 10px; margin-top: 10px; }
+  .pad { flex: 1; padding: 18px 4px; border-radius: 16px; border: 3px solid #7fe7ff; background: #123f5e; font-size: 18px; font-weight: bold; cursor: pointer; user-select: none; }
+  .pad small { display: block; font-size: 12px; color: #bfe8ff; margin-top: 4px; }
+  .pad.hit { background: #ffd166; color: #123; transform: scale(.96); }
+  .pad:nth-child(2) { border-color: #ff9f68; }
+  .pad:nth-child(3) { border-color: #a78bfa; }
+  #overlay { position: fixed; inset: 0; background: rgba(2,18,32,.92); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  #card { max-width: 520px; background: #0a3552; border: 2px solid #2aa7c9; border-radius: 18px; padding: 26px; text-align: left; }
+  #card h2 { text-align: center; color: #7fe7ff; margin-bottom: 12px; font-size: 30px; }
+  #card p, #card li { line-height: 1.55; margin-bottom: 8px; }
+  #card ul { margin-left: 20px; margin-bottom: 12px; }
+  button.big { display: block; width: 100%; padding: 15px; font-size: 20px; font-weight: bold; border: 0; border-radius: 12px; background: #ffd166; color: #14213d; cursor: pointer; margin-top: 12px; }
+  button.big:hover { background: #ffe08a; }
+  #msg { min-height: 24px; font-weight: bold; color: #ffd166; margin-top: 8px; }
+  #tidebar { height: 12px; background: #123; border-radius: 8px; overflow: hidden; margin-top: 8px; }
+  #tidefill { height: 100%; width: 0%; background: linear-gradient(90deg, #2aa7c9, #ffd166); transition: width .2s; }
+  @media (max-width: 480px) { h1 { font-size: 27px; } canvas { height: 420px; } .pad { font-size: 16px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🌊 Tide Drum Circle 🥁</h1>
+  <p class="sub">Play the ocean's rhythm before the tide washes it away.</p>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Combo: <span id="combo">x0</span></div>
+    <div>Lives: <span id="lives">♥♥♥</span></div>
+    <div>Beat: <span id="beat">0 / 60</span></div>
+  </div>
+  <canvas id="game" width="540" height="460"></canvas>
+  <div id="tidebar"><div id="tidefill"></div></div>
+  <div id="pads">
+    <div class="pad" data-drum="0">🌊 WAVE<br><small>Key A / Tap</small></div>
+    <div class="pad" data-drum="1">🐚 SHELL<br><small>Key S / Tap</small></div>
+    <div class="pad" data-drum="2">⛈️ STORM<br><small>Key D / Tap</small></div>
+  </div>
+  <div id="msg">Press Start, then catch each wave on the drum line.</div>
+</div>
+
+<div id="overlay">
+  <div id="card">
+    <h2>🌊 Tide Drum Circle</h2>
+    <p><strong>How to Play:</strong> Ocean-wave beats roll in from the top of the lagoon toward the glowing drum line near the bottom. Each beat is coloured for one drum: blue Wave, orange Shell, or purple Storm.</p>
+    <ul>
+      <li><strong>Hit on time:</strong> Press <strong>A</strong> for Wave, <strong>S</strong> for Shell, <strong>D</strong> for Storm — or click / tap the matching drum pad below the lagoon.</li>
+      <li><strong>Perfect</strong> (right on the line) = 150 points, <strong>Good</strong> (near the line) = 80 points. Every hit builds your combo multiplier.</li>
+      <li><strong>Miss:</strong> Letting a beat pass the line, or hitting the wrong drum, breaks your combo and costs 1 life. You have 3 lives.</li>
+      <li><strong>Win:</strong> Survive all 60 beats of the tide song. <strong>Game Over:</strong> Lose all 3 lives before the song ends.</li>
+      <li>Watch the tide bar: it fills as you progress through the song. Faster waves arrive in the final stretch!</li>
+    </ul>
+    <p>Sound is made live in your browser with procedural drums — no downloads needed. Audio starts only after you press Start.</p>
+    <button class="big" id="startBtn">▶ Start the Tide</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var livesEl = document.getElementById('lives');
+  var beatEl = document.getElementById('beat');
+  var msgEl = document.getElementById('msg');
+  var fillEl = document.getElementById('tidefill');
+  var overlay = document.getElementById('overlay');
+  var card = document.getElementById('card');
+  var pads = Array.prototype.slice.call(document.querySelectorAll('.pad'));
+
+  var W = 540, H = 460;
+  var LINE_Y = 380;
+  var DRUMS = [
+    { name: 'WAVE', emoji: '🌊', color: '#38bdf8', key: 'a' },
+    { name: 'SHELL', emoji: '🐚', color: '#fb923c', key: 's' },
+    { name: 'STORM', emoji: '⛈️', color: '#a78bfa', key: 'd' }
+  ];
+  var TOTAL = 60;
+  var state = 'title'; // title | playing | over
+  var score = 0, combo = 0, bestCombo = 0, lives = 3, hits = 0, spawned = 0, judged = 0;
+  var notes = [], particles = [], flashes = [];
+  var lastTime = 0, spawnTimer = 0, animId = 0, wavePhase = 0;
+  var audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function drumSound(kind, perfect) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    if (kind === 0) { osc.type = 'sine'; osc.frequency.setValueAtTime(perfect ? 180 : 140, t); osc.frequency.exponentialRampToValueAtTime(55, t + 0.22); }
+    else if (kind === 1) { osc.type = 'triangle'; osc.frequency.setValueAtTime(perfect ? 420 : 340, t); osc.frequency.exponentialRampToValueAtTime(160, t + 0.15); }
+    else { osc.type = 'square'; osc.frequency.setValueAtTime(perfect ? 220 : 180, t); osc.frequency.exponentialRampToValueAtTime(70, t + 0.18); }
+    gain.gain.setValueAtTime(0.35, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    osc.start(t); osc.stop(t + 0.3);
+  }
+  function badSound() {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.type = 'sawtooth'; osc.frequency.setValueAtTime(220, t); osc.frequency.linearRampToValueAtTime(90, t + 0.25);
+    gain.gain.setValueAtTime(0.18, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    osc.start(t); osc.stop(t + 0.3);
+  }
+
+  function colX(i) { return 90 + i * 180; }
+  function spawnNote() {
+    if (spawned >= TOTAL) return;
+    var drum = Math.floor(Math.random() * 3);
+    // Avoid three identical drums in a row for variety.
+    if (notes.length && notes[notes.length - 1].drum === drum && Math.random() < 0.7) drum = (drum + 1 + Math.floor(Math.random() * 2)) % 3;
+    notes.push({ drum: drum, y: -30, speed: 165 + Math.min(90, spawned * 1.6) });
+    spawned++;
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    comboEl.textContent = 'x' + combo;
+    livesEl.textContent = lives > 0 ? '♥'.repeat(lives) + '♡'.repeat(3 - lives) : '♡♡♡';
+    beatEl.textContent = judged + ' / ' + TOTAL;
+    fillEl.style.width = Math.round((judged / TOTAL) * 100) + '%';
+  }
+  function burst(x, y, color, text) {
+    for (var i = 0; i < 14; i++) particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 220, vy: (Math.random() - 0.5) * 220, life: 0.6, color: color });
+    flashes.push({ x: x, y: y, text: text, life: 0.9 });
+  }
+  function loseLife(reason) {
+    combo = 0; lives--;
+    badSound();
+    msgEl.textContent = reason;
+    updateHUD();
+    if (lives <= 0) endGame(false);
+  }
+  function hitDrum(drum) {
+    if (state !== 'playing') return;
+    ensureAudio();
+    var pad = pads[drum];
+    pad.classList.add('hit');
+    setTimeout(function() { pad.classList.remove('hit'); }, 140);
+    // Find the closest note for this drum near the line.
+    var best = -1, bestDist = 999;
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].drum !== drum) continue;
+      var d = Math.abs(notes[i].y - LINE_Y);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    if (best >= 0 && bestDist <= 52) {
+      var n = notes.splice(best, 1)[0];
+      var perfect = bestDist <= 22;
+      combo++; bestCombo = Math.max(bestCombo, combo);
+      var pts = (perfect ? 150 : 80) + Math.min(100, combo * 5);
+      score += pts; hits++; judged++;
+      drumSound(drum, perfect);
+      burst(colX(drum), LINE_Y, DRUMS[drum].color, perfect ? 'PERFECT +' + pts : 'GOOD +' + pts);
+      msgEl.textContent = perfect ? 'Perfect ' + DRUMS[drum].name + '! Combo x' + combo : 'Good ' + DRUMS[drum].name + '! Combo x' + combo;
+      updateHUD();
+      checkEnd();
+    } else {
+      // Wrong drum / empty hit: only penalise if a note of another drum is very close, otherwise it's just a free tap.
+      var nearOther = false;
+      for (var j = 0; j < notes.length; j++) { if (Math.abs(notes[j].y - LINE_Y) <= 42) nearOther = true; }
+      if (nearOther) { loseLife('Wrong drum! The wave slipped past.'); }
+      else { drumSound(drum, false); msgEl.textContent = 'Tap ' + DRUMS[drum].name + ' when its wave reaches the line!'; }
+    }
+  }
+  function checkEnd() {
+    if (judged >= TOTAL && notes.length === 0 && state === 'playing') endGame(true);
+  }
+  function endGame(won) {
+    state = 'over';
+    var acc = TOTAL ? Math.round((hits / TOTAL) * 100) : 0;
+    var title = won ? '🏆 You Tamed the Tide!' : '🌊 Game Over — The Tide Won';
+    var detail = won
+      ? 'You rode all 60 beats to shore! Final score: ' + score + ' · Best combo: x' + bestCombo + ' · Accuracy: ' + acc + '%.'
+      : 'The tide washed away your last life. Final score: ' + score + ' · Beats judged: ' + judged + ' / ' + TOTAL + ' · Best combo: x' + bestCombo + '.';
+    card.innerHTML = '<h2>' + title + '</h2><p>' + detail + '</p><p>Tip: Perfect hits are worth almost double. Keep your combo alive and save your Storm hits for the fast final waves.</p><button class="big" id="restartBtn">↻ Play Again</button>';
+    overlay.style.display = 'flex';
+    var rb = document.getElementById('restartBtn');
+    rb.addEventListener('click', startGame);
+    rb.addEventListener('touchstart', function(e) { e.preventDefault(); startGame(); }, { passive: false });
+  }
+  function startGame() {
+    ensureAudio();
+    score = 0; combo = 0; bestCombo = 0; lives = 3; hits = 0; spawned = 0; judged = 0;
+    notes = []; particles = []; flashes = []; spawnTimer = 0; lastTime = performance.now();
+    state = 'playing';
+    overlay.style.display = 'none';
+    msgEl.textContent = 'The tide is coming — watch the first waves!';
+    updateHUD();
+    if (!animId) animId = requestAnimationFrame(loop);
+  }
+  function drawBackground(t) {
+    ctx.fillStyle = '#0a4a6b';
+    ctx.fillRect(0, 0, W, H);
+    // Gentle animated waves at the top.
+    ctx.fillStyle = 'rgba(127,231,255,0.16)';
+    ctx.beginPath(); ctx.moveTo(0, 60);
+    for (var x = 0; x <= W; x += 20) ctx.lineTo(x, 52 + Math.sin(x / 70 + t / 500) * 10);
+    ctx.lineTo(W, 0); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill();
+    // Lanes
+    for (var i = 0; i < 3; i++) {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillRect(colX(i) - 70, 0, 140, H);
+      ctx.strokeStyle = DRUMS[i].color; ctx.globalAlpha = 0.35; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(colX(i) - 70, 0); ctx.lineTo(colX(i) - 70, H); ctx.moveTo(colX(i) + 70, 0); ctx.lineTo(colX(i) + 70, H); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // Drum line
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(10, LINE_Y); ctx.lineTo(W - 10, LINE_Y); ctx.stroke();
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('▲ DRUM LINE ▲', W / 2, LINE_Y + 24);
+    // Drum circles
+    for (var d = 0; d < 3; d++) {
+      ctx.beginPath(); ctx.arc(colX(d), LINE_Y + 52, 34, 0, Math.PI * 2);
+      ctx.fillStyle = '#123f5e'; ctx.fill(); ctx.strokeStyle = DRUMS[d].color; ctx.lineWidth = 4; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = '26px Arial'; ctx.fillText(DRUMS[d].emoji, colX(d), LINE_Y + 62);
+    }
+  }
+  function loop(now) {
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    wavePhase += dt;
+    drawBackground(now);
+    if (state === 'playing') {
+      spawnTimer -= dt;
+      if (spawnTimer <= 0 && spawned < TOTAL) { spawnNote(); spawnTimer = Math.max(0.62, 1.05 - spawned * 0.006); }
+      for (var i = notes.length - 1; i >= 0; i--) {
+        var n = notes[i];
+        n.y += n.speed * dt;
+        if (n.y > LINE_Y + 58) {
+          notes.splice(i, 1); judged++;
+          burst(colX(n.drum), LINE_Y + 20, '#ff6b6b', 'MISS');
+          loseLife('Missed a ' + DRUMS[n.drum].name + ' wave!');
+          updateHUD(); checkEnd();
+        }
+      }
+    }
+    // Notes as rolling waves
+    for (var k = 0; k < notes.length; k++) {
+      var note = notes[k];
+      var x = colX(note.drum);
+      ctx.beginPath(); ctx.arc(x, note.y, 30, 0, Math.PI * 2);
+      ctx.fillStyle = DRUMS[note.drum].color; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = '24px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(DRUMS[note.drum].emoji, x, note.y + 9);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 11px Arial';
+      ctx.fillText(DRUMS[note.drum].name, x, note.y + 46);
+    }
+    // Particles and floating text
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+      if (pt.life <= 0) { particles.splice(p, 1); continue; }
+      ctx.globalAlpha = Math.max(0, pt.life / 0.6);
+      ctx.fillStyle = pt.color; ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    for (var f = flashes.length - 1; f >= 0; f--) {
+      var fl = flashes[f]; fl.life -= dt; fl.y -= 30 * dt;
+      if (fl.life <= 0) { flashes.splice(f, 1); continue; }
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 17px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(fl.text, fl.x, fl.y);
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and ride the rhythm!', W / 2, 200);
+    }
+    animId = requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function(e) {
+    if (state === 'over' && (e.key === 'Enter' || e.key === ' ')) { startGame(); return; }
+    var k = e.key.toLowerCase();
+    for (var i = 0; i < DRUMS.length; i++) if (k === DRUMS[i].key) hitDrum(i);
+  });
+  document.addEventListener('keyup', function(e) { /* keeps keyboard focus responsive; no action needed */ });
+  pads.forEach(function(pad, idx) {
+    pad.addEventListener('click', function() { hitDrum(idx); });
+    pad.addEventListener('mousedown', function() { hitDrum(idx); });
+    pad.addEventListener('touchstart', function(e) { e.preventDefault(); hitDrum(idx); }, { passive: false });
+    pad.addEventListener('touchend', function(e) { e.preventDefault(); }, { passive: false });
+  });
+  canvas.addEventListener('click', function(e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (W / rect.width);
+    var nearest = 0, best = 999;
+    for (var i = 0; i < 3; i++) { var d = Math.abs(x - colX(i)); if (d < best) { best = d; nearest = i; } }
+    hitDrum(nearest);
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    var x = (t.clientX - rect.left) * (W / rect.width);
+    var nearest = 0, best = 999;
+    for (var i = 0; i < 3; i++) { var d = Math.abs(x - colX(i)); if (d < best) { best = d; nearest = i; } }
+    hitDrum(nearest);
+  }, { passive: false });
+  canvas.addEventListener('mousemove', function() { /* hover tracking for future aim assist */ });
+
+  updateHUD();
+  animId = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

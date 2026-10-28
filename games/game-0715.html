@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harbor Lighthouse Beam Aim</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06121f; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 14px; }
+  h1 { font-size: 26px; margin: 6px 0 4px; text-align: center; letter-spacing: 0.5px; }
+  p.tag { color: #9fd8ff; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 860px; margin-bottom: 8px; }
+  .stat { background: #0d2438; border: 1px solid #2a5a7d; border-radius: 8px; padding: 7px 12px; font-size: 15px; min-width: 110px; text-align: center; }
+  .stat b { color: #ffd166; }
+  #energyWrap { width: 100%; max-width: 860px; background: #122f46; border: 1px solid #2a5a7d; border-radius: 8px; height: 18px; overflow: hidden; margin-bottom: 8px; }
+  #energyBar { height: 100%; width: 100%; background: linear-gradient(90deg, #ffd166, #ff9f1c); transition: width 0.2s; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { display: block; width: 100%; height: auto; background: #0a2a44; border: 2px solid #2a5a7d; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(3, 18, 32, 0.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #d6ecff; }
+  .overlay .keys { background: #0d2438; border: 1px solid #2a5a7d; border-radius: 8px; padding: 10px 14px; font-size: 14px; }
+  button { cursor: pointer; background: #ffd166; color: #10202f; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; }
+  button:hover { background: #ffca4d; transform: scale(1.03); }
+  button:active { transform: scale(0.98); }
+  #status { margin-top: 8px; font-size: 15px; color: #9fd8ff; min-height: 22px; text-align: center; }
+  #charge { font-size: 14px; color: #ffd166; }
+</style>
+</head>
+<body>
+<h1>Harbor Lighthouse Beam Aim</h1>
+<p class="tag">Precision / Rotating Beam Targeting &mdash; sweep the harbor, light the ships in order!</p>
+
+<div id="hud">
+  <div class="stat">Score: <b id="score">0</b></div>
+  <div class="stat">Lives: <b id="lives">3</b></div>
+  <div class="stat">Level: <b id="level">1</b> / 3</div>
+  <div class="stat">Target: <b id="target">1 / 5</b></div>
+  <div class="stat">Energy: <b id="energyText">100%</b></div>
+</div>
+<div id="energyWrap"><div id="energyBar"></div></div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Harbor Lighthouse Beam Aim</h2>
+    <p><b>How to Play:</b> You are the lighthouse keeper. Ships and buoys sail through the dark harbor, each marked with a number. Rotate your golden beam and hold it on the <b>next numbered target</b> until it is fully lit. Light every target in order to clear the level &mdash; before your beam energy runs out!</p>
+    <div class="keys">
+      &larr; / &rarr; or A / D &mdash; rotate beam &nbsp;|&nbsp; Mouse move / drag &mdash; aim beam<br>
+      Touch drag &mdash; aim beam &nbsp;|&nbsp; Hold the beam steady on a target to charge it
+    </div>
+    <p>Lighting a target out of order does nothing, so watch the gold marker. Running out of energy costs a life. Clear all 3 levels to win!</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="finalScore"></p>
+    <button id="restartBtn">Restart Game</button>
+  </div>
+</div>
+
+<p id="status">Press Start, then aim the beam at target 1.</p>
+<p id="charge"></p>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var finalScore = document.getElementById('finalScore');
+  var statusEl = document.getElementById('status');
+  var chargeEl = document.getElementById('charge');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var targetEl = document.getElementById('target');
+  var energyBar = document.getElementById('energyBar');
+  var energyText = document.getElementById('energyText');
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, lives = 3, level = 1, nextIndex = 0;
+  var beamAngle = -Math.PI / 2, beamWidth = 0.42;
+  var energy = 100, charge = 0, litCount = 0;
+  var targets = [], stars = [], waves = [], keys = {};
+  var lighthouse = { x: W / 2, y: H / 2 };
+  var audioCtx = null, lastTime = 0;
+
+  function initDecor() {
+    stars = [];
+    for (var i = 0; i < 70; i++) stars.push({ x: Math.random() * W, y: Math.random() * H * 0.55, r: Math.random() * 1.6 + 0.4, tw: Math.random() * Math.PI * 2 });
+    waves = [];
+    for (var j = 0; j < 14; j++) waves.push({ x: Math.random() * W, y: 60 + Math.random() * (H - 100), s: 0.3 + Math.random() * 0.7, ph: Math.random() * 6.28 });
+  }
+
+  function buildLevel(lv) {
+    targets = [];
+    var count = 5;
+    var paths = ['across', 'down', 'circle', 'sine', 'across'];
+    for (var i = 0; i < count; i++) {
+      var kind = paths[i % paths.length];
+      var t = { num: i + 1, kind: kind, lit: false, glow: 0, x: 0, y: 0, speed: 0.55 + lv * 0.18 + Math.random() * 0.35, phase: Math.random() * 6.28, baseY: 80 + i * 78, baseX: 110 + i * 130, radius: 52 + i * 12 };
+      if (kind === 'across') { t.x = 60 + i * 40; t.y = t.baseY; t.dir = (i % 2 === 0) ? 1 : -1; }
+      if (kind === 'down') { t.x = t.baseX; t.y = 60; t.dir = 1; }
+      if (kind === 'circle') { t.cx = lighthouse.x; t.cy = lighthouse.y; }
+      if (kind === 'sine') { t.x = 70; t.y = t.baseY; }
+      targets.push(t);
+    }
+    nextIndex = 0; energy = 100; charge = 0;
+    updateHUD();
+    statusEl.textContent = 'Level ' + lv + ': aim at target 1 (gold). Hold the beam on it until it lights!';
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function jingle(win) {
+    if (!audioCtx) return;
+    var notes = win ? [523, 659, 784, 1046] : [300, 220, 160];
+    notes.forEach(function (f, i) { setTimeout(function () { beep(f, 0.25, 'triangle'); }, i * 140); });
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    levelEl.textContent = level;
+    targetEl.textContent = (Math.min(nextIndex + 1, targets.length)) + ' / ' + targets.length;
+    energyBar.style.width = Math.max(0, energy) + '%';
+    energyText.textContent = Math.max(0, Math.ceil(energy)) + '%';
+  }
+
+  function angleTo(x, y) { return Math.atan2(y - lighthouse.y, x - lighthouse.x); }
+
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+
+  function aimFromEvent(evt) {
+    if (state !== 'playing') return;
+    var p = canvasPos(evt);
+    beamAngle = angleTo(p.x, p.y);
+  }
+
+  canvas.addEventListener('mousemove', aimFromEvent);
+  canvas.addEventListener('mousedown', function (e) { ensureAudio(); aimFromEvent(e); });
+  canvas.addEventListener('touchstart', function (e) { ensureAudio(); e.preventDefault(); aimFromEvent(e); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); aimFromEvent(e); }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') beamAngle -= 0.05;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') beamAngle += 0.05;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].indexOf(e.key) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  function startGame() {
+    ensureAudio();
+    score = 0; lives = 3; level = 1; state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    initDecor();
+    buildLevel(level);
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function loseLife(reason) {
+    lives--; beep(160, 0.4, 'sawtooth'); updateHUD();
+    if (lives <= 0) {
+      state = 'over';
+      endTitle.textContent = 'Game Over';
+      endText.textContent = reason + ' The harbor goes dark.';
+      finalScore.textContent = 'Final score: ' + score + ' | Reached level ' + level + '.';
+      endScreen.classList.remove('hidden');
+    } else {
+      statusEl.textContent = reason + ' You lose a life. Level restarts with fresh energy.';
+      buildLevel(level);
+    }
+  }
+
+  function update(dt) {
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) beamAngle -= 1.9 * dt;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) beamAngle += 1.9 * dt;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) beamAngle -= 0.0;
+    energy -= dt * 1.35;
+    if (energy <= 0) { energy = 0; loseLife('Beam energy ran out!'); return; }
+
+    var now = performance.now() / 1000;
+    targets.forEach(function (t) {
+      if (t.kind === 'across') { t.x += t.dir * t.speed * 60 * dt; if (t.x > W - 30) t.dir = -1; if (t.x < 30) t.dir = 1; }
+      if (t.kind === 'down') { t.y += t.speed * 55 * dt; if (t.y > H - 30) t.y = 50; }
+      if (t.kind === 'circle') { var a = now * 0.35 * t.speed + t.phase; t.x = t.cx + Math.cos(a) * t.radius * 2.1; t.y = t.cy + Math.sin(a) * t.radius * 1.35; }
+      if (t.kind === 'sine') { t.x += t.speed * 60 * dt; if (t.x > W - 30) t.x = 40; t.y = t.baseY + Math.sin(now * 1.6 + t.phase) * 55; }
+    });
+
+    var cur = targets[nextIndex];
+    charge = 0;
+    if (cur && !cur.lit) {
+      var d = Math.hypot(cur.x - lighthouse.x, cur.y - lighthouse.y);
+      var ang = angleTo(cur.x, cur.y);
+      var diff = Math.atan2(Math.sin(ang - beamAngle), Math.cos(ang - beamAngle));
+      if (Math.abs(diff) < beamWidth / 2 + 0.10 && d < 430) {
+        cur.glow = Math.min(1, cur.glow + dt * 1.5);
+        charge = cur.glow;
+        chargeEl.textContent = 'Charging target ' + cur.num + ': ' + Math.round(cur.glow * 100) + '% — hold steady!';
+        if (cur.glow >= 1) {
+          cur.lit = true; score += 100; beep(880, 0.25, 'triangle'); beep(1320, 0.2, 'sine');
+          nextIndex++; litCount++;
+          if (nextIndex >= targets.length) {
+            score += Math.round(energy) + 50;
+            if (level >= 3) {
+              state = 'won'; jingle(true);
+              endTitle.textContent = 'You Win! The Harbor Shines!';
+              endText.textContent = 'You lit every ship in order across all 3 levels. Brilliant keeping!';
+              finalScore.textContent = 'Final score: ' + score + ' | Lives left: ' + lives + '.';
+              endScreen.classList.remove('hidden');
+            } else {
+              level++; beep(1046, 0.3, 'triangle');
+              statusEl.textContent = 'Level cleared! Bonus for energy left. Now level ' + level + '.';
+              buildLevel(level);
+            }
+          } else {
+            statusEl.textContent = 'Target lit! Now aim at target ' + targets[nextIndex].num + '.';
+          }
+        }
+      } else {
+        cur.glow = Math.max(0, cur.glow - dt * 2);
+        chargeEl.textContent = 'Aim the gold target — it is target ' + cur.num + '.';
+      }
+    }
+    updateHUD();
+  }
+
+  function drawBeam() {
+    ctx.save();
+    ctx.translate(lighthouse.x, lighthouse.y);
+    ctx.rotate(beamAngle);
+    var grad = ctx.createLinearGradient(0, 0, 430, 0);
+    grad.addColorStop(0, 'rgba(255, 209, 102, 0.85)');
+    grad.addColorStop(1, 'rgba(255, 209, 102, 0.05)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(430, -58);
+    ctx.lineTo(430, 58);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.fillStyle = '#0a2a44'; ctx.fillRect(0, 0, W, H);
+    var t = performance.now() / 1000;
+    stars.forEach(function (s) { ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(t + s.tw)); ctx.fillStyle = '#cfeaff'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.283); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    waves.forEach(function (w) {
+      ctx.strokeStyle = 'rgba(120, 190, 230, 0.35)'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(w.x - 22, w.y + Math.sin(t * 1.4 + w.ph) * 3);
+      ctx.quadraticCurveTo(w.x, w.y - 6 + Math.sin(t + w.ph) * 3, w.x + 22, w.y + Math.sin(t * 1.4 + w.ph) * 3);
+      ctx.stroke();
+    });
+    targets.forEach(function (tg) {
+      var isNext = (targets[nextIndex] === tg);
+      ctx.save(); ctx.translate(tg.x, tg.y);
+      if (tg.lit) { ctx.shadowColor = '#ffd166'; ctx.shadowBlur = 28; }
+      else if (isNext) { ctx.shadowColor = '#ffd166'; ctx.shadowBlur = 14; }
+      ctx.fillStyle = tg.lit ? '#ffd166' : (isNext ? '#ff9f1c' : '#5b7d94');
+      ctx.beginPath(); ctx.arc(0, 0, 22 + tg.glow * 6, 0, 6.283); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#0a1c2e'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(tg.num, 0, 1);
+      ctx.fillStyle = tg.lit ? '#fff3c4' : '#d6ecff'; ctx.font = '12px Arial';
+      ctx.fillText(tg.lit ? 'LIT' : (isNext ? 'NEXT' : 'WAIT'), 0, 36);
+      ctx.restore();
+    });
+    drawBeam();
+    // Lighthouse tower
+    ctx.fillStyle = '#e8e8e8';
+    ctx.beginPath(); ctx.moveTo(lighthouse.x - 18, lighthouse.y + 34); ctx.lineTo(lighthouse.x - 12, lighthouse.y - 34); ctx.lineTo(lighthouse.x + 12, lighthouse.y - 34); ctx.lineTo(lighthouse.x + 18, lighthouse.y + 34); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d64545'; ctx.fillRect(lighthouse.x - 16, lighthouse.y + 10, 32, 14); ctx.fillRect(lighthouse.x - 14, lighthouse.y - 18, 28, 12);
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(lighthouse.x, lighthouse.y - 38, 13, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#10202f'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('LIGHTHOUSE', lighthouse.x, lighthouse.y + 54);
+  }
+
+  function loop(now) {
+    if (state !== 'playing') { draw(); return; }
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    update(dt);
+    draw();
+    if (state === 'playing') requestAnimationFrame(loop);
+    else draw();
+  }
+
+  initDecor();
+  draw();
+})();
+</script>
+</body>
+</html>

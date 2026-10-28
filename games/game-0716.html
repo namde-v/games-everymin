@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Volcano Ember Dodger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #1a0a08; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 12px; overflow: hidden; }
+  h1 { font-size: 28px; color: #ffcc66; text-shadow: 0 2px 0 #7a1f00, 0 0 18px rgba(255,110,0,.7); margin-bottom: 6px; text-align: center; }
+  .sub { color: #ffb3a3; font-size: 13px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(92vw, 760px); aspect-ratio: 760 / 520; max-height: 72vh; background: #2b0f08; border: 3px solid #ff6a00; border-radius: 14px; overflow: hidden; box-shadow: 0 0 30px rgba(255,90,0,.35); touch-action: none; }
+  canvas { display: block; width: 100%; height: 100%; background: linear-gradient(#2b0f08, #120403); }
+  #hud { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; gap: 6px; padding: 8px 10px; font-weight: bold; font-size: 14px; background: rgba(0,0,0,.45); z-index: 3; }
+  #hud span { background: rgba(0,0,0,.35); padding: 3px 8px; border-radius: 20px; border: 1px solid rgba(255,255,255,.2); white-space: nowrap; }
+  #hud .warn { color: #ffdd66; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,2,0,.82); padding: 20px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; color: #ffcc66; margin-bottom: 8px; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #ffe8dd; font-size: 15px; margin: 4px 0; }
+  .keys { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-radius: 10px; padding: 10px 14px; margin: 12px 0; font-size: 14px; line-height: 1.7; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 13px 30px; font-size: 18px; font-weight: bold; color: #1a0a00; background: #ffb300; box-shadow: 0 4px 0 #b25e00; margin-top: 14px; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #66d9ff; box-shadow: 0 4px 0 #1a6d8a; }
+  #dashBtn { position: absolute; right: 14px; bottom: 14px; z-index: 4; padding: 12px 18px; font-size: 15px; background: #ff5722; color: #fff; box-shadow: 0 4px 0 #8a1f00; display: none; }
+  #dashBtn.show { display: block; }
+  #msg { margin-top: 10px; color: #ffcc99; font-size: 13px; min-height: 18px; text-align: center; }
+  @media (max-width: 560px) { h1 { font-size: 22px; } .overlay h2 { font-size: 26px; } .overlay p { font-size: 14px; } }
+</style>
+</head>
+<body>
+<h1>🌋 Volcano Ember Dodger</h1>
+<div class="sub">Dodge the eruption. Dash through danger. Collect cooling orbs to calm the volcano.</div>
+<div id="wrap">
+  <canvas id="game" width="760" height="520"></canvas>
+  <div id="hud">
+    <span id="hudScore">Score: 0</span>
+    <span id="hudLives">❤️❤️❤️</span>
+    <span id="hudOrbs">💧 Orbs: 0 / 20</span>
+    <span id="hudWave">Wave: 1</span>
+    <span id="hudDash" class="warn">Dash: READY</span>
+  </div>
+  <button id="dashBtn" type="button">💨 DASH</button>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🌋 Volcano Ember Dodger</h2>
+    <p><strong>How to Play:</strong> The volcano is erupting! Embers rain down and lava bursts explode from below. Survive the waves and collect <strong>20 cooling orbs</strong> to win.</p>
+    <div class="keys">
+      <strong>Move:</strong> Arrow Keys / WASD &nbsp;•&nbsp; Mouse: move to pointer &nbsp;•&nbsp; Touch: drag to move<br>
+      <strong>Dash:</strong> Space / Shift / Dash button — brief invulnerability, 2.5s cooldown<br>
+      <strong>Avoid:</strong> 🔥 Embers (falling) and lava burst zones (orange warning, then eruption)<br>
+      <strong>Collect:</strong> 💧 Cooling Orbs (+50) &nbsp;•&nbsp; Surviving a wave: +100 &nbsp;•&nbsp; You have 3 lives
+    </div>
+    <p>Tip: Dash <em>through</em> a dense ember cluster or out of a lava zone just before it erupts. Grab orbs quickly — they melt away!</p>
+    <button id="startBtn" type="button">▶ Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn" type="button">↻ Play Again</button>
+    <button id="menuBtn" type="button" class="secondary">🏠 Title Screen</button>
+  </div>
+</div>
+<div id="msg">Tip: Dash has a cooldown — save it for lava bursts and tight spots.</div>
+
+<script>
+(function() {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudOrbs = document.getElementById('hudOrbs');
+  var hudWave = document.getElementById('hudWave');
+  var hudDash = document.getElementById('hudDash');
+  var dashBtn = document.getElementById('dashBtn');
+  var msgEl = document.getElementById('msg');
+
+  var state = 'title'; // title | playing | over
+  var score = 0, lives = 3, orbs = 0, wave = 1, waveTime = 0, waveLength = 18;
+  var keys = {};
+  var pointer = { x: W/2, y: H-80, active: false };
+  var touchActive = false;
+
+  var player = { x: W/2, y: H-80, r: 18, vx: 0, vy: 0, speed: 330, dashTime: 0, dashCd: 0, dashDirX: 0, dashDirY: -1, invuln: 0, trail: [] };
+  var embers = [], bursts = [], orbList = [], particles = [], stars = [];
+  var lastTime = 0, spawnTimer = 0, orbTimer = 1.2, burstTimer = 4;
+  var audioCtx = null, muted = false;
+
+  function initStars() {
+    stars = [];
+    for (var i = 0; i < 60; i++) stars.push({ x: Math.random()*W, y: Math.random()*H*0.6, r: Math.random()*1.8+0.4, tw: Math.random()*Math.PI*2 });
+  }
+  initStars();
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol, slide) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function soundDash() { beep(300, 0.18, 'sawtooth', 0.08, 900); }
+  function soundOrb() { beep(700, 0.22, 'sine', 0.14, 1400); }
+  function soundHit() { beep(160, 0.35, 'square', 0.16, 60); }
+  function soundWin() { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,0.3,'triangle',0.14); }, i*140); }); }
+  function soundLose() { [400,300,200,120].forEach(function(f,i){ setTimeout(function(){ beep(f,0.3,'sawtooth',0.10); }, i*160); }); }
+
+  function resetGame() {
+    score = 0; lives = 3; orbs = 0; wave = 1; waveTime = 0;
+    player.x = W/2; player.y = H-80; player.vx = 0; player.vy = 0; player.dashTime = 0; player.dashCd = 0; player.invuln = 0; player.trail = [];
+    embers = []; bursts = []; orbList = []; particles = [];
+    spawnTimer = 0; orbTimer = 1.0; burstTimer = 4.5;
+    updateHUD();
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    dashBtn.classList.add('show');
+    msgEl.textContent = 'Wave 1 — dodge embers, collect cooling orbs!';
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+  function showTitle() {
+    state = 'title';
+    titleScreen.classList.remove('hidden');
+    endScreen.classList.add('hidden');
+    dashBtn.classList.remove('show');
+  }
+  function endGame(won) {
+    state = 'over';
+    dashBtn.classList.remove('show');
+    endTitle.textContent = won ? '🏆 YOU WIN!' : '💥 Game Over';
+    endText.textContent = won ? 'You collected all 20 cooling orbs and calmed the volcano! The mountain is safe again.' : 'The volcano got you. Try again — dash earlier and keep moving!';
+    endScore.textContent = 'Final Score: ' + score + '  •  Orbs: ' + orbs + ' / 20  •  Wave reached: ' + wave;
+    endScreen.classList.remove('hidden');
+    if (won) soundWin(); else soundLose();
+  }
+
+  function tryDash() {
+    if (state !== 'playing' || player.dashCd > 0) return;
+    var dx = 0, dy = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) dx -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) dx += 1;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) dy -= 1;
+    if (keys['ArrowDown'] || keys['s'] || keys['S']) dy += 1;
+    if (dx === 0 && dy === 0) { dx = player.dashDirX; dy = player.dashDirY; }
+    var len = Math.sqrt(dx*dx + dy*dy) || 1;
+    player.dashDirX = dx/len; player.dashDirY = dy/len;
+    player.dashTime = 0.22; player.dashCd = 2.5; player.invuln = Math.max(player.invuln, 0.30);
+    soundDash();
+    for (var i = 0; i < 12; i++) particles.push({ x: player.x, y: player.y, vx: (Math.random()-0.5)*220, vy: (Math.random()-0.5)*220, life: 0.4, color: '#66d9ff' });
+  }
+
+  function spawnEmber() {
+    var speed = 130 + wave * 28 + Math.random() * 70;
+    var big = Math.random() < 0.18;
+    embers.push({ x: 20 + Math.random()*(W-40), y: -20, r: big ? 16 : 10 + Math.random()*5, vy: speed, vx: (Math.random()-0.5)*40, wob: Math.random()*Math.PI*2, big: big });
+  }
+  function spawnBurst() {
+    var bw = 110 + Math.random()*90;
+    bursts.push({ x: Math.random()*(W-bw), w: bw, warn: 1.1, active: 0.45, erupted: false });
+  }
+  function spawnOrb() {
+    orbList.push({ x: 40 + Math.random()*(W-80), y: 60 + Math.random()*(H-180), r: 13, life: 9, pulse: Math.random()*Math.PI*2 });
+  }
+  function burstParticles(x, y, color, n) {
+    for (var i = 0; i < (n||16); i++) particles.push({ x: x, y: y, vx: (Math.random()-0.5)*320, vy: (Math.random()-0.5)*320, life: 0.5+Math.random()*0.3, color: color });
+  }
+  function loseLife() {
+    if (player.invuln > 0) return;
+    lives--; player.invuln = 1.4; soundHit();
+    burstParticles(player.x, player.y, '#ff5722', 24);
+    msgEl.textContent = lives > 0 ? 'Ouch! ' + lives + ' life(s) left — dash to stay safe!' : 'No lives left!';
+    if (lives <= 0) { updateHUD(); endGame(false); }
+  }
+  function updateHUD() {
+    hudScore.textContent = 'Score: ' + score;
+    hudLives.textContent = '❤️'.repeat(Math.max(0, lives)) + (lives <= 0 ? '💀' : '');
+    hudOrbs.textContent = '💧 Orbs: ' + orbs + ' / 20';
+    hudWave.textContent = 'Wave: ' + wave;
+    hudDash.textContent = player.dashCd > 0 ? 'Dash: ' + player.dashCd.toFixed(1) + 's' : 'Dash: READY';
+    hudDash.style.color = player.dashCd > 0 ? '#ffb3a3' : '#aaffaa';
+  }
+
+  function update(dt) {
+    waveTime += dt;
+    if (waveTime >= waveLength) { wave++; waveTime = 0; score += 100; msgEl.textContent = 'Wave ' + wave + '! The eruption intensifies...'; beep(500, 0.3, 'triangle', 0.12, 800); }
+
+    // Movement: keyboard velocity, pointer/touch target overrides when active
+    var mx = 0, my = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) mx -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) mx += 1;
+    if (keys['ArrowUp'] || keys['w'] || keys['W']) my -= 1;
+    if (keys['ArrowDown'] || keys['s'] || keys['S']) my += 1;
+    if (mx !== 0 || my !== 0) {
+      var ml = Math.sqrt(mx*mx + my*my);
+      player.dashDirX = mx/ml; player.dashDirY = my/ml;
+      player.vx = mx/ml * player.speed; player.vy = my/ml * player.speed;
+      pointer.active = false; touchActive = false;
+    } else if (pointer.active || touchActive) {
+      var dx = pointer.x - player.x, dy = pointer.y - player.y, dist = Math.sqrt(dx*dx+dy*dy);
+      if (dist > 8) { player.vx = dx/dist * Math.min(player.speed, dist*8); player.vy = dy/dist * Math.min(player.speed, dist*8); player.dashDirX = dx/dist; player.dashDirY = dy/dist; }
+      else { player.vx = 0; player.vy = 0; }
+    } else { player.vx = 0; player.vy = 0; }
+
+    if (player.dashTime > 0) {
+      player.dashTime -= dt;
+      player.vx = player.dashDirX * 780; player.vy = player.dashDirY * 780;
+    }
+    if (player.dashCd > 0) player.dashCd -= dt;
+    if (player.invuln > 0) player.invuln -= dt;
+
+    player.x += player.vx * dt; player.y += player.vy * dt;
+    player.x = Math.max(22, Math.min(W-22, player.x));
+    player.y = Math.max(52, Math.min(H-22, player.y));
+    player.trail.unshift({ x: player.x, y: player.y });
+    if (player.trail.length > 10) player.trail.pop();
+
+    // Spawning
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnEmber(); if (Math.random() < 0.35 + wave*0.05) spawnEmber(); spawnTimer = Math.max(0.28, 0.85 - wave*0.07); }
+    burstTimer -= dt;
+    if (burstTimer <= 0) { spawnBurst(); burstTimer = Math.max(2.2, 5.5 - wave*0.4); }
+    orbTimer -= dt;
+    if (orbTimer <= 0) { spawnOrb(); orbTimer = 2.6 + Math.random()*1.5; }
+
+    // Embers
+    for (var i = embers.length-1; i >= 0; i--) {
+      var e = embers[i]; e.wob += dt*4; e.y += e.vy*dt; e.x += (e.vx + Math.sin(e.wob)*25)*dt;
+      if (e.y > H+30) { embers.splice(i,1); score += 2; continue; }
+      var ddx = e.x-player.x, ddy = e.y-player.y;
+      if (player.invuln <= 0 && Math.sqrt(ddx*ddx+ddy*ddy) < e.r + player.r - 3) {
+        embers.splice(i,1); loseLife(); if (state !== 'playing') return;
+      }
+    }
+    // Lava bursts
+    for (var j = bursts.length-1; j >= 0; j--) {
+      var b = bursts[j];
+      if (b.warn > 0) { b.warn -= dt; if (b.warn <= 0) { b.erupted = true; beep(120, 0.4, 'sawtooth', 0.12, 50); } }
+      else { b.active -= dt; if (b.active <= 0) { bursts.splice(j,1); continue; }
+        if (player.invuln <= 0 && player.y > H-90 && player.x > b.x-10 && player.x < b.x+b.w+10) { loseLife(); if (state !== 'playing') return; }
+      }
+    }
+    // Orbs
+    for (var k = orbList.length-1; k >= 0; k--) {
+      var o = orbList[k]; o.life -= dt; o.pulse += dt*5;
+      if (o.life <= 0) { orbList.splice(k,1); continue; }
+      var odx = o.x-player.x, ody = o.y-player.y;
+      if (Math.sqrt(odx*odx+ody*ody) < o.r + player.r) {
+        orbList.splice(k,1); orbs++; score += 50; soundOrb(); burstParticles(o.x, o.y, '#66d9ff', 14);
+        if (orbs >= 20) { updateHUD(); endGame(true); return; }
+      }
+    }
+    // Particles
+    for (var p = particles.length-1; p >= 0; p--) {
+      var pt = particles[p]; pt.life -= dt; pt.x += pt.vx*dt; pt.y += pt.vy*dt;
+      if (pt.life <= 0) particles.splice(p,1);
+    }
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    // Sky, stars, volcano silhouette
+    var grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'#1a0505'); grad.addColorStop(0.6,'#2b0f08'); grad.addColorStop(1,'#3d1505');
+    ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#ffd166';
+    stars.forEach(function(s){ s.tw += 0.02; ctx.globalAlpha = 0.4 + 0.4*Math.sin(s.tw); ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    // Volcano in background
+    ctx.fillStyle = '#140303';
+    ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(W*0.28,H*0.62); ctx.lineTo(W*0.5,H*0.28); ctx.lineTo(W*0.72,H*0.62); ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff5722';
+    ctx.beginPath(); ctx.moveTo(W*0.44,H*0.34); ctx.lineTo(W*0.5,H*0.28); ctx.lineTo(W*0.56,H*0.34); ctx.lineTo(W*0.52,H*0.40); ctx.lineTo(W*0.48,H*0.40); ctx.closePath(); ctx.fill();
+    // Lava floor glow
+    ctx.fillStyle = '#ff3300'; ctx.fillRect(0,H-14,W,14);
+    ctx.fillStyle = 'rgba(255,120,0,.55)'; ctx.fillRect(0,H-20,W,6);
+
+    // Lava burst zones
+    bursts.forEach(function(b){
+      if (b.warn > 0) {
+        ctx.fillStyle = 'rgba(255,140,0,' + (0.25 + 0.25*Math.sin(Date.now()/90)) + ')';
+        ctx.fillRect(b.x, H-90, b.w, 76);
+        ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('⚠ LAVA!', b.x + b.w/2, H-96);
+      } else {
+        ctx.fillStyle = '#ff4400'; ctx.fillRect(b.x, H-90, b.w, 76);
+        ctx.fillStyle = '#ffff66';
+        for (var f = 0; f < 5; f++) { var fx = b.x + 10 + f*(b.w/5); ctx.beginPath(); ctx.arc(fx, H-30-Math.random()*4, 7, 0, Math.PI*2); ctx.fill(); }
+      }
+    });
+
+    // Orbs
+    orbList.forEach(function(o){
+      var pulse = 1 + 0.18*Math.sin(o.pulse);
+      ctx.fillStyle = 'rgba(102,217,255,.25)'; ctx.beginPath(); ctx.arc(o.x,o.y,o.r*1.7*pulse,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#66d9ff'; ctx.beginPath(); ctx.arc(o.x,o.y,o.r*pulse,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(o.x-4,o.y-4,4,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#003344'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText('💧', o.x, o.y+5);
+    });
+
+    // Embers
+    embers.forEach(function(e){
+      ctx.fillStyle = e.big ? '#ff2200' : '#ff7700';
+      ctx.beginPath(); ctx.arc(e.x,e.y,e.r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(e.x-e.r*0.25,e.y-e.r*0.25,e.r*0.45,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,100,0,.35)'; ctx.beginPath(); ctx.arc(e.x,e.y,e.r+5,0,Math.PI*2); ctx.fill();
+    });
+
+    // Player trail
+    player.trail.forEach(function(t, idx){
+      ctx.globalAlpha = 0.35 * (1 - idx/player.trail.length);
+      ctx.fillStyle = player.dashTime > 0 ? '#66d9ff' : '#ff9933';
+      ctx.beginPath(); ctx.arc(t.x,t.y,12,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Player: explorer with shield when invulnerable/dashing
+    if (player.invuln > 0 && Math.floor(Date.now()/120) % 2 === 0) ctx.globalAlpha = 0.45;
+    ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(player.x, player.y, player.r-5, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center'; ctx.fillText('🧑', player.x, player.y+7);
+    if (player.dashTime > 0 || player.invuln > 0.8) {
+      ctx.strokeStyle = '#66d9ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(player.x, player.y, player.r+6, 0, Math.PI*2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Particles
+    particles.forEach(function(pt){
+      ctx.globalAlpha = Math.max(0, pt.life);
+      ctx.fillStyle = pt.color; ctx.beginPath(); ctx.arc(pt.x,pt.y,4,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    if (state === 'playing') {
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(10, 48, 240, 22);
+      ctx.fillStyle = '#fff'; ctx.font = '13px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Wave time: ' + Math.ceil(waveLength - waveTime) + 's  •  Next wave: +100', 14, 63);
+    }
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = Math.min(0.05, (now - lastTime)/1000 || 0.016);
+    lastTime = now;
+    update(dt);
+    if (state === 'playing') { draw(); requestAnimationFrame(loop); }
+    else { draw(); }
+  }
+
+  // Controls: keyboard
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Shift') { e.preventDefault(); tryDash(); }
+    if (e.key === 'Enter' && state === 'title') startGame();
+    if (e.key === 'Enter' && state === 'over') startGame();
+    if (e.key === 'm' || e.key === 'M') muted = !muted;
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key] = false; });
+
+  // Mouse
+  canvas.addEventListener('mousemove', function(e){
+    var r = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - r.left) * (W / r.width);
+    pointer.y = (e.clientY - r.top) * (H / r.height);
+    pointer.active = true;
+  });
+  canvas.addEventListener('mousedown', function(e){
+    ensureAudio();
+    var r = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - r.left) * (W / r.width);
+    pointer.y = (e.clientY - r.top) * (H / r.height);
+    pointer.active = true;
+    if (e.shiftKey) tryDash();
+  });
+  document.addEventListener('mouseup', function(){ /* pointer stays as last target */ });
+
+  // Touch
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault(); ensureAudio();
+    var t = e.touches[0]; var r = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - r.left) * (W / r.width);
+    pointer.y = (t.clientY - r.top) * (H / r.height);
+    pointer.active = true; touchActive = true;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    var t = e.touches[0]; var r = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - r.left) * (W / r.width);
+    pointer.y = (t.clientY - r.top) * (H / r.height);
+    pointer.active = true; touchActive = true;
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); touchActive = false; }, { passive: false });
+
+  // Buttons
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', showTitle);
+  dashBtn.addEventListener('click', tryDash);
+  dashBtn.addEventListener('touchstart', function(e){ e.preventDefault(); tryDash(); }, { passive: false });
+
+  updateHUD();
+  draw();
+})();
+</script>
+</body>
+</html>
