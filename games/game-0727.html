@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Wordfall Letter Cascade</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0d1b2a; color: #e0eaf5; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 30px; color: #ffd166; text-shadow: 2px 2px 0 #1b263b; margin: 8px 0 4px; text-align: center; }
+  p.sub { color: #a8c6e0; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(520px, 96vw); }
+  canvas { display: block; width: 100%; height: 620px; background: linear-gradient(#16283f, #0d1b2a); border: 3px solid #415a77; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(8,18,32,0.88); border-radius: 14px; padding: 22px; text-align: center; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffd166; }
+  .overlay p, .overlay li { font-size: 16px; line-height: 1.55; color: #dbe9f5; }
+  .overlay ul { text-align: left; max-width: 400px; }
+  button { font-size: 20px; font-weight: bold; padding: 13px 28px; border: none; border-radius: 10px; background: #ffd166; color: #14213d; cursor: pointer; box-shadow: 0 4px 0 #b0892e; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #778da9; color: #fff; box-shadow: 0 4px 0 #415a77; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 4px; font-weight: bold; font-size: 14px; flex-wrap: wrap; }
+  #hud span { background: #1b263b; padding: 6px 9px; border-radius: 8px; }
+  #controls { display: flex; gap: 8px; margin-top: 10px; width: 100%; }
+  #controls button { flex: 1; font-size: 18px; padding: 11px 4px; }
+  #msg { min-height: 24px; color: #ffd166; font-weight: bold; text-align: center; margin-top: 6px; }
+  #wordBar { font-size: 26px; letter-spacing: 6px; font-weight: bold; color: #fff; }
+  #wordBar b { color: #06d6a0; }
+  @media (max-width: 480px) { h1 { font-size: 25px; } canvas { height: 540px; } }
+</style>
+</head>
+<body>
+<h1>Wordfall Letter Cascade</h1>
+<p class="sub">Catch the letters. Spell the words. Save the cascade!</p>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Word: <span id="wordCount">0</span>/6</span>
+    <span>Lives: <span id="lives">❤️❤️❤️</span></span>
+    <span>Combo: <span id="combo">x1</span></span>
+  </div>
+  <canvas id="game" width="520" height="620"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Wordfall</h2>
+    <p><strong>How to Play</strong></p>
+    <ul>
+      <li>A target word appears at the top. Letters rain down from the sky.</li>
+      <li>Move the basket with <b>arrow keys / A &amp; D</b>, the <b>mouse</b>, or by <b>dragging on touch</b>.</li>
+      <li>Catch letters in the correct order to spell the word. Wrong letters cost nothing, but a needed letter that hits the ground costs a life.</li>
+      <li>Golden stars give bonus points. Catch several correct letters in a row to raise your combo.</li>
+      <li>Spell <b>6 words</b> to win. Lose 3 lives and the game is over.</li>
+    </ul>
+    <button id="startBtn">▶ Start Game</button>
+    <p>Tip: press Space to pause, R to restart after the game ends.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <div id="wordBar"></div>
+    <button id="restartBtn">↻ Play Again</button>
+    <button id="menuBtn" class="secondary">Main Menu</button>
+  </div>
+</div>
+<div id="msg"></div>
+<div id="controls">
+  <button id="leftBtn" aria-label="Move left">◀ Left</button>
+  <button id="pauseBtn">⏸ Pause</button>
+  <button id="rightBtn" aria-label="Move right">Right ▶</button>
+</div>
+<p style="margin-top:10px;color:#8fa8bf;font-size:14px;text-align:center;">Keyboard: ← → / A D &nbsp;|&nbsp; Mouse: move &nbsp;|&nbsp; Touch: drag</p>
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var wordEl = document.getElementById('wordCount');
+  var livesEl = document.getElementById('lives');
+  var comboEl = document.getElementById('combo');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var wordBar = document.getElementById('wordBar');
+
+  var WORDS = ['OCEAN','BRAVE','LIGHT','MUSIC','DANCE','RIVER','EAGLE','FLAME','CLOUD','STONE','HAPPY','WINDY','QUEST','BLOOM','SPARK','GLOW','TIGER','APPLE','SUNNY','WAVES'];
+  var state = 'title'; // title, playing, paused, over, won
+  var score = 0, lives = 3, wordsDone = 0, combo = 1, comboStreak = 0;
+  var basketX = W/2, basketW = 92, basketY = H - 42;
+  var letters = [], stars = [], particles = [];
+  var spawnTimer = 0, wordIndex = 0, target = '', progress = 0, nextLetter = '';
+  var keys = {};
+  var audioCtx = null, muted = false;
+
+  function initAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function shuffle(arr){
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random()*(i+1)); var t=a[i]; a[i]=a[j]; a[j]=t; }
+    return a;
+  }
+  function pickWord(){
+    var pool = shuffle(WORDS);
+    target = pool[wordIndex % pool.length];
+    progress = 0;
+    nextLetter = target[0];
+    msgEl.textContent = 'Spell: ' + target + ' — catch "' + nextLetter + '" first!';
+  }
+  function newGame(){
+    score = 0; lives = 3; wordsDone = 0; combo = 1; comboStreak = 0;
+    basketX = W/2; letters = []; stars = []; particles = []; spawnTimer = 0; wordIndex = 0;
+    pickWord();
+    updateHUD();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+  }
+  function updateHUD(){
+    scoreEl.textContent = score;
+    wordEl.textContent = wordsDone;
+    livesEl.textContent = lives > 0 ? '❤️'.repeat(lives) : '💔';
+    comboEl.textContent = 'x' + combo;
+  }
+  function burst(x, y, color){
+    for (var i=0;i<12;i++) particles.push({x:x, y:y, vx:(Math.random()-0.5)*5, vy:(Math.random()-0.7)*5, life:30, color:color});
+  }
+  function spawnLetter(){
+    var needed = target[progress];
+    var ch, good;
+    // 55% chance the falling letter is the one we need, otherwise a decoy.
+    if (Math.random() < 0.55) { ch = needed; good = true; }
+    else {
+      var pool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.replace(needed, '');
+      ch = pool[Math.floor(Math.random()*pool.length)]; good = false;
+    }
+    letters.push({ ch: ch, good: good, x: 30 + Math.random()*(W-60), y: -30,
+      vy: 1.1 + Math.random()*1.1 + wordsDone*0.12, rot: (Math.random()-0.5)*0.4 });
+    if (Math.random() < 0.18) stars.push({ x: 30 + Math.random()*(W-60), y: -30, vy: 1.4, rot: 0 });
+  }
+  function endGame(won){
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '🏆 You Win!' : '💥 Game Over';
+    endText.textContent = won
+      ? ('You spelled ' + wordsDone + ' words and scored ' + score + ' points. Brilliant word wizard!')
+      : ('You scored ' + score + ' points and completed ' + wordsDone + ' words. Try again!');
+    wordBar.innerHTML = target.split('').map(function(c,i){ return i < progress ? '<b>'+c+'</b>' : c; }).join(' ');
+    endScreen.classList.remove('hidden');
+    tone(won ? 880 : 160, 0.5, won ? 'triangle' : 'sawtooth', 0.15);
+  }
+  function catchLetter(L){
+    if (L.ch === target[progress]) {
+      progress++; comboStreak++; combo = 1 + Math.floor(comboStreak/3);
+      var pts = 20 * combo;
+      score += pts;
+      burst(L.x, basketY, '#06d6a0');
+      tone(500 + progress*80, 0.18, 'triangle', 0.14);
+      msgEl.textContent = 'Nice! "' + L.ch + '" — ' + progress + '/' + target.length + ' of ' + target;
+      if (progress >= target.length) {
+        score += 100 + lives*25;
+        wordsDone++; wordIndex++;
+        msgEl.textContent = 'Word complete! +' + (100 + lives*25) + ' bonus. Next word coming...';
+        tone(880, 0.3, 'triangle', 0.15);
+        burst(W/2, 120, '#ffd166');
+        letters = [];
+        if (wordsDone >= 6) { updateHUD(); endGame(true); return; }
+        pickWord();
+      }
+      nextLetter = target[progress] || '';
+    } else {
+      comboStreak = 0; combo = 1;
+      score = Math.max(0, score - 5);
+      msgEl.textContent = 'That was "' + L.ch + '" — you need "' + target[progress] + '". Keep going!';
+      tone(200, 0.15, 'square', 0.08);
+    }
+    updateHUD();
+  }
+  function update(){
+    if (state !== 'playing') return;
+    if (keys.ArrowLeft || keys.a || keys.A) basketX -= 6;
+    if (keys.ArrowRight || keys.d || keys.D) basketX += 6;
+    basketX = Math.max(basketW/2, Math.min(W - basketW/2, basketX));
+    spawnTimer++;
+    var interval = Math.max(28, 62 - wordsDone*4);
+    if (spawnTimer >= interval) { spawnTimer = 0; spawnLetter(); }
+    for (var i = letters.length - 1; i >= 0; i--) {
+      var L = letters[i]; L.y += L.vy; L.rot += 0.005;
+      if (L.y >= basketY - 18 && L.y <= basketY + 22 && Math.abs(L.x - basketX) < basketW/2 + 14) {
+        catchLetter(L); letters.splice(i,1);
+      } else if (L.y > H + 20) {
+        if (L.ch === target[progress]) {
+          lives--; comboStreak = 0; combo = 1;
+          msgEl.textContent = 'Missed "' + L.ch + '"! A needed letter fell. Lives left: ' + lives;
+          tone(140, 0.3, 'sawtooth', 0.12);
+          burst(L.x, H-10, '#ef476f');
+          updateHUD();
+          if (lives <= 0) { letters.splice(i,1); endGame(false); return; }
+        }
+        letters.splice(i,1);
+      }
+    }
+    for (var s = stars.length - 1; s >= 0; s--) {
+      var S = stars[s]; S.y += S.vy; S.rot += 0.06;
+      if (S.y >= basketY - 18 && S.y <= basketY + 22 && Math.abs(S.x - basketX) < basketW/2 + 14) {
+        score += 50 * combo; burst(S.x, basketY, '#ffd166'); tone(1200, 0.25, 'sine', 0.12);
+        msgEl.textContent = '⭐ Star bonus! +' + (50*combo); stars.splice(s,1); updateHUD();
+      } else if (S.y > H + 20) stars.splice(s,1);
+    }
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var P = particles[p]; P.x += P.vx; P.y += P.vy; P.vy += 0.15; P.life--;
+      if (P.life <= 0) particles.splice(p,1);
+    }
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    // Sky, clouds, ground
+    ctx.fillStyle = '#16283f'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath(); ctx.arc(80,60,28,0,Math.PI*2); ctx.arc(115,50,34,0,Math.PI*2); ctx.arc(150,62,24,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(400,110,26,0,Math.PI*2); ctx.arc(435,100,30,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#1b4332'; ctx.fillRect(0,H-14,W,14);
+    // Target word panel
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(10,10,W-20,86);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('SPELL THIS WORD', W/2, 30);
+    ctx.font = 'bold 34px monospace';
+    for (var i=0;i<target.length;i++) {
+      ctx.fillStyle = i < progress ? '#06d6a0' : (i === progress ? '#ffd166' : '#e0eaf5');
+      ctx.fillText(target[i], W/2 - (target.length-1)*18 + i*36, 72);
+    }
+    ctx.fillStyle = '#06d6a0'; ctx.font = 'bold 15px Arial';
+    ctx.fillText('NEXT: ' + (target[progress] || '—'), W/2, 90);
+    // Falling letters
+    letters.forEach(function(L){
+      ctx.save(); ctx.translate(L.x, L.y); ctx.rotate(L.rot);
+      ctx.fillStyle = L.ch === target[progress] ? '#ffd166' : '#e0eaf5';
+      ctx.beginPath(); ctx.roundRect(-22,-22,44,44,9); ctx.fill();
+      ctx.fillStyle = '#14213d'; ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(L.ch, 0, 2); ctx.restore();
+    });
+    // Stars
+    stars.forEach(function(S){
+      ctx.save(); ctx.translate(S.x, S.y); ctx.rotate(S.rot);
+      ctx.fillStyle = '#ffd166'; ctx.font = '28px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('★', 0, 0); ctx.restore();
+    });
+    // Particles
+    particles.forEach(function(P){
+      ctx.globalAlpha = Math.max(0, P.life/30); ctx.fillStyle = P.color;
+      ctx.fillRect(P.x-3, P.y-3, 6, 6); ctx.globalAlpha = 1;
+    });
+    // Basket
+    ctx.fillStyle = '#ef476f';
+    ctx.beginPath(); ctx.moveTo(basketX-basketW/2, basketY); ctx.lineTo(basketX+basketW/2, basketY);
+    ctx.lineTo(basketX+basketW/2-12, basketY+26); ctx.lineTo(basketX-basketW/2+12, basketY+26); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.fillRect(basketX-basketW/2, basketY-4, basketW, 6);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(target[progress] || '★', basketX, basketY+18);
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('PAUSED', W/2, H/2);
+    }
+    if (state === 'title') {
+      ctx.fillStyle = '#a8c6e0'; ctx.font = '20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and catch the letters!', W/2, H/2);
+    }
+  }
+  function loop(){ update(); draw(); requestAnimationFrame(loop); }
+  function setFromClientX(clientX){
+    var rect = canvas.getBoundingClientRect();
+    basketX = (clientX - rect.left) / rect.width * W;
+    basketX = Math.max(basketW/2, Math.min(W - basketW/2, basketX));
+  }
+  // Keyboard
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if (e.key === ' ' && state === 'playing') { state = 'paused'; document.getElementById('pauseBtn').textContent = '▶ Resume'; e.preventDefault(); }
+    else if (e.key === ' ' && state === 'paused') { state = 'playing'; document.getElementById('pauseBtn').textContent = '⏸ Pause'; e.preventDefault(); }
+    if ((e.key === 'r' || e.key === 'R') && (state === 'over' || state === 'won')) { initAudio(); newGame(); }
+    if (e.key === 'Enter' && state === 'title') { initAudio(); newGame(); }
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key] = false; });
+  // Mouse
+  canvas.addEventListener('mousemove', function(e){ if (state === 'playing') setFromClientX(e.clientX); });
+  canvas.addEventListener('mousedown', function(e){ initAudio(); if (state === 'playing') setFromClientX(e.clientX); });
+  document.addEventListener('mousemove', function(e){ if (state === 'playing' && e.target === canvas) setFromClientX(e.clientX); });
+  // Touch
+  canvas.addEventListener('touchstart', function(e){ initAudio(); if (state === 'playing') setFromClientX(e.touches[0].clientX); e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('touchmove', function(e){ if (state === 'playing') setFromClientX(e.touches[0].clientX); e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); }, {passive:false});
+  // Buttons
+  document.getElementById('startBtn').addEventListener('click', function(){ initAudio(); newGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function(){ initAudio(); newGame(); });
+  document.getElementById('menuBtn').addEventListener('click', function(){ state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden'); });
+  document.getElementById('pauseBtn').addEventListener('click', function(){
+    if (state === 'playing') { state = 'paused'; this.textContent = '▶ Resume'; }
+    else if (state === 'paused') { state = 'playing'; this.textContent = '⏸ Pause'; }
+  });
+  document.getElementById('leftBtn').addEventListener('click', function(){ basketX = Math.max(basketW/2, basketX - 40); });
+  document.getElementById('rightBtn').addEventListener('click', function(){ basketX = Math.min(W - basketW/2, basketX + 40); });
+  document.getElementById('leftBtn').addEventListener('touchstart', function(e){ e.preventDefault(); basketX = Math.max(basketW/2, basketX - 40); }, {passive:false});
+  document.getElementById('rightBtn').addEventListener('touchstart', function(e){ e.preventDefault(); basketX = Math.min(W - basketW/2, basketX + 40); }, {passive:false});
+  pickWord();
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

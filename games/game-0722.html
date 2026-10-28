@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Shadow Puppet Theater</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #1a0f14; color: #ffe9c4; font-family: Georgia, serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { margin: 10px 0 2px; font-size: 30px; letter-spacing: 1px; color: #ffd166; text-shadow: 0 2px 0 #000; }
+  p.sub { margin: 0 0 10px; color: #f4c9a0; font-style: italic; }
+  #hud { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin: 6px 0; font-weight: bold; }
+  #hud span { background: #3a1f2b; border: 2px solid #ffd166; border-radius: 10px; padding: 6px 10px; min-width: 105px; text-align: center; }
+  #wrap { position: relative; width: 760px; max-width: 96vw; }
+  canvas { width: 100%; height: auto; display: block; background: #2b1620; border: 4px solid #ffd166; border-radius: 12px; touch-action: none; }
+  #controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 10px 0; }
+  button { background: #ffd166; color: #231018; border: 3px solid #fff3d6; border-radius: 12px; padding: 10px 18px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #7b2d43; color: #fff; }
+  .overlay { position: absolute; inset: 0; background: rgba(20,8,14,0.94); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffd166; font-size: 34px; margin: 6px 0; }
+  .overlay p, .overlay li { font-size: 17px; line-height: 1.55; }
+  .overlay ul { text-align: left; max-width: 560px; }
+  #message { min-height: 26px; font-weight: bold; color: #ffd166; text-align: center; }
+  #howto { background: #3a1f2b; border-radius: 12px; padding: 6px 16px; }
+  .big { font-size: 20px; }
+</style>
+</head>
+<body>
+<h1>Shadow Puppet Theater</h1>
+<p class="sub">Rotate, flip and place every silhouette piece to complete the shadow scene.</p>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Lives: <b id="lives">3</b></span>
+  <span>Level: <b id="level">1 / 5</b></span>
+  <span>Moves: <b id="moves">20</b></span>
+  <span>Status: <b id="status">Title</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="760" height="640"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Shadow Puppet Theater</h2>
+    <p class="big">The lantern is lit. The stage is waiting for its shadows.</p>
+    <div id="howto">
+      <h3>How to Play</h3>
+      <ul>
+        <li>Each scene shows a glowing target outline on the stage. Fill it exactly with the shadow pieces below.</li>
+        <li>Tap or click a piece in the tray to select it, then tap or click a stage cell to place it.</li>
+        <li>Use Rotate and Flip to turn the selected piece until it matches the shadow. Keyboard: R rotates, F flips.</li>
+        <li>Tap or click a placed piece to lift it back to the tray. Keyboard: arrows move the cursor, Enter places, Backspace lifts.</li>
+        <li>Keys 1 to 5 select tray pieces. Every placement, lift, or failed fit costs 1 move.</li>
+        <li>Complete all 5 shadow scenes to win. If moves run out, you lose a life and retry the scene.</li>
+      </ul>
+    </div>
+    <p><button id="startBtn">Start the Show</button></p>
+    <p>Mouse, touch, and keyboard are all supported. Sound starts only after you press Start.</p>
+  </div>
+  <div id="winScreen" class="overlay hidden">
+    <h2>Standing Ovation!</h2>
+    <p class="big">You completed all 5 shadow scenes.</p>
+    <p>Final score: <b id="finalScore">0</b></p>
+    <p><button id="winRestart">Play Again</button></p>
+  </div>
+  <div id="overScreen" class="overlay hidden">
+    <h2> Curtain Falls</h2>
+    <p class="big">The lantern faded. You ran out of lives.</p>
+    <p>Score: <b id="overScore">0</b></p>
+    <p><button id="overRestart">Restart Instantly</button></p>
+  </div>
+</div>
+<div id="controls">
+  <button id="rotateBtn">Rotate (R)</button>
+  <button id="flipBtn">Flip (F)</button>
+  <button id="soundBtn" class="secondary">Sound: On</button>
+  <button id="restartBtn" class="secondary">Restart Show</button>
+</div>
+<p id="message">Welcome to the theater. Press Start.</p>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var movesEl = document.getElementById('moves');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('message');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  var state = 'title';
+  var score = 0, lives = 3, levelIndex = 0, movesLeft = 20;
+  var selected = 0, cursor = { x: 0, y: 0 };
+  var soundOn = true, audioCtx = null, animTime = 0;
+  var placed = {}, tray = [], targetSet = {}, targetCells = [];
+
+  // Each piece: cells are relative coordinates, ox/oy is its solution origin.
+  // The target outline is the union of all solution placements.
+  var LEVELS = [
+    { name: 'Moon Rabbit', moves: 20, w: 6, h: 5, pieces: [
+      { cells: [[0,0],[1,0],[2,0]], ox: 1, oy: 1 },
+      { cells: [[0,0],[0,1],[1,1]], ox: 3, oy: 2 },
+      { cells: [[0,0],[1,0],[0,1],[1,1]], ox: 1, oy: 2 } ] },
+    { name: 'Paper Lantern', moves: 22, w: 7, h: 6, pieces: [
+      { cells: [[0,0],[1,0],[2,0],[3,0]], ox: 1, oy: 1 },
+      { cells: [[0,0],[0,1],[0,2]], ox: 2, oy: 2 },
+      { cells: [[0,0],[1,0],[1,1]], ox: 4, oy: 2 },
+      { cells: [[0,0],[1,0]], ox: 3, oy: 4 } ] },
+    { name: 'Dragon Kite', moves: 26, w: 7, h: 6, pieces: [
+      { cells: [[0,0],[1,0],[1,1],[2,1]], ox: 1, oy: 1 },
+      { cells: [[0,0],[0,1],[1,1],[1,2]], ox: 4, oy: 1 },
+      { cells: [[0,0],[1,0],[2,0]], ox: 1, oy: 3 },
+      { cells: [[0,0],[1,0],[0,1]], ox: 4, oy: 4 } ] },
+    { name: 'Shadow Pagoda', moves: 30, w: 8, h: 6, pieces: [
+      { cells: [[0,0],[1,0],[2,0],[3,0],[4,0]], ox: 1, oy: 1 },
+      { cells: [[0,0],[0,1],[1,1]], ox: 2, oy: 2 },
+      { cells: [[0,0],[1,0],[0,1],[1,1]], ox: 4, oy: 2 },
+      { cells: [[0,0],[1,0],[2,0]], ox: 2, oy: 4 },
+      { cells: [[0,0],[1,0]], ox: 5, oy: 4 } ] },
+    { name: 'Grand Finale Puppet', moves: 34, w: 8, h: 7, pieces: [
+      { cells: [[0,0],[1,0],[2,0],[1,1]], ox: 2, oy: 1 },
+      { cells: [[0,0],[0,1],[0,2],[1,2]], ox: 1, oy: 2 },
+      { cells: [[0,0],[1,0],[1,1],[2,1]], ox: 4, oy: 2 },
+      { cells: [[0,0],[1,0],[2,0]], ox: 3, oy: 4 },
+      { cells: [[0,0],[0,1],[1,1]], ox: 5, oy: 5 } ] }
+  ];
+  var SHADES = ['#111111', '#1d1d2e', '#2a1218', '#101a24', '#241a10'];
+
+  function norm(cells) {
+    var minX = 99, minY = 99;
+    cells.forEach(function (c) { if (c[0] < minX) minX = c[0]; if (c[1] < minY) minY = c[1]; });
+    return cells.map(function (c) { return [c[0] - minX, c[1] - minY]; });
+  }
+  function rotateCells(cells) { return norm(cells.map(function (c) { return [-c[1], c[0]]; })); }
+  function flipCells(cells) { return norm(cells.map(function (c) { return [-c[0], c[1]]; })); }
+  function keyOf(x, y) { return x + ',' + y; }
+  function cellKey(c) { return c[0] + ',' + c[1]; }
+
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function playPlace() { tone(520, 0.15, 'triangle'); setTimeout(function () { tone(780, 0.18, 'triangle'); }, 60); }
+  function playError() { tone(160, 0.22, 'sawtooth'); }
+  function playWin() { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.25, 'triangle'); }, i * 110); }); }
+
+  function loadLevel() {
+    var lv = LEVELS[levelIndex];
+    movesLeft = lv.moves; placed = {}; targetSet = {}; targetCells = [];
+    tray = lv.pieces.map(function (p, i) {
+      var cells = p.cells.map(function (c) { return [c[0], c[1]]; });
+      // Scramble orientation so the player must rotate / flip to match.
+      var turns = (i + levelIndex) % 3, flips = (i % 2 === 0) ? 1 : 0;
+      for (var t = 0; t < turns; t++) cells = rotateCells(cells);
+      if (flips) cells = flipCells(cells);
+      return { id: i, cells: cells, shade: SHADES[i % SHADES.length] };
+    });
+    lv.pieces.forEach(function (p) {
+      p.cells.forEach(function (c) {
+        var k = keyOf(p.ox + c[0], p.oy + c[1]);
+        if (!targetSet[k]) { targetSet[k] = true; targetCells.push([p.ox + c[0], p.oy + c[1]]); }
+      });
+    });
+    selected = 0; cursor = { x: 0, y: 0 };
+    updateHud('Scene: ' + lv.name + ' — fill the glowing outline.');
+  }
+
+  function updateHud(statusText) {
+    scoreEl.textContent = score; livesEl.textContent = lives;
+    levelEl.textContent = (levelIndex + 1) + ' / 5';
+    movesEl.textContent = movesLeft;
+    if (statusText) statusEl.textContent = statusText;
+  }
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function spendMove() {
+    movesLeft -= 1; updateHud();
+    if (movesLeft <= 0 && !isComplete()) {
+      lives -= 1; tone(220, 0.3, 'sawtooth');
+      if (lives <= 0) { gameOver(); }
+      else { setMsg('Out of moves! A life is lost. Retrying ' + LEVELS[levelIndex].name + '.'); updateHud(); loadLevel(); }
+      return false;
+    }
+    return true;
+  }
+  function isComplete() {
+    var filled = 0;
+    Object.keys(placed).forEach(function () { filled += 1; });
+    // placed maps every target cell to a piece id when fully filled
+    var count = 0; for (var k in placed) count++;
+    return count === targetCells.length;
+  }
+  function checkWin() {
+    if (!isComplete()) return;
+    var bonus = movesLeft * 20 + 250;
+    score += bonus; playWin();
+    if (levelIndex >= LEVELS.length - 1) {
+      state = 'win'; document.getElementById('finalScore').textContent = score;
+      winScreen.classList.remove('hidden'); updateHud('Complete!');
+      setMsg('All 5 scenes complete. Bravo!');
+    } else {
+      setMsg(LEVELS[levelIndex].name + ' complete! Bonus +' + bonus + '. Next scene...');
+      levelIndex += 1; loadLevel(); updateHud('Scene: ' + LEVELS[levelIndex].name);
+    }
+  }
+
+  function tryPlace(cx, cy) {
+    if (state !== 'playing') return;
+    var piece = tray[selected];
+    if (!piece) { setMsg('That piece is already on stage. Select another piece.'); return; }
+    var cells = piece.cells.map(function (c) { return [cx + c[0], cy + c[1]]; });
+    var lv = LEVELS[levelIndex];
+    var ok = cells.every(function (c) {
+      return c[0] >= 0 && c[0] < lv.w && c[1] >= 0 && c[1] < lv.h && targetSet[keyOf(c[0], c[1])] && !placed[keyOf(c[0], c[1])];
+    });
+    if (!ok) { playError(); setMsg('That shadow does not fit there. Try rotating or flipping it.'); spendMove(); return; }
+    cells.forEach(function (c) { placed[keyOf(c[0], c[1])] = piece.id; });
+    tray[selected] = null; score += 100; playPlace();
+    setMsg('Piece placed! Score +100.');
+    // Select next available piece.
+    for (var i = 0; i < tray.length; i++) { if (tray[i]) { selected = i; break; } }
+    spendMove(); updateHud(); checkWin();
+  }
+  function tryLift(cx, cy) {
+    if (state !== 'playing') return;
+    var pid = placed[keyOf(cx, cy)];
+    if (pid === undefined) return;
+    var lv = LEVELS[levelIndex]; var orig = lv.pieces[pid];
+    // Restore piece to tray with its current player orientation kept simple: reset to solution shape, scrambled once.
+    var cells = orig.cells.map(function (c) { return [c[0], c[1]]; });
+    cells = rotateCells(cells);
+    tray[pid] = { id: pid, cells: cells, shade: SHADES[pid % SHADES.length] };
+    for (var k in placed) { if (placed[k] === pid) delete placed[k]; }
+    selected = pid; tone(392, 0.15, 'triangle'); setMsg('Piece lifted back to the tray.');
+    spendMove(); updateHud();
+  }
+  function boardPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var x = (evt.clientX - r.left) * (canvas.width / r.width);
+    var y = (evt.clientY - r.top) * (canvas.height / r.height);
+    var lv = LEVELS[levelIndex], cell = 48;
+    var bw = lv.w * cell, bh = lv.h * cell, bx = (canvas.width - bw) / 2, by = 110;
+    var gx = Math.floor((x - bx) / cell), gy = Math.floor((y - by) / cell);
+    return { gx: gx, gy: gy, x: x, y: y, bx: bx, by: by, cell: cell };
+  }
+  function trayPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var x = (evt.clientX - r.left) * (canvas.width / r.width);
+    var y = (evt.clientY - r.top) * (canvas.height / r.height);
+    return { x: x, y: y };
+  }
+
+  function onCanvasPointer(evt) {
+    if (state !== 'playing') return;
+    ensureAudio();
+    var p = boardPos(evt);
+    var lv = LEVELS[levelIndex];
+    if (p.gx >= 0 && p.gx < lv.w && p.gy >= 0 && p.gy < lv.h) {
+      cursor = { x: p.gx, y: p.gy };
+      if (placed[keyOf(p.gx, p.gy)] !== undefined) tryLift(p.gx, p.gy);
+      else tryPlace(p.gx, p.gy);
+      return;
+    }
+    // Tray area: slots laid out from x=30, y=520, each 140 wide.
+    var t = trayPos(evt);
+    if (t.y >= 510 && t.y <= 620) {
+      var idx = Math.floor((t.x - 30) / 140);
+      if (idx >= 0 && idx < tray.length && tray[idx]) { selected = idx; tone(440, 0.1, 'triangle'); setMsg('Selected piece ' + (idx + 1) + '. Rotate or flip it, then place it.'); updateHud(); }
+    }
+  }
+
+  function startGame() {
+    ensureAudio(); score = 0; lives = 3; levelIndex = 0; state = 'playing';
+    titleScreen.classList.add('hidden'); winScreen.classList.add('hidden'); overScreen.classList.add('hidden');
+    loadLevel(); updateHud('Scene: ' + LEVELS[0].name); setMsg('Select a shadow piece, rotate it, and fill the outline.');
+    tone(523, 0.2, 'triangle');
+  }
+  function gameOver() {
+    state = 'gameover'; document.getElementById('overScore').textContent = score;
+    overScreen.classList.remove('hidden'); updateHud('Game Over'); setMsg('Game over. Press Restart to play again instantly.');
+  }
+
+  function draw() {
+    animTime += 0.016;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Stage backdrop and curtain glow.
+    ctx.fillStyle = '#2b1620'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    var glow = 0.5 + 0.12 * Math.sin(animTime * 2);
+    ctx.fillStyle = 'rgba(255,209,102,' + glow.toFixed(2) + ')';
+    ctx.beginPath(); ctx.arc(380, 70, 52 + 6 * Math.sin(animTime * 2), 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffe9c4'; ctx.font = 'bold 20px Georgia'; ctx.textAlign = 'center';
+    if (state === 'playing') ctx.fillText(LEVELS[levelIndex].name + ' — fill every glowing cell', 380, 92);
+    else ctx.fillText('Shadow Puppet Theater', 380, 92);
+    var lv = LEVELS[levelIndex], cell = 48;
+    var bw = lv.w * cell, bh = lv.h * cell, bx = (canvas.width - bw) / 2, by = 110;
+    // Stage floor.
+    ctx.fillStyle = '#4a2432'; ctx.fillRect(bx - 14, by - 14, bw + 28, bh + 28);
+    // Target outline cells.
+    targetCells.forEach(function (c) {
+      var x = bx + c[0] * cell, y = by + c[1] * cell;
+      ctx.fillStyle = 'rgba(255,209,102,0.22)'; ctx.fillRect(x, y, cell, cell);
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+      ctx.strokeRect(x + 2, y + 2, cell - 4, cell - 4); ctx.setLineDash([]);
+    });
+    // Placed pieces.
+    targetCells.forEach(function (c) {
+      var pid = placed[keyOf(c[0], c[1])];
+      if (pid === undefined) return;
+      var x = bx + c[0] * cell, y = by + c[1] * cell;
+      ctx.fillStyle = '#0b0b12'; ctx.fillRect(x + 3, y + 3, cell - 6, cell - 6);
+      ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.fillRect(x + 8, y + 8, cell - 16, 4);
+    });
+    // Grid lines and cursor.
+    ctx.strokeStyle = 'rgba(255,233,196,0.25)'; ctx.lineWidth = 1;
+    for (var gx = 0; gx <= lv.w; gx++) { ctx.beginPath(); ctx.moveTo(bx + gx * cell, by); ctx.lineTo(bx + gx * cell, by + bh); ctx.stroke(); }
+    for (var gy = 0; gy <= lv.h; gy++) { ctx.beginPath(); ctx.moveTo(bx, by + gy * cell); ctx.lineTo(bx + bw, by + gy * cell); ctx.stroke(); }
+    if (state === 'playing') {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+      ctx.strokeRect(bx + cursor.x * cell + 1, by + cursor.y * cell + 1, cell - 2, cell - 2);
+    }
+    // Tray label and pieces.
+    ctx.fillStyle = '#ffe9c4'; ctx.font = 'bold 18px Georgia'; ctx.textAlign = 'left';
+    ctx.fillText('Shadow pieces — click one, then click the stage:', 30, 505);
+    tray.forEach(function (piece, i) {
+      if (!piece) return;
+      var sx = 30 + i * 140, sy = 520;
+      ctx.fillStyle = (i === selected && state === 'playing') ? '#ffd166' : '#3a1f2b';
+      ctx.fillRect(sx, sy, 126, 96);
+      ctx.strokeStyle = (i === selected) ? '#ffffff' : '#ffd166'; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, 126, 96);
+      piece.cells.forEach(function (c) {
+        ctx.fillStyle = '#0b0b12'; ctx.fillRect(sx + 14 + c[0] * 20, sy + 14 + c[1] * 20, 18, 18);
+      });
+      ctx.fillStyle = '#ffe9c4'; ctx.font = '14px Georgia'; ctx.fillText('Piece ' + (i + 1), sx + 8, sy + 88);
+    });
+    requestAnimationFrame(draw);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestart').addEventListener('click', startGame);
+  document.getElementById('overRestart').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('rotateBtn').addEventListener('click', function () {
+    ensureAudio();
+    if (state !== 'playing' || !tray[selected]) return;
+    tray[selected].cells = rotateCells(tray[selected].cells); tone(600, 0.1, 'triangle'); setMsg('Piece rotated.');
+  });
+  document.getElementById('flipBtn').addEventListener('click', function () {
+    ensureAudio();
+    if (state !== 'playing' || !tray[selected]) return;
+    tray[selected].cells = flipCells(tray[selected].cells); tone(500, 0.1, 'triangle'); setMsg('Piece flipped.');
+  });
+  document.getElementById('soundBtn').addEventListener('click', function (e) {
+    soundOn = !soundOn; e.target.textContent = soundOn ? 'Sound: On' : 'Sound: Off';
+  });
+
+  canvas.addEventListener('mousedown', onCanvasPointer);
+  canvas.addEventListener('click', function () { ensureAudio(); });
+  canvas.addEventListener('touchstart', function (evt) {
+    evt.preventDefault(); ensureAudio();
+    var t = evt.touches[0];
+    onCanvasPointer({ clientX: t.clientX, clientY: t.clientY });
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (evt) { evt.preventDefault(); }, { passive: false });
+  document.addEventListener('keydown', function (evt) {
+    if (state === 'title' && (evt.key === 'Enter' || evt.key === ' ')) { startGame(); return; }
+    if (state !== 'playing') {
+      if ((state === 'win' || state === 'gameover') && evt.key === 'Enter') startGame();
+      return;
+    }
+    ensureAudio();
+    var lv = LEVELS[levelIndex];
+    if (evt.key === 'ArrowLeft' || evt.key === 'a') cursor.x = Math.max(0, cursor.x - 1);
+    else if (evt.key === 'ArrowRight' || evt.key === 'd') cursor.x = Math.min(lv.w - 1, cursor.x + 1);
+    else if (evt.key === 'ArrowUp' || evt.key === 'w') cursor.y = Math.max(0, cursor.y - 1);
+    else if (evt.key === 'ArrowDown' || evt.key === 's') cursor.y = Math.min(lv.h - 1, cursor.y + 1);
+    else if (evt.key === 'r' || evt.key === 'R') { if (tray[selected]) { tray[selected].cells = rotateCells(tray[selected].cells); tone(600, 0.1, 'triangle'); } }
+    else if (evt.key === 'f' || evt.key === 'F') { if (tray[selected]) { tray[selected].cells = flipCells(tray[selected].cells); tone(500, 0.1, 'triangle'); } }
+    else if (evt.key === 'Enter' || evt.key === ' ') {
+      evt.preventDefault();
+      if (placed[keyOf(cursor.x, cursor.y)] !== undefined) tryLift(cursor.x, cursor.y);
+      else tryPlace(cursor.x, cursor.y);
+    }
+    else if (evt.key === 'Backspace' || evt.key === 'Delete') { tryLift(cursor.x, cursor.y); }
+    else if (evt.key >= '1' && evt.key <= '5') {
+      var idx = parseInt(evt.key, 10) - 1;
+      if (tray[idx]) { selected = idx; tone(440, 0.1, 'triangle'); }
+    }
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].indexOf(evt.key) >= 0) evt.preventDefault();
+  });
+  document.addEventListener('touchstart', function () { ensureAudio(); }, { passive: true });
+
+  loadLevel();
+  updateHud('Title');
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

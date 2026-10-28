@@ -24,3 +24,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0718 | Mountain Observatory Scheduler | Strategy / Telescope Night Planning | Keys 1-3 select, arrows pick target, Enter assign, mouse/touch tap | [Play](./../games/game-0718.html) |
 | 0719 | Starlight Archery Range | Precision / Archery Wind Aim | Mouse/touch drag aim and release, Arrow Keys aim, Space shoot | [Play](./../games/game-0719.html) |
 | 0720 | Moonlit Kite Runner | Arcade / Wind Gust Runner | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0720.html) |
+| 0721 | Coral Reef Diver Quest | Arcade / Underwater Treasure Dive | Arrow Keys/WASD dive, mouse/touch drag | [Play](./../games/game-0721.html) |
+| 0722 | Shadow Puppet Theater | Puzzle / Shadow Shape Matching | Mouse/touch drag rotate, Arrow Keys rotate, Space/Enter flip | [Play](./../games/game-0722.html) |
+| 0723 | Skyport Air Traffic Director | Strategy / Air Traffic Routing | Mouse/touch draw paths, Arrow Keys select | [Play](./../games/game-0723.html) |
+| 0724 | Echo Cave Clapper | Rhythm / Echo Beat Memory | Keys tap drums, mouse/touch tap pads | [Play](./../games/game-0724.html) |
+| 0725 | Blacksmith Forge Hammer | Precision / Hammer Strike Timing | Space/Enter strike, mouse/touch tap | [Play](./../games/game-0725.html) |
+| 0726 | Mushroom Grove Forager | Arcade / Forage Maze Collection | Arrow Keys/WASD move, mouse/touch drag | [Play](./../games/game-0726.html) |
+| 0727 | Wordfall Letter Cascade | Puzzle / Falling Word Builder | Arrow Keys/WASD catch, mouse/touch move, letter keys | [Play](./../games/game-0727.html) |
+| 0728 | Railway Switch Yard | Strategy / Train Switching | Mouse/touch tap switches, Arrow Keys select, Space toggle | [Play](./../games/game-0728.html) |
+| 0729 | Rain Tap Symphony | Rhythm / Rain Drop Catch Beat | Keys tap pads, mouse/touch tap drops | [Play](./../games/game-0729.html) |
+| 0730 | Glassblower Breath Control | Precision / Breath Pressure Crafting | Space hold/release, mouse/touch hold | [Play](./../games/game-0730.html) |

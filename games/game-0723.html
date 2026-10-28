@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Skyport Air Traffic Director</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1e33; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 22px; margin: 6px 0 2px; text-align: center; letter-spacing: 1px; }
+  p.sub { font-size: 13px; color: #9fc3e8; text-align: center; margin-bottom: 8px; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; width: 100%; max-width: 840px; }
+  .pill { background: #14365c; border: 1px solid #2f6db3; border-radius: 20px; padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .pill.warn { background: #5c2a14; border-color: #d97b2f; }
+  #wrap { position: relative; width: 100%; max-width: 840px; }
+  canvas { display: block; width: 100%; height: auto; background: #122c4d; border: 2px solid #3f7fc2; border-radius: 10px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; background: rgba(4, 16, 32, 0.92); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 28px; }
+  .overlay p, .overlay li { font-size: 14px; line-height: 1.55; color: #cfe4ff; }
+  .overlay ul { text-align: left; max-width: 520px; margin: 0 auto; }
+  button { background: #ffb020; color: #1a1200; border: none; border-radius: 8px; padding: 12px 26px; font-size: 17px; font-weight: bold; cursor: pointer; margin-top: 6px; }
+  button:hover { background: #ffc94d; }
+  button.secondary { background: #2f6db3; color: #fff; }
+  #status { font-size: 13px; color: #9fc3e8; margin-top: 8px; text-align: center; min-height: 18px; }
+  #legend { font-size: 12px; color: #9fc3e8; margin-top: 4px; text-align: center; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin: 0 2px; }
+</style>
+</head>
+<body>
+<h1>&#9992; Skyport Air Traffic Director</h1>
+<p class="sub">Draw safe flight paths and land every plane on its matching runway.</p>
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Landed: <span id="landed">0</span> / 20</div>
+  <div class="pill">In Air: <span id="inair">0</span></div>
+  <div class="pill">Near Misses: <span id="nearmiss">0</span></div>
+  <div class="pill warn">Collisions: <span id="collisions">0</span> / 2</div>
+  <div class="pill">Wave: <span id="wave">1</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="840" height="560"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>&#9992; Skyport Air Traffic Director</h2>
+    <p><strong>How to Play</strong></p>
+    <ul>
+      <li>Planes enter from the edges, each labelled with a colour. Land each plane on the runway of the SAME colour.</li>
+      <li>Click or tap a plane to select it, then drag on the sky to draw its flight path. The plane follows your path, then heads for its runway.</li>
+      <li>Draw wide, separated routes: two planes that touch will collide. Close calls count as near misses.</li>
+      <li>Keyboard: 1-9 selects a plane in the air, arrow keys nudge the selected plane's next waypoint, Space pauses, R restarts, Enter starts.</li>
+      <li>Win by landing 20 planes. The game ends after 2 collisions, so keep the skies separated!</li>
+    </ul>
+    <button id="startBtn">Start Directing</button>
+    <p>Mouse, touch, and keyboard all work. Sound starts only after you press Start.</p>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">Restart Instantly</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+<div id="status">Select a plane, then drag to draw its route.</div>
+<div id="legend">Runways:
+  <span class="dot" style="background:#ff5252"></span> Red &nbsp;
+  <span class="dot" style="background:#40c4ff"></span> Blue &nbsp;
+  <span class="dot" style="background:#69f0ae"></span> Green &nbsp;
+  <span class="dot" style="background:#ffea00"></span> Yellow
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var landedEl = document.getElementById('landed');
+  var inairEl = document.getElementById('inair');
+  var nearEl = document.getElementById('nearmiss');
+  var collEl = document.getElementById('collisions');
+  var waveEl = document.getElementById('wave');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  var COLORS = ['#ff5252', '#40c4ff', '#69f0ae', '#ffea00'];
+  var NAMES = ['Red', 'Blue', 'Green', 'Yellow'];
+  var runways = [
+    { x: 90, y: H - 60, color: COLORS[0], name: 'Red' },
+    { x: W - 90, y: H - 60, color: COLORS[1], name: 'Blue' },
+    { x: 90, y: 60, color: COLORS[2], name: 'Green' },
+    { x: W - 90, y: 60, color: COLORS[3], name: 'Yellow' }
+  ];
+
+  var planes = [], particles = [];
+  var selected = null, drawing = false, running = false, paused = false, over = false;
+  var score = 0, landed = 0, nearMisses = 0, collisions = 0, spawned = 0;
+  var spawnTimer = 0, elapsed = 0, lastTime = 0;
+  var audioCtx = null, nearPairs = {};
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function initAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+
+  function wave() { return 1 + Math.floor(landed / 5); }
+  function spawnInterval() { return Math.max(1400, 3400 - wave() * 350); }
+
+  function spawnPlane() {
+    var side = Math.floor(Math.random() * 4);
+    var x, y, angle;
+    if (side === 0) { x = -20; y = 80 + Math.random() * (H - 160); angle = 0; }
+    else if (side === 1) { x = W + 20; y = 80 + Math.random() * (H - 160); angle = Math.PI; }
+    else if (side === 2) { x = 80 + Math.random() * (W - 160); y = -20; angle = Math.PI / 2; }
+    else { x = 80 + Math.random() * (W - 160); y = H + 20; angle = -Math.PI / 2; }
+    var ci = Math.floor(Math.random() * COLORS.length);
+    planes.push({
+      id: ++spawned, x: x, y: y, angle: angle,
+      speed: 62 + Math.random() * 22 + wave() * 5,
+      color: COLORS[ci], colorName: NAMES[ci], runway: runways[ci],
+      path: [], trail: [], dead: false, nearKey: null
+    });
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    landedEl.textContent = landed;
+    inairEl.textContent = planes.length;
+    nearEl.textContent = nearMisses;
+    collEl.textContent = collisions;
+    waveEl.textContent = wave();
+  }
+
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0].clientX);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0].clientY);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+
+  function pickPlane(p) {
+    var best = null, bestD = 34;
+    planes.forEach(function (pl) {
+      var d = Math.hypot(pl.x - p.x, pl.y - p.y);
+      if (d < bestD) { bestD = d; best = pl; }
+    });
+    return best;
+  }
+
+  function onDown(evt) {
+    if (!running || paused || over) return;
+    evt.preventDefault();
+    var p = canvasPos(evt);
+    var pl = pickPlane(p);
+    if (pl) {
+      selected = pl;
+      pl.path = [];
+      drawing = true;
+      statusEl.textContent = 'Routing ' + pl.colorName + ' plane #' + pl.id + ' — drag to draw its path.';
+      beep(520, 0.08, 'triangle');
+    }
+  }
+  function onMove(evt) {
+    if (!drawing || !selected) return;
+    evt.preventDefault();
+    var p = canvasPos(evt);
+    var path = selected.path;
+    if (!path.length || Math.hypot(p.x - path[path.length - 1].x, p.y - path[path.length - 1].y) > 14) {
+      path.push(p);
+    }
+  }
+  function onUp(evt) {
+    if (drawing) { drawing = false; beep(660, 0.08, 'triangle'); }
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  canvas.addEventListener('touchend', onUp);
+  canvas.addEventListener('touchcancel', onUp);
+
+  document.addEventListener('keydown', function (evt) {
+    if (evt.key === 'Enter' && !running) { startGame(); return; }
+    if (evt.key === 'r' || evt.key === 'R') { startGame(); return; }
+    if (evt.key === ' ') { if (running && !over) { paused = !paused; statusEl.textContent = paused ? 'Paused — press Space to resume.' : 'Resumed.'; } evt.preventDefault(); return; }
+    if (!running || paused || over) return;
+    var n = parseInt(evt.key, 10);
+    if (n >= 1 && n <= planes.length) {
+      selected = planes[n - 1];
+      selected.path = [];
+      statusEl.textContent = 'Selected ' + selected.colorName + ' plane #' + selected.id + ' — drag to draw its path.';
+      beep(520, 0.08, 'triangle');
+    } else if (selected) {
+      var step = 26, dx = 0, dy = 0;
+      if (evt.key === 'ArrowLeft') dx = -step;
+      if (evt.key === 'ArrowRight') dx = step;
+      if (evt.key === 'ArrowUp') dy = -step;
+      if (evt.key === 'ArrowDown') dy = step;
+      if (dx || dy) {
+        var last = selected.path.length ? selected.path[selected.path.length - 1] : { x: selected.x, y: selected.y };
+        selected.path.push({ x: Math.max(0, Math.min(W, last.x + dx)), y: Math.max(0, Math.min(H, last.y + dy)) });
+        evt.preventDefault();
+      }
+    }
+  });
+
+  function explode(x, y, color) {
+    for (var i = 0; i < 26; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 260, vy: (Math.random() - 0.5) * 260, life: 0.7 + Math.random() * 0.5, color: color });
+    }
+  }
+
+  function update(dt) {
+    elapsed += dt;
+    spawnTimer -= dt * 1000;
+    if (spawnTimer <= 0 && planes.length < 7) { spawnPlane(); spawnTimer = spawnInterval(); }
+
+    planes.forEach(function (pl) {
+      var tx, ty;
+      if (pl.path.length) { tx = pl.path[0].x; ty = pl.path[0].y; }
+      else { tx = pl.runway.x; ty = pl.runway.y; }
+      var dx = tx - pl.x, dy = ty - pl.y;
+      var dist = Math.hypot(dx, dy);
+      var targetAngle = Math.atan2(dy, dx);
+      var diff = targetAngle - pl.angle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      pl.angle += Math.max(-2.6 * dt, Math.min(2.6 * dt, diff));
+      pl.x += Math.cos(pl.angle) * pl.speed * dt;
+      pl.y += Math.sin(pl.angle) * pl.speed * dt;
+      if (pl.path.length && dist < 14) pl.path.shift();
+      pl.trail.push({ x: pl.x, y: pl.y });
+      if (pl.trail.length > 22) pl.trail.shift();
+      // Landing: reach matching runway
+      var rd = Math.hypot(pl.x - pl.runway.x, pl.y - pl.runway.y);
+      if (!pl.path.length && rd < 26) {
+        pl.dead = true; landed++; score += 100 + wave() * 25;
+        beep(880, 0.18, 'sine'); beep(1320, 0.18, 'sine');
+        statusEl.textContent = pl.colorName + ' plane #' + pl.id + ' landed safely! (' + landed + '/20)';
+      }
+      // Out of bounds with no path: keep flying, nudge back inside
+      if (pl.x < -60 || pl.x > W + 60 || pl.y < -60 || pl.y > H + 60) { pl.dead = true; }
+    });
+
+    // Collisions and near misses
+    for (var i = 0; i < planes.length; i++) {
+      for (var j = i + 1; j < planes.length; j++) {
+        var a = planes[i], b = planes[j];
+        var d = Math.hypot(a.x - b.x, a.y - b.y);
+        var key = a.id + '-' + b.id;
+        if (d < 24) {
+          a.dead = true; b.dead = true; collisions++;
+          explode((a.x + b.x) / 2, (a.y + b.y) / 2, '#ff7043');
+          beep(140, 0.4, 'sawtooth');
+          statusEl.textContent = 'Collision! Two planes went down. Collisions: ' + collisions + '/2';
+          if (selected === a || selected === b) selected = null;
+        } else if (d < 52 && !nearPairs[key]) {
+          nearPairs[key] = true; nearMisses++; score += 15;
+          statusEl.textContent = 'Near miss! Keep routes separated. Near misses: ' + nearMisses;
+          beep(300, 0.1, 'square');
+        } else if (d >= 52) { delete nearPairs[key]; }
+      }
+    }
+
+    planes = planes.filter(function (pl) { return !pl.dead; });
+    particles.forEach(function (pt) { pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt; });
+    particles = particles.filter(function (pt) { return pt.life > 0; });
+
+    if (landed >= 20) return endGame(true);
+    if (collisions >= 2) return endGame(false);
+    updateHUD();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
+    for (var gx = 0; gx <= W; gx += 70) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+    for (var gy = 0; gy <= H; gy += 70) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+    // Clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    [[150, 120], [560, 200], [330, 430], [680, 90], [90, 320]].forEach(function (c) {
+      ctx.beginPath(); ctx.arc(c[0], c[1], 34, 0, Math.PI * 2); ctx.arc(c[0] + 30, c[1] - 8, 26, 0, Math.PI * 2); ctx.fill();
+    });
+    // Runways
+    runways.forEach(function (r) {
+      ctx.fillStyle = '#1d3a5f'; ctx.strokeStyle = r.color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect(r.x - 46, r.y - 16, 92, 32, 6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(r.name.toUpperCase(), r.x, r.y + 5);
+    });
+    // Paths
+    planes.forEach(function (pl) {
+      if (pl.path.length) {
+        ctx.strokeStyle = pl.color; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.moveTo(pl.x, pl.y);
+        pl.path.forEach(function (pt) { ctx.lineTo(pt.x, pt.y); });
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+    });
+    // Planes
+    planes.forEach(function (pl) {
+      ctx.save(); ctx.translate(pl.x, pl.y); ctx.rotate(pl.angle);
+      ctx.fillStyle = pl.color;
+      ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-8, -9); ctx.lineTo(-4, 0); ctx.lineTo(-8, 9); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(2, 0, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      if (pl === selected) {
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(pl.x, pl.y, 20, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(pl.colorName, pl.x, pl.y - 22);
+    });
+    // Particles
+    particles.forEach(function (pt) {
+      ctx.globalAlpha = Math.max(0, pt.life);
+      ctx.fillStyle = pt.color; ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    if (paused) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 32px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('PAUSED', W / 2, H / 2);
+    }
+  }
+
+  function loop(ts) {
+    if (!running) return;
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime) / 1000);
+    lastTime = ts;
+    if (!paused && !over) update(dt);
+    draw();
+    if (!over) requestAnimationFrame(loop);
+    else draw();
+  }
+
+  function endGame(win) {
+    over = true; running = false;
+    endScreen.classList.remove('hidden');
+    if (win) {
+      endTitle.textContent = 'You Win! Skyport Secured';
+      endText.textContent = 'You landed 20 planes with expert routing. The skies are safe thanks to you!';
+      beep(660, 0.2, 'sine'); beep(880, 0.2, 'sine'); beep(1100, 0.3, 'sine');
+    } else {
+      endTitle.textContent = 'Game Over — Airport Closed';
+      endText.textContent = 'Two collisions shut down Skyport. Reroute wider and try again!';
+      beep(180, 0.4, 'sawtooth');
+    }
+    endStats.textContent = 'Score: ' + score + ' | Landed: ' + landed + ' | Near misses: ' + nearMisses + ' | Collisions: ' + collisions;
+    updateHUD();
+  }
+
+  function startGame() {
+    initAudio();
+    planes = []; particles = []; nearPairs = {};
+    selected = null; drawing = false; over = false; paused = false;
+    score = 0; landed = 0; nearMisses = 0; collisions = 0; spawned = 0;
+    spawnTimer = 400; elapsed = 0; lastTime = 0;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    running = true;
+    statusEl.textContent = 'Click a plane, then drag to draw its route.';
+    spawnPlane(); spawnPlane();
+    updateHUD();
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    running = false; over = false;
+    statusEl.textContent = 'Select a plane, then drag to draw its route.';
+  });
+  updateHUD();
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Glassblower Breath Control</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #12101c; color: #f5e9d5; font-family: Georgia, 'Times New Roman', serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; text-align: center; margin: 8px 0 2px; color: #ffb347; text-shadow: 0 0 12px rgba(255,179,71,.6); }
+  p.tag { text-align: center; color: #cbb; font-size: 14px; margin-bottom: 10px; }
+  #hud { width: min(680px, 96vw); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: #241f33; border: 1px solid #574a7a; border-radius: 10px; padding: 8px 12px; font-size: 15px; }
+  #hud b { color: #ffd166; }
+  #wrap { position: relative; width: min(680px, 96vw); margin-top: 10px; }
+  canvas { width: 100%; height: 460px; display: block; background: radial-gradient(circle at 50% 30%, #2b2140, #171224 70%); border: 2px solid #6b5b95; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,8,18,.86); border-radius: 14px; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffb347; font-size: 30px; }
+  .overlay p { max-width: 520px; line-height: 1.5; font-size: 15px; color: #e8dcc8; }
+  .how { background: #2a2340; border: 1px solid #5a4b80; border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 14px; line-height: 1.55; }
+  .how b { color: #ffd166; }
+  button { background: #ff7b54; color: #1a1025; border: none; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 6px; }
+  button:hover { background: #ffb347; }
+  button:active { transform: scale(.97); }
+  #blowBtn { width: min(680px, 96vw); margin-top: 10px; padding: 18px; font-size: 20px; background: #4ecdc4; }
+  #blowBtn:active { background: #ffd166; }
+  #msg { min-height: 22px; margin-top: 8px; font-size: 15px; color: #ffd166; text-align: center; }
+  .meter { width: min(680px, 96vw); margin-top: 8px; }
+  .meter label { font-size: 13px; color: #cbb; display: flex; justify-content: space-between; }
+  .bar { height: 16px; background: #2a2340; border: 1px solid #574a7a; border-radius: 999px; overflow: hidden; }
+  #pressureFill { height: 100%; width: 0%; background: linear-gradient(90deg, #4ecdc4, #ffd166, #ff5d5d); transition: width .08s linear; }
+  #targetFill { height: 100%; width: 0%; background: #ffb347; transition: width .2s linear; }
+</style>
+</head>
+<body>
+<h1>Glassblower Breath Control</h1>
+<p class="tag">Precision / Breath Pressure Crafting &mdash; shape molten glass, don't pop it!</p>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span>Lives (pops left): <b id="lives">3</b></span>
+  <span>Pieces shaped: <b id="pieces">0 / 6</b></span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="680" height="460"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Glassblower Breath Control</h2>
+    <p>At the furnace bench, a glowing blob of molten glass waits on your pipe. Breathe life into it &mdash; gently! &mdash; and sculpt it to match each customer's silhouette.</p>
+    <div class="how">
+      <b>How to Play:</b><br>
+      &bull; <b>Hold</b> SPACE, the mouse button, the big BLOW button, or your finger on the canvas to blow. <b>Release</b> to stop.<br>
+      &bull; Watch the <b>pressure gauge</b>: blowing raises pressure. If it hits the red zone, the piece <b>POPS</b> and you lose a life.<br>
+      &bull; Each piece has a <b>target silhouette</b> (dashed outline). Grow the glass to match it, then press <b>Finish Piece (F)</b> or tap Finish when the match is close.<br>
+      &bull; Match quality scores points. Shape <b>6 pieces</b> to win. <b>3 pops</b> ends the game.<br>
+      &bull; Controls: SPACE / mouse hold / touch hold to blow &middot; F or Finish button to finish &middot; R to restart.
+    </div>
+    <button id="startBtn">Start Blowing</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<div class="meter">
+  <label><span>Breath Pressure</span><span id="pressureLabel">0%</span></label>
+  <div class="bar"><div id="pressureFill"></div></div>
+</div>
+<div class="meter">
+  <label><span>Match to Target Silhouette</span><span id="matchLabel">0%</span></label>
+  <div class="bar"><div id="targetFill"></div></div>
+</div>
+<button id="blowBtn">Hold to BLOW (or hold SPACE / mouse / touch)</button>
+<div style="text-align:center; margin-top:8px;">
+  <button id="finishBtn" style="background:#ffd166;">Finish Piece (F)</button>
+</div>
+<div id="msg">Press Start, then hold to blow gently.</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var piecesEl = document.getElementById('pieces');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var pressureFill = document.getElementById('pressureFill');
+  var pressureLabel = document.getElementById('pressureLabel');
+  var targetFill = document.getElementById('targetFill');
+  var matchLabel = document.getElementById('matchLabel');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title, playing, over
+  var score = 0, pops = 0, pieces = 0;
+  var blowing = false;
+  var pressure = 0;      // 0..100
+  var heat = 100;        // glass cools slowly; cooler glass grows slower
+  var size = 18;         // current glass radius
+  var wobble = 0;
+  var popFlash = 0;
+  var finishFlash = 0;
+  var pieceIndex = 0;
+
+  // Target silhouettes: each is a profile of radii at heights, scaled to a base radius.
+  // Distinct vessel shapes: round vase, tall bottle, wide bowl, bud vase, goblet, decanter.
+  var TARGETS = [
+    { name: 'Round Vase', profile: [0.45, 0.85, 1.0, 0.95, 0.7, 0.42], base: 78 },
+    { name: 'Tall Bottle', profile: [0.55, 0.7, 0.72, 0.6, 0.32, 0.28], base: 92 },
+    { name: 'Wide Bowl', profile: [0.5, 0.95, 1.0, 0.9, 0.62, 0.35], base: 95 },
+    { name: 'Bud Vase', profile: [0.4, 0.55, 0.62, 0.5, 0.3, 0.24], base: 105 },
+    { name: 'Goblet', profile: [0.35, 0.85, 1.0, 0.8, 0.4, 0.55], base: 88 },
+    { name: 'Decanter', profile: [0.5, 0.9, 1.0, 0.75, 0.38, 0.3], base: 96 }
+  ];
+  var target = TARGETS[0];
+
+  // --- Procedural Web Audio (created only after user interaction) ---
+  var audioCtx = null, blowOsc = null, blowGain = null;
+  function ensureAudio() {
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function startBlowSound() {
+    ensureAudio();
+    if (!audioCtx || blowOsc) return;
+    blowOsc = audioCtx.createOscillator();
+    blowOsc.type = 'sine';
+    blowOsc.frequency.value = 180;
+    blowGain = audioCtx.createGain();
+    blowGain.gain.value = 0.0;
+    blowOsc.connect(blowGain);
+    blowGain.connect(audioCtx.destination);
+    blowOsc.start();
+  }
+  function updateBlowSound() {
+    if (!audioCtx || !blowOsc) return;
+    var t = audioCtx.currentTime;
+    blowGain.gain.setTargetAtTime(blowing ? 0.12 + pressure / 900 : 0.0, t, 0.05);
+    blowOsc.frequency.setTargetAtTime(160 + pressure * 1.4, t, 0.05);
+  }
+  function stopBlowSound() {
+    if (!blowOsc) return;
+    try { blowOsc.stop(); } catch (e) {}
+    blowOsc = null; blowGain = null;
+  }
+  function beep(freq, dur, type) {
+    ensureAudio();
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'triangle'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function popSound() {
+    ensureAudio();
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(700, audioCtx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.25);
+      g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + 0.3);
+    } catch (e) {}
+  }
+
+  function setStatus(s) { statusEl.textContent = s; }
+  function setMsg(s) { msgEl.textContent = s; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = Math.max(0, 3 - pops);
+    piecesEl.textContent = pieces + ' / 6';
+  }
+  function matchPercent() {
+    // Compare current size to the target's average radius.
+    var sum = 0;
+    for (var i = 0; i < target.profile.length; i++) sum += target.profile[i];
+    var avg = (sum / target.profile.length) * target.base;
+    var diff = Math.abs(size - avg) / avg;
+    return Math.max(0, Math.min(100, Math.round(100 - diff * 100)));
+  }
+  function newPiece() {
+    pieceIndex = pieces % TARGETS.length;
+    target = TARGETS[pieceIndex];
+    size = 18; pressure = 0; heat = 100; wobble = 0;
+    setStatus('Shaping: ' + target.name);
+    setMsg('New piece: ' + target.name + '. Blow gently to match the dashed silhouette.');
+    updateHUD();
+  }
+  function startGame() {
+    ensureAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    score = 0; pops = 0; pieces = 0;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    newPiece();
+    setMsg('Hold to blow! Keep pressure out of the red zone.');
+    beep(520, 0.15);
+  }
+  function finishPiece() {
+    if (state !== 'playing') return;
+    var m = matchPercent();
+    if (m < 55) {
+      setMsg('Not close enough yet (' + m + '% match). Keep shaping to at least 55%!');
+      beep(180, 0.2, 'square');
+      return;
+    }
+    var gained = 50 + m;
+    score += gained;
+    pieces++;
+    finishFlash = 1;
+    beep(880, 0.25); setTimeout(function () { beep(1170, 0.3); }, 120);
+    if (pieces >= 6) { winGame(); return; }
+    setMsg('Beautiful ' + target.name + '! +' + gained + ' points (' + m + '% match). Next piece...');
+    updateHUD();
+    newPiece();
+  }
+  function popPiece() {
+    pops++;
+    popFlash = 1;
+    popSound();
+    stopBlowSound();
+    blowing = false;
+    updateHUD();
+    if (pops >= 3) { gameOver(); return; }
+    setMsg('POP! The glass burst. ' + (3 - pops) + ' life(s) left. A fresh blob is on the pipe.');
+    setStatus('Popped! Fresh blob ready');
+    newPiece();
+  }
+  function winGame() {
+    state = 'over';
+    stopBlowSound();
+    updateHUD();
+    setStatus('Master Glassblower!');
+    endTitle.textContent = 'You Win!';
+    endText.textContent = 'You shaped all 6 pieces without losing your bench. Final score: ' + score + '. You are a master glassblower!';
+    endScreen.classList.remove('hidden');
+  }
+  function gameOver() {
+    state = 'over';
+    stopBlowSound();
+    updateHUD();
+    setStatus('Bench closed');
+    endTitle.textContent = 'Game Over';
+    endText.textContent = 'Three pieces popped. You shaped ' + pieces + ' of 6 pieces, scoring ' + score + ' points. Try again!';
+    endScreen.classList.remove('hidden');
+  }
+
+  // --- Input: keyboard, mouse, touch ---
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space') { e.preventDefault(); if (state === 'playing') { blowing = true; startBlowSound(); } }
+    if (e.code === 'KeyF') finishPiece();
+    if (e.code === 'KeyR' && state === 'over') startGame();
+  });
+  document.addEventListener('keyup', function (e) {
+    if (e.code === 'Space') { blowing = false; }
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    if (state === 'playing') { blowing = true; startBlowSound(); }
+  });
+  document.addEventListener('mouseup', function () { blowing = false; });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    if (state === 'playing') { blowing = true; startBlowSound(); }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); blowing = false; }, { passive: false });
+  canvas.addEventListener('touchcancel', function () { blowing = false; });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('finishBtn').addEventListener('click', finishPiece);
+  var blowBtn = document.getElementById('blowBtn');
+  blowBtn.addEventListener('mousedown', function () { if (state === 'playing') { blowing = true; startBlowSound(); } });
+  blowBtn.addEventListener('mouseup', function () { blowing = false; });
+  blowBtn.addEventListener('touchstart', function (e) { e.preventDefault(); if (state === 'playing') { blowing = true; startBlowSound(); } }, { passive: false });
+  blowBtn.addEventListener('touchend', function (e) { e.preventDefault(); blowing = false; }, { passive: false });
+
+  // --- Drawing ---
+  function drawGlass(cx, cy) {
+    var pts = [];
+    var n = target.profile.length;
+    for (var i = 0; i < n; i++) {
+      var t = i / (n - 1);
+      var r = size * target.profile[i] * (1 + Math.sin(wobble * 3 + i) * 0.02);
+      var y = cy - 150 + t * 190;
+      pts.push([cx - r, y]); pts.push([cx + r, y]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 150);
+    for (var j = 0; j < pts.length; j++) { ctx.lineTo(pts[j][0], pts[j][1]); }
+    ctx.closePath();
+    var grad = ctx.createRadialGradient(cx - size * 0.3, cy - 80, 10, cx, cy, size + 60);
+    grad.addColorStop(0, 'rgba(255,220,150,0.95)');
+    grad.addColorStop(0.5, 'rgba(255,140,60,0.85)');
+    grad.addColorStop(1, 'rgba(200,60,20,0.75)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,240,200,0.7)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // glow highlight
+    ctx.beginPath();
+    ctx.ellipse(cx - size * 0.35, cy - 60, size * 0.12, size * 0.5, 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fill();
+  }
+  function drawTarget(cx, cy) {
+    var n = target.profile.length;
+    ctx.beginPath();
+    ctx.setLineDash([7, 7]);
+    ctx.strokeStyle = 'rgba(255,209,102,0.9)';
+    ctx.lineWidth = 2;
+    for (var i = 0; i < n; i++) {
+      var t = i / (n - 1);
+      var r = target.base * target.profile[i];
+      var y = cy - 150 + t * 190;
+      if (i === 0) ctx.moveTo(cx - r, y); else ctx.lineTo(cx - r, y);
+    }
+    for (var i = n - 1; i >= 0; i--) {
+      var t2 = i / (n - 1);
+      var r2 = target.base * target.profile[i];
+      var y2 = cy - 150 + t2 * 190;
+      ctx.lineTo(cx + r2, y2);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ffd166';
+    ctx.font = '16px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('Target: ' + target.name, cx, 28);
+  }
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // furnace glow background
+    ctx.fillStyle = 'rgba(255,120,40,0.12)';
+    ctx.beginPath(); ctx.arc(340, 400, 150, 0, Math.PI * 2); ctx.fill();
+    // bench + pipe
+    ctx.fillStyle = '#4a3b2c';
+    ctx.fillRect(60, 400, 560, 18);
+    ctx.fillStyle = '#8a8a9a';
+    ctx.fillRect(330, 250, 20, 170);
+    ctx.fillStyle = '#c0c0d0';
+    ctx.fillRect(334, 250, 4, 170);
+    if (state !== 'title') {
+      drawTarget(340, 300);
+      if (popFlash <= 0) drawGlass(340, 300);
+    } else {
+      ctx.fillStyle = '#e8dcc8';
+      ctx.font = '20px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText('The furnace is hot. Press Start to begin.', 340, 200);
+    }
+    if (popFlash > 0) {
+      ctx.fillStyle = 'rgba(255,80,40,' + (popFlash * 0.5) + ')';
+      ctx.font = 'bold 44px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText('POP!', 340, 200);
+      for (var s = 0; s < 14; s++) {
+        var a = Math.random() * Math.PI * 2, d = Math.random() * 90;
+        ctx.fillStyle = 'rgba(255,' + (100 + Math.floor(Math.random() * 120)) + ',60,0.9)';
+        ctx.fillRect(340 + Math.cos(a) * d, 180 + Math.sin(a) * d, 5, 5);
+      }
+    }
+    if (finishFlash > 0) {
+      ctx.fillStyle = 'rgba(255,209,102,' + finishFlash + ')';
+      ctx.font = 'bold 30px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText('Lovely piece!', 340, 90);
+    }
+    // heat shimmer label
+    ctx.fillStyle = '#cbb';
+    ctx.font = '14px Georgia';
+    ctx.textAlign = 'left';
+    ctx.fillText('Heat: ' + Math.round(heat) + '%', 16, 445);
+    ctx.fillText('Target: ' + target.name, 480, 445);
+  }
+
+  // --- Main loop ---
+  function loop() {
+    if (state === 'playing') {
+      wobble += 0.05;
+      if (blowing) {
+        pressure += 0.9 + (100 - heat) * 0.004;
+        var growth = 0.55 * (heat / 100) + 0.15;
+        size += growth;
+        heat = Math.max(30, heat - 0.05);
+        if (pressure >= 100) { pressure = 100; popPiece(); }
+      } else {
+        pressure = Math.max(0, pressure - 1.4);
+        heat = Math.min(100, heat + 0.08);
+        size = Math.max(16, size - 0.02);
+      }
+      updateBlowSound();
+      var m = matchPercent();
+      pressureFill.style.width = pressure + '%';
+      pressureLabel.textContent = Math.round(pressure) + '%';
+      targetFill.style.width = m + '%';
+      matchLabel.textContent = m + '%';
+      if (pressure > 82 && Math.floor(performance.now() / 400) % 2 === 0) {
+        setMsg('WARNING: pressure critical! Release now or it pops!');
+      }
+    }
+    if (popFlash > 0) popFlash -= 0.02;
+    if (finishFlash > 0) finishFlash -= 0.02;
+    draw();
+    requestAnimationFrame(loop);
+  }
+  updateHUD();
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
