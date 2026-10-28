@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 10
-- **Latest game:** 0010 — Skyline Leap
+- **Total games:** 20
+- **Latest game:** 0020 — Clockwork City
 - **Current volume:** 001 (Games 0001 to 0100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -13,7 +13,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 | Volume | Games | Catalog |
 |--------|-------|---------|
-| 001 | 0001–0010 (10 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
+| 001 | 0001–0020 (20 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -27,20 +27,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 001
+## Latest batch — Batch 002
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0001 | Starfall Vanguard | Arcade / Space Shmup | [Play](./games/game-0001.html) |
-| 0002 | Crate Keeper | Puzzle / Sokoban Logic | [Play](./games/game-0002.html) |
-| 0003 | Ember Bastion | Strategy / Micro Tower Defense | [Play](./games/game-0003.html) |
-| 0004 | Pulse Tap | Rhythm / Beat Timing | [Play](./games/game-0004.html) |
-| 0005 | Mirror Maze | Puzzle / Laser Reflection | [Play](./games/game-0005.html) |
-| 0006 | Slingshot Summit | Precision / Trajectory Launcher | [Play](./games/game-0006.html) |
-| 0007 | Dune Dash | Arcade / Line Runner | [Play](./games/game-0007.html) |
-| 0008 | Gem Cascade | Puzzle / Sliding Match | [Play](./games/game-0008.html) |
-| 0009 | Haven Colony | Simulation / Resource Allocator | [Play](./games/game-0009.html) |
-| 0010 | Skyline Leap | Platformer / Precision | [Play](./games/game-0010.html) |
+| 0011 | Comet Courier | Arcade / Parcel Dash | [Play](./games/game-0011.html) |
+| 0012 | Hex Vault | Puzzle / Circuit Logic | [Play](./games/game-0012.html) |
+| 0013 | Harbor Master | Strategy / Port Logistics | [Play](./games/game-0013.html) |
+| 0014 | Echo Drums | Rhythm / Pattern Memory | [Play](./games/game-0014.html) |
+| 0015 | Abyss Angler | Arcade / Deep-Sea Catch | [Play](./games/game-0015.html) |
+| 0016 | Glyph Grid | Puzzle / Symbol Deduction | [Play](./games/game-0016.html) |
+| 0017 | Meadow Market | Simulation / Farm Trading | [Play](./games/game-0017.html) |
+| 0018 | Pendulum Perch | Precision / Balance Swing | [Play](./games/game-0018.html) |
+| 0019 | Storm Chaser | Arcade / Weather Dodge | [Play](./games/game-0019.html) |
+| 0020 | Clockwork City | Strategy / Gear Builder | [Play](./games/game-0020.html) |
 
 ## Quality standard
 

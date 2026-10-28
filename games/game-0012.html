@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Hex Vault - Puzzle Circuit Logic</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { background: #0d1420; color: #e8eefc; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 26px; letter-spacing: 2px; color: #ffd166; text-shadow: 0 0 12px rgba(255,209,102,.5); margin: 6px 0 2px; text-align: center; }
+  .sub { font-size: 13px; color: #9fb3d9; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 760px; margin-bottom: 8px; }
+  .stat { background: #16233a; border: 1px solid #2a3f66; border-radius: 10px; padding: 7px 14px; font-size: 15px; min-width: 130px; text-align: center; }
+  .stat b { color: #ffd166; }
+  #status { color: #7ee2a8; font-weight: bold; }
+  #wrap { position: relative; width: 100%; max-width: 760px; }
+  canvas { display: block; width: 100%; height: auto; background: radial-gradient(circle at 50% 40%, #16233a 0%, #0a1120 70%); border: 2px solid #2a3f66; border-radius: 14px; touch-action: manipulation; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(5,10,20,.88); border-radius: 14px; padding: 20px; text-align: center; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffd166; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #c7d6f2; max-width: 520px; }
+  .overlay .small { font-size: 13px; color: #9fb3d9; }
+  button { background: #ffd166; color: #1a1200; border: none; border-radius: 10px; padding: 13px 30px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  button.secondary { background: #2a3f66; color: #e8eefc; box-shadow: 0 4px 0 #16233a; }
+  #controls { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  #controls button { padding: 10px 18px; font-size: 15px; }
+  .legend { font-size: 12.5px; color: #9fb3d9; margin-top: 8px; text-align: center; line-height: 1.5; }
+  .gold { color: #ffd166; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>&#11042; HEX VAULT &#11042;</h1>
+<div class="sub">Rotate the hex tiles. Reconnect the power source to every vault lock before you run out of rotations.</div>
+
+<div id="hud">
+  <div class="stat">Score: <b id="score">1000</b></div>
+  <div class="stat">Rotations left: <b id="moves">40</b></div>
+  <div class="stat">Locks: <b id="locks">0 / 5</b></div>
+  <div class="stat">Status: <b id="status">Ready</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="540"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>&#11042; HEX VAULT &#11042;</h2>
+    <p><b>How to Play:</b> A power surge scrambled the vault wiring. Every hex tile carries pipes on some of its six sides. Click or tap a hex to rotate it 60&deg;. Use the <b>arrow keys</b> to move the glowing selection ring and press <b>Enter</b> or <b>Space</b> to rotate the selected tile.</p>
+    <p>Power flows only where two neighbouring pipes meet edge to edge. Light up all <b>5 vault locks</b> (the padlock hexes) to win. Each rotation costs 1 move &mdash; you have <b>40 rotations</b>. Fewer moves used means a higher score.</p>
+    <p class="small">Tip: start at the glowing power core and trace one branch at a time. Locked tiles with a single pipe must point exactly at their neighbour.</p>
+    <button id="startBtn">▶ START GAME</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">VAULT OPEN!</h2>
+    <p id="endText"></p>
+    <p class="small" id="endScore"></p>
+    <button id="restartBtn">↻ PLAY AGAIN</button>
+    <button id="menuBtn" class="secondary">How to Play</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="shuffleBtn" class="secondary">↻ New Puzzle</button>
+  <button id="hintBtn" class="secondary">💡 Hint: highlight powered</button>
+  <button id="soundBtn" class="secondary">🔊 Sound: ON</button>
+</div>
+<div class="legend">
+  <span class="gold">● Gold pipes</span> = powered &nbsp;|&nbsp; Grey pipes = unpowered &nbsp;|&nbsp;
+  ⚡ = power core &nbsp;|&nbsp; 🔒 = vault lock &nbsp;|&nbsp; Click / tap / arrows + Enter / Space to rotate
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var movesEl = document.getElementById('moves');
+  var locksEl = document.getElementById('locks');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endScore = document.getElementById('endScore');
+
+  // Axial directions: 0 E, 1 NE, 2 NW, 3 W, 4 SW, 5 SE
+  var DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+  function key(q, r) { return q + ',' + r; }
+  function opp(d) { return (d + 3) % 6; }
+
+  // Solved puzzle graph: [q, r, type, baseDirs]  type: source | pipe | lock
+  var LAYOUT = [
+    [0, 2, 'source', [0]],
+    [1, 2, 'pipe',   [3, 0, 1]],
+    [2, 2, 'pipe',   [3, 1, 5]],
+    [2, 1, 'pipe',   [4, 2]],
+    [2, 0, 'lock',   [5]],
+    [3, 1, 'pipe',   [4, 5, 1]],
+    [3, 2, 'lock',   [2]],
+    [4, 0, 'lock',   [4]],
+    [2, 3, 'pipe',   [2, 0, 4]],
+    [3, 3, 'lock',   [3]],
+    [1, 4, 'lock',   [1]]
+  ];
+
+  var SIZE = 52;
+  var tiles = [];
+  var tileMap = {};
+  var selected = 0;
+  var score = 1000;
+  var movesLeft = 40;
+  var gameState = 'title'; // title | playing | won | lost
+  var showPoweredOnly = false;
+  var soundOn = true;
+  var pulse = 0;
+
+  // ---- Audio: procedural Web Audio, created only after user interaction ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function playRotate() { beep(320 + Math.random() * 80, 0.09, 'triangle', 0.12); }
+  function playPower() { beep(880, 0.12, 'sine', 0.12); setTimeout(function () { beep(1320, 0.15, 'sine', 0.10); }, 90); }
+  function playWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, 0.22, 'triangle', 0.14); }, i * 130); }); }
+  function playLose() { [300, 220, 160, 110].forEach(function (f, i) { setTimeout(function () { beep(f, 0.22, 'sawtooth', 0.08); }, i * 140); }); }
+
+  function buildPuzzle() {
+    tiles = []; tileMap = {};
+    LAYOUT.forEach(function (row) {
+      var t = { q: row[0], r: row[1], type: row[2], base: row[3].slice(), rot: 0 };
+      tiles.push(t);
+      tileMap[key(t.q, t.r)] = t;
+    });
+    // Scramble: random rotation per tile, but never leave it already solved.
+    tiles.forEach(function (t) { t.rot = Math.floor(Math.random() * 6); });
+    if (isSolved()) { tiles[1].rot = (tiles[1].rot + 1) % 6; }
+    selected = 0;
+    score = 1000;
+    movesLeft = 40;
+    updateHUD('Playing - rotate tiles to connect the power!');
+  }
+
+  function effDirs(t) {
+    return t.base.map(function (d) { return (d + t.rot) % 6; });
+  }
+  function hasEff(t, d) { return effDirs(t).indexOf(d) !== -1; }
+
+  function poweredSet() {
+    var powered = {};
+    var src = tiles[0];
+    var queue = [src];
+    powered[key(src.q, src.r)] = true;
+    while (queue.length) {
+      var u = queue.shift();
+      effDirs(u).forEach(function (d) {
+        var nq = u.q + DIRS[d][0], nr = u.r + DIRS[d][1];
+        var v = tileMap[key(nq, nr)];
+        if (v && hasEff(v, opp(d)) && !powered[key(nq, nr)]) {
+          powered[key(nq, nr)] = true;
+          queue.push(v);
+        }
+      });
+    }
+    return powered;
+  }
+  function locksPowered() {
+    var p = poweredSet();
+    var total = 0, done = 0;
+    tiles.forEach(function (t) {
+      if (t.type === 'lock') { total++; if (p[key(t.q, t.r)]) done++; }
+    });
+    return { done: done, total: total };
+  }
+  function isSolved() {
+    var lp = locksPowered();
+    return lp.done === lp.total;
+  }
+
+  function updateHUD(msg) {
+    var lp = locksPowered();
+    scoreEl.textContent = score;
+    movesEl.textContent = movesLeft;
+    locksEl.textContent = lp.done + ' / ' + lp.total;
+    if (msg) statusEl.textContent = msg;
+  }
+
+  function rotateTile(t) {
+    if (gameState !== 'playing') return;
+    t.rot = (t.rot + 1) % 6;
+    movesLeft--;
+    score = Math.max(0, score - 10);
+    playRotate();
+    var lp = locksPowered();
+    if (isSolved()) {
+      score += movesLeft * 25 + 500;
+      gameState = 'won';
+      playWin();
+      updateHUD('VAULT OPEN - you win!');
+      endTitle.textContent = 'VAULT OPEN!';
+      endText.textContent = 'Every vault lock is powered. The vault doors swing open and the treasure is yours.';
+      endScore.textContent = 'Final score: ' + score + '  |  Rotations left: ' + movesLeft;
+      endScreen.classList.remove('hidden');
+    } else if (movesLeft <= 0) {
+      gameState = 'lost';
+      playLose();
+      updateHUD('Out of rotations - game over');
+      endTitle.textContent = 'POWER LOST';
+      endText.textContent = 'You ran out of rotations with ' + lp.done + ' of ' + lp.total + ' locks powered. Study the layout and try again.';
+      endScore.textContent = 'Final score: ' + score;
+      endScreen.classList.remove('hidden');
+    } else {
+      if (lp.done > 0) { playPower(); }
+      updateHUD(lp.done + ' of ' + lp.total + ' locks powered - keep going!');
+    }
+    updateHUD();
+  }
+
+  // ---- Hex geometry (pointy-top axial) ----
+  function hexCenter(t) {
+    var x = SIZE * Math.sqrt(3) * (t.q + t.r / 2) + 380;
+    var y = SIZE * 1.5 * t.r + 130;
+    return { x: x, y: y };
+  }
+  function hexCorners(cx, cy) {
+    var pts = [];
+    for (var i = 0; i < 6; i++) {
+      var a = Math.PI / 180 * (60 * i - 90);
+      pts.push({ x: cx + SIZE * Math.cos(a), y: cy + SIZE * Math.sin(a) });
+    }
+    return pts;
+  }
+  function hexCornerDir(d) {
+    // Direction toward neighbour d for pointy-top axial hexes:
+    // E 0 deg, NE -60, NW -120, W 180, SW 120, SE 60.
+    var a = Math.PI / 180 * (-60 * d);
+    return { x: Math.cos(a), y: Math.sin(a) };
+  }
+  function pixelToTile(px, py) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (px - rect.left) * (canvas.width / rect.width) - 380;
+    var y = (py - rect.top) * (canvas.height / rect.height) - 130;
+    var qf = (Math.sqrt(3) / 3 * x - 1 / 3 * y) / SIZE;
+    var rf = (2 / 3 * y) / SIZE;
+    // Cube rounding
+    var xf = qf, zf = rf, yf = -xf - zf;
+    var rx = Math.round(xf), ry = Math.round(yf), rz = Math.round(zf);
+    var dx = Math.abs(rx - xf), dy = Math.abs(ry - yf), dz = Math.abs(rz - zf);
+    if (dx > dy && dx > dz) rx = -ry - rz;
+    else if (dy > dz) ry = -rx - rz;
+    else rz = -rx - ry;
+    return tileMap[key(rx, rz)];
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    var powered = poweredSet();
+    // Connection lines between powered neighbours, drawn under tiles
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    tiles.forEach(function (t) {
+      if (!powered[key(t.q, t.r)]) return;
+      var c = hexCenter(t);
+      effDirs(t).forEach(function (d) {
+        var v = tileMap[key(t.q + DIRS[d][0], t.r + DIRS[d][1])];
+        if (v && powered[key(v.q, v.r)] && hasEff(v, opp(d))) {
+          var vc = hexCenter(v);
+          ctx.strokeStyle = 'rgba(255,209,102,0.85)';
+          ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(vc.x, vc.y); ctx.stroke();
+        }
+      });
+    });
+    tiles.forEach(function (t, idx) {
+      var c = hexCenter(t);
+      var corners = hexCorners(c.x, c.y);
+      var isPow = !!powered[key(t.q, t.r)];
+      // Tile body
+      ctx.beginPath();
+      corners.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.closePath();
+      ctx.fillStyle = t.type === 'source' ? '#3a2a00' : (isPow ? '#1d3357' : '#141f33');
+      ctx.fill();
+      ctx.strokeStyle = (gameState === 'playing' && idx === selected) ? '#ffd166' : (isPow ? '#ffd166' : '#2a3f66');
+      ctx.lineWidth = (gameState === 'playing' && idx === selected) ? 4 : 2;
+      ctx.stroke();
+      // Pipes
+      effDirs(t).forEach(function (d) {
+        var dir = hexCornerDir(d);
+        var ex = c.x + dir.x * SIZE * 0.92, ey = c.y + dir.y * SIZE * 0.92;
+        var neighbour = tileMap[key(t.q + DIRS[d][0], t.r + DIRS[d][1])];
+        var linked = isPow && neighbour && powered[key(neighbour.q, neighbour.r)] && hasEff(neighbour, opp(d));
+        ctx.strokeStyle = linked ? '#ffd166' : '#5a739e';
+        ctx.lineWidth = linked ? 7 : 5;
+        ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(ex, ey); ctx.stroke();
+      });
+      // Centre node
+      ctx.beginPath(); ctx.arc(c.x, c.y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = isPow ? '#ffd166' : '#5a739e';
+      ctx.fill();
+      // Icons
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      if (t.type === 'source') {
+        ctx.font = 'bold 26px Arial';
+        ctx.fillStyle = '#ffe082';
+        ctx.fillText('⚡', c.x, c.y - 24);
+      } else if (t.type === 'lock') {
+        ctx.font = 'bold 22px Arial';
+        ctx.fillStyle = isPow ? '#7ee2a8' : '#c7d6f2';
+        ctx.fillText(isPow ? '🔓' : '🔒', c.x, c.y - 24);
+      }
+      // Selection ring pulse
+      if (gameState === 'playing' && idx === selected) {
+        ctx.beginPath(); ctx.arc(c.x, c.y, SIZE * 0.62 + Math.sin(pulse) * 3, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,209,102,0.55)'; ctx.lineWidth = 2; ctx.stroke();
+      }
+    });
+    // Hint mode: dim unpowered tiles
+    if (showPoweredOnly && gameState === 'playing') {
+      ctx.fillStyle = 'rgba(5,10,20,0.25)';
+      tiles.forEach(function (t) {
+        if (!powered[key(t.q, t.r)]) {
+          var c = hexCenter(t);
+          ctx.beginPath(); ctx.arc(c.x, c.y, SIZE * 0.9, 0, Math.PI * 2); ctx.fill();
+        }
+      });
+    }
+  }
+
+  function loop(ts) {
+    pulse = ts / 300;
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Controls: mouse, touch, keyboard ----
+  function tileFromEvent(e) {
+    var x, y;
+    if (e.touches && e.touches.length) { x = e.touches[0].clientX; y = e.touches[0].clientY; }
+    else { x = e.clientX; y = e.clientY; }
+    return pixelToTile(x, y);
+  }
+  canvas.addEventListener('click', function (e) {
+    ensureAudio();
+    if (gameState !== 'playing') return;
+    var t = tileFromEvent(e);
+    if (t) { selected = tiles.indexOf(t); rotateTile(t); }
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio();
+    if (gameState !== 'playing') return;
+    e.preventDefault();
+    var t = tileFromEvent(e);
+    if (t) { selected = tiles.indexOf(t); rotateTile(t); }
+  }, { passive: false });
+  canvas.addEventListener('mousemove', function (e) {
+    if (gameState !== 'playing') return;
+    var t = tileFromEvent(e);
+    if (t) selected = tiles.indexOf(t);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (gameState !== 'playing') {
+      if ((e.key === 'Enter' || e.key === ' ') && gameState === 'title') { startGame(); }
+      else if ((e.key === 'Enter' || e.key === ' ') && (gameState === 'won' || gameState === 'lost')) { restartGame(); }
+      return;
+    }
+    var cur = tiles[selected];
+    var moved = false;
+    var order = tiles.slice();
+    function neighbourIn(dx, dy) {
+      // Pick the tile closest in the requested screen direction
+      var cc = hexCenter(cur);
+      var best = null, bestScore = 1e9;
+      tiles.forEach(function (t) {
+        var c = hexCenter(t);
+        var vx = c.x - cc.x, vy = c.y - cc.y;
+        if (vx * dx + vy * dy <= 0) return;
+        var dist = Math.sqrt(vx * vx + vy * vy);
+        var align = (vx * dx + vy * vy) / dist;
+        var s = dist / (align + 0.2);
+        if (s < bestScore) { bestScore = s; best = t; }
+      });
+      return best;
+    }
+    if (e.key === 'ArrowRight') { var n = neighbourIn(1, 0); if (n) { selected = tiles.indexOf(n); moved = true; } }
+    else if (e.key === 'ArrowLeft') { var n2 = neighbourIn(-1, 0); if (n2) { selected = tiles.indexOf(n2); moved = true; } }
+    else if (e.key === 'ArrowUp') { var n3 = neighbourIn(0, -1); if (n3) { selected = tiles.indexOf(n3); moved = true; } }
+    else if (e.key === 'ArrowDown') { var n4 = neighbourIn(0, 1); if (n4) { selected = tiles.indexOf(n4); moved = true; } }
+    else if (e.key === 'Enter' || e.key === ' ') { ensureAudio(); e.preventDefault(); rotateTile(cur); }
+    if (moved) { e.preventDefault(); beep(500, 0.05, 'sine', 0.05); }
+  });
+
+  // ---- Buttons ----
+  function startGame() {
+    ensureAudio();
+    buildPuzzle();
+    gameState = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Playing - rotate tiles to connect the power!');
+  }
+  function restartGame() {
+    ensureAudio();
+    buildPuzzle();
+    gameState = 'playing';
+    endScreen.classList.add('hidden');
+    titleScreen.classList.add('hidden');
+    updateHUD('New puzzle - rotate tiles to connect the power!');
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', restartGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+    gameState = 'title';
+  });
+  document.getElementById('shuffleBtn').addEventListener('click', function () {
+    ensureAudio();
+    if (gameState === 'title') { startGame(); return; }
+    restartGame();
+  });
+  document.getElementById('hintBtn').addEventListener('click', function () {
+    ensureAudio();
+    showPoweredOnly = !showPoweredOnly;
+    this.textContent = showPoweredOnly ? '💡 Hint: ON' : '💡 Hint: highlight powered';
+  });
+  document.getElementById('soundBtn').addEventListener('click', function () {
+    ensureAudio();
+    soundOn = !soundOn;
+    this.textContent = soundOn ? '🔊 Sound: ON' : '🔇 Sound: OFF';
+  });
+
+  buildPuzzle();
+  gameState = 'title';
+  updateHUD('Press START to power the vault');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

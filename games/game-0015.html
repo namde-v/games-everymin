@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Abyss Angler — Game 0015</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #02111f; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 1px; color: #7dd3fc; text-shadow: 0 2px 10px rgba(125,211,252,.5); margin: 6px 0 2px; text-align: center; }
+  p.tag { color: #a5c8dd; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(92vw, 840px); }
+  canvas { width: 100%; height: 520px; display: block; background: linear-gradient(#0b3d66 0%, #062a4a 30%, #031a33 62%, #010d1e 100%); border: 3px solid #38bdf8; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; width: min(92vw, 840px); margin: 10px 0; }
+  .pill { background: #0f2f4d; border: 1px solid #38bdf8; border-radius: 999px; padding: 8px 13px; font-weight: bold; font-size: 14px; }
+  .pill.warn { background: #5b1a1a; border-color: #f87171; }
+  #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(1, 12, 26, 0.82); border-radius: 14px; padding: 18px; }
+  .card { max-width: 560px; text-align: center; background: #07233d; border: 2px solid #38bdf8; border-radius: 16px; padding: 22px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .card h2 { font-size: 34px; color: #7dd3fc; margin-bottom: 8px; }
+  .card h3 { color: #fde68a; margin: 14px 0 6px; }
+  .card p, .card li { font-size: 15px; line-height: 1.55; color: #dbeafe; }
+  .card ul { text-align: left; margin: 0 auto; max-width: 460px; }
+  button { cursor: pointer; background: #f59e0b; color: #111827; border: none; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: bold; margin-top: 16px; box-shadow: 0 4px 0 #92400e; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #38bdf8; box-shadow: 0 4px 0 #075985; }
+  #hint { color: #9fc6dd; font-size: 13px; text-align: center; width: min(92vw, 840px); line-height: 1.5; }
+  .legend { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+  .legend span { background: rgba(255,255,255,.08); padding: 5px 9px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<h1>🪝 ABYSS ANGLER</h1>
+<p class="tag">Game #0015 &bull; Arcade / Deep-Sea Catch &bull; Fully offline</p>
+
+<div id="hud">
+  <div class="pill" id="scorePill">Score: 0</div>
+  <div class="pill" id="quotaPill">Quota: 0 / 150</div>
+  <div class="pill" id="livesPill">Lives: ❤❤❤</div>
+  <div class="pill" id="timePill">Time: 90s</div>
+  <div class="pill" id="statusPill">Status: Ready</div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="840" height="520"></canvas>
+  <div id="overlay">
+    <div class="card" id="card"></div>
+  </div>
+</div>
+
+<p id="hint">Move the boat with mouse / touch drag or Arrow keys. Press Space or click / tap to drop and reel the hook. Catch fish, dodge jellyfish and trash!</p>
+<div class="legend"><span>🐟 Small Fish +10</span><span>🐠 Reef Fish +20</span><span>🦈 Rare Fish +40</span><span>🪼 Jellyfish −1 life</span><span>🗑 Trash −1 life</span></div>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var card = document.getElementById('card');
+  var scorePill = document.getElementById('scorePill');
+  var quotaPill = document.getElementById('quotaPill');
+  var livesPill = document.getElementById('livesPill');
+  var timePill = document.getElementById('timePill');
+  var statusPill = document.getElementById('statusPill');
+
+  var W = 840, H = 520;
+  var state = 'title'; // title, playing, win, over
+  var score = 0, lives = 3, timeLeft = 90, quota = 150;
+  var lastTime = 0, elapsed = 0, flash = 0, flashText = '';
+  var keys = {};
+
+  var boat = { x: 420, speed: 280 };
+  var hook = { x: 420, y: 78, state: 'idle', swing: 0, swingDir: 1, caught: null, depth: 0 };
+  var fishes = [], hazards = [], bubbles = [], particles = [];
+
+  // ---------- Audio: procedural only, created after user interaction ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundCatch() { beep(520, 0.12, 'sine', 0.15); setTimeout(function(){ beep(780, 0.15, 'sine', 0.15); }, 80); }
+  function soundHurt() { beep(140, 0.3, 'sawtooth', 0.16); }
+  function soundWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'triangle', 0.15); }, i * 130); }); }
+
+  // ---------- Setup ----------
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function spawnCreatures() {
+    fishes = []; hazards = [];
+    var kinds = [
+      { name: 'Small Fish', emoji: '🐟', value: 10, depth: [150, 300], speed: [40, 80], size: 18 },
+      { name: 'Reef Fish', emoji: '🐠', value: 20, depth: [220, 380], speed: [55, 100], size: 22 },
+      { name: 'Rare Fish', emoji: '🦈', value: 40, depth: [330, 470], speed: [80, 130], size: 28 }
+    ];
+    for (var i = 0; i < 16; i++) {
+      var k = kinds[i % 3];
+      var dir = Math.random() < 0.5 ? 1 : -1;
+      fishes.push({ kind: k, x: dir > 0 ? rand(-60, 200) : rand(640, 900), y: rand(k.depth[0], k.depth[1]), dir: dir, speed: rand(k.speed[0], k.speed[1]), wob: rand(0, 6) });
+    }
+    for (var j = 0; j < 7; j++) {
+      var bad = Math.random() < 0.55;
+      hazards.push({ emoji: bad ? '🪼' : '🗑', x: rand(40, 800), y: rand(150, 460), dir: Math.random() < 0.5 ? 1 : -1, speed: rand(25, 60), wob: rand(0, 6), drift: rand(-12, 12) });
+    }
+    for (var b = 0; b < 24; b++) bubbles.push({ x: rand(0, 840), y: rand(0, 520), r: rand(2, 6), s: rand(15, 45) });
+  }
+  function resetGame() {
+    score = 0; lives = 3; timeLeft = 90; elapsed = 0; flash = 0; flashText = '';
+    boat.x = 420; hook.x = 420; hook.y = 78; hook.state = 'idle'; hook.caught = null; hook.swing = 0;
+    particles = []; spawnCreatures(); updateHUD('Fishing!');
+  }
+  function updateHUD(status) {
+    scorePill.textContent = 'Score: ' + score;
+    quotaPill.textContent = 'Quota: ' + score + ' / ' + quota;
+    livesPill.textContent = 'Lives: ' + '❤'.repeat(Math.max(0, lives)) + (lives <= 1 ? ' — Careful!' : '');
+    timePill.textContent = 'Time: ' + Math.ceil(timeLeft) + 's';
+    timePill.parentElement && 0;
+    if (timeLeft <= 15) timePill.classList.add('warn'); else timePill.classList.remove('warn');
+    if (status) statusPill.textContent = 'Status: ' + status;
+  }
+  function showTitle() {
+    state = 'title'; overlay.style.display = 'flex';
+    card.innerHTML = '<h2>🪝 ABYSS ANGLER</h2><p>Drop your hook into the deep blue, catch enough fish to fill the quota, and steer clear of stingers and junk.</p>' +
+      '<h3>How to Play</h3><ul>' +
+      '<li><b>Move boat:</b> Mouse / touch drag, or Left / Right Arrow keys.</li>' +
+      '<li><b>Drop &amp; reel:</b> Press Space, click, or tap the water. The hook swings — time your drop!</li>' +
+      '<li><b>Score:</b> Small fish +10, reef fish +20, rare deep fish +40.</li>' +
+      '<li><b>Danger:</b> Jellyfish and trash cost 1 life. You have 3 lives.</li>' +
+      '<li><b>Win:</b> Reach 150 points before 90 seconds run out.</li></ul>' +
+      '<button id="startBtn">▶ Start Fishing</button>';
+    document.getElementById('startBtn').addEventListener('click', startGame);
+  }
+  function showEnd(won) {
+    state = won ? 'win' : 'over'; overlay.style.display = 'flex';
+    if (won) soundWin();
+    card.innerHTML = '<h2>' + (won ? '🏆 YOU WIN!' : '💀 GAME OVER') + '</h2>' +
+      '<p>' + (won ? 'The quota is filled! The crew celebrates a legendary catch.' : (lives <= 0 ? 'You ran out of lives in the deep.' : 'Time ran out before the quota was filled.')) + '</p>' +
+      '<p style="margin-top:12px;font-size:18px;"><b>Final Score: ' + score + ' / ' + quota + '</b> &nbsp;|&nbsp; Lives left: ' + Math.max(0, lives) + '</p>' +
+      '<button id="restartBtn">↻ Restart</button> <button class="secondary" id="menuBtn">🏠 Title Screen</button>';
+    document.getElementById('restartBtn').addEventListener('click', startGame);
+    document.getElementById('menuBtn').addEventListener('click', function() { resetGame(); showTitle(); });
+  }
+  function startGame() {
+    ensureAudio(); resetGame(); overlay.style.display = 'none'; state = 'playing'; beep(440, 0.15, 'triangle', 0.14);
+  }
+  function loseLife(reason) {
+    lives--; flash = 1.2; flashText = reason; soundHurt(); updateHUD(reason);
+    hook.caught = null; hook.state = 'reel'; 
+    for (var i = 0; i < 14; i++) particles.push({ x: hook.x, y: hook.y, vx: rand(-90, 90), vy: rand(-90, 40), life: rand(0.4, 0.9), color: '#f87171' });
+    if (lives <= 0) { updateHUD('Game Over'); showEnd(false); }
+  }
+  function dropHook() {
+    if (state !== 'playing' || hook.state !== 'idle') return;
+    hook.state = 'drop'; hook.swing = 0; beep(300, 0.1, 'sine', 0.1);
+  }
+  function reelHook() {
+    if (state !== 'playing' || hook.state !== 'drop') return;
+    hook.state = 'reel';
+  }
+
+  // ---------- Input: keyboard, mouse, touch ----------
+  document.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); if (hook.state === 'idle') dropHook(); else if (hook.state === 'drop') reelHook(); }
+    if (e.key === 'Enter' && state !== 'playing') startGame();
+    if ((e.key === 'r' || e.key === 'R') && (state === 'win' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+  canvas.addEventListener('mousedown', function(e) {
+    ensureAudio();
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (W / rect.width);
+    boat.x = Math.max(50, Math.min(790, x));
+    if (hook.state === 'idle') dropHook(); else if (hook.state === 'drop') reelHook();
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    if (e.buttons !== 1) return;
+    var rect = canvas.getBoundingClientRect();
+    boat.x = Math.max(50, Math.min(790, (e.clientX - rect.left) * (W / rect.width)));
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault(); ensureAudio();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    boat.x = Math.max(50, Math.min(790, (t.clientX - rect.left) * (W / rect.width)));
+    if (hook.state === 'idle') dropHook(); else if (hook.state === 'drop') reelHook();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    boat.x = Math.max(50, Math.min(790, (t.clientX - rect.left) * (W / rect.width)));
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e) { e.preventDefault(); }, { passive: false });
+
+  // ---------- Update ----------
+  function update(dt) {
+    if (state !== 'playing') return;
+    elapsed += dt; timeLeft = Math.max(0, 90 - elapsed);
+    if (timeLeft <= 0) { updateHUD('Time up'); showEnd(score >= quota); return; }
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) boat.x -= boat.speed * dt;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) boat.x += boat.speed * dt;
+    boat.x = Math.max(50, Math.min(790, boat.x));
+    hook.swing += hook.swingDir * dt * 1.6;
+    if (hook.swing > 0.55 || hook.swing < -0.55) hook.swingDir *= -1;
+    if (hook.state === 'idle') { hook.x = boat.x + Math.sin(hook.swing) * 34; hook.y = 78; }
+    else if (hook.state === 'drop') {
+      hook.x = boat.x + Math.sin(hook.swing) * (34 + hook.depth * 0.08);
+      hook.y += 260 * dt; hook.depth = hook.y - 78;
+      if (hook.y >= 500) hook.state = 'reel';
+    } else if (hook.state === 'reel') {
+      hook.y -= 320 * dt;
+      if (hook.caught) { hook.caught.x = hook.x; hook.caught.y = hook.y + 16; }
+      if (hook.y <= 78) {
+        if (hook.caught) {
+          score += hook.caught.kind.value;
+          for (var p = 0; p < 12; p++) particles.push({ x: hook.x, y: hook.y, vx: rand(-80, 80), vy: rand(-100, 20), life: rand(0.4, 0.8), color: '#fde68a' });
+          soundCatch(); flash = 0.9; flashText = '+' + hook.caught.kind.value + ' ' + hook.caught.kind.name + '!';
+          hook.caught = null;
+          if (score >= quota) { updateHUD('Quota reached!'); showEnd(true); return; }
+        }
+        hook.state = 'idle'; hook.depth = 0;
+      }
+    }
+    fishes.forEach(function(f) {
+      f.x += f.dir * f.speed * dt; f.wob += dt * 3;
+      if (f.dir > 0 && f.x > 900) { f.x = -60; f.y = rand(f.kind.depth[0], f.kind.depth[1]); }
+      if (f.dir < 0 && f.x < -60) { f.x = 900; f.y = rand(f.kind.depth[0], f.kind.depth[1]); }
+      if (hook.state === 'drop' && !hook.caught && Math.abs(f.x - hook.x) < 30 && Math.abs((f.y + Math.sin(f.wob) * 8) - hook.y) < 26) {
+        hook.caught = f; hook.state = 'reel'; f.caught = true;
+      }
+    });
+    fishes = fishes.filter(function(f) { return !f.caught || hook.caught === f; });
+    // If a caught fish was reeled in, remove it and respawn a fresh one of same kind
+    if (hook.state === 'idle') {
+      // respawn to keep the sea full
+      while (fishes.length < 16) {
+        var kinds2 = [{ name: 'Small Fish', emoji: '🐟', value: 10, depth: [150, 300], speed: [40, 80] }, { name: 'Reef Fish', emoji: '🐠', value: 20, depth: [220, 380], speed: [55, 100] }, { name: 'Rare Fish', emoji: '🦈', value: 40, depth: [330, 470], speed: [80, 130] }];
+        var kk = kinds2[Math.floor(Math.random() * 3)]; var dd = Math.random() < 0.5 ? 1 : -1;
+        fishes.push({ kind: kk, x: dd > 0 ? -60 : 900, y: rand(kk.depth[0], kk.depth[1]), dir: dd, speed: rand(kk.speed[0], kk.speed[1]), wob: 0 });
+      }
+    }
+    hazards.forEach(function(hz) {
+      hz.x += hz.dir * hz.speed * dt; hz.wob += dt * 2; hz.y += Math.sin(hz.wob) * 12 * dt + hz.drift * dt * 0.2;
+      if (hz.dir > 0 && hz.x > 880) hz.x = -40;
+      if (hz.dir < 0 && hz.x < -40) hz.x = 880;
+      hz.y = Math.max(140, Math.min(480, hz.y));
+      if ((hook.state === 'drop' || hook.state === 'reel') && Math.abs(hz.x - hook.x) < 30 && Math.abs(hz.y - hook.y) < 28) {
+        loseLife(hz.emoji === '🪼' ? 'Stung by jellyfish!' : 'Snagged trash!');
+        hz.x = hz.dir > 0 ? -40 : 880;
+      }
+    });
+    bubbles.forEach(function(b) { b.y -= b.s * dt; if (b.y < 90) { b.y = 520; b.x = rand(0, 840); } });
+    particles.forEach(function(pt) { pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt; });
+    particles = particles.filter(function(pt) { return pt.life > 0; });
+    if (flash > 0) flash -= dt;
+    updateHUD('Fishing!');
+  }
+
+  // ---------- Draw ----------
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // light rays
+    ctx.fillStyle = 'rgba(125,211,252,0.06)';
+    for (var i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(80 + i * 200, 70); ctx.lineTo(160 + i * 200, 70); ctx.lineTo(300 + i * 200, 520); ctx.lineTo(180 + i * 200, 520); ctx.fill(); }
+    // seaweed
+    ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 5;
+    for (var s = 0; s < 8; s++) { var sx = 30 + s * 115; ctx.beginPath(); ctx.moveTo(sx, 520); ctx.quadraticCurveTo(sx + 18, 460, sx - 8, 410); ctx.stroke(); }
+    // bubbles
+    ctx.fillStyle = 'rgba(224,242,254,0.5)';
+    bubbles.forEach(function(b) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
+    // fish
+    fishes.forEach(function(f) {
+      var fy = f.y + Math.sin(f.wob) * 8;
+      ctx.font = (f.kind.size + 8) + 'px serif'; ctx.textAlign = 'center';
+      ctx.save(); if (f.dir < 0) { ctx.translate(f.x, fy); ctx.scale(-1, 1); ctx.translate(-f.x, -fy); }
+      ctx.fillText(f.kind.emoji, f.x, fy); ctx.restore();
+    });
+    // hazards
+    hazards.forEach(function(hz) { ctx.font = '34px serif'; ctx.textAlign = 'center'; ctx.fillText(hz.emoji, hz.x, hz.y); });
+    // surface + boat
+    ctx.fillStyle = '#38bdf8'; ctx.fillRect(0, 66, W, 4);
+    ctx.font = '52px serif'; ctx.textAlign = 'center'; ctx.fillText('⛵', boat.x, 66);
+    ctx.fillStyle = '#fde68a'; ctx.font = 'bold 13px Arial'; ctx.fillText('YOU', boat.x, 22);
+    // line + hook
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(boat.x, 72); ctx.lineTo(hook.x, hook.y); ctx.stroke();
+    ctx.font = '26px serif'; ctx.fillText('🪝', hook.x, hook.y + 8);
+    if (hook.caught) { ctx.font = '28px serif'; ctx.fillText(hook.caught.kind.emoji, hook.x, hook.y + 34); }
+    // particles
+    particles.forEach(function(pt) { ctx.fillStyle = pt.color; ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2); ctx.fill(); });
+    // depth markers
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '12px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('SHALLOW', 12, 130); ctx.fillText('REEF', 12, 260); ctx.fillText('DEEP — RARE FISH', 12, 410);
+    // flash message
+    if (flash > 0 && flashText) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(230, 90, 380, 44);
+      ctx.fillStyle = '#fde68a'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center'; ctx.fillText(flashText, 420, 119);
+    }
+    // quota progress bar
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(20, 486, 300, 18);
+    ctx.fillStyle = '#22c55e'; ctx.fillRect(20, 486, 300 * Math.min(1, score / quota), 18);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'left'; ctx.fillText('QUOTA ' + Math.min(100, Math.floor(score / quota * 100)) + '%', 26, 499);
+  }
+
+  function loop(ts) {
+    var dt = Math.min(0.05, (ts - lastTime) / 1000 || 0);
+    lastTime = ts;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  resetGame(); showTitle(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

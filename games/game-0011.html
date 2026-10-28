@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Comet Courier — Game 0011</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #050514; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; color: #eef2ff; display: flex; align-items: center; justify-content: center; }
+  #wrap { position: relative; width: min(96vw, 900px); aspect-ratio: 16 / 10; max-height: 94vh; }
+  canvas { width: 100%; height: 100%; display: block; background: #050514; border: 2px solid #3b4a8f; border-radius: 12px; box-shadow: 0 0 40px rgba(80, 120, 255, 0.35); touch-action: none; }
+  #hud { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: space-between; gap: 8px; font-weight: 700; font-size: clamp(12px, 2vw, 17px); text-shadow: 0 2px 4px #000; pointer-events: none; flex-wrap: wrap; }
+  #hud span { background: rgba(5, 8, 30, 0.65); padding: 5px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.18); }
+  #hud .carry { border-color: #ffd166; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 12px; padding: 24px; background: rgba(4, 6, 26, 0.88); border-radius: 12px; }
+  .screen.hidden { display: none; }
+  h1 { font-size: clamp(30px, 6vw, 56px); letter-spacing: 2px; color: #ffd166; text-shadow: 0 0 18px rgba(255, 209, 102, 0.6); }
+  h2 { font-size: clamp(24px, 4.5vw, 40px); color: #7bf1c8; }
+  p { max-width: 620px; line-height: 1.55; font-size: clamp(13px, 2vw, 16px); color: #dbe4ff; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; font-size: 14px; }
+  .dot { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 4px; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 14px 34px; font-size: 18px; font-weight: 800; color: #10131f; background: #ffd166; box-shadow: 0 6px 0 #b8860b, 0 0 24px rgba(255, 209, 102, 0.5); }
+  button:active { transform: translateY(4px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #7bf1c8; box-shadow: 0 6px 0 #1f8a66; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .small { font-size: 13px; opacity: 0.85; }
+  #toast { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); font-weight: 800; font-size: 18px; color: #ffd166; text-shadow: 0 2px 6px #000; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="562"></canvas>
+  <div id="hud">
+    <span id="hudScore">Score: 0</span>
+    <span id="hudLives">Lives: &#10084;&#10084;&#10084;</span>
+    <span id="hudLevel">Level 1 / 3</span>
+    <span id="hudDeliver">Deliveries: 0 / 4</span>
+    <span id="hudTime">Time: 60s</span>
+    <span id="hudCarry" class="carry">Carrying: none</span>
+  </div>
+  <div id="toast"></div>
+
+  <div id="titleScreen" class="screen">
+    <h1>&#9733; COMET COURIER &#9733;</h1>
+    <p><strong>The galaxy's parcels won't deliver themselves.</strong> Pilot your courier ship through a drifting asteroid field, grab glowing parcels, and drop each one at the beacon of the <em>same colour</em>. Wrong beacon? No delivery. Crash into an asteroid? Lose a life.</p>
+    <div class="legend">
+      <span><i class="dot" style="background:#ff5d8f"></i>Pink parcel &rarr; pink beacon</span>
+      <span><i class="dot" style="background:#38d9ff"></i>Blue parcel &rarr; blue beacon</span>
+      <span><i class="dot" style="background:#ffd166"></i>Gold parcel &rarr; gold beacon</span>
+      <span><i class="dot" style="background:#9b8cff"></i>Purple parcel &rarr; purple beacon</span>
+    </div>
+    <p><strong>How to Play:</strong> Arrow keys or WASD to fly. Mouse: move to steer, click to boost. Touch: drag to steer. Press Space to boost. Grab a parcel, then fly into its matching beacon before the timer runs out. Complete every level's deliveries to win. You have 3 lives.</p>
+    <div class="row">
+      <button id="startBtn">START DELIVERY RUN</button>
+    </div>
+    <p class="small">Level quotas: 4, then 5, then 6 deliveries &mdash; 15 total. Deliver fast for a speed bonus. Sound starts only after you press Start.</p>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">MISSION COMPLETE</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <div class="row">
+      <button id="restartBtn">RESTART</button>
+      <button id="menuBtn" class="secondary">BACK TO TITLE</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+  var hudScore = document.getElementById("hudScore");
+  var hudLives = document.getElementById("hudLives");
+  var hudLevel = document.getElementById("hudLevel");
+  var hudDeliver = document.getElementById("hudDeliver");
+  var hudTime = document.getElementById("hudTime");
+  var hudCarry = document.getElementById("hudCarry");
+  var toastEl = document.getElementById("toast");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+  var endStats = document.getElementById("endStats");
+
+  var COLORS = ["#ff5d8f", "#38d9ff", "#ffd166", "#9b8cff"];
+  var COLOR_NAMES = ["Pink", "Blue", "Gold", "Purple"];
+  var QUOTAS = [4, 5, 6];
+  var LEVEL_TIME = [60, 55, 50];
+
+  var state = "title"; // title | playing | won | over
+  var score = 0, lives = 3, level = 1, delivered = 0, totalDelivered = 0;
+  var timeLeft = 60, lastTime = 0, elapsed = 0, combo = 0, comboTimer = 0;
+  var keys = {}, pointer = null, boosting = false, toastTimer = 0;
+  var stars = [], parcels = [], beacons = [], asteroids = [], particles = [], trail = [];
+  var ship = { x: 120, y: H / 2, vx: 0, vy: 0, angle: 0, r: 16, invuln: 0, carrying: -1, carryTime: 0 };
+  var shake = 0;
+
+  // ---------- Procedural Web Audio (created only after user interaction) ----------
+  var audioCtx = null, masterGain = null;
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === "suspended") audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain);
+      o.start(); o.stop(audioCtx.currentTime + dur + 0.02);
+    } catch (e) {}
+  }
+  function sfxPickup() { tone(660, 0.12, "triangle", 0.6, 990); }
+  function sfxDeliver() { tone(523, 0.12, "sine", 0.6); setTimeout(function(){ tone(659, 0.12, "sine", 0.6); }, 90); setTimeout(function(){ tone(784, 0.2, "sine", 0.6); }, 180); }
+  function sfxCrash() { tone(180, 0.35, "sawtooth", 0.7, 50); }
+  function sfxWrong() { tone(220, 0.2, "square", 0.4, 160); }
+  function sfxWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.25, "triangle", 0.6); }, i * 130); }); }
+  function sfxLose() { [392, 330, 262, 196].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.25, "sawtooth", 0.4); }, i * 150); }); }
+
+  // ---------- Helpers ----------
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
+  function showToast(msg, ms) {
+    toastEl.textContent = msg; toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove("show"); }, ms || 1800);
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 18); i++) {
+      particles.push({ x: x, y: y, vx: rand(-160, 160), vy: rand(-160, 160), life: rand(0.3, 0.8), max: 0.8, color: color, size: rand(2, 5) });
+    }
+  }
+
+  function makeStars() {
+    stars = [];
+    for (var i = 0; i < 130; i++) stars.push({ x: rand(0, W), y: rand(0, H), s: rand(0.6, 2.4), tw: rand(0, Math.PI * 2), speed: rand(8, 40) });
+  }
+  function makeBeacons() {
+    beacons = [];
+    var slots = [ {x: W - 70, y: 90}, {x: W - 70, y: H - 90}, {x: 70, y: 90}, {x: 70, y: H - 90} ];
+    // Shuffle slots so beacon positions vary per level
+    for (var i = slots.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = slots[i]; slots[i] = slots[j]; slots[j] = t; }
+    for (var k = 0; k < 4; k++) beacons.push({ x: slots[k].x, y: slots[k].y, color: COLORS[k], name: COLOR_NAMES[k], r: 34, pulse: rand(0, Math.PI * 2) });
+  }
+  function spawnParcel() {
+    var c = Math.floor(Math.random() * 4);
+    var tries = 0, x = 0, y = 0;
+    do { x = rand(180, W - 180); y = rand(70, H - 70); tries++; }
+    while (tries < 20 && dist({x: x, y: y}, ship) < 130);
+    parcels.push({ x: x, y: y, color: COLORS[c], name: COLOR_NAMES[c], idx: c, bob: rand(0, Math.PI * 2), vx: rand(-14, 14), vy: rand(-14, 14) });
+  }
+  function spawnAsteroid() {
+    var side = Math.random() < 0.5 ? -30 : W + 30;
+    asteroids.push({ x: side, y: rand(50, H - 50), vx: (side < 0 ? 1 : -1) * rand(40, 90 + level * 18), vy: rand(-30, 30), r: rand(16, 34), rot: rand(0, 6.28), vr: rand(-1.5, 1.5), bumps: [rand(0.75, 1.15), rand(0.75, 1.15), rand(0.75, 1.15), rand(0.75, 1.15), rand(0.75, 1.15), rand(0.75, 1.15)] });
+  }
+  function setupLevel(lv) {
+    level = lv; delivered = 0; timeLeft = LEVEL_TIME[lv - 1];
+    parcels = []; asteroids = []; particles = []; trail = [];
+    ship.x = 120; ship.y = H / 2; ship.vx = 0; ship.vy = 0; ship.carrying = -1; ship.invuln = 1.5;
+    makeBeacons();
+    var initial = 3 + lv;
+    for (var i = 0; i < initial; i++) spawnParcel();
+    for (var a = 0; a < 3 + lv * 2; a++) spawnAsteroid();
+    showToast("LEVEL " + lv + " — Deliver " + QUOTAS[lv - 1] + " parcels!", 2200);
+  }
+  function startGame() {
+    initAudio();
+    score = 0; lives = 3; totalDelivered = 0; combo = 0;
+    titleScreen.classList.add("hidden"); endScreen.classList.add("hidden");
+    state = "playing"; setupLevel(1); lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+  function endGame(won) {
+    state = won ? "won" : "over";
+    endScreen.classList.remove("hidden");
+    if (won) {
+      endTitle.textContent = "MISSION COMPLETE!";
+      endText.textContent = "All 15 parcels delivered across 3 star systems. The Comet Courier fleet salutes you, Captain.";
+      sfxWin();
+    } else {
+      endTitle.textContent = "GAME OVER";
+      endText.textContent = "Your courier ship ran out of lives. The parcels will wait for another brave pilot.";
+      sfxLose();
+    }
+    endStats.textContent = "Final score: " + score + "  |  Deliveries: " + totalDelivered + " / 15  |  Level reached: " + level;
+  }
+  function loseLife(reason) {
+    lives--; sfxCrash(); shake = 12;
+    burst(ship.x, ship.y, "#ff6b6b", 26);
+    ship.carrying = -1; ship.x = 120; ship.y = H / 2; ship.vx = 0; ship.vy = 0; ship.invuln = 2;
+    showToast(reason || "CRASH! Life lost.", 1800);
+    if (lives <= 0) endGame(false);
+  }
+
+  function update(dt) {
+    elapsed += dt;
+    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
+    timeLeft -= dt;
+    if (timeLeft <= 0) {
+      timeLeft = LEVEL_TIME[level - 1];
+      if (lives > 1) { loseLife("TIME UP! Life lost — level restarted."); setupLevel(level); }
+      else { loseLife("TIME UP!"); }
+      return;
+    }
+    // Steering
+    var ax = 0, ay = 0;
+    if (keys["ArrowLeft"] || keys["a"] || keys["A"]) ax -= 1;
+    if (keys["ArrowRight"] || keys["d"] || keys["D"]) ax += 1;
+    if (keys["ArrowUp"] || keys["w"] || keys["W"]) ay -= 1;
+    if (keys["ArrowDown"] || keys["s"] || keys["S"]) ay += 1;
+    if (pointer) {
+      var dx = pointer.x - ship.x, dy = pointer.y - ship.y, d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 12) { ax += dx / d; ay += dy / d; }
+    }
+    var len = Math.sqrt(ax * ax + ay * ay);
+    if (len > 0) { ax /= len; ay /= len; ship.angle = Math.atan2(ay, ax); }
+    var accel = boosting ? 620 : 380;
+    ship.vx += ax * accel * dt; ship.vy += ay * accel * dt;
+    ship.vx *= Math.pow(0.12, dt); ship.vy *= Math.pow(0.12, dt);
+    // Clamp speed
+    var sp = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy), maxSp = boosting ? 340 : 260;
+    if (sp > maxSp) { ship.vx = ship.vx / sp * maxSp; ship.vy = ship.vy / sp * maxSp; }
+    ship.x += ship.vx * dt; ship.y += ship.vy * dt;
+    if (ship.x < 20) { ship.x = 20; ship.vx = Math.abs(ship.vx) * 0.4; }
+    if (ship.x > W - 20) { ship.x = W - 20; ship.vx = -Math.abs(ship.vx) * 0.4; }
+    if (ship.y < 20) { ship.y = 20; ship.vy = Math.abs(ship.vy) * 0.4; }
+    if (ship.y > H - 20) { ship.y = H - 20; ship.vy = -Math.abs(ship.vy) * 0.4; }
+    if (ship.invuln > 0) ship.invuln -= dt;
+    trail.push({ x: ship.x, y: ship.y, life: 0.35 });
+    if (trail.length > 26) trail.shift();
+    for (var i = trail.length - 1; i >= 0; i--) { trail[i].life -= dt; if (trail[i].life <= 0) trail.splice(i, 1); }
+
+    // Stars drift (scrolling starfield)
+    for (var s = 0; s < stars.length; s++) {
+      stars[s].x -= stars[s].speed * dt; stars[s].tw += dt * 3;
+      if (stars[s].x < 0) { stars[s].x = W; stars[s].y = rand(0, H); }
+    }
+    // Parcels bob and drift
+    for (var p = 0; p < parcels.length; p++) {
+      parcels[p].bob += dt * 3; parcels[p].x += parcels[p].vx * dt; parcels[p].y += parcels[p].vy * dt;
+      if (parcels[p].x < 60 || parcels[p].x > W - 60) parcels[p].vx *= -1;
+      if (parcels[p].y < 60 || parcels[p].y > H - 60) parcels[p].vy *= -1;
+    }
+    for (var b = 0; b < beacons.length; b++) beacons[b].pulse += dt * 3;
+    // Asteroids
+    if (Math.random() < dt * (0.35 + level * 0.12) && asteroids.length < 9 + level * 2) spawnAsteroid();
+    for (var a = asteroids.length - 1; a >= 0; a--) {
+      var ast = asteroids[a];
+      ast.x += ast.vx * dt; ast.y += ast.vy * dt; ast.rot += ast.vr * dt;
+      if (ast.x < -50 || ast.x > W + 50) asteroids.splice(a, 1);
+    }
+    // Particles
+    for (var q = particles.length - 1; q >= 0; q--) {
+      particles[q].x += particles[q].vx * dt; particles[q].y += particles[q].vy * dt; particles[q].life -= dt;
+      if (particles[q].life <= 0) particles.splice(q, 1);
+    }
+    // Pickup
+    if (ship.carrying === -1) {
+      for (var k = parcels.length - 1; k >= 0; k--) {
+        if (dist(ship, parcels[k]) < ship.r + 18) {
+          ship.carrying = parcels[k].idx; ship.carryTime = 0;
+          burst(parcels[k].x, parcels[k].y, parcels[k].color, 14);
+          showToast("Picked up " + parcels[k].name + " parcel! Fly to the " + parcels[k].name + " beacon.", 2000);
+          sfxPickup(); parcels.splice(k, 1);
+          if (parcels.length < 3) spawnParcel();
+          break;
+        }
+      }
+    } else {
+      ship.carryTime += dt;
+      // Delivery / wrong beacon
+      for (var m = 0; m < beacons.length; m++) {
+        if (dist(ship, beacons[m]) < ship.r + beacons[m].r - 6) {
+          if (beacons[m].color === COLORS[ship.carrying]) {
+            var speedBonus = ship.carryTime < 8 ? 50 : (ship.carryTime < 15 ? 25 : 0);
+            combo++; comboTimer = 10;
+            var gained = 100 + speedBonus + (combo > 1 ? (combo - 1) * 25 : 0);
+            score += gained; delivered++; totalDelivered++;
+            burst(beacons[m].x, beacons[m].y, beacons[m].color, 26);
+            showToast("DELIVERED! +" + gained + (speedBonus ? " (speed bonus +" + speedBonus + ")" : "") + (combo > 1 ? " Combo x" + combo : ""), 2000);
+            sfxDeliver(); ship.carrying = -1; spawnParcel();
+            if (delivered >= QUOTAS[level - 1]) {
+              score += 250; // level-clear bonus
+              if (level >= 3) { endGame(true); return; }
+              showToast("LEVEL " + level + " CLEAR! +250 bonus", 2200);
+              setupLevel(level + 1);
+            }
+          } else {
+            sfxWrong();
+            showToast("Wrong beacon! That parcel goes to the " + COLOR_NAMES[ship.carrying] + " beacon.", 2000);
+            ship.x -= ship.vx * 0.08; ship.y -= ship.vy * 0.08;
+          }
+          break;
+        }
+      }
+    }
+    // Asteroid collision
+    if (ship.invuln <= 0) {
+      for (var c2 = 0; c2 < asteroids.length; c2++) {
+        if (dist(ship, asteroids[c2]) < ship.r + asteroids[c2].r - 8) { loseLife("ASTEROID HIT!"); break; }
+      }
+    }
+    if (shake > 0) shake -= dt * 30;
+    updateHUD();
+  }
+
+  function updateHUD() {
+    hudScore.textContent = "Score: " + score;
+    var hearts = "";
+    for (var i = 0; i < lives; i++) hearts += "\u2764";
+    hudLives.textContent = "Lives: " + hearts;
+    hudLevel.textContent = "Level " + level + " / 3";
+    hudDeliver.textContent = "Deliveries: " + delivered + " / " + QUOTAS[level - 1];
+    hudTime.textContent = "Time: " + Math.max(0, Math.ceil(timeLeft)) + "s";
+    hudCarry.textContent = ship.carrying === -1 ? "Carrying: none" : "Carrying: " + COLOR_NAMES[ship.carrying] + " parcel";
+    hudCarry.style.color = ship.carrying === -1 ? "#eef2ff" : COLORS[ship.carrying];
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake) * 0.4, rand(-shake, shake) * 0.4);
+    ctx.fillStyle = "#050514"; ctx.fillRect(-20, -20, W + 40, H + 40);
+    // Nebula blobs
+    var neb = ctx.createRadialGradient(200, 120, 10, 200, 120, 260);
+    neb.addColorStop(0, "rgba(90,60,200,0.25)"); neb.addColorStop(1, "rgba(90,60,200,0)");
+    ctx.fillStyle = neb; ctx.fillRect(0, 0, W, H);
+    var neb2 = ctx.createRadialGradient(700, 430, 10, 700, 430, 280);
+    neb2.addColorStop(0, "rgba(20,140,180,0.20)"); neb2.addColorStop(1, "rgba(20,140,180,0)");
+    ctx.fillStyle = neb2; ctx.fillRect(0, 0, W, H);
+    // Stars
+    for (var i = 0; i < stars.length; i++) {
+      var st = stars[i];
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(st.tw));
+      ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(st.x, st.y, st.s, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Beacons
+    for (var b = 0; b < beacons.length; b++) {
+      var bc = beacons[b], pr = bc.r + Math.sin(bc.pulse) * 5;
+      ctx.strokeStyle = bc.color; ctx.globalAlpha = 0.25; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(bc.x, bc.y, pr + 12, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(bc.x, bc.y, bc.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = bc.color; ctx.globalAlpha = 0.18;
+      ctx.beginPath(); ctx.arc(bc.x, bc.y, bc.r, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = "#0b0d24"; ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center";
+      ctx.fillStyle = bc.color; ctx.fillText(bc.name.toUpperCase(), bc.x, bc.y + 4);
+      // Beacon antenna
+      ctx.fillRect(bc.x - 2, bc.y - bc.r - 14, 4, 14);
+      ctx.beginPath(); ctx.arc(bc.x, bc.y - bc.r - 16, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    // Parcels
+    for (var p = 0; p < parcels.length; p++) {
+      var pc = parcels[p], bobY = Math.sin(pc.bob) * 4;
+      ctx.save(); ctx.translate(pc.x, pc.y + bobY); ctx.rotate(Math.sin(pc.bob * 0.5) * 0.2);
+      ctx.fillStyle = pc.color; ctx.shadowColor = pc.color; ctx.shadowBlur = 14;
+      ctx.fillRect(-13, -11, 26, 22);
+      ctx.shadowBlur = 0; ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = 2; ctx.strokeRect(-13, -11, 26, 22);
+      ctx.beginPath(); ctx.moveTo(-13, 0); ctx.lineTo(13, 0); ctx.moveTo(0, -11); ctx.lineTo(0, 11); ctx.stroke();
+      ctx.restore();
+    }
+    // Trail
+    for (var t = 0; t < trail.length; t++) {
+      ctx.globalAlpha = trail[t].life / 0.35 * 0.5;
+      ctx.fillStyle = boosting ? "#ffd166" : "#38d9ff";
+      ctx.beginPath(); ctx.arc(trail[t].x, trail[t].y, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // Ship
+    ctx.save(); ctx.translate(ship.x, ship.y); ctx.rotate(ship.angle);
+    if (ship.invuln > 0 && Math.floor(elapsed * 10) % 2 === 0) ctx.globalAlpha = 0.45;
+    ctx.fillStyle = "#e8ecff";
+    ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-12, -13); ctx.lineTo(-6, 0); ctx.lineTo(-12, 13); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#38d9ff"; ctx.beginPath(); ctx.arc(2, 0, 6, 0, Math.PI * 2); ctx.fill();
+    // Engine flame
+    ctx.fillStyle = boosting ? "#ffd166" : "#ff7a3c";
+    ctx.beginPath(); ctx.moveTo(-12, -5); ctx.lineTo(-12 - (boosting ? 22 : 12) - Math.random() * 6, 0); ctx.lineTo(-12, 5); ctx.closePath(); ctx.fill();
+    ctx.restore(); ctx.globalAlpha = 1;
+    // Carried parcel above ship
+    if (ship.carrying !== -1) {
+      ctx.fillStyle = COLORS[ship.carrying]; ctx.shadowColor = COLORS[ship.carrying]; ctx.shadowBlur = 12;
+      ctx.fillRect(ship.x - 9, ship.y - 34, 18, 15); ctx.shadowBlur = 0;
+      ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.strokeRect(ship.x - 9, ship.y - 34, 18, 15);
+    }
+    // Asteroids
+    for (var a = 0; a < asteroids.length; a++) {
+      var ast = asteroids[a];
+      ctx.save(); ctx.translate(ast.x, ast.y); ctx.rotate(ast.rot);
+      ctx.fillStyle = "#6b5d4f"; ctx.strokeStyle = "#3d332b"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (var v = 0; v < 6; v++) {
+        var ang = v / 6 * Math.PI * 2, rr = ast.r * ast.bumps[v];
+        if (v === 0) ctx.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr); else ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#4a4038"; ctx.beginPath(); ctx.arc(-ast.r * 0.3, -ast.r * 0.2, ast.r * 0.22, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+    // Particles
+    for (var q = 0; q < particles.length; q++) {
+      ctx.globalAlpha = Math.max(0, particles[q].life / particles[q].max);
+      ctx.fillStyle = particles[q].color;
+      ctx.beginPath(); ctx.arc(particles[q].x, particles[q].y, particles[q].size, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    // Low-time warning
+    if (state === "playing" && timeLeft <= 10) {
+      ctx.fillStyle = timeLeft <= 5 || Math.floor(elapsed * 2) % 2 === 0 ? "#ff5d5d" : "rgba(255,93,93,0.4)";
+      ctx.font = "bold 18px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("TIME LOW: " + Math.ceil(timeLeft) + "s", W / 2, 34);
+    }
+  }
+
+  function loop(now) {
+    if (state !== "playing") { draw(); return; }
+    var dt = Math.min(0.033, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Controls: keyboard, mouse, touch ----------
+  document.addEventListener("keydown", function (e) {
+    keys[e.key] = true;
+    if (e.key === " ") { boosting = true; e.preventDefault(); }
+    if (state === "playing" && (e.key === "Enter")) { /* reserved */ }
+  });
+  document.addEventListener("keyup", function (e) {
+    keys[e.key] = false;
+    if (e.key === " ") boosting = false;
+  });
+  function setPointerFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    var cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+    pointer = { x: cx, y: cy };
+  }
+  canvas.addEventListener("mousemove", function (e) { if (state === "playing") setPointerFromEvent(e); });
+  canvas.addEventListener("mousedown", function (e) { initAudio(); setPointerFromEvent(e); boosting = true; });
+  document.addEventListener("mouseup", function () { boosting = false; });
+  canvas.addEventListener("touchstart", function (e) { initAudio(); e.preventDefault(); setPointerFromEvent(e.touches[0]); }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); setPointerFromEvent(e.touches[0]); }, { passive: false });
+  canvas.addEventListener("touchend", function (e) { e.preventDefault(); pointer = null; }, { passive: false });
+
+  document.getElementById("startBtn").addEventListener("click", function () { startGame(); });
+  document.getElementById("restartBtn").addEventListener("click", function () { startGame(); });
+  document.getElementById("menuBtn").addEventListener("click", function () {
+    endScreen.classList.add("hidden"); titleScreen.classList.remove("hidden"); state = "title"; draw();
+  });
+
+  makeStars();
+  updateHUD();
+  draw();
+})();
+</script>
+</body>
+</html>

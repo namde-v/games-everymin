@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Storm Chaser — Game 0019</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1220; color: #e8eefc; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 26px; margin: 6px 0 2px; letter-spacing: 1px; color: #7dd3fc; text-shadow: 0 0 12px rgba(125,211,252,.6); }
+  .sub { font-size: 13px; color: #a5b4d4; margin-bottom: 8px; text-align: center; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: 640px; background: #16233a; border: 3px solid #334155; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0; font-weight: bold; font-size: 15px; }
+  #hud span { background: #1e293b; border: 1px solid #334155; padding: 6px 10px; border-radius: 8px; flex: 1; text-align: center; }
+  #hud .lives { color: #f87171; } #hud .score { color: #facc15; } #hud .sensors { color: #4ade80; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(2,6,23,.88); border-radius: 12px; padding: 24px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; margin-bottom: 10px; color: #7dd3fc; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #cbd5e1; max-width: 380px; margin-bottom: 8px; }
+  .overlay .big { font-size: 19px; color: #facc15; font-weight: bold; }
+  .howto { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px 14px; margin: 12px 0; text-align: left; font-size: 14px; line-height: 1.6; color: #e2e8f0; }
+  .howto b { color: #7dd3fc; }
+  button { cursor: pointer; font-size: 19px; font-weight: bold; padding: 13px 30px; border: none; border-radius: 10px; background: #0284c7; color: #fff; margin-top: 10px; box-shadow: 0 4px 0 #075985; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #075985; }
+  button.secondary { background: #475569; box-shadow: 0 4px 0 #334155; }
+  .hint { font-size: 12px; color: #94a3b8; margin-top: 8px; text-align: center; }
+  .emoji { font-size: 44px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<h1>🌩️ STORM CHASER</h1>
+<p class="sub">Game 0019 &bull; Arcade / Weather Dodge &bull; Drive into the storm, dodge everything, grab the sensors!</p>
+<div id="wrap">
+  <div id="hud">
+    <span class="score">Score: <b id="score">0</b></span>
+    <span class="lives">Lives: <b id="lives">♥♥♥</b></span>
+    <span class="sensors">Sensors: <b id="sensors">0 / 12</b></span>
+  </div>
+  <canvas id="game" width="480" height="640"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="emoji">🚐🌩️</div>
+    <h2>STORM CHASER</h2>
+    <p>You are a storm chaser in a research van. Drive through the storm and recover <b>12 weather sensors</b> before the storm takes you out!</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      🚐 <b>Move:</b> Arrow keys / WASD, mouse, or touch-drag to steer the van.<br>
+      🧊 <b>Dodge:</b> falling hail, tumbling debris, and lightning strike zones (watch for the warning glow!).<br>
+      📡 <b>Collect:</b> glowing weather sensors for +100 points each.<br>
+      ❤️ <b>Survive:</b> you have 3 lives. A hit costs 1 life and briefly shields you.<br>
+      🏆 <b>Win:</b> collect all 12 sensors. <b>Lose:</b> lose all 3 lives.
+    </div>
+    <button id="startBtn">▶ START CHASE</button>
+    <p class="hint">Sound starts after you press Start. Best on keyboard, mouse, or touch.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div class="emoji" id="endEmoji">🏆</div>
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText" class="big"></p>
+    <p id="endDetail"></p>
+    <button id="restartBtn">↻ RESTART</button>
+    <button id="menuBtn" class="secondary">Title Screen</button>
+  </div>
+</div>
+<p class="hint">Tip: lightning zones flash before they strike — get out of the glowing circle fast! Hail gets faster as you collect more sensors.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var sensorsEl = document.getElementById('sensors');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endDetail = document.getElementById('endDetail');
+  var endEmoji = document.getElementById('endEmoji');
+
+  var TOTAL_SENSORS = 12;
+  var state = 'title'; // title | playing | over
+  var score = 0, lives = 3, collected = 0, distance = 0;
+  var keys = {};
+  var pointer = { active: false, x: W / 2, y: H - 110 };
+  var van = { x: W / 2, y: H - 110, w: 46, h: 66, speed: 5.2, invuln: 0 };
+  var hail = [], debris = [], sensors = [], bolts = [], flashes = [], particles = [];
+  var spawnT = 0, sensorT = 0, boltT = 0, frame = 0, lastTime = 0, shake = 0;
+  var roadOffset = 0;
+
+  // ---- Procedural Web Audio (only after user interaction) ----
+  var audioCtx = null, muted = false;
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slideTo) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfxPick() { tone(880, 0.12, 'sine', 0.12, 1320); tone(440, 0.08, 'triangle', 0.06); }
+  function sfxHit() { tone(180, 0.3, 'sawtooth', 0.14, 60); }
+  function sfxBolt() { tone(1200, 0.18, 'sawtooth', 0.1, 90); tone(60, 0.25, 'square', 0.08); }
+  function sfxWin() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.22, 'triangle', 0.12); }, i * 140); }); }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = '♥'.repeat(Math.max(0, lives)) + '♡'.repeat(Math.max(0, 3 - lives));
+    sensorsEl.textContent = collected + ' / ' + TOTAL_SENSORS;
+  }
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function rectHit(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: rand(-3, 3), vy: rand(-3, 1), life: rand(15, 35), color: color });
+    }
+  }
+
+  function resetGame() {
+    score = 0; lives = 3; collected = 0; distance = 0; frame = 0; shake = 0;
+    van.x = W / 2; van.y = H - 110; van.invuln = 0;
+    hail = []; debris = []; sensors = []; bolts = []; flashes = []; particles = [];
+    spawnT = 0; sensorT = 40; boltT = 120;
+    updateHUD();
+  }
+
+  function spawnSensor() {
+    sensors.push({ x: rand(50, W - 50), y: -30, r: 16, bob: rand(0, 6), vy: 1.6 });
+  }
+  function spawnHail() {
+    hail.push({ x: rand(30, W - 30), y: -20, r: rand(8, 15), vy: rand(2.6, 4.2) + collected * 0.12, vx: rand(-0.6, 0.6) });
+  }
+  function spawnDebris() {
+    debris.push({ x: rand(40, W - 40), y: -30, w: rand(26, 44), h: rand(16, 26), vy: rand(2.2, 3.4), rot: rand(0, 3), vr: rand(-0.08, 0.08) });
+  }
+  function spawnBolt() {
+    var x = rand(60, W - 60);
+    bolts.push({ x: x, y: rand(80, 300), r: 46, warn: 55, struck: false });
+  }
+
+  function hitVan() {
+    if (van.invuln > 0 || state !== 'playing') return;
+    lives--; van.invuln = 90; shake = 12;
+    burst(van.x, van.y, '#f87171', 22);
+    sfxHit();
+    updateHUD();
+    if (lives <= 0) { endGame(false); }
+  }
+
+  function endGame(won) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endEmoji.textContent = '🏆';
+      endTitle.textContent = 'STORM SECURED!';
+      endText.textContent = 'You collected all 12 sensors!';
+      sfxWin();
+    } else {
+      endEmoji.textContent = '💥';
+      endTitle.textContent = 'GAME OVER';
+      endText.textContent = 'The storm got your van!';
+    }
+    endDetail.textContent = 'Final score: ' + score + '  •  Sensors: ' + collected + ' / ' + TOTAL_SENSORS + '  •  Distance: ' + Math.floor(distance) + ' m';
+  }
+
+  function startGame() {
+    initAudio();
+    resetGame();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    state = 'playing';
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    initAudio(); state = 'title';
+    endScreen.classList.add('hidden');
+    titleScreen.classList.remove('hidden');
+  });
+
+  // ---- Controls: keyboard, mouse, touch ----
+  document.addEventListener('keydown', function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].indexOf(e.key.toLowerCase()) >= 0) e.preventDefault();
+    if ((e.key === 'Enter' || e.key === ' ') && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+  function setPointerFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches ? e.touches[0].clientX : e.clientX);
+    var cy = (e.touches ? e.touches[0].clientY : e.clientY);
+    pointer.x = (cx - rect.left) * (W / rect.width);
+    pointer.y = (cy - rect.top) * (H / rect.height);
+  }
+  canvas.addEventListener('mousemove', function (e) { setPointerFromEvent(e); pointer.active = true; });
+  canvas.addEventListener('mousedown', function (e) { initAudio(); setPointerFromEvent(e); pointer.active = true; });
+  canvas.addEventListener('mouseup', function () { pointer.active = false; });
+  canvas.addEventListener('touchstart', function (e) { initAudio(); e.preventDefault(); setPointerFromEvent(e); pointer.active = true; }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); setPointerFromEvent(e); }, { passive: false });
+  canvas.addEventListener('touchend', function () { pointer.active = false; });
+
+  function update() {
+    frame++; distance += 0.6; roadOffset = (roadOffset + 6) % 60;
+    if (van.invuln > 0) van.invuln--;
+
+    // Keyboard movement
+    var sp = van.speed;
+    if (keys['arrowleft'] || keys['a']) van.x -= sp;
+    if (keys['arrowright'] || keys['d']) van.x += sp;
+    if (keys['arrowup'] || keys['w']) van.y -= sp;
+    if (keys['arrowdown'] || keys['s']) van.y += sp;
+    // Mouse / touch steering: glide toward pointer while active
+    if (pointer.active) {
+      van.x += (pointer.x - van.x) * 0.18;
+      van.y += (pointer.y - van.y) * 0.18;
+    }
+    van.x = Math.max(28, Math.min(W - 28, van.x));
+    van.y = Math.max(60, Math.min(H - 50, van.y));
+
+    // Spawning, difficulty ramps with sensors collected
+    spawnT--;
+    if (spawnT <= 0) {
+      spawnHail();
+      if (Math.random() < 0.55) spawnDebris();
+      if (Math.random() < 0.35) spawnHail();
+      spawnT = Math.max(22, 52 - collected * 2);
+    }
+    sensorT--;
+    if (sensorT <= 0 && sensors.length < 3 && collected < TOTAL_SENSORS) { spawnSensor(); sensorT = rand(90, 160); }
+    boltT--;
+    if (boltT <= 0) { spawnBolt(); boltT = rand(180, 320); }
+
+    var vanBox = { x: van.x - 23, y: van.y - 33, w: 46, h: 66 };
+
+    hail.forEach(function (h) { h.y += h.vy; h.x += h.vx; });
+    hail = hail.filter(function (h) { return h.y < H + 30; });
+    debris.forEach(function (d) { d.y += d.vy; d.rot += d.vr; });
+    debris = debris.filter(function (d) { return d.y < H + 40; });
+    sensors.forEach(function (s) { s.y += s.vy; s.bob += 0.1; });
+    sensors = sensors.filter(function (s) { return s.y < H + 40; });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    flashes = flashes.filter(function (f) { f.life--; return f.life > 0; });
+
+    // Lightning: warn, then strike
+    bolts.forEach(function (b) {
+      if (b.warn > 0) { b.warn--; if (b.warn === 0) { b.struck = true; b.life = 14; flashes.push({ life: 10 }); sfxBolt(); shake = 8; } }
+      else if (b.struck) { b.life--; }
+    });
+    bolts = bolts.filter(function (b) { return !(b.struck && b.life <= 0); });
+
+    // Collisions
+    hail.forEach(function (h) {
+      if (Math.abs(h.x - van.x) < 30 && Math.abs(h.y - van.y) < 38) { hitVan(); h.y = H + 50; }
+    });
+    debris.forEach(function (d) {
+      if (rectHit(vanBox, { x: d.x - d.w / 2, y: d.y - d.h / 2, w: d.w, h: d.h })) { hitVan(); d.y = H + 50; }
+    });
+    bolts.forEach(function (b) {
+      if (b.struck && Math.abs(b.x - van.x) < 42 && Math.abs(b.y - van.y) < 70) { hitVan(); b.life = 1; }
+    });
+    sensors.forEach(function (s) {
+      if (!s.taken && Math.abs(s.x - van.x) < 34 && Math.abs(s.y - van.y) < 42) {
+        s.taken = true; collected++; score += 100;
+        burst(s.x, s.y, '#4ade80', 16); sfxPick(); updateHUD();
+        if (collected >= TOTAL_SENSORS) { score += lives * 250; endGame(true); }
+      }
+    });
+    sensors = sensors.filter(function (s) { return !s.taken; });
+
+    // Survival trickle score
+    if (frame % 60 === 0) { score += 5; updateHUD(); }
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#16233a'; ctx.fillRect(0, 0, W, H);
+    // Storm clouds
+    ctx.fillStyle = 'rgba(30,41,59,0.9)';
+    for (var i = 0; i < 5; i++) {
+      var cy = (i * 130 + frame * 0.4) % (H + 80) - 40;
+      ctx.beginPath(); ctx.ellipse(90 + i * 80, cy, 90, 26, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // Road
+    ctx.fillStyle = '#1f2937'; ctx.fillRect(40, 0, W - 80, H);
+    ctx.strokeStyle = '#facc15'; ctx.lineWidth = 4; ctx.setLineDash([30, 30]); ctx.lineDashOffset = -roadOffset;
+    ctx.beginPath(); ctx.moveTo(W / 2, -20); ctx.lineTo(W / 2, H + 20); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(40, 0); ctx.lineTo(40, H); ctx.moveTo(W - 40, 0); ctx.lineTo(W - 40, H); ctx.stroke();
+    // Rain streaks
+    ctx.strokeStyle = 'rgba(125,211,252,0.35)'; ctx.lineWidth = 1;
+    for (var r = 0; r < 40; r++) {
+      var rx = (r * 97 + frame * 3) % W, ry = (r * 53 + frame * 9) % H;
+      ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 4, ry + 14); ctx.stroke();
+    }
+    if (flashes.length) { ctx.fillStyle = 'rgba(255,255,200,0.18)'; ctx.fillRect(0, 0, W, H); }
+  }
+
+  function drawVan() {
+    ctx.save();
+    ctx.translate(van.x, van.y);
+    if (shake > 0) ctx.translate(rand(-3, 3), rand(-3, 3));
+    if (van.invuln > 0 && Math.floor(frame / 4) % 2 === 0) ctx.globalAlpha = 0.45;
+    // Body
+    ctx.fillStyle = '#0284c7'; ctx.fillRect(-23, -33, 46, 66);
+    ctx.fillStyle = '#e0f2fe'; ctx.fillRect(-23, -33, 46, 22);
+    ctx.fillStyle = '#0ea5e9'; ctx.fillRect(-19, -28, 38, 12);
+    ctx.fillStyle = '#facc15'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('STORM', 0, 8);
+    ctx.fillStyle = '#facc15'; ctx.font = 'bold 9px Arial'; ctx.fillText('CHASER', 0, 20);
+    // Wheels, lights, antenna + dish
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(-27, -22, 8, 16); ctx.fillRect(19, -22, 8, 16);
+    ctx.fillRect(-27, 10, 8, 16); ctx.fillRect(19, 10, 8, 16);
+    ctx.fillStyle = '#fef08a'; ctx.fillRect(-18, -35, 10, 4); ctx.fillRect(8, -35, 10, 4);
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(10, -33); ctx.lineTo(16, -46); ctx.stroke();
+    ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.arc(16, -46, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) { ctx.translate(rand(-shake / 2, shake / 2), rand(-shake / 2, shake / 2)); shake *= 0.9; }
+    drawBackground();
+    // Sensors
+    sensors.forEach(function (s) {
+      var bobY = s.y + Math.sin(s.bob) * 4;
+      ctx.fillStyle = 'rgba(74,222,128,0.25)'; ctx.beginPath(); ctx.arc(s.x, bobY, 26, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(s.x, bobY, s.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.fillText('📡', s.x, bobY + 5);
+      ctx.fillStyle = '#bbf7d0'; ctx.font = 'bold 10px Arial'; ctx.fillText('SENSOR', s.x, bobY + 28);
+    });
+    // Lightning warnings / strikes
+    bolts.forEach(function (b) {
+      if (b.warn > 0) {
+        ctx.fillStyle = b.warn < 20 && Math.floor(frame / 3) % 2 === 0 ? 'rgba(250,204,21,0.45)' : 'rgba(250,204,21,0.18)';
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#facc15'; ctx.stroke();
+        ctx.fillStyle = '#fef08a'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.fillText('⚡', b.x, b.y + 8);
+      } else if (b.struck) {
+        ctx.strokeStyle = '#fef08a'; ctx.lineWidth = 5; ctx.beginPath();
+        ctx.moveTo(b.x, -10); ctx.lineTo(b.x - 12, b.y - 40); ctx.lineTo(b.x + 10, b.y); ctx.lineTo(b.x - 6, b.y + 40); ctx.lineTo(b.x, H); ctx.stroke();
+        ctx.fillStyle = 'rgba(254,240,138,0.3)'; ctx.beginPath(); ctx.arc(b.x, b.y, 52, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    // Hail
+    hail.forEach(function (h) {
+      ctx.fillStyle = '#bae6fd'; ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(h.x - 3, h.y - 3, h.r * 0.4, 0, Math.PI * 2); ctx.fill();
+    });
+    // Debris
+    debris.forEach(function (d) {
+      ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.rot);
+      ctx.fillStyle = '#92400e'; ctx.fillRect(-d.w / 2, -d.h / 2, d.w, d.h);
+      ctx.fillStyle = '#78350f'; ctx.fillRect(-d.w / 2, -d.h / 2, d.w, 5);
+      ctx.restore();
+    });
+    particles.forEach(function (p) { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life / 30); ctx.fillRect(p.x, p.y, 5, 5); ctx.globalAlpha = 1; });
+    drawVan();
+    // Status banner while playing
+    ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Distance: ' + Math.floor(distance) + ' m', 50, 22);
+    ctx.restore();
+  }
+
+  function loop(now) {
+    if (state !== 'playing') return;
+    var dt = now - lastTime; lastTime = now;
+    if (dt > 100) dt = 100;
+    update();
+    draw();
+    if (state === 'playing') requestAnimationFrame(loop);
+  }
+
+  // Idle backdrop so the title screen sits over a living storm scene
+  resetGame();
+  drawBackground(); drawVan();
+  updateHUD();
+})();
+</script>
+</body>
+</html>

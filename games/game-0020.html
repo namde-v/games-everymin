@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Clockwork City — Game 0020</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #141b26; color: #eef2f7; font-family: system-ui, Arial, sans-serif; text-align: center; }
+  h1 { margin: 10px 0 4px; font-size: 26px; letter-spacing: 1px; }
+  p.sub { margin: 0 0 10px; color: #9fb0c3; }
+  #hud { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 8px auto; max-width: 740px; }
+  .pill { background: #223049; border: 1px solid #3a4f72; border-radius: 999px; padding: 7px 14px; font-weight: 700; font-size: 14px; }
+  .pill b { color: #ffd166; }
+  #controls { margin: 8px auto; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  button { cursor: pointer; border: 0; border-radius: 10px; padding: 10px 18px; font-size: 15px; font-weight: 800; background: #ffd166; color: #222; }
+  button.secondary { background: #33465f; color: #eef2f7; }
+  button.active { outline: 3px solid #fff; background: #ffdf8a; }
+  #wrap { position: relative; width: min(740px, 96vw); margin: 0 auto 16px; }
+  canvas { width: 100%; height: auto; background: #1b2a3d; border: 2px solid #3a4f72; border-radius: 12px; display: block; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(10, 16, 26, 0.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0; font-size: 30px; }
+  .overlay p { max-width: 560px; line-height: 1.5; color: #cdd9e8; margin: 4px 0; }
+  .overlay ul { text-align: left; max-width: 560px; color: #cdd9e8; line-height: 1.55; }
+  #msg { min-height: 22px; color: #ffd166; font-weight: 700; }
+  .small { font-size: 13px; color: #9fb0c3; }
+</style>
+</head>
+<body>
+<h1>⚙️ Clockwork City</h1>
+<p class="sub">Game 0020 — Strategy / Gear Builder &nbsp;•&nbsp; Connect the crank to every building!</p>
+
+<div id="hud">
+  <span class="pill">Score: <b id="score">0</b></span>
+  <span class="pill">Gear budget left: <b id="budget">20</b></span>
+  <span class="pill">Buildings powered: <b id="powered">0 / 5</b></span>
+  <span class="pill">Status: <b id="status">Ready</b></span>
+</div>
+
+<div id="controls">
+  <button id="btnSmall" class="active">Small gear (cost 1) — key 1</button>
+  <button id="btnLarge">Large gear (cost 2) — key 2</button>
+  <button id="btnRemove" class="secondary">Remove: click a gear / Backspace</button>
+  <button id="btnRestart" class="secondary">Restart</button>
+</div>
+<div id="msg">Place gears to carry power from the crank to all 5 buildings.</div>
+
+<div id="wrap">
+  <canvas id="game" width="720" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>⚙️ Clockwork City</h2>
+    <p><b>How to Play:</b> The crank on the left spins with power. Place gears on the grid so power flows through meshing gears to all 5 city buildings on the right and top.</p>
+    <ul>
+      <li><b>Meshing matters:</b> adjacent gears spin in opposite directions. A powered gear only passes power to a neighbour it meshes with.</li>
+      <li><b>Size matters:</b> small gears connect only to orthogonal neighbours (up / down / left / right). Large gears also connect diagonally — great for shortcuts and corners, but they cost 2 budget instead of 1.</li>
+      <li><b>Budget:</b> you have 20 gear-units. Click or tap an empty cell to place the selected gear. Click a placed gear to remove it and get its cost back.</li>
+      <li><b>Keyboard:</b> Arrow keys move the cursor, Enter or Space places a gear, Backspace removes it, 1 / 2 choose gear size.</li>
+      <li><b>Touch:</b> tap a cell to place or remove a gear.</li>
+      <li><b>Win:</b> power all 5 buildings. <b>Game Over:</b> your budget hits 0 before all buildings are powered.</li>
+    </ul>
+    <button id="startBtn">▶ Start Game</button>
+    <p class="small">Sound is procedural Web Audio and starts only after you press Start.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+<p class="small">Tip: build a spine along the middle row, then branch to the top, bottom and far-right buildings. Large gears help at diagonal corners.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLS = 9, ROWS = 7, OX = 44, OY = 36, CELL = 72;
+  var CRANK = { x: 0, y: 3 };
+  var BUILDINGS = [
+    { x: 8, y: 1, name: 'Library' },
+    { x: 8, y: 3, name: 'Town Hall' },
+    { x: 8, y: 5, name: 'Bakery' },
+    { x: 6, y: 6, name: 'Workshop' },
+    { x: 2, y: 0, name: 'Lighthouse' }
+  ];
+  var OBSTACLES = [
+    { x: 3, y: 2 }, { x: 4, y: 4 }, { x: 6, y: 2 }, { x: 3, y: 5 }, { x: 5, y: 1 }
+  ];
+  var BUDGET_MAX = 20;
+  var budgetLeft, score, gears, poweredSet, gameState, cursor, selectedSize, time, lastPoweredCount;
+  var audioCtx = null;
+
+  function isObstacle(x, y) {
+    for (var i = 0; i < OBSTACLES.length; i++) if (OBSTACLES[i].x === x && OBSTACLES[i].y === y) return true;
+    return false;
+  }
+  function isBuilding(x, y) {
+    for (var i = 0; i < BUILDINGS.length; i++) if (BUILDINGS[i].x === x && BUILDINGS[i].y === y) return true;
+    return false;
+  }
+  function gearAt(x, y) {
+    for (var i = 0; i < gears.length; i++) if (gears[i].x === x && gears[i].y === y) return gears[i];
+    return null;
+  }
+  function cellKey(x, y) { return x + ',' + y; }
+
+  function resetGame() {
+    budgetLeft = BUDGET_MAX;
+    score = 0;
+    gears = [];
+    poweredSet = {};
+    gameState = 'title';
+    cursor = { x: 1, y: 3 };
+    selectedSize = 'small';
+    time = 0;
+    lastPoweredCount = 0;
+    updateHUD('Ready');
+    document.getElementById('endScreen').classList.add('hidden');
+    document.getElementById('msg').textContent = 'Place gears to carry power from the crank to all 5 buildings.';
+    syncSizeButtons();
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+
+  // Power propagation. A gear is powered if it meshes with a powered neighbour:
+  // orthogonal always meshes; diagonal meshes only when at least one gear is large.
+  function computePower() {
+    var powered = {}; // gear keys
+    var queue = [];
+    var depth = {};
+    powered[cellKey(CRANK.x, CRANK.y)] = true;
+    depth[cellKey(CRANK.x, CRANK.y)] = 0;
+    queue.push(CRANK);
+    var dirs = [
+      { dx: 1, dy: 0, diag: false }, { dx: -1, dy: 0, diag: false },
+      { dx: 0, dy: 1, diag: false }, { dx: 0, dy: -1, diag: false },
+      { dx: 1, dy: 1, diag: true }, { dx: 1, dy: -1, diag: true },
+      { dx: -1, dy: 1, diag: true }, { dx: -1, dy: -1, diag: true }
+    ];
+    while (queue.length) {
+      var cur = queue.shift();
+      var curGear = gearAt(cur.x, cur.y);
+      var curLarge = (cur.x === CRANK.x && cur.y === CRANK.y) ? true : (curGear && curGear.size === 'large');
+      for (var d = 0; d < dirs.length; d++) {
+        var nx = cur.x + dirs[d].dx, ny = cur.y + dirs[d].dy;
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+        var ng = gearAt(nx, ny);
+        if (!ng) continue;
+        if (dirs[d].diag && !(curLarge || ng.size === 'large')) continue;
+        var k = cellKey(nx, ny);
+        if (!powered[k]) {
+          powered[k] = true;
+          depth[k] = depth[cellKey(cur.x, cur.y)] + 1;
+          queue.push({ x: nx, y: ny });
+        }
+      }
+    }
+    // Buildings: powered when adjacent (orth, or diag via a large gear) to a powered gear or the crank.
+    var bPowered = {};
+    BUILDINGS.forEach(function (b) {
+      for (var d = 0; d < dirs.length; d++) {
+        var nx = b.x + dirs[d].dx, ny = b.y + dirs[d].dy;
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+        var isCrank = (nx === CRANK.x && ny === CRANK.y);
+        var ng = gearAt(nx, ny);
+        if (isCrank || (ng && powered[cellKey(nx, ny)])) {
+          if (!dirs[d].diag || isCrank || (ng && ng.size === 'large')) { bPowered[cellKey(b.x, b.y)] = true; }
+        }
+      }
+    });
+    // Store rotation direction (meshing parity) on each gear.
+    gears.forEach(function (g) {
+      var k = cellKey(g.x, g.y);
+      g.powered = !!powered[k];
+      g.dir = (depth[k] % 2 === 0) ? 1 : -1;
+      if (g.powered && g.dir === undefined) g.dir = 1;
+    });
+    return bPowered;
+  }
+
+  function countPowered(bPowered) {
+    var n = 0;
+    BUILDINGS.forEach(function (b) { if (bPowered[cellKey(b.x, b.y)]) n++; });
+    return n;
+  }
+
+  function updateHUD(status) {
+    document.getElementById('score').textContent = score;
+    document.getElementById('budget').textContent = budgetLeft;
+    var n = countPowered(poweredSet);
+    document.getElementById('powered').textContent = n + ' / ' + BUILDINGS.length;
+    document.getElementById('status').textContent = status || (n === BUILDINGS.length ? 'All powered!' : 'Building...');
+  }
+
+  function afterMove() {
+    poweredSet = computePower();
+    var n = countPowered(poweredSet);
+    if (n > lastPoweredCount) {
+      score += (n - lastPoweredCount) * 100;
+      beep(660 + n * 80, 0.18, 'triangle', 0.15);
+      document.getElementById('msg').textContent = 'Powered a building! ' + n + ' of ' + BUILDINGS.length + ' lit up.';
+    }
+    lastPoweredCount = n;
+    if (n === BUILDINGS.length) {
+      score += budgetLeft * 25;
+      gameState = 'win';
+      showEnd('🏆 You Win! Clockwork City shines!', 'Final score: ' + score + ' — all 5 buildings powered with ' + budgetLeft + ' budget to spare. Bonus: +' + (budgetLeft * 25) + '.');
+      beep(523, 0.2, 'sine', 0.15); setTimeout(function () { beep(659, 0.2, 'sine', 0.15); }, 160); setTimeout(function () { beep(784, 0.35, 'sine', 0.15); }, 320);
+    } else if (budgetLeft <= 0) {
+      gameState = 'over';
+      showEnd('💥 Game Over — Out of Gears!', 'Budget exhausted with only ' + n + ' of ' + BUILDINGS.length + ' buildings powered. Remove gears before you run out, or restart and plan a tighter route.');
+      beep(180, 0.4, 'sawtooth', 0.12);
+    }
+    updateHUD();
+  }
+
+  function showEnd(title, text) {
+    document.getElementById('endTitle').textContent = title;
+    document.getElementById('endText').textContent = text;
+    document.getElementById('endScreen').classList.remove('hidden');
+  }
+
+  function costOf(size) { return size === 'large' ? 2 : 1; }
+
+  function placeAt(x, y) {
+    if (gameState !== 'playing') return;
+    if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
+    if (isObstacle(x, y) || isBuilding(x, y) || (x === CRANK.x && y === CRANK.y)) {
+      document.getElementById('msg').textContent = 'That cell is blocked — pick an empty grid cell.';
+      beep(140, 0.12, 'square', 0.08); return;
+    }
+    var existing = gearAt(x, y);
+    if (existing) { removeAt(x, y); return; }
+    var cost = costOf(selectedSize);
+    if (budgetLeft < cost) {
+      document.getElementById('msg').textContent = 'Not enough budget for that gear. Remove a gear to refund it.';
+      beep(140, 0.12, 'square', 0.08); return;
+    }
+    gears.push({ x: x, y: y, size: selectedSize, angle: 0, powered: false, dir: 1 });
+    budgetLeft -= cost;
+    beep(440, 0.1, 'triangle', 0.13);
+    afterMove();
+  }
+
+  function removeAt(x, y) {
+    if (gameState !== 'playing') return;
+    for (var i = 0; i < gears.length; i++) {
+      if (gears[i].x === x && gears[i].y === y) {
+        budgetLeft += costOf(gears[i].size);
+        gears.splice(i, 1);
+        beep(300, 0.1, 'triangle', 0.1);
+        afterMove();
+        document.getElementById('msg').textContent = 'Gear removed and refunded.';
+        return;
+      }
+    }
+  }
+
+  function syncSizeButtons() {
+    document.getElementById('btnSmall').classList.toggle('active', selectedSize === 'small');
+    document.getElementById('btnLarge').classList.toggle('active', selectedSize === 'large');
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    gameState = 'playing';
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    updateHUD('Building...');
+    beep(523, 0.15, 'sine', 0.13);
+  }
+
+  function drawGear(cx, cy, r, angle, powered, large) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    var teeth = large ? 12 : 8;
+    ctx.fillStyle = powered ? '#ffd166' : '#7d8ca3';
+    for (var i = 0; i < teeth; i++) {
+      ctx.rotate((Math.PI * 2) / teeth);
+      ctx.fillRect(r - 3, -5, 9, 10);
+    }
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = powered ? '#f4a261' : '#5a6b84';
+    ctx.fill();
+    ctx.strokeStyle = '#223049'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
+    ctx.fillStyle = '#223049'; ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#1b2a3d'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Grid
+    for (var x = 0; x < COLS; x++) {
+      for (var y = 0; y < ROWS; y++) {
+        var px = OX + x * CELL, py = OY + y * CELL;
+        ctx.strokeStyle = '#2c3e57'; ctx.lineWidth = 1;
+        ctx.strokeRect(px, py, CELL, CELL);
+        if (isObstacle(x, y)) {
+          ctx.fillStyle = '#3a2f2f'; ctx.fillRect(px + 2, py + 2, CELL - 4, CELL - 4);
+          ctx.fillStyle = '#c9a27a'; ctx.font = 'bold 26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText('▓', px + CELL / 2, py + CELL / 2);
+        }
+      }
+    }
+    // Cursor
+    if (gameState === 'playing') {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+      ctx.strokeRect(OX + cursor.x * CELL + 2, OY + cursor.y * CELL + 2, CELL - 4, CELL - 4);
+    }
+    // Crank
+    var ccx = OX + CRANK.x * CELL + CELL / 2, ccy = OY + CRANK.y * CELL + CELL / 2;
+    drawGear(ccx, ccy, 26, time * 1.2, true, false);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('CRANK', ccx, ccy + 44);
+    // Gears
+    gears.forEach(function (g) {
+      var gx = OX + g.x * CELL + CELL / 2, gy = OY + g.y * CELL + CELL / 2;
+      var speed = g.powered ? 1.6 : 0.25;
+      drawGear(gx, gy, g.size === 'large' ? 30 : 22, g.angle, g.powered, g.size === 'large');
+      ctx.fillStyle = '#eef2f7'; ctx.font = '11px sans-serif';
+      ctx.fillText(g.size === 'large' ? 'L' : 'S', gx, gy + 44);
+      g.angle += speed * 0.03 * g.dir;
+    });
+    // Buildings
+    BUILDINGS.forEach(function (b) {
+      var bx = OX + b.x * CELL, by = OY + b.y * CELL;
+      var lit = !!poweredSet[cellKey(b.x, b.y)];
+      ctx.fillStyle = lit ? '#ffe08a' : '#44546e';
+      ctx.fillRect(bx + 12, by + 22, CELL - 24, CELL - 26);
+      ctx.beginPath(); ctx.moveTo(bx + 8, by + 24); ctx.lineTo(bx + CELL / 2, by + 4); ctx.lineTo(bx + CELL - 8, by + 24); ctx.closePath();
+      ctx.fillStyle = lit ? '#e76f51' : '#33415a'; ctx.fill();
+      ctx.fillStyle = lit ? '#fff7cc' : '#223049';
+      ctx.fillRect(bx + 22, by + 38, 12, 12); ctx.fillRect(bx + 40, by + 38, 12, 12);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(b.name, bx + CELL / 2, by + CELL - 6);
+    });
+    ctx.fillStyle = '#9fb0c3'; ctx.font = '13px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('Click / tap a cell to place or remove a gear. Arrows + Enter work too.', 10, 552);
+  }
+
+  function loop() {
+    time += 0.03;
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    var sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+    var mx = (clientX - rect.left) * sx, my = (clientY - rect.top) * sy;
+    return { x: Math.floor((mx - OX) / CELL), y: Math.floor((my - OY) / CELL) };
+  }
+
+  canvas.addEventListener('click', function (e) {
+    ensureAudio();
+    var c = cellFromEvent(e);
+    cursor = { x: Math.max(0, Math.min(COLS - 1, c.x)), y: Math.max(0, Math.min(ROWS - 1, c.y)) };
+    placeAt(c.x, c.y);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    ensureAudio();
+    var c = cellFromEvent(e);
+    cursor = { x: Math.max(0, Math.min(COLS - 1, c.x)), y: Math.max(0, Math.min(ROWS - 1, c.y)) };
+    placeAt(c.x, c.y);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (gameState !== 'playing') {
+      if (e.key === 'Enter' && gameState === 'title') startGame();
+      return;
+    }
+    if (e.key === 'ArrowLeft') cursor.x = Math.max(0, cursor.x - 1);
+    else if (e.key === 'ArrowRight') cursor.x = Math.min(COLS - 1, cursor.x + 1);
+    else if (e.key === 'ArrowUp') cursor.y = Math.max(0, cursor.y - 1);
+    else if (e.key === 'ArrowDown') cursor.y = Math.min(ROWS - 1, cursor.y + 1);
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ensureAudio(); placeAt(cursor.x, cursor.y); }
+    else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); removeAt(cursor.x, cursor.y); }
+    else if (e.key === '1') { selectedSize = 'small'; syncSizeButtons(); }
+    else if (e.key === '2') { selectedSize = 'large'; syncSizeButtons(); }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('btnRestart').addEventListener('click', startGame);
+  document.getElementById('btnSmall').addEventListener('click', function () { selectedSize = 'small'; syncSizeButtons(); });
+  document.getElementById('btnLarge').addEventListener('click', function () { selectedSize = 'large'; syncSizeButtons(); });
+  document.getElementById('btnRemove').addEventListener('click', function () {
+    document.getElementById('msg').textContent = 'Remove mode: click a placed gear, or use Backspace on the cursor cell.';
+  });
+
+  resetGame();
+  loop();
+})();
+</script>
+</body>
+</html>

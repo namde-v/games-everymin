@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Harbor Master — Port Logistics</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b2233; font-family: Arial, Helvetica, sans-serif; color: #fff; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; }
+  h1 { font-size: 26px; letter-spacing: 2px; margin-bottom: 4px; text-shadow: 0 2px 0 #000; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 760px; margin: 6px 0; font-size: 15px; font-weight: bold; }
+  #hud span { background: #123a52; border: 2px solid #2f7ba6; border-radius: 8px; padding: 5px 10px; }
+  #hud .warn { background: #5a1a1a; border-color: #d44; }
+  #canvasWrap { position: relative; width: 100%; max-width: 760px; }
+  canvas { display: block; width: 100%; height: auto; background: #155a7a; border: 3px solid #e8c15a; border-radius: 10px; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(4, 22, 36, 0.88); border-radius: 10px; padding: 20px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { font-size: 15px; line-height: 1.5; max-width: 520px; color: #d9ecf5; }
+  .overlay .small { font-size: 13px; color: #a8c8d8; }
+  button { font-size: 19px; font-weight: bold; padding: 12px 30px; border: none; border-radius: 10px; background: #f2b705; color: #14202a; cursor: pointer; box-shadow: 0 4px 0 #9a7200; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #2f7ba6; color: #fff; box-shadow: 0 4px 0 #1a4a66; }
+  #dockBar { display: flex; gap: 8px; width: 100%; max-width: 760px; margin-top: 8px; }
+  #dockBar button { flex: 1; font-size: 13px; padding: 10px 4px; }
+  #msg { min-height: 22px; font-weight: bold; color: #ffe27a; margin-top: 6px; text-align: center; }
+  #legend { font-size: 12px; color: #b9d4e2; text-align: center; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9875; HARBOR MASTER &#9875;</h1>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Reputation: <b id="lives">&#10084;&#10084;&#10084;&#10084;&#10084;</b></span>
+    <span>Wave: <b id="wave">1 / 5</b></span>
+    <span>Cargo: <b id="cargo">0 / 40</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="canvasWrap">
+    <canvas id="game" width="760" height="460"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>&#9875; HARBOR MASTER</h2>
+      <p><b>How to Play:</b> Ships queue offshore with a cargo type and a patience timer.
+      Tap or click a ship to select it, then tap its matching dock below (or press keys 1-4) before its patience runs out.
+      A correct dock unloads cargo for points. A wrong dock or a ship that gives up costs 1 reputation.</p>
+      <p class="small">Cargo: &#128230; Containers (Dock 1) &nbsp; &#128666; Oil (Dock 2) &nbsp; &#127806; Grain (Dock 3) &nbsp; &#128031; Fish (Dock 4)<br>
+      Survive all 5 waves and unload 40 cargo to WIN. Lose all 5 reputation and the harbor closes.<br>
+      Controls: Mouse click, Touch tap, Keys 1-4 to assign, Arrow keys / A-D to change selection, Enter to start.</p>
+      <button id="startBtn">START</button>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">GAME OVER</h2>
+      <p id="endText"></p>
+      <p class="small" id="endStats"></p>
+      <button id="restartBtn">RESTART</button>
+    </div>
+  </div>
+  <div id="dockBar">
+    <button data-dock="0">1 &#128230; Containers</button>
+    <button data-dock="1">2 &#128666; Oil</button>
+    <button data-dock="2">3 &#127806; Grain</button>
+    <button data-dock="3">4 &#128031; Fish</button>
+  </div>
+  <div id="msg">Select a ship, then its matching dock!</div>
+  <div id="legend">Tip: work the ship with the shortest patience bar first. Later waves bring more ships, faster.</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var waveEl = document.getElementById('wave');
+  var cargoEl = document.getElementById('cargo');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+
+  var CARGO = [
+    { name: 'Containers', icon: 'C', color: '#f2b705', dock: 'CONTAINER DOCK' },
+    { name: 'Oil', icon: 'O', color: '#3a3a3a', dock: 'OIL TERMINAL' },
+    { name: 'Grain', icon: 'G', color: '#e8c15a', dock: 'GRAIN SILO' },
+    { name: 'Fish', icon: 'F', color: '#4fc3f7', dock: 'FISH MARKET' }
+  ];
+  var DOCKS = [
+    { x: 30, y: 380, w: 165, h: 62, type: 0 },
+    { x: 210, y: 380, w: 165, h: 62, type: 1 },
+    { x: 390, y: 380, w: 165, h: 62, type: 2 },
+    { x: 570, y: 380, w: 160, h: 62, type: 3 }
+  ];
+  var TOTAL_WAVES = 5;
+  var CARGO_TARGET = 40;
+
+  var state = 'title'; // title, playing, won, over
+  var score = 0, reputation = 5, wave = 1, cargo = 0;
+  var ships = [], effects = [], selected = -1;
+  var spawnTimer = 0, shipsToSpawn = 0, shipsSpawned = 0, wavePause = 0;
+  var lastTime = 0, elapsed = 0, flashDock = -1, flashTime = 0;
+  var audioCtx = null;
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function soundGood() { beep(660, 0.12, 'triangle', 0.14); setTimeout(function(){ beep(880, 0.16, 'triangle', 0.14); }, 90); }
+  function soundBad() { beep(180, 0.25, 'sawtooth', 0.12); setTimeout(function(){ beep(130, 0.25, 'sawtooth', 0.12); }, 120); }
+  function soundWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'triangle', 0.15); }, i * 130); }); }
+
+  function startWave(n) {
+    wave = n;
+    shipsToSpawn = 4 + n * 2; // wave 1: 6, wave 5: 14, total well above target
+    shipsSpawned = 0;
+    spawnTimer = 0.4;
+    wavePause = 0;
+    statusEl.textContent = 'Wave ' + n + ' incoming';
+    msgEl.textContent = 'Wave ' + n + ' has begun — match every ship to its dock!';
+  }
+  function spawnShip() {
+    var type = Math.floor(Math.random() * 4);
+    var patienceMax = Math.max(9, 20 - wave * 1.6);
+    var y = 55 + ships.length * 0; // stacked queue handled by slot below
+    var slot = 0;
+    while (ships.some(function(s){ return s.slot === slot; })) slot++;
+    ships.push({
+      id: Date.now() + Math.random(), type: type, slot: slot,
+      x: 30, y: 52, w: 118, h: 46,
+      patience: patienceMax, patienceMax: patienceMax,
+      unloading: 0, dockX: -1, dockY: -1, leaving: false
+    });
+    shipsSpawned++;
+  }
+  function layoutShips() {
+    // Queue ships in two rows offshore, left to right
+    var ordered = ships.slice().sort(function(a, b){ return a.slot - b.slot; });
+    ordered.forEach(function(s, i) {
+      var col = i % 5, row = Math.floor(i / 5);
+      s.x = 20 + col * 148;
+      s.y = 48 + row * 72;
+    });
+  }
+  function resetGame() {
+    score = 0; reputation = 5; cargo = 0; selected = -1;
+    ships = []; effects = []; elapsed = 0; flashDock = -1;
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    startWave(1);
+    updateHUD();
+  }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, reputation));
+    waveEl.textContent = wave + ' / ' + TOTAL_WAVES;
+    cargoEl.textContent = cargo + ' / ' + CARGO_TARGET;
+    if (state === 'playing') statusEl.textContent = ships.length ? 'Ships waiting: ' + ships.length : 'Awaiting ships';
+    document.getElementById('hud').querySelectorAll('span')[1].className = reputation <= 2 ? 'warn' : '';
+  }
+  function addEffect(x, y, text, color) {
+    effects.push({ x: x, y: y, text: text, color: color || '#fff', life: 1.4 });
+  }
+  function assignSelected(dockIndex) {
+    if (state !== 'playing' || selected < 0 || selected >= ships.length) {
+      msgEl.textContent = 'First select a ship, then pick its dock (or press 1-4).';
+      return;
+    }
+    var ship = ships[selected];
+    if (ship.unloading > 0) return;
+    flashDock = dockIndex; flashTime = 0.5;
+    if (dockIndex === ship.type) {
+      var bonus = Math.ceil(ship.patience) * 2;
+      score += 100 + bonus;
+      cargo += 3;
+      ship.unloading = 1; ship.dockX = DOCKS[dockIndex].x + 20; ship.dockY = DOCKS[dockIndex].y;
+      addEffect(ship.x + 55, ship.y, '+' + (100 + bonus), '#7dff7d');
+      soundGood();
+      msgEl.textContent = CARGO[ship.type].name + ' unloaded at the right dock! +' + (100 + bonus);
+      statusEl.textContent = 'Unloading...';
+    } else {
+      reputation--;
+      addEffect(ship.x + 55, ship.y, 'WRONG DOCK -1', '#ff6b6b');
+      soundBad();
+      msgEl.textContent = 'Wrong dock! That ship needed ' + CARGO[ship.type].name + '. Reputation -1.';
+      // Wrongly docked ship leaves angrily
+      ship.leaving = true; ship.unloading = 0.01;
+      selected = -1;
+      if (reputation <= 0) return endGame(false);
+    }
+    updateHUD();
+    checkWin();
+  }
+  function checkWin() {
+    if (cargo >= CARGO_TARGET && wave >= TOTAL_WAVES) return endGame(true);
+    if (wave >= TOTAL_WAVES && shipsSpawned >= shipsToSpawn && ships.length === 0 && cargo >= CARGO_TARGET) return endGame(true);
+    if (cargo >= CARGO_TARGET && wave === TOTAL_WAVES && shipsSpawned >= shipsToSpawn && ships.length === 0) return endGame(true);
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'over';
+    endScreen.classList.remove('hidden');
+    endTitle.textContent = won ? 'YOU WIN! HARBOR LEGEND!' : 'GAME OVER — HARBOR CLOSED';
+    endText.textContent = won
+      ? 'You kept the harbor running through all 5 waves and hit the cargo target. Brilliant harbor mastering!'
+      : 'Your reputation ran out and the port authority closed the harbor. Try again — watch those patience bars!';
+    endStats.textContent = 'Final score: ' + score + ' | Cargo unloaded: ' + cargo + ' / ' + CARGO_TARGET + ' | Wave reached: ' + wave + ' / ' + TOTAL_WAVES + ' | Time: ' + Math.floor(elapsed) + 's';
+    statusEl.textContent = won ? 'WINNER!' : 'GAME OVER';
+    if (won) soundWin(); else soundBad();
+    updateHUD();
+  }
+  function update(dt) {
+    elapsed += dt;
+    if (flashTime > 0) flashTime -= dt;
+    effects.forEach(function(e){ e.life -= dt; e.y -= 18 * dt; });
+    effects = effects.filter(function(e){ return e.life > 0; });
+    if (state !== 'playing') return;
+    if (wavePause > 0) {
+      wavePause -= dt;
+      if (wavePause <= 0) {
+        if (wave < TOTAL_WAVES) startWave(wave + 1);
+        else if (cargo >= CARGO_TARGET) endGame(true);
+        else { // ran out of waves but short of target: keep score pressure, declare over only if no hope
+          if (cargo < CARGO_TARGET) { msgEl.textContent = 'All waves done but cargo target missed.'; endGame(false); }
+        }
+      }
+      return;
+    }
+    if (shipsSpawned < shipsToSpawn) {
+      spawnTimer -= dt;
+      if (spawnTimer <= 0) { spawnShip(); spawnTimer = Math.max(0.9, 2.4 - wave * 0.25); }
+    }
+    var i = ships.length - 1;
+    while (i >= 0) {
+      var s = ships[i];
+      if (s.unloading > 0 && !s.leaving) {
+        s.unloading += dt * 1.4;
+        s.y += (DOCKS[s.type].y - 10 - s.y) * dt * 3;
+        s.x += (DOCKS[s.type].x + 25 - s.x) * dt * 3;
+        if (s.unloading >= 2) { ships.splice(i, 1); selected = -1; }
+      } else if (s.leaving) {
+        s.x += 260 * dt; s.y -= 40 * dt;
+        if (s.x > W + 80) ships.splice(i, 1);
+      } else {
+        s.patience -= dt;
+        if (s.patience <= 0) {
+          reputation--;
+          addEffect(s.x + 55, s.y, 'GAVE UP -1', '#ff6b6b');
+          soundBad();
+          msgEl.textContent = 'A ' + CARGO[s.type].name + ' ship gave up waiting! Reputation -1.';
+          ships.splice(i, 1); selected = -1;
+          if (reputation <= 0) { updateHUD(); return endGame(false); }
+        }
+      }
+      i--;
+    }
+    // Reassign slots after removals so queue stays tidy
+    ships.sort(function(a, b){ return a.slot - b.slot; });
+    ships.forEach(function(s, idx){ s.slot = idx; });
+    layoutShips();
+    if (shipsSpawned >= shipsToSpawn && ships.length === 0 && wavePause <= 0) {
+      if (wave < TOTAL_WAVES) { wavePause = 2.2; statusEl.textContent = 'Wave ' + wave + ' complete!'; msgEl.textContent = 'Wave ' + wave + ' complete! Next wave incoming...'; soundGood(); }
+      else if (cargo >= CARGO_TARGET) endGame(true);
+      else { wavePause = 0.5; statusEl.textContent = 'Final wave done'; }
+    }
+    if (selected >= ships.length) selected = -1;
+    updateHUD();
+  }
+  function drawSea() {
+    ctx.fillStyle = '#155a7a'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1;
+    for (var y = 30; y < H; y += 28) {
+      ctx.beginPath();
+      for (var x = 0; x <= W; x += 20) ctx.lineTo(x, y + Math.sin(x * 0.03 + elapsed * 2) * 3);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#c9a86a'; ctx.fillRect(0, 368, W, 12);
+    ctx.fillStyle = '#8a6d3b'; ctx.fillRect(0, 380, W, 80);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('OFFSHORE QUEUE — select a ship, then its matching dock', 14, 24);
+    ctx.fillText('DOCKS (keys 1-4)', 14, 364);
+  }
+  function drawShip(s, idx) {
+    var c = CARGO[s.type];
+    var isSel = (idx === selected);
+    ctx.save();
+    if (isSel) { ctx.strokeStyle = '#ffe27a'; ctx.lineWidth = 4; ctx.strokeRect(s.x - 4, s.y - 4, s.w + 8, s.h + 14); }
+    ctx.fillStyle = '#20303c'; ctx.fillRect(s.x, s.y + 18, s.w, 26);
+    ctx.fillStyle = c.color; ctx.fillRect(s.x + 6, s.y, s.w - 12, 24);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(c.icon + '  ' + c.name, s.x + s.w / 2, s.y + 16);
+    ctx.fillStyle = '#e8eef2'; ctx.font = '11px Arial';
+    ctx.fillText('Patience', s.x + s.w / 2, s.y + 38);
+    var pw = s.w - 14, frac = Math.max(0, s.patience / s.patienceMax);
+    ctx.fillStyle = '#400'; ctx.fillRect(s.x + 7, s.y + 42, pw, 8);
+    ctx.fillStyle = frac > 0.5 ? '#4caf50' : (frac > 0.25 ? '#ffb300' : '#e53935');
+    ctx.fillRect(s.x + 7, s.y + 42, pw * frac, 8);
+    if (s.unloading > 0 && !s.leaving) { ctx.fillStyle = '#ffe27a'; ctx.font = 'bold 12px Arial'; ctx.fillText('UNLOADING...', s.x + s.w / 2, s.y + 64); }
+    ctx.restore();
+  }
+  function draw() {
+    drawSea();
+    DOCKS.forEach(function(d, di) {
+      var c = CARGO[d.type];
+      ctx.fillStyle = (flashDock === di && flashTime > 0) ? '#fff3b0' : '#1d3a4d';
+      ctx.strokeStyle = '#e8c15a'; ctx.lineWidth = 2;
+      ctx.fillRect(d.x, d.y, d.w, d.h); ctx.strokeRect(d.x, d.y, d.w, d.h);
+      ctx.fillStyle = c.color; ctx.fillRect(d.x + 8, d.y + 8, 22, 22);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(c.icon, d.x + 19, d.y + 24);
+      ctx.font = 'bold 12px Arial'; ctx.textAlign = 'left';
+      ctx.fillText((di + 1) + ' ' + c.dock, d.x + 36, d.y + 24);
+      ctx.font = '11px Arial'; ctx.fillStyle = '#cfe3ee';
+      ctx.fillText(c.name + ' only', d.x + 36, d.y + 42);
+    });
+    ships.forEach(function(s, idx){ drawShip(s, idx); });
+    effects.forEach(function(e) {
+      ctx.globalAlpha = Math.max(0, e.life / 1.4);
+      ctx.fillStyle = e.color; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(e.text, e.x, e.y);
+      ctx.globalAlpha = 1;
+    });
+    if (state === 'playing' && ships.length === 0 && shipsSpawned >= shipsToSpawn) {
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Wave complete — next wave incoming...', W / 2, 200);
+    }
+  }
+  function loop(t) {
+    var dt = lastTime ? Math.min(0.05, (t - lastTime) / 1000) : 0.016;
+    lastTime = t;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  function onPointer(evt) {
+    if (state !== 'playing') return;
+    evt.preventDefault();
+    var p = canvasPos(evt);
+    // Dock tap assigns selected ship
+    for (var d = 0; d < DOCKS.length; d++) {
+      if (p.x >= DOCKS[d].x && p.x <= DOCKS[d].x + DOCKS[d].w && p.y >= DOCKS[d].y && p.y <= DOCKS[d].y + DOCKS[d].h) {
+        initAudio(); assignSelected(d); return;
+      }
+    }
+    for (var i = 0; i < ships.length; i++) {
+      var s = ships[i];
+      if (p.x >= s.x - 4 && p.x <= s.x + s.w + 4 && p.y >= s.y - 4 && p.y <= s.y + s.h + 14) {
+        selected = i; initAudio(); beep(520, 0.08, 'square', 0.08);
+        msgEl.textContent = 'Selected: ' + CARGO[s.type].name + ' ship — now tap dock ' + (s.type + 1) + ' or press ' + (s.type + 1) + '.';
+        return;
+      }
+    }
+  }
+  canvas.addEventListener('click', onPointer);
+  canvas.addEventListener('touchstart', onPointer, { passive: false });
+  document.getElementById('dockBar').addEventListener('click', function(e) {
+    var b = e.target.closest('button[data-dock]');
+    if (!b) return;
+    initAudio(); assignSelected(parseInt(b.getAttribute('data-dock'), 10));
+  });
+  document.getElementById('dockBar').addEventListener('touchstart', function(e) {
+    var b = e.target.closest('button[data-dock]');
+    if (!b) return;
+    initAudio(); assignSelected(parseInt(b.getAttribute('data-dock'), 10));
+  }, { passive: true });
+  document.addEventListener('keydown', function(e) {
+    if (state === 'title' && (e.key === 'Enter' || e.key === ' ')) { initAudio(); resetGame(); return; }
+    if (state !== 'playing') return;
+    if (e.key >= '1' && e.key <= '4') { initAudio(); assignSelected(parseInt(e.key, 10) - 1); }
+    else if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') { if (ships.length) selected = (selected + 1) % ships.length; }
+    else if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') { if (ships.length) selected = (selected - 1 + ships.length) % ships.length; }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { if (ships.length && selected < 0) selected = 0; }
+  });
+  document.getElementById('startBtn').addEventListener('click', function() { initAudio(); soundGood(); resetGame(); });
+  document.getElementById('startBtn').addEventListener('touchstart', function() { initAudio(); resetGame(); }, { passive: true });
+  document.getElementById('restartBtn').addEventListener('click', function() { initAudio(); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('touchstart', function() { initAudio(); resetGame(); }, { passive: true });
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
