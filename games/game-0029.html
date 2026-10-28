@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ghost Glider</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0b1a; font-family: Georgia, 'Times New Roman', serif; }
+  #wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; background: #12122b; border: 2px solid #4a4a8a; max-width: 100vw; max-height: 100vh; touch-action: none; }
+  #hud { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 18px; color: #e8e8ff; font-size: 16px; text-shadow: 1px 1px 2px #000; background: rgba(0,0,0,0.45); padding: 6px 14px; border-radius: 10px; z-index: 5; flex-wrap: wrap; justify-content: center; }
+  #hud span { white-space: nowrap; }
+  #alertBar { width: 110px; height: 12px; background: #333; border-radius: 6px; display: inline-block; vertical-align: middle; overflow: hidden; border: 1px solid #888; }
+  #alertFill { height: 100%; width: 0%; background: #ffd23f; transition: width 0.1s; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(5,5,20,0.88); color: #f0f0ff; text-align: center; padding: 20px; z-index: 10; }
+  .overlay h1 { font-size: 52px; letter-spacing: 3px; color: #b8c6ff; text-shadow: 0 0 18px #6a7bff, 2px 2px 0 #000; margin-bottom: 6px; }
+  .overlay h2 { font-size: 34px; color: #ffd23f; margin-bottom: 10px; text-shadow: 0 0 12px #ff9f1c; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 16px; margin: 6px 0; color: #d8d8f0; }
+  .overlay .howto { background: rgba(255,255,255,0.08); border: 1px solid #5555aa; border-radius: 12px; padding: 12px 18px; margin: 12px 0; text-align: left; }
+  .overlay .howto b { color: #9be8ff; }
+  button { margin-top: 16px; padding: 13px 34px; font-size: 20px; font-family: inherit; font-weight: bold; color: #10102a; background: #9be8ff; border: none; border-radius: 12px; cursor: pointer; box-shadow: 0 4px 0 #3a7ea5; }
+  button:hover { background: #c8f4ff; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #3a7ea5; }
+  #dashBarWrap { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #ccc; font-size: 13px; z-index: 5; text-align: center; }
+  #dashBar { width: 180px; height: 10px; background: #333; border-radius: 5px; margin: 4px auto 0; overflow: hidden; border: 1px solid #888; }
+  #dashFill { height: 100%; width: 100%; background: #7CFC9A; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="hud">
+    <span>👻 Wisps: <b id="hudWisps">0 / 0</b></span>
+    <span>❤️ Lives: <b id="hudLives">3</b></span>
+    <span>🚨 Alert: <span id="alertBar"><span id="alertFill"></span></span> <b id="hudAlert">Calm</b></span>
+    <span>🏰 Level: <b id="hudLevel">1</b></span>
+    <span>⭐ Score: <b id="hudScore">0</b></span>
+  </div>
+  <div id="dashBarWrap">DASH <div id="dashBar"><div id="dashFill"></div></div></div>
+
+  <div id="titleScreen" class="overlay">
+    <h1>👻 GHOST GLIDER 👻</h1>
+    <p><i>Slip through the haunted mansion unseen. The guards can see — but you can glide.</i></p>
+    <div class="howto">
+      <p><b>Goal:</b> Collect every glowing wisp, then reach the golden exit door to win the level. Survive all 3 levels to win the game!</p>
+      <p><b>Stealth:</b> Guards patrol with golden vision cones. If you linger inside a cone, your detection meter fills. When it fills, you are SPOTTED and lose a life!</p>
+      <p><b>Dash:</b> Press Shift or Space to dash — you move fast and are harder to spot for a split second. Dash recharges over time.</p>
+      <p><b>Controls:</b> Arrow Keys / WASD to glide &bull; Shift / Space to dash &bull; Mouse or touch drag to steer toward the pointer.</p>
+      <p><b>Tip:</b> Hide behind furniture, wait for a guard to look away, then glide through the gap. Wisps are worth 100 points; finishing a level fast earns a bonus.</p>
+    </div>
+    <button id="startBtn">▶ START GLIDING</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">YOU WIN!</h2>
+    <p id="endText"></p>
+    <p>Final Score: <b id="endScore">0</b></p>
+    <button id="restartBtn">↻ RESTART</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+var canvas = document.getElementById('game');
+var ctx = canvas.getContext('2d');
+var W = canvas.width, H = canvas.height;
+
+var titleScreen = document.getElementById('titleScreen');
+var endScreen = document.getElementById('endScreen');
+var endTitle = document.getElementById('endTitle');
+var endText = document.getElementById('endText');
+var endScore = document.getElementById('endScore');
+var hudWisps = document.getElementById('hudWisps');
+var hudLives = document.getElementById('hudLives');
+var hudAlert = document.getElementById('hudAlert');
+var hudLevel = document.getElementById('hudLevel');
+var hudScore = document.getElementById('hudScore');
+var alertFill = document.getElementById('alertFill');
+var dashFill = document.getElementById('dashFill');
+
+// ---------- Audio (procedural, after user interaction only) ----------
+var audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+  }
+  if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+}
+function beep(freq, dur, type, vol) {
+  if (!audioCtx) return;
+  var o = audioCtx.createOscillator();
+  var g = audioCtx.createGain();
+  o.type = type || 'sine';
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxWisp() { beep(880, 0.25, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.2, 'sine', 0.10); }, 70); }
+function sfxDash() { beep(300, 0.18, 'triangle', 0.12); }
+function sfxSpotted() { beep(160, 0.4, 'sawtooth', 0.16); setTimeout(function(){ beep(110, 0.4, 'sawtooth', 0.14); }, 150); }
+function sfxWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, 'triangle', 0.14); }, i * 130); }); }
+function sfxLose() { [400, 300, 200, 120].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.3, 'sawtooth', 0.12); }, i * 150); }); }
+
+// ---------- Input ----------
+var keys = {};
+var pointer = { active: false, x: 0, y: 0 };
+window.addEventListener('keydown', function(e) {
+  keys[e.key.toLowerCase()] = true;
+  if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(e.key.toLowerCase()) >= 0) e.preventDefault();
+  if ((e.key === 'Shift' || e.key === ' ') && state === 'playing') tryDash();
+});
+window.addEventListener('keyup', function(e) { keys[e.key.toLowerCase()] = false; });
+function pointerPos(e) {
+  var r = canvas.getBoundingClientRect();
+  var t = e.touches ? e.touches[0] : e;
+  return { x: (t.clientX - r.left) * (W / r.width), y: (t.clientY - r.top) * (H / r.height) };
+}
+canvas.addEventListener('mousedown', function(e) { pointer.active = true; var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; });
+window.addEventListener('mousemove', function(e) { if (pointer.active) { var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; } });
+window.addEventListener('mouseup', function() { pointer.active = false; });
+canvas.addEventListener('touchstart', function(e) { e.preventDefault(); pointer.active = true; var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; }, { passive: false });
+window.addEventListener('touchmove', function(e) { if (pointer.active) { e.preventDefault(); var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; } }, { passive: false });
+window.addEventListener('touchend', function() { pointer.active = false; });
+document.getElementById('startBtn').addEventListener('click', function() { ensureAudio(); startGame(); });
+document.getElementById('restartBtn').addEventListener('click', function() { ensureAudio(); startGame(); });
+
+// ---------- Game state ----------
+var state = 'title'; // title | playing | over
+var level = 1, score = 0, lives = 3, levelStartTime = 0;
+var player, guards, wisps, obstacles, exitDoor;
+var detection = 0, dashCooldown = 0, dashTime = 0, invuln = 0, spottedFlash = 0;
+
+function makeLevel(n) {
+  var guardCount = 2 + n; // 3, 4, 5
+  guards = [];
+  var spots = [
+    { x: 200, y: 130, dx: 1, dy: 0, range: 130 }, { x: 650, y: 140, dx: -1, dy: 0, range: 130 },
+    { x: 450, y: 300, dx: 0, dy: 1, range: 110 }, { x: 250, y: 440, dx: 1, dy: 0, range: 130 },
+    { x: 700, y: 430, dx: 0, dy: -1, range: 120 }, { x: 450, y: 130, dx: 0, dy: 1, range: 110 }
+  ];
+  for (var i = 0; i < guardCount; i++) {
+    var s = spots[i % spots.length];
+    guards.push({ x: s.x + (i >= spots.length ? 60 : 0), y: s.y, baseX: s.x, baseY: s.y,
+      dir: Math.atan2(s.dy, s.dx), patrolT: Math.random() * 6, speed: 0.7 + n * 0.12,
+      range: s.range, fov: 0.55, sweep: 0.9 + n * 0.08, phase: Math.random() * 6.28 });
+  }
+  wisps = [];
+  var wispSpots = [
+    [120, 90], [780, 90], [120, 480], [780, 480], [450, 90], [450, 480],
+    [180, 280], [720, 280], [330, 200], [570, 360], [330, 400], [570, 180]
+  ];
+  var wCount = 5 + n; // 6, 7, 8
+  for (var j = 0; j < wCount; j++) { wisps.push({ x: wispSpots[j][0], y: wispSpots[j][1], taken: false, bob: Math.random() * 6.28 }); }
+  obstacles = [
+    { x: 300, y: 200, w: 90, h: 26 }, { x: 520, y: 330, w: 90, h: 26 },
+    { x: 150, y: 330, w: 60, h: 60 }, { x: 700, y: 200, w: 60, h: 60 },
+    { x: 400, y: 440, w: 110, h: 22 }
+  ];
+  exitDoor = { x: 830, y: 270, w: 44, h: 80 };
+  player = { x: 60, y: 280, vx: 0, vy: 0, r: 16 };
+  detection = 0; dashCooldown = 0; dashTime = 0; invuln = 1;
+  levelStartTime = performance.now();
+}
+
+function startGame() {
+  level = 1; score = 0; lives = 3;
+  makeLevel(level);
+  state = 'playing';
+  titleScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+}
+
+function tryDash() {
+  if (dashCooldown <= 0 && dashTime <= 0) {
+    dashTime = 0.22; dashCooldown = 2.2; sfxDash();
+  }
+}
+
+function blocked(x, y, r) {
+  if (x < r + 8 || x > W - r - 8 || y < r + 8 || y > H - r - 8) return true;
+  for (var i = 0; i < obstacles.length; i++) {
+    var o = obstacles[i];
+    if (x + r > o.x && x - r < o.x + o.w && y + r > o.y && y - r < o.y + o.h) return true;
+  }
+  return false;
+}
+function lineBlocked(x1, y1, x2, y2) {
+  // sample the segment; furniture blocks vision
+  for (var t = 0; t <= 1.0001; t += 0.05) {
+    var x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
+    for (var i = 0; i < obstacles.length; i++) {
+      var o = obstacles[i];
+      if (x > o.x && x < o.x + o.w && y > o.y && y < o.y + o.h) return true;
+    }
+  }
+  return false;
+}
+
+function update(dt) {
+  if (state !== 'playing') return;
+  dashCooldown = Math.max(0, dashCooldown - dt);
+  if (invuln > 0) invuln -= dt;
+  if (spottedFlash > 0) spottedFlash -= dt;
+
+  // player movement
+  var ax = 0, ay = 0;
+  if (keys['arrowleft'] || keys['a']) ax -= 1;
+  if (keys['arrowright'] || keys['d']) ax += 1;
+  if (keys['arrowup'] || keys['w']) ay -= 1;
+  if (keys['arrowdown'] || keys['s']) ay += 1;
+  if (pointer.active) {
+    var dxp = pointer.x - player.x, dyp = pointer.y - player.y;
+    var d = Math.hypot(dxp, dyp);
+    if (d > 12) { ax = dxp / d; ay = dyp / d; }
+  }
+  var len = Math.hypot(ax, ay);
+  if (len > 0) { ax /= len; ay /= len; }
+  var speed = 190;
+  if (dashTime > 0) { speed = 480; dashTime -= dt; }
+  player.vx = ax * speed; player.vy = ay * speed;
+  var nx = player.x + player.vx * dt, ny = player.y + player.vy * dt;
+  if (!blocked(nx, player.y, player.r)) player.x = nx;
+  if (!blocked(player.x, ny, player.r)) player.y = ny;
+
+  // guards patrol: sweep look direction + slow drift
+  var time = performance.now() / 1000;
+  guards.forEach(function(g) {
+    g.patrolT += dt;
+    g.dir = Math.sin(time * g.sweep + g.phase) * 1.1 + (g.patrolT * 0.15 % 1.5 - 0.75);
+    g.x = g.baseX + Math.sin(g.patrolT * 0.35 + g.phase) * 55;
+    g.y = g.baseY + Math.cos(g.patrolT * 0.28 + g.phase) * 45;
+  });
+
+  // detection: inside a vision cone and in line of sight?
+  var seen = false;
+  guards.forEach(function(g) {
+    var dx = player.x - g.x, dy = player.y - g.y;
+    var dist = Math.hypot(dx, dy);
+    if (dist < g.range + player.r) {
+      var ang = Math.atan2(dy, dx);
+      var diff = Math.abs(((ang - g.dir + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (diff < g.fov && !lineBlocked(g.x, g.y, player.x, player.y)) seen = true;
+    }
+  });
+  if (seen && invuln <= 0 && dashTime <= 0) {
+    detection += dt * 1.4;
+  } else {
+    detection = Math.max(0, detection - dt * 0.7);
+  }
+  if (detection >= 1) {
+    detection = 0;
+    lives -= 1; invuln = 2; spottedFlash = 0.8; sfxSpotted();
+    player.x = 60; player.y = 280; // ghost retreats to the entrance
+    if (lives <= 0) { endGame(false); return; }
+  }
+
+  // wisps
+  wisps.forEach(function(w) {
+    w.bob += dt * 3;
+    if (!w.taken && Math.hypot(player.x - w.x, player.y - w.y) < 30) {
+      w.taken = true; score += 100; sfxWisp();
+    }
+  });
+
+  // exit
+  var allTaken = wisps.every(function(w) { return w.taken; });
+  if (allTaken && player.x + player.r > exitDoor.x && player.x - player.r < exitDoor.x + exitDoor.w &&
+      player.y + player.r > exitDoor.y && player.y - player.r < exitDoor.y + exitDoor.h) {
+    var elapsed = (performance.now() - levelStartTime) / 1000;
+    score += Math.max(0, Math.round(500 - elapsed * 5));
+    if (level >= 3) { endGame(true); }
+    else { level += 1; sfxWin(); makeLevel(level); }
+  }
+
+  // HUD
+  var taken = wisps.filter(function(w) { return w.taken; }).length;
+  hudWisps.textContent = taken + ' / ' + wisps.length;
+  hudLives.textContent = lives;
+  hudLevel.textContent = level;
+  hudScore.textContent = score;
+  alertFill.style.width = Math.round(detection * 100) + '%';
+  alertFill.style.background = detection > 0.66 ? '#ff4444' : detection > 0.33 ? '#ff9f1c' : '#ffd23f';
+  hudAlert.textContent = detection > 0.66 ? 'SPOTTED!' : detection > 0.33 ? 'Suspicious' : seen ? 'Watched' : 'Calm';
+  dashFill.style.width = Math.round((1 - dashCooldown / 2.2) * 100) + '%';
+}
+
+function endGame(won) {
+  state = 'over';
+  endTitle.textContent = won ? '🏆 YOU WIN! 🏆' : '💀 GAME OVER 💀';
+  endText.textContent = won
+    ? 'You glided through all 3 rooms of the mansion unseen and escaped with every wisp. A truly legendary ghost!'
+    : 'The guards caught you too many times and the mansion sealed its doors. Try gliding quieter next time!';
+  endScore.textContent = score;
+  endScreen.classList.remove('hidden');
+  if (won) sfxWin(); else sfxLose();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  // floor tiles
+  ctx.fillStyle = '#17173a';
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  for (var x = 0; x < W; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (var y = 0; y < H; y += 60) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+
+  // exit door
+  var allTaken = wisps && wisps.every(function(w) { return w.taken; });
+  ctx.fillStyle = allTaken ? '#ffd23f' : '#5a4a20';
+  ctx.fillRect(exitDoor.x, exitDoor.y, exitDoor.w, exitDoor.h);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 13px Georgia';
+  ctx.textAlign = 'center';
+  ctx.fillText(allTaken ? 'EXIT!' : 'LOCKED', exitDoor.x + 22, exitDoor.y + 44);
+  ctx.fillText('🚪', exitDoor.x + 22, exitDoor.y + 66);
+
+  // furniture obstacles
+  obstacles.forEach(function(o) {
+    ctx.fillStyle = '#3a2a5a';
+    ctx.fillRect(o.x, o.y, o.w, o.h);
+    ctx.strokeStyle = '#7a5abf';
+    ctx.strokeRect(o.x, o.y, o.w, o.h);
+    ctx.fillStyle = '#c9b8ff';
+    ctx.font = '20px Georgia';
+    ctx.fillText('🛋️', o.x + o.w / 2, o.y + o.h / 2 + 7);
+  });
+
+  // vision cones
+  guards.forEach(function(g) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(g.x, g.y);
+    ctx.arc(g.x, g.y, g.range, g.dir - g.fov, g.dir + g.fov);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255, 210, 63, 0.18)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 210, 63, 0.55)';
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  // wisps
+  wisps.forEach(function(w) {
+    if (w.taken) return;
+    var bobY = w.y + Math.sin(w.bob) * 4;
+    ctx.beginPath();
+    ctx.arc(w.x, bobY, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#9be8ff';
+    ctx.shadowColor = '#9be8ff'; ctx.shadowBlur = 16;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.font = '12px Georgia';
+    ctx.fillText('✦', w.x, bobY + 4);
+  });
+
+  // guards
+  guards.forEach(function(g) {
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, 16, 0, Math.PI * 2);
+    ctx.fillStyle = '#2a2a4a';
+    ctx.fill();
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = '18px Georgia';
+    ctx.fillText('👮', g.x, g.y + 6);
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath();
+    ctx.moveTo(g.x, g.y);
+    ctx.lineTo(g.x + Math.cos(g.dir) * 22, g.y + Math.sin(g.dir) * 22);
+    ctx.strokeStyle = '#ffd23f';
+    ctx.stroke();
+  });
+
+  // player ghost
+  if (state === 'playing') {
+    var blink = invuln > 0 && Math.floor(performance.now() / 120) % 2 === 0;
+    ctx.save();
+    ctx.globalAlpha = blink ? 0.4 : 1;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y - 2, player.r, Math.PI, 0);
+    ctx.lineTo(player.x + player.r, player.y + 14);
+    ctx.lineTo(player.x + player.r * 0.5, player.y + 6);
+    ctx.lineTo(player.x, player.y + 14);
+    ctx.lineTo(player.x - player.r * 0.5, player.y + 6);
+    ctx.lineTo(player.x - player.r, player.y + 14);
+    ctx.closePath();
+    ctx.fillStyle = '#eef0ff';
+    ctx.shadowColor = '#b8c6ff'; ctx.shadowBlur = 18;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#10102a';
+    ctx.beginPath(); ctx.arc(player.x - 6, player.y - 4, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(player.x + 6, player.y - 4, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    if (dashTime > 0) {
+      ctx.strokeStyle = 'rgba(155,232,255,0.8)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 6, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  if (spottedFlash > 0) {
+    ctx.fillStyle = 'rgba(255,0,0,' + (spottedFlash * 0.35) + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+  if (state === 'title') {
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.font = 'italic 18px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('The mansion sleeps... the guards do not.', W / 2, H - 20);
+  }
+}
+
+var last = performance.now();
+function loop(now) {
+  var dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+makeLevel(1);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

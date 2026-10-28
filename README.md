@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 20
-- **Latest game:** 0020 — Clockwork City
+- **Total games:** 30
+- **Latest game:** 0030 — Rune Duel
 - **Current volume:** 001 (Games 0001 to 0100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -13,7 +13,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 | Volume | Games | Catalog |
 |--------|-------|---------|
-| 001 | 0001–0020 (20 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
+| 001 | 0001–0030 (30 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -27,20 +27,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 002
+## Latest batch — Batch 003
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0011 | Comet Courier | Arcade / Parcel Dash | [Play](./games/game-0011.html) |
-| 0012 | Hex Vault | Puzzle / Circuit Logic | [Play](./games/game-0012.html) |
-| 0013 | Harbor Master | Strategy / Port Logistics | [Play](./games/game-0013.html) |
-| 0014 | Echo Drums | Rhythm / Pattern Memory | [Play](./games/game-0014.html) |
-| 0015 | Abyss Angler | Arcade / Deep-Sea Catch | [Play](./games/game-0015.html) |
-| 0016 | Glyph Grid | Puzzle / Symbol Deduction | [Play](./games/game-0016.html) |
-| 0017 | Meadow Market | Simulation / Farm Trading | [Play](./games/game-0017.html) |
-| 0018 | Pendulum Perch | Precision / Balance Swing | [Play](./games/game-0018.html) |
-| 0019 | Storm Chaser | Arcade / Weather Dodge | [Play](./games/game-0019.html) |
-| 0020 | Clockwork City | Strategy / Gear Builder | [Play](./games/game-0020.html) |
+| 0021 | Orbit Flip | Arcade / Gravity Flip Runner | [Play](./games/game-0021.html) |
+| 0022 | Word Weaver | Puzzle / Word Logic | [Play](./games/game-0022.html) |
+| 0023 | Skyport Control | Strategy / Air Traffic Routing | [Play](./games/game-0023.html) |
+| 0024 | Beat Bounce | Rhythm / Bounce Timing | [Play](./games/game-0024.html) |
+| 0025 | Prism Breaker | Arcade / Color Breakout | [Play](./games/game-0025.html) |
+| 0026 | Boulder Balance | Puzzle / Physics Stacking | [Play](./games/game-0026.html) |
+| 0027 | Lighthouse Keeper | Simulation / Beacon Management | [Play](./games/game-0027.html) |
+| 0028 | Orbit Golf | Precision / Gravity Mini-Golf | [Play](./games/game-0028.html) |
+| 0029 | Ghost Glider | Arcade / Stealth Glide | [Play](./games/game-0029.html) |
+| 0030 | Rune Duel | Strategy / Card Duel | [Play](./games/game-0030.html) |
 
 ## Quality standard
 

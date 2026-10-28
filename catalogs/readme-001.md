@@ -1,4 +1,4 @@
-# Game Catalog: Volume 001 (Games 0001 to 0020)
+# Game Catalog: Volume 001 (Games 0001 to 0030)
 
 Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets, or assets — all CSS and JavaScript are inline, audio is procedural Web Audio, graphics are Canvas 2D / DOM.
 
@@ -24,10 +24,21 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0018 | Pendulum Perch | Precision / Balance Swing | Space hop, mouse click, touch tap | [Play](./../games/game-0018.html) |
 | 0019 | Storm Chaser | Arcade / Weather Dodge | Arrow Keys / WASD, mouse/touch steering | [Play](./../games/game-0019.html) |
 | 0020 | Clockwork City | Strategy / Gear Builder | Mouse/touch click place gear, Arrow Keys, Enter place | [Play](./../games/game-0020.html) |
+| 0021 | Orbit Flip | Arcade / Gravity Flip Runner | Space / Up / W flip gravity, mouse click / touch tap flip | [Play](./../games/game-0021.html) |
+| 0022 | Word Weaver | Puzzle / Word Logic | Click/tap adjacent letters, Arrow Keys, Enter select | [Play](./../games/game-0022.html) |
+| 0023 | Skyport Control | Strategy / Air Traffic Routing | Click/tap plane then runway, 1/2/3/4 runways, Arrow Keys select | [Play](./../games/game-0023.html) |
+| 0024 | Beat Bounce | Rhythm / Bounce Timing | Space / J / K bounce on beat, mouse click, touch tap pad | [Play](./../games/game-0024.html) |
+| 0025 | Prism Breaker | Arcade / Color Breakout | Arrow Keys / A/D paddle, Space switch color, mouse/touch drag | [Play](./../games/game-0025.html) |
+| 0026 | Boulder Balance | Puzzle / Physics Stacking | Arrow Keys move/rotate, Space drop, mouse/touch drag and tap | [Play](./../games/game-0026.html) |
+| 0027 | Lighthouse Keeper | Simulation / Beacon Management | Mouse/touch aim beam, F refuel, R repair, Space flash | [Play](./../games/game-0027.html) |
+| 0028 | Orbit Golf | Precision / Gravity Mini-Golf | Mouse/touch drag aim and release, Arrow Keys aim, Space charge | [Play](./../games/game-0028.html) |
+| 0029 | Ghost Glider | Arcade / Stealth Glide | Arrow Keys / WASD glide, Shift/Space dash, mouse/touch drag | [Play](./../games/game-0029.html) |
+| 0030 | Rune Duel | Strategy / Card Duel | Click/tap cards, 1-5 select, Enter play, E end turn | [Play](./../games/game-0030.html) |
 
 ## Batch notes
 
 - Batch 001: 10 games, produced in one cycle.
 - Batch 002: 10 games, produced in one cycle.
+- Batch 003: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 - Next volume starts at game 0101 in `catalogs/readme-002.md`, after this volume reaches 100 entries.

@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Skyport Control</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1626; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 28px; letter-spacing: 1px; margin: 6px 0 2px; color: #ffd166; text-align: center; }
+  .tag { color: #9fb8d8; font-size: 13px; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 6px 0 8px; width: 100%; max-width: 920px; }
+  .stat { background: #16283f; border: 1px solid #2d4a6b; border-radius: 8px; padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .stat span { color: #ffd166; }
+  #wrap { position: relative; width: 100%; max-width: 920px; }
+  canvas { width: 100%; height: auto; display: block; background: #0e2a4a; border: 2px solid #2d4a6b; border-radius: 10px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(5, 14, 28, 0.88); border-radius: 10px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #d7e4f5; }
+  .overlay ul { text-align: left; max-width: 560px; line-height: 1.55; font-size: 14px; color: #d7e4f5; }
+  button { background: #ffd166; color: #12233a; border: none; border-radius: 8px; padding: 12px 26px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #2d4a6b; color: #fff; padding: 8px 16px; font-size: 14px; }
+  #msg { min-height: 20px; font-size: 14px; color: #7ee2a8; margin-top: 6px; text-align: center; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; font-size: 13px; color: #c7d6ea; margin-top: 6px; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+</style>
+</head>
+<body>
+<h1>&#9992; SKYPORT CONTROL</h1>
+<p class="tag">Strategy / Air Traffic Routing &mdash; route every plane to its matching runway</p>
+<div id="hud">
+  <div class="stat">Score: <span id="score">0</span></div>
+  <div class="stat">Landed: <span id="landed">0</span> / <span id="target">20</span></div>
+  <div class="stat">Lives: <span id="lives">&#10084;&#10084;&#10084;</span></div>
+  <div class="stat">Wave: <span id="wave">1</span></div>
+  <div class="stat">Airborne: <span id="air">0</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="900" height="600"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>SKYPORT CONTROL</h2>
+    <p><strong>How to Play:</strong> Planes fly in from the edges, each coloured to match one of the four runways. Select a plane, then send it to its matching runway before it leaves the sky or hits another plane.</p>
+    <ul>
+      <li><strong>Mouse / Touch:</strong> tap a plane to select it, then tap a runway to route it.</li>
+      <li><strong>Keyboard:</strong> Left / Right arrows cycle planes, Up / Down cycle runways, Enter or Space confirms the route, keys 1&ndash;4 send the selected plane straight to that runway.</li>
+      <li><strong>Scoring:</strong> +100 for a matching landing, +25 bonus for a fast landing. Wrong runway or a mid-air collision costs a life. A plane that exits unlanded costs a life.</li>
+      <li><strong>Win:</strong> land 20 planes. <strong>Game Over:</strong> lose all 3 lives.</li>
+    </ul>
+    <button id="startBtn">Start Game</button>
+    <p>Sound starts only after you press Start.</p>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+</div>
+<div id="msg">Select a plane, then choose its matching runway.</div>
+<div class="legend">
+  <span><span class="dot" style="background:#ff5d5d"></span>Runway 1 (Red)</span>
+  <span><span class="dot" style="background:#4dc96b"></span>Runway 2 (Green)</span>
+  <span><span class="dot" style="background:#4db2ff"></span>Runway 3 (Blue)</span>
+  <span><span class="dot" style="background:#e08cff"></span>Runway 4 (Purple)</span>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 900, H = 600;
+  var scoreEl = document.getElementById('score');
+  var landedEl = document.getElementById('landed');
+  var livesEl = document.getElementById('lives');
+  var waveEl = document.getElementById('wave');
+  var airEl = document.getElementById('air');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var COLORS = ['#ff5d5d', '#4dc96b', '#4db2ff', '#e08cff'];
+  var NAMES = ['Red', 'Green', 'Blue', 'Purple'];
+  var RUNWAYS = [
+    { x: 150, y: 540, w: 130, h: 26, color: 0, label: '1' },
+    { x: 330, y: 540, w: 130, h: 26, color: 1, label: '2' },
+    { x: 510, y: 540, w: 130, h: 26, color: 2, label: '3' },
+    { x: 690, y: 540, w: 130, h: 26, color: 3, label: '4' }
+  ];
+  var TARGET = 20;
+  var state = 'title';
+  var planes = [], effects = [];
+  var score = 0, landed = 0, lives = 3, wave = 1;
+  var selected = -1, runwaySel = 0, spawnTimer = 0, spawnInterval = 150;
+  var nextId = 1, lastTime = 0;
+  var audioCtx = null;
+
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function reset() {
+    planes = []; effects = [];
+    score = 0; landed = 0; lives = 3; wave = 1;
+    selected = -1; runwaySel = 0; spawnTimer = 60; spawnInterval = 150;
+    nextId = 1; updateHud(); msgEl.textContent = 'Select a plane, then choose its matching runway.';
+  }
+
+  function spawnPlane() {
+    var color = Math.floor(Math.random() * 4);
+    var edge = Math.floor(Math.random() * 3); // 0 left, 1 top, 2 right
+    var p = { id: nextId++, color: color, x: 0, y: 0, vx: 0, vy: 0, speed: 0.9 + Math.random() * 0.4 + wave * 0.08, target: -1, age: 0, trail: [] };
+    if (edge === 0) { p.x = -20; p.y = 60 + Math.random() * 380; p.vx = p.speed; p.vy = (Math.random() - 0.5) * 0.4; }
+    else if (edge === 1) { p.x = 60 + Math.random() * 780; p.y = -20; p.vx = (Math.random() - 0.5) * 0.5; p.vy = p.speed; }
+    else { p.x = W + 20; p.y = 60 + Math.random() * 380; p.vx = -p.speed; p.vy = (Math.random() - 0.5) * 0.4; }
+    planes.push(p);
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    landedEl.textContent = landed;
+    livesEl.textContent = '\u2764'.repeat(Math.max(0, lives));
+    waveEl.textContent = wave;
+    airEl.textContent = planes.length;
+  }
+
+  function loseLife(reason) {
+    lives--;
+    beep(160, 0.35, 'sawtooth');
+    msgEl.textContent = reason + ' Lives left: ' + lives;
+    effects.push({ x: W / 2, y: 40, text: reason, life: 90 });
+    if (lives <= 0) endGame(false);
+    updateHud();
+  }
+
+  function endGame(won) {
+    state = 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endTitle.textContent = 'YOU WIN! Airport Clear!';
+      endText.textContent = 'You landed all ' + TARGET + ' planes with a final score of ' + score + '. Excellent routing, controller!';
+      beep(660, 0.2, 'sine'); setTimeout(function () { beep(880, 0.3, 'sine'); }, 180);
+    } else {
+      endTitle.textContent = 'GAME OVER';
+      endText.textContent = 'The sky got too crowded. You landed ' + landed + ' planes and scored ' + score + '. Try again!';
+    }
+    updateHud();
+  }
+
+  function startGame() {
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    beep(520, 0.15, 'sine');
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function assignRunway(planeIdx, runwayIdx) {
+    if (state !== 'playing' || planeIdx < 0 || planeIdx >= planes.length) return;
+    var p = planes[planeIdx];
+    p.target = runwayIdx;
+    if (runwayIdx === p.color) {
+      msgEl.textContent = 'Plane ' + p.id + ' routed to the ' + NAMES[runwayIdx] + ' runway. Good call!';
+      beep(740, 0.12, 'sine');
+    } else {
+      msgEl.textContent = 'Warning: Plane ' + p.id + ' is ' + NAMES[p.color] + ', not ' + NAMES[runwayIdx] + '! It will be turned away.';
+      beep(300, 0.2, 'square');
+    }
+  }
+
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined) ? evt.clientX : (evt.touches && evt.touches[0].clientX);
+    var cy = (evt.clientY !== undefined) ? evt.clientY : (evt.touches && evt.touches[0].clientY);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+
+  function handlePoint(pos) {
+    if (state !== 'playing') return;
+    // Runway clicked?
+    for (var i = 0; i < RUNWAYS.length; i++) {
+      var rw = RUNWAYS[i];
+      if (pos.x >= rw.x - 10 && pos.x <= rw.x + rw.w + 10 && pos.y >= rw.y - 14 && pos.y <= rw.y + rw.h + 14) {
+        runwaySel = i;
+        if (selected >= 0) assignRunway(selected, i);
+        return;
+      }
+    }
+    // Plane clicked?
+    var best = -1, bestD = 42;
+    for (var j = 0; j < planes.length; j++) {
+      var d = Math.hypot(planes[j].x - pos.x, planes[j].y - pos.y);
+      if (d < bestD) { bestD = d; best = j; }
+    }
+    if (best >= 0) {
+      selected = best;
+      msgEl.textContent = 'Plane ' + planes[best].id + ' (' + NAMES[planes[best].color] + ') selected. Pick its matching runway.';
+      beep(600, 0.08, 'sine');
+    }
+  }
+
+  canvas.addEventListener('click', function (e) { handlePoint(canvasPos(e)); });
+  canvas.addEventListener('mousedown', function (e) { if (state === 'playing') handlePoint(canvasPos(e)); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); handlePoint(canvasPos(e)); }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (state !== 'playing') {
+      if ((e.key === 'Enter' || e.key === ' ') && (state === 'title' || state === 'over')) startGame();
+      return;
+    }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      if (planes.length === 0) return;
+      if (selected < 0) selected = 0;
+      else selected = (selected + (e.key === 'ArrowRight' ? 1 : -1) + planes.length) % planes.length;
+      msgEl.textContent = 'Plane ' + planes[selected].id + ' (' + NAMES[planes[selected].color] + ') selected.';
+      beep(600, 0.08, 'sine');
+      e.preventDefault();
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      runwaySel = (runwaySel + (e.key === 'ArrowDown' ? 1 : -1) + 4) % 4;
+      msgEl.textContent = 'Runway ' + (runwaySel + 1) + ' (' + NAMES[runwaySel] + ') highlighted. Press Enter to route.';
+      e.preventDefault();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      if (selected >= 0) assignRunway(selected, runwaySel);
+      e.preventDefault();
+    } else if (e.key >= '1' && e.key <= '4') {
+      runwaySel = parseInt(e.key, 10) - 1;
+      if (selected >= 0) assignRunway(selected, runwaySel);
+    }
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  function update() {
+    spawnTimer--;
+    if (spawnTimer <= 0) {
+      spawnPlane();
+      spawnInterval = Math.max(70, 150 - wave * 10);
+      spawnTimer = spawnInterval + Math.floor(Math.random() * 60);
+    }
+    // Move planes
+    for (var i = planes.length - 1; i >= 0; i--) {
+      var p = planes[i];
+      p.age++;
+      p.trail.push({ x: p.x, y: p.y });
+      if (p.trail.length > 18) p.trail.shift();
+      if (p.target >= 0) {
+        var rw = RUNWAYS[p.target];
+        var tx = rw.x + rw.w / 2, ty = rw.y - 6;
+        var dx = tx - p.x, dy = ty - p.y;
+        var dist = Math.hypot(dx, dy) || 1;
+        p.x += (dx / dist) * p.speed * 1.6;
+        p.y += (dy / dist) * p.speed * 1.6;
+        if (dist < 22) {
+          if (p.target === p.color) {
+            landed++;
+            var bonus = p.age < 600 ? 25 : 0;
+            score += 100 + bonus;
+            effects.push({ x: tx, y: ty - 20, text: '+' + (100 + bonus), life: 70 });
+            beep(880, 0.18, 'sine');
+            msgEl.textContent = 'Plane ' + p.id + ' landed safely on ' + NAMES[p.color] + '! Score: ' + score;
+            if (landed % 5 === 0) { wave++; msgEl.textContent += ' Wave ' + wave + ' incoming!'; }
+            planes.splice(i, 1);
+            if (selected >= planes.length) selected = planes.length - 1;
+            if (landed >= TARGET) { updateHud(); endGame(true); return; }
+          } else {
+            // Wrong runway: turned away, loses a life and leaves
+            planes.splice(i, 1);
+            if (selected >= planes.length) selected = planes.length - 1;
+            loseLife('Wrong runway! Plane turned away.');
+            if (state !== 'playing') return;
+          }
+          continue;
+        }
+      } else {
+        p.x += p.vx; p.y += p.vy;
+      }
+      // Exited unlanded
+      if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) {
+        planes.splice(i, 1);
+        if (selected >= planes.length) selected = planes.length - 1;
+        loseLife('Plane ' + p.id + ' left the airspace unlanded!');
+        if (state !== 'playing') return;
+      }
+    }
+    // Collisions
+    for (var a = 0; a < planes.length; a++) {
+      for (var b = a + 1; b < planes.length; b++) {
+        if (Math.hypot(planes[a].x - planes[b].x, planes[a].y - planes[b].y) < 26) {
+          var mx = (planes[a].x + planes[b].x) / 2, my = (planes[a].y + planes[b].y) / 2;
+          effects.push({ x: mx, y: my, text: 'CRASH!', life: 90 });
+          planes.splice(b, 1); planes.splice(a, 1);
+          selected = -1;
+          loseLife('Mid-air collision!');
+          if (state !== 'playing') return;
+          a = planes.length; break;
+        }
+      }
+    }
+    for (var k = effects.length - 1; k >= 0; k--) {
+      effects[k].life--;
+      if (effects[k].life <= 0) effects.splice(k, 1);
+    }
+    updateHud();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sky grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for (var gx = 0; gx <= W; gx += 90) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+    for (var gy = 0; gy <= H; gy += 90) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+    // Ground strip
+    ctx.fillStyle = '#1d3a22';
+    ctx.fillRect(0, 520, W, 80);
+    // Runways
+    RUNWAYS.forEach(function (rw, idx) {
+      ctx.fillStyle = '#222';
+      ctx.fillRect(rw.x, rw.y, rw.w, rw.h);
+      ctx.strokeStyle = (idx === runwaySel && state === 'playing') ? '#ffffff' : COLORS[rw.color];
+      ctx.lineWidth = (idx === runwaySel && state === 'playing') ? 3 : 2;
+      ctx.strokeRect(rw.x, rw.y, rw.w, rw.h);
+      ctx.fillStyle = COLORS[rw.color];
+      ctx.font = 'bold 13px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('RUNWAY ' + rw.label + ' ' + NAMES[rw.color].toUpperCase(), rw.x + rw.w / 2, rw.y + rw.h + 18);
+      ctx.fillStyle = '#fff';
+      for (var s = 0; s < 5; s++) ctx.fillRect(rw.x + 12 + s * 24, rw.y + 11, 12, 3);
+    });
+    // Trails and planes
+    planes.forEach(function (p, idx) {
+      ctx.strokeStyle = COLORS[p.color];
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      p.trail.forEach(function (t, ti) { if (ti === 0) ctx.moveTo(t.x, t.y); else ctx.lineTo(t.x, t.y); });
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      if (p.target >= 0) {
+        var rw = RUNWAYS[p.target];
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = COLORS[p.color];
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(rw.x + rw.w / 2, rw.y); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // Plane body
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      var ang = Math.atan2(p.vy, p.vx);
+      if (p.target >= 0) {
+        var rw2 = RUNWAYS[p.target];
+        ang = Math.atan2((rw2.y - p.y), (rw2.x + rw2.w / 2 - p.x));
+      }
+      ctx.rotate(ang);
+      ctx.fillStyle = COLORS[p.color];
+      ctx.beginPath();
+      ctx.moveTo(16, 0); ctx.lineTo(-10, -10); ctx.lineTo(-4, 0); ctx.lineTo(-10, 10); ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(-2, -13, 5, 26);
+      ctx.restore();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('P' + p.id, p.x, p.y - 20);
+      if (idx === selected) {
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 24, 0, Math.PI * 2); ctx.stroke();
+      }
+    });
+    // Effects
+    effects.forEach(function (ef) {
+      ctx.fillStyle = '#ffe08a';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(ef.text, ef.x, ef.y);
+    });
+    ctx.fillStyle = '#9fb8d8';
+    ctx.font = '13px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('Tip: match plane colour to runway colour. White outline = highlighted runway.', 12, 22);
+  }
+
+  function loop(t) {
+    if (state !== 'playing') return;
+    update();
+    if (state !== 'playing') { draw(); return; }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  draw();
+  updateHud();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Prism Breaker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #0b0b1e; color: #f2f2ff; font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 10px; overflow: hidden;
+  }
+  h1 { font-size: 30px; letter-spacing: 2px; margin-bottom: 4px; text-align: center; }
+  h1 span:nth-child(1) { color: #ff4d6d; } h1 span:nth-child(2) { color: #ffb703; }
+  h1 span:nth-child(3) { color: #4cc9f0; } h1 span:nth-child(4) { color: #80ed99; }
+  #wrap { position: relative; width: min(96vw, 640px); }
+  canvas {
+    width: 100%; height: auto; display: block; background: #12122b;
+    border: 2px solid #44447a; border-radius: 10px; touch-action: none;
+  }
+  #hud {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    width: 100%; padding: 8px 4px; font-size: 15px; font-weight: bold; flex-wrap: wrap;
+  }
+  #hud .pill { background: #23234d; border-radius: 999px; padding: 5px 12px; }
+  #ballColorDot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -2px; margin-left: 4px; border: 2px solid #fff; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; text-align: center; padding: 20px;
+    background: rgba(8, 8, 26, 0.88); border-radius: 10px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 26px; }
+  .overlay p { font-size: 15px; line-height: 1.55; max-width: 480px; color: #d8d8f5; }
+  .overlay .big { font-size: 18px; color: #fff; }
+  button {
+    cursor: pointer; border: none; border-radius: 999px; padding: 13px 34px;
+    font-size: 18px; font-weight: bold; color: #10101f; background: #ffd166;
+    box-shadow: 0 4px 0 #b98a1d;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b98a1d; }
+  button.secondary { background: #8ecae6; box-shadow: 0 4px 0 #3f7ea6; }
+  .keys { font-size: 13px; color: #b9b9e6; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<h1><span>P</span><span>r</span><span>i</span><span>s</span>m Breaker</h1>
+<div id="wrap">
+  <div id="hud">
+    <span class="pill">Score: <span id="score">0</span></span>
+    <span class="pill">Lives: <span id="lives">3</span></span>
+    <span class="pill">Level: <span id="level">1</span></span>
+    <span class="pill">Ball: <span id="ballColorName">Ruby</span><span id="ballColorDot"></span></span>
+    <span class="pill">Left: <span id="left">0</span></span>
+  </div>
+  <canvas id="game" width="640" height="480"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Prism Breaker</h2>
+    <p class="big">Color-matching breakout!</p>
+    <p><b>How to Play:</b> Bounce the ball to smash the prisms. A prism only breaks when the ball's color MATCHES the prism's color. A mismatched hit just bounces off, so switch colors at the right moment!</p>
+    <p>
+      <span class="swatch" style="background:#ff4d6d"></span> Ruby &nbsp;
+      <span class="swatch" style="background:#ffb703"></span> Amber &nbsp;
+      <span class="swatch" style="background:#4cc9f0"></span> Sapphire &nbsp;
+      <span class="swatch" style="background:#80ed99"></span> Jade
+    </p>
+    <p class="keys">Move: Left / Right arrows or A / D, mouse, or touch drag &nbsp;|&nbsp; Switch ball color: Space or tap the SWITCH button &nbsp;|&nbsp; Launch ball: Space / click / tap</p>
+    <p>Clear every prism to win. You have 3 lives. Each level adds new layouts and a faster ball.</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+  </div>
+
+  <div id="levelScreen" class="overlay hidden">
+    <h2 id="levelTitle">Level 2</h2>
+    <p id="levelText"></p>
+    <button id="nextBtn">Continue</button>
+  </div>
+</div>
+<p style="margin-top:10px;"><button id="switchBtn" class="secondary">Switch Ball Color (Space)</button></p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var COLORS = [
+    { name: 'Ruby',    hex: '#ff4d6d' },
+    { name: 'Amber',   hex: '#ffb703' },
+    { name: 'Sapphire',hex: '#4cc9f0' },
+    { name: 'Jade',    hex: '#80ed99' }
+  ];
+
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var leftEl = document.getElementById('left');
+  var ballNameEl = document.getElementById('ballColorName');
+  var ballDotEl = document.getElementById('ballColorDot');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var levelScreen = document.getElementById('levelScreen');
+  var levelTitle = document.getElementById('levelTitle');
+  var levelText = document.getElementById('levelText');
+
+  var state = 'title'; // title | serving | playing | levelclear | win | over
+  var score = 0, lives = 3, level = 1, colorIndex = 0;
+  var paddle, ball, bricks, particles;
+  var keys = {};
+  var audioCtx = null, muted = false;
+  var lastTime = 0, rafId = null;
+
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.12));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.12));
+    } catch (e) { /* audio unavailable */ }
+  }
+
+  function initAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function buildLevel(n) {
+    bricks = [];
+    var rows, cols = 8, bw = 72, bh = 26, gap = 6, top = 70, left = 8;
+    if (n === 1) {
+      rows = [
+        [0, 1, 2, 3, 0, 1, 2, 3],
+        [1, 2, 3, 0, 1, 2, 3, 0],
+        [2, 3, 0, 1, 2, 3, 0, 1],
+        [3, 0, 1, 2, 3, 0, 1, 2]
+      ];
+    } else if (n === 2) {
+      rows = [
+        [0, 0, 1, 1, 2, 2, 3, 3],
+        [-1, 1, 2, 3, 0, 1, 2, -1],
+        [2, -1, 3, 0, 1, 2, -1, 3],
+        [3, 2, -1, 1, 0, -1, 2, 1],
+        [0, 1, 2, 3, 3, 2, 1, 0]
+      ];
+    } else {
+      rows = [
+        [0, -1, 1, -1, 2, -1, 3, -1],
+        [-1, 2, 3, 0, 1, -1, 0, 2],
+        [3, 1, -1, 2, 0, 3, -1, 1],
+        [0, 2, 1, 3, -1, 0, 2, 3],
+        [1, 3, 0, -1, 2, 1, 3, 0],
+        [2, 0, 3, 1, 0, 2, 1, 3]
+      ];
+    }
+    for (var r = 0; r < rows.length; r++) {
+      for (var c = 0; c < cols; c++) {
+        var ci = rows[r][c];
+        if (ci < 0) continue;
+        bricks.push({
+          x: left + c * (bw + gap), y: top + r * (bh + gap),
+          w: bw, h: bh, color: ci, alive: true, hp: (n >= 3 && (r + c) % 4 === 0) ? 2 : 1
+        });
+      }
+    }
+  }
+
+  function resetRound() {
+    paddle = { x: W / 2 - 55, y: H - 32, w: 110, h: 14, speed: 520 };
+    ball = { x: W / 2, y: H - 50, r: 10, dx: 0, dy: 0, speed: 300 + (level - 1) * 70, stuck: true };
+    particles = [];
+    state = 'serving';
+  }
+
+  function newGame() {
+    score = 0; lives = 3; level = 1; colorIndex = 0;
+    buildLevel(level);
+    resetRound();
+    updateHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    levelEl.textContent = level;
+    ballNameEl.textContent = COLORS[colorIndex].name;
+    ballDotEl.style.background = COLORS[colorIndex].hex;
+    var remaining = 0;
+    for (var i = 0; i < bricks.length; i++) if (bricks[i].alive) remaining++;
+    leftEl.textContent = remaining;
+  }
+
+  function switchColor() {
+    colorIndex = (colorIndex + 1) % COLORS.length;
+    beep(520 + colorIndex * 110, 0.09, 'triangle', 0.12);
+    updateHud();
+  }
+
+  function launch() {
+    if (state !== 'serving') return;
+    var angle = (Math.random() * 0.7 - 0.35) - Math.PI / 2;
+    ball.dx = Math.cos(angle) * ball.speed;
+    ball.dy = Math.sin(angle) * ball.speed;
+    ball.stuck = false;
+    state = 'playing';
+    beep(660, 0.1, 'sine', 0.12);
+  }
+
+  function spawnParticles(x, y, hex) {
+    for (var i = 0; i < 14; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 260, vy: (Math.random() - 0.5) * 260, life: 0.5, hex: hex });
+    }
+  }
+
+  function showEnd(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? 'You Win!' : 'Game Over';
+    endText.textContent = win
+      ? 'You shattered every prism! Final score: ' + score + '. Brilliant color matching!'
+      : 'Out of lives. Final score: ' + score + '. The prisms remain... for now.';
+    endScreen.classList.remove('hidden');
+    beep(win ? 880 : 180, 0.4, win ? 'triangle' : 'sawtooth', 0.15);
+  }
+
+  function loseLife() {
+    lives--;
+    beep(140, 0.3, 'sawtooth', 0.15);
+    updateHud();
+    if (lives <= 0) { showEnd(false); return; }
+    resetRound();
+  }
+
+  function levelCleared() {
+    score += 250 * level;
+    if (level >= 3) { updateHud(); showEnd(true); return; }
+    state = 'levelclear';
+    levelTitle.textContent = 'Level ' + level + ' Cleared!';
+    levelText.textContent = 'Bonus awarded. Score: ' + score + '. Next level: faster ball, trickier prisms.';
+    levelScreen.classList.remove('hidden');
+    beep(980, 0.25, 'triangle', 0.15);
+  }
+
+  function update(dt) {
+    // Paddle movement
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) paddle.x -= paddle.speed * dt;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) paddle.x += paddle.speed * dt;
+    if (paddle.x < 0) paddle.x = 0;
+    if (paddle.x > W - paddle.w) paddle.x = W - paddle.w;
+
+    if (ball.stuck) {
+      ball.x = paddle.x + paddle.w / 2;
+      ball.y = paddle.y - ball.r - 2;
+    } else {
+      ball.x += ball.dx * dt;
+      ball.y += ball.dy * dt;
+      if (ball.x - ball.r < 0) { ball.x = ball.r; ball.dx = Math.abs(ball.dx); beep(220, 0.05, 'square', 0.06); }
+      if (ball.x + ball.r > W) { ball.x = W - ball.r; ball.dx = -Math.abs(ball.dx); beep(220, 0.05, 'square', 0.06); }
+      if (ball.y - ball.r < 0) { ball.y = ball.r; ball.dy = Math.abs(ball.dy); beep(220, 0.05, 'square', 0.06); }
+
+      // Paddle collision
+      if (ball.dy > 0 && ball.y + ball.r >= paddle.y && ball.y + ball.r <= paddle.y + paddle.h + 12 &&
+          ball.x >= paddle.x - ball.r && ball.x <= paddle.x + paddle.w + ball.r) {
+        var rel = (ball.x - (paddle.x + paddle.w / 2)) / (paddle.w / 2);
+        var ang = rel * 1.1 - Math.PI / 2;
+        var sp = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
+        ball.dx = Math.cos(ang) * sp;
+        ball.dy = Math.sin(ang) * sp;
+        ball.y = paddle.y - ball.r - 1;
+        beep(440, 0.07, 'sine', 0.1);
+      }
+
+      // Brick collisions (only matching color breaks)
+      for (var i = 0; i < bricks.length; i++) {
+        var b = bricks[i];
+        if (!b.alive) continue;
+        if (ball.x + ball.r > b.x && ball.x - ball.r < b.x + b.w &&
+            ball.y + ball.r > b.y && ball.y - ball.r < b.y + b.h) {
+          var overlapX = Math.min(ball.x + ball.r - b.x, b.x + b.w - (ball.x - ball.r));
+          var overlapY = Math.min(ball.y + ball.r - b.y, b.y + b.h - (ball.y - ball.r));
+          if (overlapX < overlapY) ball.dx = -ball.dx; else ball.dy = -ball.dy;
+          if (b.color === colorIndex) {
+            b.hp--;
+            if (b.hp <= 0) {
+              b.alive = false;
+              score += 50;
+              spawnParticles(b.x + b.w / 2, b.y + b.h / 2, COLORS[b.color].hex);
+              beep(700 + b.color * 120, 0.12, 'triangle', 0.14);
+            } else {
+              beep(500, 0.08, 'square', 0.1);
+            }
+          } else {
+            // Mismatched prism: deflect only, hint the needed color
+            beep(180, 0.12, 'sawtooth', 0.1);
+          }
+          break;
+        }
+      }
+
+      if (ball.y - ball.r > H) { loseLife(); return; }
+
+      var remaining = 0;
+      for (var j = 0; j < bricks.length; j++) if (bricks[j].alive) remaining++;
+      if (remaining === 0) { levelCleared(); return; }
+    }
+
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    updateHud();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Subtle prism sparkle background
+    ctx.fillStyle = '#12122b';
+    ctx.fillRect(0, 0, W, H);
+    // Bricks
+    for (var i = 0; i < bricks.length; i++) {
+      var b = bricks[i];
+      if (!b.alive) continue;
+      ctx.fillStyle = COLORS[b.color].hex;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.fillRect(b.x, b.y, b.w, 6);
+      ctx.strokeStyle = '#0b0b1e';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+      if (b.hp > 1) {
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 13px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('2x', b.x + b.w / 2, b.y + b.h / 2 + 5);
+      }
+    }
+    // Paddle
+    ctx.fillStyle = '#e0e0ff';
+    ctx.beginPath();
+    ctx.roundRect(paddle.x, paddle.y, paddle.w, paddle.h, 7);
+    ctx.fill();
+    ctx.fillStyle = COLORS[colorIndex].hex;
+    ctx.fillRect(paddle.x + 8, paddle.y + 3, paddle.w - 16, 3);
+    // Ball
+    ctx.fillStyle = COLORS[colorIndex].hex;
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.arc(ball.x - 3, ball.y - 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Particles
+    for (var p = 0; p < particles.length; p++) {
+      var pt = particles[p];
+      ctx.globalAlpha = Math.max(0, pt.life * 2);
+      ctx.fillStyle = pt.hex;
+      ctx.fillRect(pt.x - 3, pt.y - 3, 6, 6);
+    }
+    ctx.globalAlpha = 1;
+    // Serving hint
+    if (state === 'serving') {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Press Space, click, or tap to launch!', W / 2, H - 90);
+      ctx.fillText('Current ball: ' + COLORS[colorIndex].name + ' - switch with Space', W / 2, H - 65);
+    }
+    if (state === 'title') {
+      ctx.fillStyle = '#8a8ab8';
+      ctx.font = '16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Press Start to play Prism Breaker', W / 2, H / 2);
+    }
+  }
+
+  function loop(t) {
+    rafId = requestAnimationFrame(loop);
+    var dt = Math.min(0.033, (t - lastTime) / 1000 || 0.016);
+    lastTime = t;
+    if (state === 'playing' || state === 'serving') update(dt);
+    draw();
+  }
+
+  function pointerMove(clientX) {
+    var rect = canvas.getBoundingClientRect();
+    var scale = W / rect.width;
+    var x = (clientX - rect.left) * scale;
+    paddle.x = x - paddle.w / 2;
+    if (paddle.x < 0) paddle.x = 0;
+    if (paddle.x > W - paddle.w) paddle.x = W - paddle.w;
+  }
+
+  function startGame() {
+    initAudio();
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    levelScreen.classList.add('hidden');
+    newGame();
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('nextBtn').addEventListener('click', function () {
+    initAudio();
+    levelScreen.classList.add('hidden');
+    level++;
+    buildLevel(level);
+    resetRound();
+    updateHud();
+  });
+  document.getElementById('switchBtn').addEventListener('click', function () {
+    initAudio();
+    if (state === 'playing' || state === 'serving') switchColor();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      initAudio();
+      if (state === 'title') { startGame(); return; }
+      if (state === 'serving') { launch(); return; }
+      if (state === 'playing') { switchColor(); return; }
+    }
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && state !== 'title') e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  canvas.addEventListener('mousemove', function (e) {
+    if (state === 'playing' || state === 'serving') pointerMove(e.clientX);
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    initAudio();
+    if (state === 'serving') launch();
+    else if (state === 'playing') pointerMove(e.clientX);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    initAudio();
+    if (state === 'serving') launch();
+    else if (state === 'playing' && e.touches.length > 0) pointerMove(e.touches[0].clientX);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    if ((state === 'playing' || state === 'serving') && e.touches.length > 0) pointerMove(e.touches[0].clientX);
+  }, { passive: false });
+
+  newGame();
+  state = 'title';
+  updateHud();
+  lastTime = performance.now();
+  rafId = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
