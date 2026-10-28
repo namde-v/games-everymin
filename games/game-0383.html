@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Willow Warden — Forest Tower Defense</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0c1f14;color:#eaf6ec;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center;padding:14px}
+  #wrap{width:min(860px,100%)}
+  h1{margin:4px 0 2px;text-align:center;font-size:30px;letter-spacing:.5px}
+  p.sub{text-align:center;margin:0 0 10px;color:#b9d8bd}
+  #hud{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:8px 0}
+  .pill{background:#173d24;border:1px solid #3d7a4d;padding:6px 10px;border-radius:999px;font-weight:700;font-size:14px}
+  .pill b{color:#ffe08a}
+  #bar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:6px 0 10px}
+  button{cursor:pointer;border:0;border-radius:10px;padding:10px 14px;font-weight:800;font-size:15px;background:#ffd166;color:#1d2a10}
+  button:hover{filter:brightness(1.08)}
+  button.sel{outline:3px solid #fff;background:#8fe388}
+  button.secondary{background:#274d34;color:#fff}
+  canvas{display:block;width:100%;height:auto;background:#1d4a2a;border:3px solid #5f9a62;border-radius:14px;touch-action:none}
+  #msg{text-align:center;min-height:24px;font-weight:700;margin-top:8px}
+  #overlay{position:relative}
+  .panel{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:rgba(6,22,11,.88);border-radius:14px;padding:20px}
+  .panel.hidden{display:none}
+  .panel h2{font-size:34px;margin:0 0 8px}
+  .panel p{max-width:560px;line-height:1.55;margin:6px 0}
+  .keys{font-size:13px;color:#cfe8d2}
+  #how{text-align:center;font-size:14px;line-height:1.6;color:#cfe8d2;background:#122f1d;border-radius:12px;padding:10px 14px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🌿 Willow Warden</h1>
+  <p class="sub">Strategy / Forest Tower Defense — defend the ancient grove from the blight.</p>
+  <div id="hud" aria-label="Game status">
+    <span class="pill">Sap: <b id="sap">120</b></span>
+    <span class="pill">Score: <b id="score">0</b></span>
+    <span class="pill">Grove Health: <b id="health">100</b></span>
+    <span class="pill">Wave: <b id="wave">0 / 8</b></span>
+    <span class="pill">Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="bar">
+    <button id="btnThorn" class="sel" title="Thorn — 40 sap, long range, fast shots">🌵 Thorn · 40 sap [1]</button>
+    <button id="btnRoot" title="Root — 60 sap, slows enemies in a wide area">🌳 Root · 60 sap [2]</button>
+    <button id="btnBreeze" title="Breeze — 50 sap, pushes enemies back">🍃 Breeze · 50 sap [3]</button>
+    <button id="btnWave" class="secondary">▶ Start Next Wave [Space]</button>
+    <button id="btnRestart" class="secondary">↻ Restart [R]</button>
+  </div>
+  <div id="overlay">
+    <canvas id="game" width="840" height="520"></canvas>
+    <div id="titlePanel" class="panel">
+      <h2>🌿 Willow Warden</h2>
+      <p><strong>How to Play:</strong> Blight creatures march along the winding dirt path toward the grove on the right. Click an empty grass square to plant the selected guardian. Guardians attack automatically. Earn sap by defeating enemies and clearing waves.</p>
+      <p>🌵 <strong>Thorn</strong> fires sharp seeds. 🌳 <strong>Root</strong> slows and crushes nearby foes. 🍃 <strong>Breeze</strong> knocks enemies backward. Survive all <strong>8 waves</strong> to win. If grove health reaches 0, the forest falls.</p>
+      <p class="keys">Mouse: click to place · Hover to preview · Keys: 1 / 2 / 3 choose guardian, Space next wave, R restart · Touch: tap to place, drag to preview</p>
+      <button id="startBtn" style="font-size:19px;padding:13px 26px">▶ Start Game</button>
+    </div>
+    <div id="endPanel" class="panel hidden">
+      <h2 id="endTitle">Victory!</h2>
+      <p id="endText"></p>
+      <button id="restartBtn2" style="font-size:19px;padding:13px 26px">↻ Play Again</button>
+      <p class="keys">Or press R to restart instantly.</p>
+    </div>
+  </div>
+  <div id="msg">Choose a guardian, then click a grass square to plant it.</div>
+  <div id="how">Tip: Root guardians near corners slow whole groups. Breeze guardians are best just before the grove. Thorn guardians cover long straight paths. Press Space when you are ready for the next wave.</div>
+</div>
+<script>
+(function(){
+  var cv=document.getElementById('game'), ctx=cv.getContext('2d');
+  var sapEl=document.getElementById('sap'), scoreEl=document.getElementById('score'),
+      healthEl=document.getElementById('health'), waveEl=document.getElementById('wave'),
+      statusEl=document.getElementById('status'), msgEl=document.getElementById('msg');
+  var titlePanel=document.getElementById('titlePanel'), endPanel=document.getElementById('endPanel');
+  // Grid: 14 cols x 8 rows, cell 60px, canvas 840x520 (last row is HUD strip inside canvas drawing area)
+  var COLS=14, ROWS=8, CELL=60, TOP=40;
+  // Path waypoints in grid coordinates (col,row), winding across the map.
+  var path=[[0,1],[4,1],[4,3],[9,3],[9,5],[4,5],[4,6],[13,6]];
+  function cellCenter(c,r){return {x:c*CELL+CELL/2, y:TOP+r*CELL+CELL/2};}
+  function isPath(c,r){
+    for(var i=0;i<path.length-1;i++){
+      var a=path[i], b=path[i+1];
+      if(a[0]===b[0] && c===a[0] && r>=Math.min(a[1],b[1]) && r<=Math.max(a[1],b[1])) return true;
+      if(a[1]===b[1] && r===a[1] && c>=Math.min(a[0],b[0]) && c<=Math.max(a[0],b[0])) return true;
+    }
+    return false;
+  }
+  var TYPES={
+    thorn:{name:'Thorn',cost:40,range:150,rate:450,dmg:18,color:'#7ed957',emoji:'🌵'},
+    root:{name:'Root',cost:60,range:110,rate:900,dmg:26,color:'#2f9e44',emoji:'🌳'},
+    breeze:{name:'Breeze',cost:50,range:130,rate:700,dmg:10,color:'#7fd4ff',emoji:'🍃'}
+  };
+  var state, audioCtx=null;
+  function reset(){
+    state={sap:120,score:0,health:100,wave:0,playing:false,over:false,won:false,
+      guardians:[],enemies:[],shots:[],particles:[],spawnQueue:[],spawnTimer:0,
+      waveActive:false,selected:'thorn',hover:null,last:0,msg:'Choose a guardian, then click a grass square to plant it.'};
+    endPanel.classList.add('hidden');
+    updateHUD(); updateSelection();
+  }
+  function beep(freq,dur,type,vol){
+    if(!audioCtx) return;
+    try{
+      var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type||'sine'; o.frequency.value=freq;
+      g.gain.setValueAtTime(vol||0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+    }catch(e){}
+  }
+  function initAudio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); }
+  function updateHUD(){
+    sapEl.textContent=state.sap; scoreEl.textContent=state.score; healthEl.textContent=state.health;
+    waveEl.textContent=state.wave+' / 8';
+    statusEl.textContent=state.over?(state.won?'Victory!':'Game Over'):state.waveActive?('Wave '+state.wave+' — blight incoming!'):(state.playing?'Build phase':'Ready');
+    msgEl.textContent=state.msg;
+  }
+  function updateSelection(){
+    document.getElementById('btnThorn').classList.toggle('sel',state.selected==='thorn');
+    document.getElementById('btnRoot').classList.toggle('sel',state.selected==='root');
+    document.getElementById('btnBreeze').classList.toggle('sel',state.selected==='breeze');
+  }
+  function select(t){ state.selected=t; updateSelection(); beep(520,0.08,'triangle',0.08); state.msg=TYPES[t].name+' selected ('+TYPES[t].cost+' sap). Click a grass square to plant.'; updateHUD(); }
+  function occupied(c,r){ return state.guardians.some(function(g){return g.c===c&&g.r===r;}); }
+  function place(c,r){
+    if(!state.playing||state.over) return;
+    if(c<0||c>=COLS||r<0||r>=ROWS) return;
+    if(isPath(c,r)){ state.msg='That is the blight path — plant on grass instead.'; beep(140,0.15,'sawtooth',0.08); updateHUD(); return; }
+    if(occupied(c,r)){ state.msg='A guardian already grows there.'; updateHUD(); return; }
+    var t=TYPES[state.selected];
+    if(state.sap<t.cost){ state.msg='Not enough sap for '+t.name+' (need '+t.cost+'). Defeat enemies to earn more.'; beep(140,0.15,'sawtooth',0.08); updateHUD(); return; }
+    state.sap-=t.cost;
+    state.guardians.push({c:c,r:r,type:state.selected,cool:0});
+    state.msg=t.name+' guardian planted!'; beep(660,0.12,'triangle',0.12); burst(cellCenter(c,r).x,cellCenter(c,r).y,t.color,10); updateHUD();
+  }
+  function burst(x,y,color,n){ for(var i=0;i<n;i++) state.particles.push({x:x,y:y,vx:(Math.random()-0.5)*3,vy:(Math.random()-0.5)*3,life:24,color:color}); }
+  function startWave(){
+    if(!state.playing||state.over||state.waveActive) return;
+    if(state.wave>=8) return;
+    state.wave++; state.waveActive=true;
+    var n=5+state.wave*2, hp=30+state.wave*18;
+    for(var i=0;i<n;i++){
+      var kind=i%5===4?'brute':(i%3===0?'swift':'blight');
+      state.spawnQueue.push({hp:hp*(kind==='brute'?2.2:kind==='swift'?0.7:1),maxHp:hp*(kind==='brute'?2.2:kind==='swift'?0.7:1),speed:kind==='swift'?1.1:kind==='brute'?0.55:0.75,kind:kind,reward:kind==='brute'?22:12,seg:0,dist:0,slow:0});
+    }
+    state.msg='Wave '+state.wave+' begins!'; beep(440,0.2,'square',0.1); updateHUD();
+  }
+  function pathPoints(){
+    var pts=[]; for(var i=0;i<path.length;i++){ var p=cellCenter(path[i][0],path[i][1]); pts.push(p); } return pts;
+  }
+  function update(dt){
+    if(!state.playing||state.over) return;
+    var pts=pathPoints();
+    if(state.spawnTimer>0) state.spawnTimer-=dt;
+    if(state.spawnQueue.length&&state.spawnTimer<=0){
+      var e=state.spawnQueue.shift(); e.x=pts[0].x-20; e.y=pts[0].y; e.seg=0;
+      state.enemies.push(e); state.spawnTimer=700;
+    }
+    state.enemies.forEach(function(e){
+      var sp=e.speed*(e.slow>0?0.45:1); if(e.slow>0) e.slow-=dt;
+      var target=pts[e.seg+1];
+      if(!target){ e.reached=true; return; }
+      var dx=target.x-e.x, dy=target.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
+      var step=sp*dt/16.7;
+      if(d<=step){ e.x=target.x; e.y=target.y; e.seg++; } else { e.x+=dx/d*step; e.y+=dy/d*step; }
+    });
+    var survivors=[];
+    state.enemies.forEach(function(e){
+      if(e.reached){ state.health-=10; state.msg='A blight creature reached the grove! Grove health: '+state.health; beep(180,0.3,'sawtooth',0.14); burst(800,430,'#ff5a5a',14); }
+      else survivors.push(e);
+    });
+    state.enemies=survivors;
+    state.guardians.forEach(function(g){
+      g.cool-=dt; var pos=cellCenter(g.c,g.r), t=TYPES[g.type];
+      if(g.cool>0) return;
+      var target=null,best=1e9;
+      state.enemies.forEach(function(e){ var d=Math.hypot(e.x-pos.x,e.y-pos.y); if(d<t.range&&d<best){best=d;target=e;} });
+      if(target){
+        g.cool=t.rate;
+        if(g.type==='root'){
+          state.enemies.forEach(function(e){ if(Math.hypot(e.x-pos.x,e.y-pos.y)<t.range){ e.hp-=t.dmg; e.slow=1200; } });
+          burst(pos.x,pos.y,t.color,8); beep(220,0.15,'triangle',0.1);
+        } else if(g.type==='breeze'){
+          state.shots.push({x:pos.x,y:pos.y,tx:target.x,ty:target.y,from:g,dmg:t.dmg,push:true}); beep(880,0.08,'sine',0.08);
+        } else {
+          state.shots.push({x:pos.x,y:pos.y,tx:target.x,ty:target.y,from:g,dmg:t.dmg,push:false}); beep(760,0.07,'square',0.07);
+        }
+      }
+    });
+    var kept=[];
+    state.shots.forEach(function(s){
+      var dx=s.tx-s.x, dy=s.ty-s.y, d=Math.hypot(dx,dy);
+      if(d<14){
+        // Hit nearest enemy near target point
+        var hit=null,best=1e9;
+        state.enemies.forEach(function(e){ var dd=Math.hypot(e.x-s.tx,e.y-s.ty); if(dd<best){best=dd;hit=e;} });
+        if(hit){ hit.hp-=s.dmg; if(s.push){ hit.seg=Math.max(0,hit.seg); hit.x-=8; } burst(hit.x,hit.y,'#ffe08a',4); }
+      } else { s.x+=dx/d*14; s.y+=dy/d*14; kept.push(s); }
+    });
+    state.shots=kept;
+    var alive=[];
+    state.enemies.forEach(function(e){
+      if(e.hp<=0){ state.score+=100; state.sap+=e.reward; burst(e.x,e.y,'#8fe388',10); beep(980,0.08,'triangle',0.08); }
+      else alive.push(e);
+    });
+    state.enemies=alive;
+    state.particles.forEach(function(p){ p.x+=p.vx; p.y+=p.vy; p.life--; });
+    state.particles=state.particles.filter(function(p){return p.life>0;});
+    if(state.waveActive&&!state.spawnQueue.length&&!state.enemies.length){
+      state.waveActive=false; state.sap+=25; state.score+=250;
+      state.msg='Wave '+state.wave+' cleared! +25 sap, +250 score.';
+      beep(660,0.12,'triangle',0.1); setTimeout(function(){beep(880,0.15,'triangle',0.1);},120);
+      if(state.wave>=8){ endGame(true); }
+    }
+    if(state.health<=0){ state.health=0; endGame(false); }
+    updateHUD();
+  }
+  function endGame(won){
+    state.over=true; state.won=won; state.playing=true;
+    document.getElementById('endTitle').textContent=won?'🌿 Victory! The Grove Endures':'💀 Game Over — The Grove Has Fallen';
+    document.getElementById('endText').textContent=won?('You survived all 8 waves! Final score: '+state.score+' with '+state.health+' grove health remaining.') : ('The blight overwhelmed the grove on wave '+state.wave+'. Final score: '+state.score+'. Try a new guardian layout!');
+    endPanel.classList.remove('hidden');
+    beep(won?880:160,won?0.4:0.5,won?'triangle':'sawtooth',0.14);
+    updateHUD();
+  }
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    // Header strip
+    ctx.fillStyle='#0f2d18'; ctx.fillRect(0,0,cv.width,TOP);
+    ctx.fillStyle='#eaf6ec'; ctx.font='bold 15px system-ui'; ctx.textAlign='left';
+    ctx.fillText('Sap '+state.sap+'  •  Score '+state.score+'  •  Grove '+state.health+'  •  Wave '+state.wave+' / 8',12,24);
+    // Grass + path
+    for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
+      ctx.fillStyle=(c+r)%2?'#2b6b35':'#357a3d';
+      ctx.fillRect(c*CELL,TOP+r*CELL,CELL,CELL);
+      if(isPath(c,r)){ ctx.fillStyle='#8a6b42'; ctx.fillRect(c*CELL,TOP+r*CELL,CELL,CELL); }
+    }
+    // Path direction dots
+    var pts=pathPoints(); ctx.strokeStyle='#c9a86a'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y); pts.forEach(function(p){ctx.lineTo(p.x,p.y);}); ctx.stroke();
+    // Grove
+    ctx.fillStyle='#1a5c2e'; ctx.beginPath(); ctx.arc(810,TOP+6*CELL+30,26,0,Math.PI*2); ctx.fill();
+    ctx.font='30px serif'; ctx.textAlign='center'; ctx.fillText('🌳',810,TOP+6*CELL+40);
+    ctx.fillStyle='#fff'; ctx.font='bold 12px system-ui'; ctx.fillText('GROVE',810,TOP+6*CELL+68);
+    // Hover preview
+    if(state.hover&&state.playing&&!state.over){
+      var h=state.hover;
+      if(!isPath(h.c,h.r)&&!occupied(h.c,h.r)){
+        ctx.fillStyle='rgba(255,255,255,0.28)'; ctx.fillRect(h.c*CELL,TOP+h.r*CELL,CELL,CELL);
+        ctx.strokeStyle='#fff'; ctx.strokeRect(h.c*CELL+1,TOP+h.r*CELL+1,CELL-2,CELL-2);
+      }
+    }
+    // Guardians
+    state.guardians.forEach(function(g){
+      var p=cellCenter(g.c,g.r), t=TYPES[g.type];
+      ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(p.x,p.y,t.range,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=t.color; ctx.beginPath(); ctx.arc(p.x,p.y,20,0,Math.PI*2); ctx.fill();
+      ctx.font='24px serif'; ctx.fillText(t.emoji,p.x,p.y+8);
+    });
+    // Shots
+    state.shots.forEach(function(s){ ctx.fillStyle='#ffe08a'; ctx.beginPath(); ctx.arc(s.x,s.y,5,0,Math.PI*2); ctx.fill(); });
+    // Enemies
+    state.enemies.forEach(function(e){
+      ctx.fillStyle=e.kind==='brute'?'#5b1f8a':e.kind==='swift'?'#ff7a1a':'#7a1f3d';
+      ctx.beginPath(); ctx.arc(e.x,e.y,e.kind==='brute'?20:14,0,Math.PI*2); ctx.fill();
+      ctx.font='18px serif'; ctx.fillText(e.kind==='brute'?'👹':e.kind==='swift'?'👻':'🦠',e.x,e.y+6);
+      ctx.fillStyle='#222'; ctx.fillRect(e.x-18,e.y-28,36,6);
+      ctx.fillStyle='#ff5a5a'; ctx.fillRect(e.x-18,e.y-28,36*Math.max(0,e.hp/e.maxHp),6);
+    });
+    // Particles
+    state.particles.forEach(function(p){ ctx.fillStyle=p.color; ctx.fillRect(p.x,p.y,4,4); });
+    if(!state.playing){
+      ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.fillRect(0,TOP,cv.width,cv.height-TOP);
+    }
+  }
+  function loop(ts){
+    if(!state.last) state.last=ts;
+    var dt=Math.min(50,ts-state.last); state.last=ts;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  function toCell(evt){
+    var rect=cv.getBoundingClientRect();
+    var x=(evt.clientX-rect.left)*cv.width/rect.width;
+    var y=(evt.clientY-rect.top)*cv.height/rect.height;
+    return {c:Math.floor(x/CELL), r:Math.floor((y-TOP)/CELL)};
+  }
+  function startGame(){
+    initAudio(); reset(); state.playing=true; titlePanel.classList.add('hidden');
+    state.msg='Build phase: plant guardians, then press Start Next Wave.'; beep(660,0.15,'triangle',0.12); updateHUD();
+  }
+  function restart(){ initAudio(); startGame(); }
+  document.getElementById('startBtn').addEventListener('click',startGame);
+  document.getElementById('restartBtn2').addEventListener('click',restart);
+  document.getElementById('btnRestart').addEventListener('click',restart);
+  document.getElementById('btnThorn').addEventListener('click',function(){initAudio();select('thorn');});
+  document.getElementById('btnRoot').addEventListener('click',function(){initAudio();select('root');});
+  document.getElementById('btnBreeze').addEventListener('click',function(){initAudio();select('breeze');});
+  document.getElementById('btnWave').addEventListener('click',function(){initAudio();startWave();});
+  cv.addEventListener('click',function(e){initAudio(); var cell=toCell(e); place(cell.c,cell.r);});
+  cv.addEventListener('mousemove',function(e){ state.hover=toCell(e); });
+  cv.addEventListener('touchstart',function(e){ initAudio(); if(e.touches[0]){ var cell=toCell(e.touches[0]); state.hover=cell; place(cell.c,cell.r); } e.preventDefault(); },{passive:false});
+  cv.addEventListener('touchmove',function(e){ if(e.touches[0]) state.hover=toCell(e.touches[0]); e.preventDefault(); },{passive:false});
+  document.addEventListener('keydown',function(e){
+    if(e.key==='1') select('thorn');
+    else if(e.key==='2') select('root');
+    else if(e.key==='3') select('breeze');
+    else if(e.key===' '){ e.preventDefault(); initAudio(); startWave(); }
+    else if(e.key==='r'||e.key==='R'){ restart(); }
+  });
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

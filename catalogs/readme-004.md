@@ -84,6 +84,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0378 | Echo Engineer | Rhythm / Pattern Repeat | Keys 1-4 / Arrow Keys pads, mouse click, touch tap, R restart | [Play](./../games/game-0378.html) |
 | 0379 | Canopy Courier | Arcade / Zipline Delivery | Space launch/release, mouse click, touch tap, Arrow Keys steer, R restart | [Play](./../games/game-0379.html) |
 | 0380 | Reef Ranger | Strategy / Reef Restoration | Mouse/touch click assign, Keys 1-3 choose actions, R restart | [Play](./../games/game-0380.html) |
+| 0381 | Juniper Juggler | Arcade / Ball Juggling Catch | Arrow Keys / A-D move, mouse move steer, touch drag, R restart | [Play](./../games/game-0381.html) |
+| 0382 | Obsidian Oracle | Puzzle / Rune Prediction Logic | Mouse/touch click runes, Arrow Keys select, Enter confirm, R restart | [Play](./../games/game-0382.html) |
+| 0383 | Willow Warden | Strategy / Forest Tower Defense | Mouse/touch click place guardians, Keys 1-3 select type, R restart | [Play](./../games/game-0383.html) |
+| 0384 | Tempo Trawler | Rhythm / Beat Fishing | D/F/J/K rhythm lanes, mouse click pads, touch tap pads, R restart | [Play](./../games/game-0384.html) |
+| 0385 | Boulder Bard | Arcade / Downhill Boulder Roll | Arrow Keys / A-D steer, mouse move steer, touch drag, R restart | [Play](./../games/game-0385.html) |
+| 0386 | Moss Merchant | Strategy / Market Trading | Mouse/touch click Buy/Sell, Arrow Keys select, Space/Enter trade, N next day, R restart | [Play](./../games/game-0386.html) |
+| 0387 | Solar Sorter | Puzzle / Spectrum Sorting | Mouse/touch click rotate mirrors, Arrow Keys select, Space rotate, R restart | [Play](./../games/game-0387.html) |
+| 0388 | Hollow Harvester | Arcade / Cave Harvesting | Arrow Keys / WASD move, mouse steer, touch drag, R restart | [Play](./../games/game-0388.html) |
+| 0389 | Zephyr Zookeeper | Strategy / Wind Aviary Management | Mouse/touch click assign, Keys 1-3 choose actions, R restart | [Play](./../games/game-0389.html) |
+| 0390 | Marble Machinist | Puzzle / Marble Machine Routing | Mouse/touch click rotate pieces, Arrow Keys select, Space rotate, R restart | [Play](./../games/game-0390.html) |
 
 ## Batch notes
 
@@ -103,3 +113,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 037: 10 games, produced in one cycle (0361–0370). Four initially proposed titles duplicated earlier games and were replaced before production (Metronome Mine, Storm Surfer, Glyph Grove, Foundry Foreman, Tempo Tinkerer, Beat Blacksmith — replaced with Syncopation Station, Tempest Tamer, Rune Reservoir, Assembly Archon). Also includes a level-layout fix to game-0360 (Labyrinth Ledger).
 
 - Batch 038: 10 games, produced in one cycle (0371–0380). Six initially proposed titles duplicated earlier games and were replaced before production (Ember Escort, Tide Turner, Glacier Glider, Orbit Oracle, Cipher Canyon, Kelp Keeper — replaced with Lantern Lifter, Comet Cartographer, Frost Ferry, Saffron Sleuth, Reef Ranger).
+
+- Batch 039: 10 games, produced in one cycle (0381–0390).

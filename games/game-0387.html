@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Solar Sorter — Spectrum Sorting Puzzle</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1026; color: #eef2ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin: 6px 0 2px; text-align: center; }
+  .tag { color: #a5b4fc; font-size: 13px; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 8px 0; font-weight: bold; font-size: 14px; }
+  #hud span { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; }
+  #hud .good { color: #4ade80; } #hud .bad { color: #f87171; } #hud .info { color: #facc15; }
+  #wrap { position: relative; width: min(96vw, 760px); }
+  canvas { width: 100%; height: auto; background: #111827; border: 2px solid #6366f1; border-radius: 12px; display: block; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(2,6,23,0.88); border-radius: 12px; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; }
+  .overlay p { max-width: 520px; line-height: 1.5; font-size: 15px; color: #dbeafe; }
+  .overlay ul { text-align: left; max-width: 520px; line-height: 1.6; font-size: 14px; color: #e2e8f0; }
+  button { cursor: pointer; background: #6366f1; color: white; border: none; border-radius: 10px; padding: 12px 20px; font-size: 16px; font-weight: bold; }
+  button:hover { background: #818cf8; } button.secondary { background: #334155; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  #controls button { padding: 10px 14px; font-size: 14px; }
+  #message { min-height: 22px; margin-top: 8px; font-weight: bold; color: #fde68a; text-align: center; }
+  #preview { display: flex; gap: 8px; justify-content: center; margin-top: 6px; font-size: 13px; }
+  .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid white; display: inline-block; vertical-align: middle; }
+</style>
+</head>
+<body>
+<h1>&#9728; SOLAR SORTER &#9728;</h1>
+<p class="tag">Puzzle / Spectrum Sorting &mdash; route every beam of light into its matching prism</p>
+
+<div id="hud">
+  <span>Sorted: <span id="sorted" class="good">0</span> / 30</span>
+  <span>Errors: <span id="errors" class="bad">0</span> / 5</span>
+  <span>Score: <span id="score">0</span></span>
+  <span>Lives: <span id="lives">5</span></span>
+  <span>Status: <span id="status" class="info">Title</span></span>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="760" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>&#9728; SOLAR SORTER</h2>
+    <p>Beams of coloured light arrive in mixed order. Rotate the central mirror, aim the beam, and divert it into the prism of the SAME colour.</p>
+    <ul>
+      <li><b>How to Play:</b> A beam waits at the emitter (top left). Turn the mirror, then FIRE it.</li>
+      <li><b>Controls:</b> Left / Right arrows or A / D to rotate the mirror. Mouse move to aim, mouse click to fire. Touch drag to aim, tap FIRE to shoot. Space or Enter fires. Keys 1&ndash;6 jump-aim at a prism.</li>
+      <li><b>Swap trick:</b> Press S (or Swap Prisms) to swap two neighbouring prisms when the layout gets tricky &mdash; the colours move with them, so re-aim!</li>
+      <li><b>Win:</b> Sort 30 beams with fewer than 5 errors. <b>Game Over:</b> 5 wrong prisms, and the spectrum collapses.</li>
+      <li>Every 10 sorted beams the prisms shuffle to a new order. Watch the labels!</li>
+    </ul>
+    <button id="startBtn">Start Game</button>
+    <p>Headphones optional: all sound is generated in your browser, nothing is downloaded.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart (R)</button>
+  </div>
+</div>
+
+<div id="preview">Next beams: <span id="nextBeams"></span></div>
+<div id="message">Rotate the mirror, then fire the beam into the matching prism.</div>
+
+<div id="controls">
+  <button id="rotLBtn">&larr; Rotate</button>
+  <button id="fireBtn">FIRE BEAM</button>
+  <button id="rotRBtn">Rotate &rarr;</button>
+  <button id="swapBtn" class="secondary">Swap Prisms (S)</button>
+  <button id="restartBtn2" class="secondary">Restart (R)</button>
+</div>
+<p style="font-size:12px;color:#94a3b8;margin-top:8px;text-align:center;">Keyboard: &larr;/&rarr; or A/D rotate &middot; Space/Enter fire &middot; 1&ndash;6 aim &middot; S swap &middot; R restart</p>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var sortedEl = document.getElementById('sorted');
+  var errorsEl = document.getElementById('errors');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('message');
+  var nextEl = document.getElementById('nextBeams');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var COLORS = [
+    { name: 'Red', hex: '#ef4444' }, { name: 'Orange', hex: '#f97316' },
+    { name: 'Yellow', hex: '#eab308' }, { name: 'Green', hex: '#22c55e' },
+    { name: 'Blue', hex: '#3b82f6' }, { name: 'Violet', hex: '#a855f7' }
+  ];
+  var MIRROR = { x: 300, y: 210 };
+  var EMITTER = { x: 70, y: 210 };
+  var state = 'title'; // title | playing | win | over
+  var sorted = 0, errors = 0, score = 0, mirrorAngle = -0.5, beamFlying = false;
+  var beam = null, queue = [], prisms = [], particles = [], flash = 0, flashColor = '#ffffff';
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function tone(freq, dur, type) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.18, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+  function goodSound() { tone(660, 0.15, 'sine'); setTimeout(function () { tone(880, 0.2, 'sine'); }, 90); }
+  function badSound() { tone(160, 0.3, 'sawtooth'); }
+  function winSound() { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.25, 'triangle'); }, i * 130); }); }
+
+  function randColor() { return Math.floor(Math.random() * COLORS.length); }
+  function buildQueue() {
+    queue = [];
+    for (var i = 0; i < 4; i++) queue.push(randColor());
+    // Avoid three identical beams in a row at the start of a run for fairness.
+    if (queue[0] === queue[1] && queue[1] === queue[2]) queue[2] = (queue[2] + 1) % 6;
+  }
+  function buildPrisms() {
+    var order = [0, 1, 2, 3, 4, 5];
+    for (var i = order.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = order[i]; order[i] = order[j]; order[j] = t; }
+    prisms = order.map(function (c, i) {
+      return { color: c, x: 90 + i * 112, y: 430, w: 86, h: 58 };
+    });
+  }
+  function currentBeam() { return queue[0]; }
+  function targetPrismForAngle(angle) {
+    // Reflected direction: incoming beam travels right, mirror angle tilts it.
+    var dir = Math.PI / 2 + angle * 2.2; // downward-ish fan
+    var best = null, bestDist = 1e9;
+    prisms.forEach(function (p) {
+      var cx = p.x + p.w / 2, cy = p.y;
+      var vx = cx - MIRROR.x, vy = cy - MIRROR.y;
+      var len = Math.sqrt(vx * vx + vy * vy);
+      var ux = vx / len, uy = vy / len;
+      var dx = Math.cos(dir), dy = Math.sin(dir);
+      var dot = ux * dx + uy * dy;
+      if (dot > 0.86 && Math.abs(ux * dy - uy * dx) < 0.45) {
+        var d = Math.abs(ux * dy - uy * dx);
+        if (d < bestDist) { bestDist = d; best = p; }
+      }
+    });
+    return best || prisms[0];
+  }
+  function aimAtPrism(index) {
+    var p = prisms[index]; if (!p) return;
+    // Invert the fan mapping approximately: pick the angle whose fan hits this prism.
+    var best = -1, bestScore = -1;
+    for (var a = -1.2; a <= 1.2; a += 0.05) {
+      if (targetPrismForAngle(a) === p) { var s = -Math.abs(a - mirrorAngle); if (s > bestScore) { bestScore = s; best = a; } }
+    }
+    if (best > -1) mirrorAngle = best;
+  }
+
+  function updateHUD() {
+    sortedEl.textContent = sorted; errorsEl.textContent = errors;
+    scoreEl.textContent = score; livesEl.textContent = Math.max(0, 5 - errors);
+    statusEl.textContent = state === 'playing' ? 'Sorting beams...' : state === 'win' ? 'You Win!' : state === 'over' ? 'Game Over' : 'Title';
+    var html = queue.slice(0, 4).map(function (c, i) {
+      return '<span class="swatch" title="' + COLORS[c].name + '" style="background:' + COLORS[c].hex + ';opacity:' + (i === 0 ? 1 : 0.55) + '"></span>';
+    }).join(' ');
+    nextEl.innerHTML = html;
+  }
+
+  function fire() {
+    if (state !== 'playing' || beamFlying) return;
+    var target = targetPrismForAngle(mirrorAngle);
+    var dir = Math.PI / 2 + mirrorAngle * 2.2;
+    beam = { x: MIRROR.x, y: MIRROR.y, color: currentBeam(), target: target,
+      dx: Math.cos(dir), dy: Math.sin(dir), trail: [] };
+    // Steer the flying beam toward the target centre so every shot lands somewhere.
+    var tx = target.x + target.w / 2 - MIRROR.x, ty = target.y - MIRROR.y;
+    var len = Math.sqrt(tx * tx + ty * ty);
+    beam.dx = tx / len; beam.dy = ty / len;
+    beamFlying = true; tone(440, 0.12, 'triangle');
+    msgEl.textContent = 'Beam flying toward the ' + COLORS[target.color].name + ' prism...';
+  }
+
+  function resolveBeam() {
+    var b = beam; beamFlying = false; beam = null;
+    var hit = b.target;
+    for (var i = 0; i < 18; i++) particles.push({ x: hit.x + hit.w / 2, y: hit.y + 10, vx: (Math.random() - 0.5) * 4, vy: -Math.random() * 3, life: 30, color: COLORS[b.color].hex });
+    if (hit.color === b.color) {
+      sorted++; score += 100;
+      flash = 12; flashColor = COLORS[b.color].hex; goodSound();
+      msgEl.textContent = 'Correct! ' + COLORS[b.color].name + ' beam sorted into the ' + COLORS[hit.color].name + ' prism.';
+    } else {
+      errors++; score = Math.max(0, score - 25); badSound();
+      flash = 12; flashColor = '#ef4444';
+      msgEl.textContent = 'Wrong prism! That was a ' + COLORS[b.color].name + ' beam, not ' + COLORS[hit.color].name + '. Errors: ' + errors + '/5';
+    }
+    queue.shift(); queue.push(randColor());
+    if (sorted > 0 && sorted % 10 === 0 && sorted < 30) {
+      buildPrisms(); msgEl.textContent += ' The prisms shuffled! Re-check their colours.';
+    }
+    if (sorted >= 30) return endGame(true);
+    if (errors >= 5) return endGame(false);
+    updateHUD();
+  }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endTitle.textContent = won ? 'YOU WIN! Spectrum Complete' : 'GAME OVER';
+    endText.textContent = won
+      ? 'You sorted 30 beams with only ' + errors + ' error(s). Final score: ' + score + '. The spectrum shines in perfect order!'
+      : 'The spectrum collapsed after 5 errors. You sorted ' + sorted + ' of 30 beams. Final score: ' + score + '. Try again!';
+    endScreen.classList.remove('hidden');
+    if (won) winSound(); else badSound();
+    updateHUD();
+  }
+
+  function startGame() {
+    sorted = 0; errors = 0; score = 0; mirrorAngle = -0.5; beamFlying = false; beam = null; particles = [];
+    buildQueue(); buildPrisms(); state = 'playing';
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    msgEl.textContent = 'First beam: ' + COLORS[currentBeam()].name + '. Rotate the mirror and fire!';
+    audio(); updateHUD();
+  }
+  function restart() { startGame(); }
+
+  function drawPrism(p) {
+    ctx.fillStyle = COLORS[p.color].hex;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y + p.h); ctx.lineTo(p.x + p.w / 2, p.y); ctx.lineTo(p.x + p.w, p.y + p.h); ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(COLORS[p.color].name, p.x + p.w / 2, p.y + p.h + 18);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Spectrum backdrop stripes
+    COLORS.forEach(function (c, i) {
+      ctx.fillStyle = c.hex; ctx.globalAlpha = 0.10;
+      ctx.fillRect(0, i * 12, canvas.width, 12); ctx.globalAlpha = 1;
+    });
+    // Emitter
+    ctx.fillStyle = '#f8fafc'; ctx.fillRect(20, EMITTER.y - 22, 60, 44);
+    ctx.fillStyle = state === 'playing' ? COLORS[currentBeam()].hex : '#64748b';
+    ctx.beginPath(); ctx.arc(EMITTER.x + 10, EMITTER.y, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0f172a'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('EMITTER', 50, EMITTER.y - 30);
+    // Incoming path emitter -> mirror
+    ctx.strokeStyle = state === 'playing' ? COLORS[currentBeam()].hex : '#475569';
+    ctx.lineWidth = 4; ctx.setLineDash([8, 6]);
+    ctx.beginPath(); ctx.moveTo(EMITTER.x + 26, EMITTER.y); ctx.lineTo(MIRROR.x - 34, MIRROR.y); ctx.stroke();
+    ctx.setLineDash([]);
+    // Mirror (rotating bar)
+    ctx.save(); ctx.translate(MIRROR.x, MIRROR.y); ctx.rotate(mirrorAngle);
+    ctx.fillStyle = '#e2e8f0'; ctx.fillRect(-34, -5, 68, 10);
+    ctx.fillStyle = '#94a3b8'; ctx.fillRect(-34, -5, 68, 3); ctx.restore();
+    ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 12px Arial'; ctx.fillText('MIRROR', MIRROR.x, MIRROR.y - 32);
+    // Aim guide to predicted prism
+    if (state === 'playing' && !beamFlying) {
+      var t = targetPrismForAngle(mirrorAngle);
+      ctx.strokeStyle = COLORS[currentBeam()].hex; ctx.globalAlpha = 0.55; ctx.lineWidth = 3; ctx.setLineDash([4, 8]);
+      ctx.beginPath(); ctx.moveTo(MIRROR.x, MIRROR.y); ctx.lineTo(t.x + t.w / 2, t.y); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    // Prisms
+    prisms.forEach(drawPrism);
+    // Flying beam
+    if (beam) {
+      beam.trail.push({ x: beam.x, y: beam.y });
+      if (beam.trail.length > 14) beam.trail.shift();
+      ctx.strokeStyle = COLORS[beam.color].hex; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      ctx.beginPath(); beam.trail.forEach(function (pt, i) { if (i === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y); }); ctx.stroke();
+      ctx.fillStyle = COLORS[beam.color].hex;
+      ctx.beginPath(); ctx.arc(beam.x, beam.y, 9, 0, Math.PI * 2); ctx.fill();
+    }
+    // Particles
+    particles.forEach(function (p) {
+      ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life / 30);
+      ctx.fillRect(p.x, p.y, 5, 5); ctx.globalAlpha = 1;
+    });
+    if (flash > 0) { ctx.fillStyle = flashColor; ctx.globalAlpha = flash / 60; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.globalAlpha = 1; }
+    // Current beam label
+    if (state === 'playing') {
+      ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('Beam: ' + COLORS[currentBeam()].name, 20, 32);
+      ctx.fillText('Aim: ' + COLORS[targetPrismForAngle(mirrorAngle).color].name + ' prism', 20, 54);
+    }
+  }
+
+  function loop() {
+    if (beamFlying && beam) {
+      beam.x += beam.dx * 9; beam.y += beam.dy * 9;
+      var tx = beam.target.x + beam.target.w / 2, ty = beam.target.y;
+      if (Math.hypot(beam.x - tx, beam.y - ty) < 14) resolveBeam();
+    }
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    if (flash > 0) flash--;
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- Input: keyboard, mouse, touch (all required listeners) ----
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { mirrorAngle = Math.max(-1.2, mirrorAngle - 0.12); }
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { mirrorAngle = Math.min(1.2, mirrorAngle + 0.12); }
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (state === 'title') startGame(); else if (state === 'playing') fire(); }
+    else if (e.key === 'r' || e.key === 'R') { if (state !== 'title') restart(); }
+    else if (e.key === 's' || e.key === 'S') { swapPrisms(); }
+    else if (['1', '2', '3', '4', '5', '6'].indexOf(e.key) >= 0) { aimAtPrism(parseInt(e.key, 10) - 1); }
+  });
+
+  function aimFromClientX(clientX) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) / rect.width * canvas.width;
+    mirrorAngle = Math.max(-1.2, Math.min(1.2, (x - MIRROR.x) / 260));
+  }
+  canvas.addEventListener('mousemove', function (e) { if (state === 'playing') aimFromClientX(e.clientX); });
+  canvas.addEventListener('click', function (e) { if (state === 'playing') { aimFromClientX(e.clientX); fire(); } });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); if (state === 'playing' && e.touches[0]) aimFromClientX(e.touches[0].clientX); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); if (state === 'playing' && e.touches[0]) aimFromClientX(e.touches[0].clientX); }, { passive: false });
+
+  function swapPrisms() {
+    if (state !== 'playing' || prisms.length < 2) return;
+    var i = Math.floor(Math.random() * (prisms.length - 1));
+    var a = prisms[i], b = prisms[i + 1];
+    var ax = a.x, bx = b.x; a.x = bx; b.x = ax;
+    prisms.sort(function (p, q) { return p.x - q.x; });
+    // Keep each prism's slot coordinates consistent after the swap.
+    prisms.forEach(function (p, idx) { p.x = 90 + idx * 112; });
+    tone(520, 0.12, 'triangle');
+    msgEl.textContent = 'Prisms swapped! Colours moved — re-aim before firing.';
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', restart);
+  document.getElementById('restartBtn2').addEventListener('click', restart);
+  document.getElementById('fireBtn').addEventListener('click', function () { if (state === 'title') startGame(); else fire(); });
+  document.getElementById('rotLBtn').addEventListener('click', function () { mirrorAngle = Math.max(-1.2, mirrorAngle - 0.12); });
+  document.getElementById('rotRBtn').addEventListener('click', function () { mirrorAngle = Math.min(1.2, mirrorAngle + 0.12); });
+  document.getElementById('swapBtn').addEventListener('click', swapPrisms);
+
+  buildQueue(); buildPrisms(); updateHUD(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

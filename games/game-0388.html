@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Hollow Harvester</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0a0714; font-family: 'Segoe UI', system-ui, sans-serif; }
+  #wrap { position:relative; width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; background: radial-gradient(ellipse at 50% 20%, #241a3d 0%, #0a0714 60%); }
+  canvas { display:block; background:#120c24; border:3px solid #6b4fa8; border-radius:12px; box-shadow:0 0 40px rgba(140,100,255,.35); touch-action:none; }
+  #hud { position:absolute; top:14px; left:50%; transform:translateX(-50%); display:none; gap:10px; flex-wrap:wrap; justify-content:center; width:min(94vw, 860px); z-index:5; }
+  #hud.show { display:flex; }
+  .pill { background:rgba(10,6,22,.82); border:1.5px solid #7b5fc0; color:#f2ecff; padding:7px 13px; border-radius:999px; font-weight:700; font-size:14px; letter-spacing:.02em; }
+  .pill b { color:#b6ff7a; }
+  .pill.warn b { color:#ffb347; }
+  .pill.danger b { color:#ff5a5a; }
+  #fuelbar { width:150px; height:12px; background:#2a2140; border-radius:999px; overflow:hidden; display:inline-block; vertical-align:middle; margin-left:6px; }
+  #fuelfill { height:100%; width:100%; background:linear-gradient(90deg,#ffd23f,#ff8c42); transition:width .2s; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; background:rgba(6,3,16,.78); color:#f5f0ff; padding:22px; z-index:10; }
+  .overlay.hidden { display:none; }
+  h1 { font-size:clamp(34px, 7vw, 64px); letter-spacing:.04em; color:#c9f27a; text-shadow:0 0 24px rgba(180,255,120,.55), 0 3px 0 #2c1a4d; }
+  h2 { font-size:clamp(26px, 5vw, 44px); color:#ffd23f; text-shadow:0 0 18px rgba(255,210,63,.5); }
+  .sub { font-size:clamp(14px, 2.6vw, 19px); color:#d8ccf5; max-width:620px; line-height:1.55; }
+  .howto { background:rgba(30,20,60,.85); border:1.5px solid #6b4fa8; border-radius:14px; padding:16px 20px; max-width:620px; text-align:left; line-height:1.7; font-size:15px; color:#e6ddff; }
+  .howto strong { color:#b6ff7a; }
+  button { cursor:pointer; border:0; border-radius:999px; padding:14px 34px; font-size:19px; font-weight:800; color:#14092a; background:linear-gradient(180deg,#c9f27a,#7ddb3a); box-shadow:0 6px 0 #3d7a1a, 0 0 26px rgba(160,255,100,.45); }
+  button:active { transform:translateY(4px); box-shadow:0 2px 0 #3d7a1a; }
+  button.secondary { background:linear-gradient(180deg,#ffd23f,#ff9a2e); box-shadow:0 6px 0 #8a4d00, 0 0 22px rgba(255,180,60,.4); }
+  .hint { font-size:13px; color:#b8a8dd; }
+  .big { font-size:22px; font-weight:800; }
+  .score { color:#b6ff7a; }
+  @media (max-width:600px){ #hud{top:8px;} .pill{font-size:12px;padding:5px 9px;} #fuelbar{width:90px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="880" height="560"></canvas>
+
+  <div id="hud">
+    <span class="pill">Fungi <b id="hFungi">0 / 40</b></span>
+    <span class="pill">Score <b id="hScore">0</b></span>
+    <span class="pill">Hull <b id="hHull">&#9829;&#9829;&#9829;</b></span>
+    <span class="pill" id="fuelPill">Lamp Fuel <span id="fuelbar"><span id="fuelfill"></span></span></span>
+    <span class="pill">Status <b id="hStatus">Exploring</b></span>
+  </div>
+
+  <div id="titleScreen" class="overlay">
+    <h1>HOLLOW HARVESTER</h1>
+    <p class="sub">Pilot your little harvester through a glowing cavern. Gather luminous fungi, dodge falling rocks and cave-in zones, and keep your lamp burning.</p>
+    <div class="howto">
+      <strong>How to Play</strong><br>
+      Collect <strong>40 glowing fungi</strong> to win.<br>
+      &#129704; Dodge <strong>falling rocks</strong> and stay out of marked <strong>cave-in zones</strong> before they collapse.<br>
+      &#128161; Your <strong>lamp fuel</strong> drains over time &mdash; grab glowing <strong>fuel cells</strong> to refill it.<br>
+      &#10084; You have <strong>3 hull points</strong>. A rock hit or a cave-in costs 1 hull.<br>
+      <strong>Controls:</strong> Arrow keys / WASD to fly &bull; Mouse: move to steer &bull; Touch: drag to steer &bull; P pauses &bull; R restarts.
+    </div>
+    <button id="startBtn">Start Harvest</button>
+    <p class="hint">Sound starts after you press Start. Best played with keyboard, mouse, or touch.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p class="big" id="endLine">You harvested 40 fungi!</p>
+    <p class="sub" id="endDetail"></p>
+    <button id="restartBtn" class="secondary">Restart (R)</button>
+    <p class="hint">Press R or click Restart to play again instantly.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var hud = document.getElementById('hud');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endLine = document.getElementById('endLine');
+  var endDetail = document.getElementById('endDetail');
+  var hFungi = document.getElementById('hFungi');
+  var hScore = document.getElementById('hScore');
+  var hHull = document.getElementById('hHull');
+  var hStatus = document.getElementById('hStatus');
+  var fuelFill = document.getElementById('fuelfill');
+  var fuelPill = document.getElementById('fuelPill');
+  var W = canvas.width, H = canvas.height;
+
+  // ---- Audio: procedural Web Audio, created only after user interaction ----
+  var audioCtx = null, masterGain = null;
+  function initAudio(){
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+    } catch(e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide){
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  var sfx = {
+    pickup: function(){ tone(880, .12, 'sine', .6, 1320); tone(1320, .14, 'triangle', .4, 1760); },
+    fuel: function(){ tone(330, .2, 'triangle', .5, 660); },
+    hit: function(){ tone(160, .25, 'sawtooth', .6, 60); },
+    warn: function(){ tone(220, .15, 'square', .35, 180); },
+    win: function(){ [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f,.3,'triangle',.5); }, i*130); }); },
+    lose: function(){ [392,330,262,196].forEach(function(f,i){ setTimeout(function(){ tone(f,.3,'sawtooth',.4); }, i*150); }); }
+  };
+
+  // ---- Game state ----
+  var state = 'title'; // title | playing | paused | won | over
+  var player, fungi, rocks, zones, cells, particles, stalactites, stars;
+  var keys = {};
+  var pointer = { x: W/2, y: H-90, active: false };
+  var spawnT = 0, rockT = 0, zoneT = 0, cellT = 0, elapsed = 0, lastTime = 0, shake = 0;
+  var TARGET = 40;
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function dist(a,b){ var dx=a.x-b.x, dy=a.y-b.y; return Math.sqrt(dx*dx+dy*dy); }
+
+  function reset(){
+    player = { x: W/2, y: H-90, vx:0, vy:0, r:18, hull:3, fuel:100, fungi:0, score:0, inv:0, tilt:0 };
+    fungi = []; rocks = []; zones = []; cells = []; particles = [];
+    stalactites = [];
+    for (var i=0;i<14;i++) stalactites.push({ x: rand(0,W), y: rand(-10,60), w: rand(18,44), h: rand(30,90) });
+    stars = [];
+    for (var j=0;j<60;j++) stars.push({ x: rand(0,W), y: rand(0,H), r: rand(1,2.4), p: rand(0,6.28) });
+    spawnT = 0; rockT = 0; zoneT = 0; cellT = 0; elapsed = 0; shake = 0;
+    for (var k=0;k<7;k++) spawnFungus();
+    updateHUD();
+  }
+
+  function spawnFungus(){
+    var cols = ['#b6ff7a','#7affd8','#ff7ad9','#ffe066'];
+    fungi.push({ x: rand(40,W-40), y: rand(70,H-140), r: rand(11,16), col: cols[Math.floor(Math.random()*cols.length)], bob: rand(0,6.28), pulse: rand(1.5,3) });
+  }
+  function spawnRock(){
+    rocks.push({ x: rand(30,W-30), y: -30, vy: rand(150,280), r: rand(14,26), rot: rand(0,6.28), vr: rand(-2,2), wob: rand(0,6.28) });
+  }
+  function spawnZone(){
+    var zx = rand(80, W-80);
+    zones.push({ x: zx, w: rand(90,150), timer: 2.2, state:'warn', debris: [] });
+    sfx.warn();
+  }
+  function spawnCell(){
+    cells.push({ x: rand(40,W-40), y: rand(80,H-160), r: 13, bob: rand(0,6.28) });
+  }
+  function burst(x,y,col,n){
+    for (var i=0;i<n;i++) particles.push({ x:x, y:y, vx: rand(-140,140), vy: rand(-160,60), life: rand(.3,.8), max:.8, col:col, r: rand(2,5) });
+  }
+  function damage(reason){
+    if (player.inv > 0 || state !== 'playing') return;
+    player.hull--; player.inv = 1.2; shake = 12; sfx.hit();
+    burst(player.x, player.y, '#ff5a5a', 18);
+    hStatus.textContent = reason;
+    if (player.hull <= 0) endGame(false);
+    updateHUD();
+  }
+
+  function updateHUD(){
+    hFungi.textContent = player.fungi + ' / ' + TARGET;
+    hScore.textContent = player.score;
+    var hearts = '';
+    for (var i=0;i<3;i++) hearts += (i < player.hull) ? '\u2764' : '\u2661';
+    hHull.innerHTML = hearts;
+    fuelFill.style.width = Math.max(0, player.fuel) + '%';
+    fuelPill.className = 'pill' + (player.fuel < 25 ? ' danger' : (player.fuel < 50 ? ' warn' : ''));
+  }
+
+  function startGame(){
+    initAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    hud.classList.add('show');
+    hStatus.textContent = 'Exploring';
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(won){
+    state = won ? 'won' : 'over';
+    hud.classList.remove('show');
+    endTitle.textContent = won ? 'Cavern Cleared!' : 'Harvester Down!';
+    endLine.textContent = won ? 'You harvested all 40 fungi!' : (player.fuel <= 0 ? 'Your lamp ran out of fuel.' : 'Your hull gave out in the dark.');
+    endDetail.textContent = 'Fungi: ' + player.fungi + ' / 40  |  Score: ' + player.score + '  |  Time: ' + Math.floor(elapsed) + 's';
+    endScreen.classList.remove('hidden');
+    if (won) sfx.win(); else sfx.lose();
+  }
+
+  function update(dt){
+    elapsed += dt;
+    // Fuel drains slowly; faster when moving hard
+    var speed = Math.sqrt(player.vx*player.vx + player.vy*player.vy);
+    player.fuel -= dt * (1.1 + speed / 900);
+    if (player.fuel <= 0) { player.fuel = 0; endGame(false); return; }
+    if (player.inv > 0) player.inv -= dt;
+
+    // Movement: keyboard velocity + pointer steering
+    var ax = 0, ay = 0;
+    if (keys['arrowleft'] || keys['a']) ax -= 1;
+    if (keys['arrowright'] || keys['d']) ax += 1;
+    if (keys['arrowup'] || keys['w']) ay -= 1;
+    if (keys['arrowdown'] || keys['s']) ay += 1;
+    if (ax || ay) {
+      var len = Math.sqrt(ax*ax+ay*ay); ax/=len; ay/=len;
+      player.vx += ax * 1400 * dt; player.vy += ay * 1400 * dt;
+      pointer.active = false;
+    } else if (pointer.active) {
+      var dx = pointer.x - player.x, dy = pointer.y - player.y;
+      var d = Math.sqrt(dx*dx+dy*dy);
+      if (d > 6) { player.vx += (dx/d) * 900 * dt; player.vy += (dy/d) * 900 * dt; }
+    }
+    player.vx *= Math.pow(0.12, dt); player.vy *= Math.pow(0.12, dt);
+    player.x += player.vx * dt; player.y += player.vy * dt;
+    player.x = Math.max(24, Math.min(W-24, player.x));
+    player.y = Math.max(56, Math.min(H-24, player.y));
+    player.tilt = Math.max(-0.35, Math.min(0.35, player.vx / 900));
+
+    // Spawners, scaling difficulty with fungi collected
+    spawnT -= dt; rockT -= dt; zoneT -= dt; cellT -= dt;
+    if (spawnT <= 0 && fungi.length < 10) { spawnFungus(); spawnT = rand(0.6, 1.4); }
+    if (rockT <= 0) { spawnRock(); rockT = Math.max(0.45, rand(0.9, 1.6) - player.fungi * 0.012); }
+    if (zoneT <= 0) { spawnZone(); zoneT = rand(5, 8); }
+    if (cellT <= 0) { spawnCell(); cellT = rand(6, 10); }
+
+    // Fungi bob + pickup
+    for (var i = fungi.length-1; i >= 0; i--) {
+      var f = fungi[i]; f.bob += dt * f.pulse;
+      if (dist(player, f) < player.r + f.r) {
+        fungi.splice(i,1);
+        player.fungi++; player.score += 100;
+        burst(f.x, f.y, f.col, 14); sfx.pickup();
+        hStatus.textContent = 'Fungus harvested!';
+        if (player.fungi >= TARGET) { updateHUD(); endGame(true); return; }
+      }
+    }
+    // Fuel cells
+    for (var j = cells.length-1; j >= 0; j--) {
+      var c = cells[j]; c.bob += dt * 3;
+      if (dist(player, c) < player.r + c.r) {
+        cells.splice(j,1);
+        player.fuel = Math.min(100, player.fuel + 40); player.score += 25;
+        burst(c.x, c.y, '#ffd23f', 12); sfx.fuel();
+        hStatus.textContent = 'Fuel refilled!';
+      }
+    }
+    // Rocks fall + hit
+    for (var k = rocks.length-1; k >= 0; k--) {
+      var r = rocks[k]; r.y += r.vy * dt; r.rot += r.vr * dt; r.wob += dt * 3;
+      r.x += Math.sin(r.wob) * 12 * dt;
+      if (r.y > H + 40) { rocks.splice(k,1); continue; }
+      if (dist(player, r) < player.r + r.r - 4) {
+        rocks.splice(k,1); damage('Rock strike!');
+      }
+    }
+    // Cave-in zones: warn, then collapse
+    for (var z = zones.length-1; z >= 0; z--) {
+      var zn = zones[z]; zn.timer -= dt;
+      if (zn.state === 'warn' && zn.timer <= 0) {
+        zn.state = 'fall'; zn.timer = 0.6; sfx.warn();
+        for (var d=0; d<10; d++) zn.debris.push({ x: zn.x + rand(-zn.w/2, zn.w/2), y: -20, vy: rand(240,420), r: rand(8,18) });
+      } else if (zn.state === 'fall') {
+        zn.debris.forEach(function(db){ db.y += db.vy * dt; });
+        if (Math.abs(player.x - zn.x) < zn.w/2 && player.y > H - 220) damage('Caught in a cave-in!');
+        if (zn.timer <= 0 && zn.debris.every(function(db){ return db.y > H + 30; })) zones.splice(z,1);
+      }
+    }
+    // Particles
+    for (var p = particles.length-1; p >= 0; p--) {
+      var pt = particles[p]; pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += 180 * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(p,1);
+    }
+    if (shake > 0) shake -= dt * 40;
+    updateHUD();
+  }
+
+  function draw(){
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake,shake)*0.4, rand(-shake,shake)*0.4);
+    // Cavern background
+    var g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#1a1233'); g.addColorStop(0.6,'#120c24'); g.addColorStop(1,'#0d0819');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+    // Lamp glow around player
+    var lg = ctx.createRadialGradient(player.x, player.y, 10, player.x, player.y, 190);
+    lg.addColorStop(0,'rgba(255,220,120,0.35)'); lg.addColorStop(1,'rgba(255,220,120,0)');
+    ctx.fillStyle = lg; ctx.fillRect(player.x-200, player.y-200, 400, 400);
+    // Twinkling crystals
+    stars.forEach(function(s){
+      ctx.globalAlpha = 0.35 + 0.3 * Math.sin(elapsed*2 + s.p);
+      ctx.fillStyle = '#8f7bd8'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.283); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Stalactites
+    ctx.fillStyle = '#2c2148';
+    stalactites.forEach(function(s){
+      ctx.beginPath(); ctx.moveTo(s.x - s.w/2, 0); ctx.lineTo(s.x + s.w/2, 0); ctx.lineTo(s.x, s.h); ctx.closePath(); ctx.fill();
+    });
+    // Cave floor
+    ctx.fillStyle = '#241a3d'; ctx.fillRect(0, H-18, W, 18);
+    ctx.fillStyle = '#3a2c60';
+    for (var fx=0; fx<W; fx+=44) { ctx.beginPath(); ctx.arc(fx+10, H-6, 7, 0, 6.283); ctx.fill(); }
+    // Cave-in warning zones
+    zones.forEach(function(zn){
+      if (zn.state === 'warn') {
+        var blink = (Math.sin(elapsed*12) > 0) ? 0.35 : 0.12;
+        ctx.fillStyle = 'rgba(255,90,60,'+blink+')'; ctx.fillRect(zn.x - zn.w/2, 0, zn.w, H);
+        ctx.fillStyle = '#ff8c6b'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('! CAVE-IN !', zn.x, 36);
+      } else {
+        zn.debris.forEach(function(db){
+          ctx.fillStyle = '#6b5a8a'; ctx.save(); ctx.translate(db.x, db.y); ctx.rotate(db.r); ctx.fillRect(-db.r, -db.r, db.r*2, db.r*2); ctx.restore();
+        });
+      }
+    });
+    // Fuel cells
+    cells.forEach(function(c){
+      var cy = c.y + Math.sin(c.bob) * 4;
+      ctx.fillStyle = '#ffd23f'; ctx.shadowColor = '#ffd23f'; ctx.shadowBlur = 16;
+      ctx.fillRect(c.x-7, cy-11, 14, 22);
+      ctx.fillStyle = '#14092a'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('F', c.x, cy+4);
+      ctx.shadowBlur = 0;
+    });
+    // Fungi
+    fungi.forEach(function(f){
+      var fy = f.y + Math.sin(f.bob) * 5;
+      ctx.fillStyle = f.col; ctx.shadowColor = f.col; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(f.x, fy-6, f.r, Math.PI, 0); ctx.fill();
+      ctx.fillRect(f.x-3, fy-6, 6, 12);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath(); ctx.arc(f.x-4, fy-12, 2.5, 0, 6.283); ctx.arc(f.x+5, fy-9, 1.8, 0, 6.283); ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+    // Rocks
+    rocks.forEach(function(r){
+      ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.rot);
+      ctx.fillStyle = '#7a6a9e'; ctx.beginPath();
+      for (var a=0; a<7; a++){ var ang = a/7*6.283, rr = r.r * (0.85 + 0.25*Math.sin(a*2.3)); var px = Math.cos(ang)*rr, py = Math.sin(ang)*rr; if(a===0) ctx.moveTo(px,py); else ctx.lineTo(px,py); }
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.arc(-r.r*0.3, -r.r*0.3, r.r*0.35, 0, 6.283); ctx.fill();
+      ctx.restore();
+    });
+    // Particles
+    particles.forEach(function(pt){
+      ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+      ctx.fillStyle = pt.col; ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, 6.283); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // Harvester (blinking while invulnerable)
+    if (!(player.inv > 0 && Math.floor(elapsed*12) % 2 === 0)) {
+      ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.tilt);
+      ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.arc(0, 0, player.r, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#2a1a4d'; ctx.fillRect(-16, -5, 32, 10);
+      ctx.fillStyle = '#b6ff7a'; ctx.beginPath(); ctx.arc(8, 0, 6, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.arc(-14, 0, 4, 0, 6.283); ctx.fill();
+      ctx.fillStyle = '#5a4632'; ctx.fillRect(-6, player.r-2, 12, 8);
+      ctx.restore();
+      // Lamp beam
+      ctx.fillStyle = 'rgba(255,220,120,0.12)';
+      ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(player.x-60, player.y+90); ctx.lineTo(player.x+60, player.y+90); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 34px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Paused — press P to resume', W/2, H/2);
+    }
+  }
+
+  function loop(now){
+    if (state !== 'playing') return;
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    update(dt);
+    if (state === 'playing') { draw(); requestAnimationFrame(loop); }
+    else draw();
+  }
+
+  // ---- Input: keyboard + mouse + touch ----
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === 'r' && (state === 'won' || state === 'over')) startGame();
+    if (k === 'p' && state === 'playing') { state = 'paused'; draw(); }
+    else if (k === 'p' && state === 'paused') { state = 'playing'; lastTime = performance.now(); requestAnimationFrame(loop); }
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+  canvas.addEventListener('mousemove', function(e){
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  });
+  canvas.addEventListener('click', function(e){
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = (e.clientX - rect.left) * (W / rect.width);
+    pointer.y = (e.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  });
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    var t = e.touches[0], rect = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - rect.left) * (W / rect.width);
+    pointer.y = (t.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    var t = e.touches[0], rect = canvas.getBoundingClientRect();
+    pointer.x = (t.clientX - rect.left) * (W / rect.width);
+    pointer.y = (t.clientY - rect.top) * (H / rect.height);
+    pointer.active = true;
+  }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // Fit canvas responsively while keeping internal resolution
+  function fit(){
+    var scale = Math.min(window.innerWidth / W, window.innerHeight / H, 1.15);
+    canvas.style.width = Math.floor(W * scale) + 'px';
+    canvas.style.height = Math.floor(H * scale) + 'px';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>

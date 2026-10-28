@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 380
-- **Latest game:** 0380 — Reef Ranger
+- **Total games:** 390
+- **Latest game:** 0390 — Marble Machinist
 - **Current volume:** 004 (Games 0301 to 0400)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -16,7 +16,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
-| 004 | 0301–0400 (80 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
+| 004 | 0301–0400 (90 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -30,20 +30,21 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 038
+## Latest batch — Batch 039
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0371 | Lantern Lifter | Arcade / Lantern Escort | [Play](./games/game-0371.html) |
-| 0372 | Comet Cartographer | Puzzle / Constellation Tracing | [Play](./games/game-0372.html) |
-| 0373 | Mycelium Mayor | Strategy / Fungal City | [Play](./games/game-0373.html) |
-| 0374 | Cadence Climber | Rhythm / Beat Climbing | [Play](./games/game-0374.html) |
-| 0375 | Frost Ferry | Arcade / Ice Ferry Delivery | [Play](./games/game-0375.html) |
-| 0376 | Saffron Sleuth | Puzzle / Deduction | [Play](./games/game-0376.html) |
-| 0377 | Foundry Flux | Strategy / Factory Routing | [Play](./games/game-0377.html) |
-| 0378 | Echo Engineer | Rhythm / Pattern Repeat | [Play](./games/game-0378.html) |
-| 0379 | Canopy Courier | Arcade / Zipline Delivery | [Play](./games/game-0379.html) |
-| 0380 | Reef Ranger | Strategy / Reef Restoration | [Play](./games/game-0380.html) |
+| 0381 | Juniper Juggler | Arcade / Ball Juggling Catch | [Play](./games/game-0381.html) |
+| 0382 | Obsidian Oracle | Puzzle / Rune Prediction Logic | [Play](./games/game-0382.html) |
+| 0383 | Willow Warden | Strategy / Forest Tower Defense | [Play](./games/game-0383.html) |
+| 0384 | Tempo Trawler | Rhythm / Beat Fishing | [Play](./games/game-0384.html) |
+| 0385 | Boulder Bard | Arcade / Downhill Boulder Roll | [Play](./games/game-0385.html) |
+| 0386 | Moss Merchant | Strategy / Market Trading | [Play](./games/game-0386.html) |
+| 0387 | Solar Sorter | Puzzle / Spectrum Sorting | [Play](./games/game-0387.html) |
+| 0388 | Hollow Harvester | Arcade / Cave Harvesting | [Play](./games/game-0388.html) |
+| 0389 | Zephyr Zookeeper | Strategy / Wind Aviary Management | [Play](./games/game-0389.html) |
+| 0390 | Marble Machinist | Puzzle / Marble Machine Routing | [Play](./games/game-0390.html) |
+
 
 
 ## Quality standard

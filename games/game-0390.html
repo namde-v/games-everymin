@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Marble Machinist</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #14100c; color: #f5e9d0; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  h1 { margin: 10px 0 2px; font-size: 30px; letter-spacing: 1px; color: #f1c40f; text-shadow: 0 2px 0 #7a4a00; }
+  p.sub { margin: 0 0 10px; color: #cbb98f; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: min(740px, 96vw); margin: 6px 0; }
+  .pill { background: #2b2118; border: 2px solid #8a6a2f; border-radius: 10px; padding: 7px 11px; font-weight: bold; font-size: 15px; }
+  .pill span { color: #f1c40f; }
+  #nextDot { display: inline-block; width: 16px; height: 16px; border-radius: 50%; vertical-align: middle; border: 2px solid #fff; margin-left: 4px; }
+  #wrap { position: relative; width: min(740px, 96vw); }
+  canvas { width: 100%; height: auto; display: block; background: #1e1812; border: 3px solid #8a6a2f; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,7,4,0.88); border-radius: 14px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #f1c40f; font-size: 34px; margin: 0 0 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; margin: 6px 0; }
+  .overlay ul { text-align: left; max-width: 560px; line-height: 1.55; }
+  button { background: #f1c40f; color: #201404; border: none; border-radius: 10px; padding: 13px 26px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 14px; }
+  button:hover { background: #ffd84d; }
+  button.secondary { background: #e0d3b3; }
+  #controls { width: min(740px, 96vw); display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 10px 0 18px; }
+  #controls button { margin: 0; padding: 9px 13px; font-size: 14px; }
+  #status { min-height: 22px; font-weight: bold; color: #7ed492; }
+  .legend { font-size: 13px; color: #cbb98f; text-align: center; max-width: 740px; }
+</style>
+</head>
+<body>
+<h1>&#9881; Marble Machinist &#9881;</h1>
+<p class="sub">Puzzle / Marble Machine Routing &mdash; steer every marble into its matching colour bin.</p>
+
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Correct: <span id="correct">0</span> / 25</div>
+  <div class="pill">Faults: <span id="faults">0</span> / 8</div>
+  <div class="pill">Wave: <span id="wave">1</span></div>
+  <div class="pill">Next: <span id="nextName">Red</span><span id="nextDot"></span></div>
+  <div class="pill">Status: <span id="statusText">Ready</span></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="720" height="580"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Marble Machinist</h2>
+    <p><strong>Route 25 marbles correctly before 8 go astray.</strong> Marbles drop from the top in waves. Each colour belongs in the matching bin at the bottom.</p>
+    <ul>
+      <li><strong>How to play:</strong> Four diverter gates stand between the drop and the bins. Each gate steers a marble Left, Straight, or Right when it passes through.</li>
+      <li><strong>Set the path before the marble arrives.</strong> A gate only affects a marble at the moment it reaches that gate &mdash; later gates can still save it.</li>
+      <li><strong>Click / tap a gate row</strong> to cycle it. <strong>Keys 1&ndash;4</strong> select a gate, <strong>Arrow Left / Right</strong> steer it, <strong>Space</strong> cycles it.</li>
+      <li>Start lane is the centre. A Red marble needs the leftmost bin, so its gates must add up to 2 steps left, and so on.</li>
+    </ul>
+    <p>Correct marble: +100 points. Streaks add a bonus. Wrong bin: +1 fault.</p>
+    <button id="startBtn">Start Machine</button>
+    <p class="legend">Keyboard, mouse and touch supported. Sound starts only after you press Start.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p id="status">Press R or tap Restart to run the machine again.</p>
+    <button id="restartBtn">Restart</button>
+    <button id="menuBtn" class="secondary">How to Play</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button data-gate="0">Gate 1: <span id="gateLabel0">Straight</span></button>
+  <button data-gate="1">Gate 2: <span id="gateLabel1">Straight</span></button>
+  <button data-gate="2">Gate 3: <span id="gateLabel2">Straight</span></button>
+  <button data-gate="3">Gate 4: <span id="gateLabel3">Straight</span></button>
+</div>
+<p class="legend">Tip: watch the Next colour, count the steps to its bin, and set the gates to match. Example: a Green marble (bin 2 from the left) starting in the centre needs one step left in total.</p>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var COLORS = ['#e74c3c', '#2ecc71', '#3498db', '#f1c40f', '#9b59b6'];
+  var NAMES = ['Red', 'Green', 'Blue', 'Yellow', 'Purple'];
+  var LANE_X = [130, 245, 360, 475, 590];
+  var GATE_Y = [150, 240, 330, 420];
+  var BIN_Y = 505;
+  var gates = [0, 0, 0, 0];
+  var gateNames = { '-1': 'Left', '0': 'Straight', '1': 'Right' };
+  var selected = 0;
+  var score = 0, correct = 0, faults = 0, wave = 1, streak = 0, spawned = 0;
+  var running = false, over = false, won = false;
+  var marble = null, nextColor = 0, spawnTimer = 0, hoverGate = -1, mouseX = 0, mouseY = 0;
+  var gearAngle = 0, lastTime = 0, flash = '', flashTimer = 0;
+  var audioCtx = null;
+
+  function el(id) { return document.getElementById(id); }
+  function pickNext() { nextColor = Math.floor(Math.random() * 5); }
+  function gateLabel(v) { return gateNames[String(v)]; }
+
+  function updateHUD() {
+    el('score').textContent = score;
+    el('correct').textContent = correct;
+    el('faults').textContent = faults;
+    el('wave').textContent = wave;
+    el('nextName').textContent = NAMES[nextColor];
+    el('nextDot').style.background = COLORS[nextColor];
+    el('statusText').textContent = over ? (won ? 'WINNER!' : 'GAME OVER') : (running ? 'Running' : 'Ready');
+    for (var i = 0; i < 4; i++) {
+      el('gateLabel' + i).textContent = gateLabel(gates[i]) + (selected === i ? ' *' : '');
+    }
+  }
+
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundFor(kind) {
+    if (kind === 'correct') { beep(660, 0.12, 'sine', 0.16); setTimeout(function(){ beep(880, 0.16, 'sine', 0.16); }, 90); }
+    else if (kind === 'wrong') { beep(180, 0.25, 'sawtooth', 0.14); setTimeout(function(){ beep(120, 0.3, 'sawtooth', 0.14); }, 100); }
+    else if (kind === 'click') { beep(440, 0.06, 'square', 0.08); }
+    else if (kind === 'win') { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'triangle', 0.16); }, i * 130); }); }
+    else if (kind === 'lose') { [330, 262, 196, 131].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.22, 'sawtooth', 0.12); }, i * 140); }); }
+  }
+
+  function cycleGate(i) {
+    gates[i] = gates[i] === -1 ? 0 : (gates[i] === 0 ? 1 : -1);
+    selected = i;
+    soundFor('click');
+    updateHUD();
+  }
+  function setGate(i, v) { gates[i] = v; selected = i; soundFor('click'); updateHUD(); }
+
+  function spawnMarble() {
+    spawned++;
+    wave = 1 + Math.floor((spawned - 1) / 5);
+    marble = {
+      color: nextColor, lane: 2, x: LANE_X[2], y: 58,
+      gateIdx: 0, segT: 0, fromX: LANE_X[2], toX: LANE_X[2], fromY: 58, toY: GATE_Y[0],
+      stage: 'toGate'
+    };
+    pickNext();
+    updateHUD();
+  }
+
+  function resolveMarble() {
+    var target = marble.color;
+    if (marble.lane === target) {
+      correct++; streak++;
+      score += 100 + (streak - 1) * 10;
+      flash = 'CORRECT! +' + (100 + (streak - 1) * 10); flashTimer = 1.4;
+      soundFor('correct');
+    } else {
+      faults++; streak = 0;
+      flash = 'MISROUTED! Went to ' + NAMES[marble.lane] + ' bin, needed ' + NAMES[target]; flashTimer = 1.8;
+      soundFor('wrong');
+    }
+    marble = null;
+    spawnTimer = 0.9;
+    if (correct >= 25) endGame(true);
+    else if (faults >= 8) endGame(false);
+    updateHUD();
+  }
+
+  function stepMarble(dt) {
+    if (!marble) return;
+    marble.segT += dt / 0.55;
+    var t = Math.min(1, marble.segT);
+    marble.x = marble.fromX + (marble.toX - marble.fromX) * t;
+    marble.y = marble.fromY + (marble.toY - marble.fromY) * t;
+    if (t >= 1) {
+      if (marble.stage === 'toGate') {
+        var g = gates[marble.gateIdx];
+        var nextLane = Math.max(0, Math.min(4, marble.lane + g));
+        marble.lane = nextLane;
+        marble.fromX = marble.x; marble.fromY = marble.y; marble.segT = 0;
+        if (marble.gateIdx < 3) {
+          marble.stage = 'toGate'; marble.gateIdx++;
+          marble.toX = LANE_X[nextLane]; marble.toY = GATE_Y[marble.gateIdx];
+        } else {
+          marble.stage = 'toBin';
+          marble.toX = LANE_X[nextLane]; marble.toY = BIN_Y - 18;
+        }
+      } else {
+        resolveMarble();
+      }
+    }
+  }
+
+  function drawGear(x, y, r, angle) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(angle);
+    ctx.fillStyle = '#8a6a2f'; ctx.strokeStyle = '#5d451c'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var i = 0; i < 12; i++) {
+      var a = i * Math.PI / 6;
+      var rr = (i % 2 === 0) ? r : r * 0.78;
+      var px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#1e1812'; ctx.beginPath(); ctx.arc(0, 0, r * 0.32, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, 720, 580);
+    ctx.fillStyle = '#1e1812'; ctx.fillRect(0, 0, 720, 580);
+    // side gears
+    drawGear(52, 90, 30, gearAngle);
+    drawGear(668, 90, 30, -gearAngle);
+    drawGear(52, 470, 26, -gearAngle * 0.8);
+    drawGear(668, 470, 26, gearAngle * 0.8);
+    // lane guides
+    ctx.strokeStyle = '#3a2f22'; ctx.lineWidth = 1; ctx.setLineDash([6, 6]);
+    for (var l = 0; l < 5; l++) { ctx.beginPath(); ctx.moveTo(LANE_X[l], 55); ctx.lineTo(LANE_X[l], BIN_Y); ctx.stroke(); }
+    ctx.setLineDash([]);
+    // hopper
+    ctx.fillStyle = '#2b2118'; ctx.strokeStyle = '#f1c40f'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(290, 20); ctx.lineTo(430, 20); ctx.lineTo(395, 58); ctx.lineTo(325, 58); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#f5e9d0'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText('HOPPER', 360, 40);
+    // gates
+    for (var i = 0; i < 4; i++) {
+      var y = GATE_Y[i];
+      var isSel = selected === i, isHover = hoverGate === i;
+      ctx.fillStyle = isSel ? '#3d2f14' : '#241c13';
+      ctx.strokeStyle = isSel ? '#f1c40f' : '#8a6a2f'; ctx.lineWidth = isSel ? 3 : 2;
+      ctx.beginPath(); ctx.roundRect(88, y - 32, 544, 44, 10); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#f5e9d0'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left';
+      ctx.fillText('GATE ' + (i + 1), 100, y + 5);
+      ctx.textAlign = 'center'; ctx.font = 'bold 20px Arial';
+      var arrow = gates[i] === -1 ? '\u25C0 LEFT' : (gates[i] === 1 ? 'RIGHT \u25B6' : '\u2195 STRAIGHT');
+      ctx.fillStyle = gates[i] === 0 ? '#f1c40f' : '#7ed492';
+      ctx.fillText(arrow, 360, y + 7);
+      if (isHover) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(86, y - 34, 548, 48, 12); ctx.stroke(); }
+      // small gear on the gate bar
+      drawGear(610, y - 10, 15, gearAngle + i);
+    }
+    // bins
+    for (var b = 0; b < 5; b++) {
+      ctx.fillStyle = COLORS[b]; ctx.globalAlpha = 0.28;
+      ctx.fillRect(LANE_X[b] - 52, BIN_Y, 104, 58);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = COLORS[b]; ctx.lineWidth = 3; ctx.strokeRect(LANE_X[b] - 52, BIN_Y, 104, 58);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(NAMES[b].toUpperCase(), LANE_X[b], BIN_Y + 35);
+    }
+    // marble
+    if (marble) {
+      ctx.fillStyle = COLORS[marble.color];
+      ctx.beginPath(); ctx.arc(marble.x, marble.y, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.beginPath(); ctx.arc(marble.x - 5, marble.y - 5, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    // flash message
+    if (flashTimer > 0) {
+      ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(flash, 360, 545);
+    }
+    ctx.fillStyle = '#cbb98f'; ctx.font = '13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Click a gate row to cycle it  |  Keys 1-4 select, arrows steer, Space cycles, R restarts', 360, 575);
+  }
+
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime) / 1000);
+    lastTime = ts;
+    gearAngle += dt * 0.9;
+    if (flashTimer > 0) flashTimer -= dt;
+    if (running && !over) {
+      if (marble) stepMarble(dt);
+      else { spawnTimer -= dt; if (spawnTimer <= 0) spawnMarble(); }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function resetGame() {
+    score = 0; correct = 0; faults = 0; wave = 1; streak = 0; spawned = 0;
+    gates = [0, 0, 0, 0]; selected = 0; marble = null; over = false; won = false;
+    flash = ''; flashTimer = 0; pickNext(); spawnTimer = 0.6; updateHUD();
+  }
+  function startGame() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+    resetGame();
+    running = true;
+    el('titleScreen').classList.add('hidden');
+    el('endScreen').classList.add('hidden');
+    soundFor('click');
+    updateHUD();
+  }
+  function endGame(didWin) {
+    over = true; won = didWin; running = false;
+    el('endTitle').textContent = didWin ? 'You Win! Master Machinist!' : 'Game Over';
+    el('endText').textContent = didWin
+      ? 'You routed 25 marbles correctly with a score of ' + score + '. The machine hums in triumph.'
+      : '8 marbles went astray. Final score: ' + score + ' with ' + correct + ' correct routings.';
+    el('endScreen').classList.remove('hidden');
+    soundFor(didWin ? 'win' : 'lose');
+    updateHUD();
+  }
+  function showMenu() {
+    el('endScreen').classList.add('hidden');
+    el('titleScreen').classList.remove('hidden');
+    running = false; over = false;
+  }
+
+  function gateFromY(y) {
+    var rect = canvas.getBoundingClientRect();
+    var cy = (y - rect.top) * (580 / rect.height);
+    for (var i = 0; i < 4; i++) { if (Math.abs(cy - GATE_Y[i]) < 34) return i; }
+    return -1;
+  }
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX - rect.left) * (720 / rect.width);
+    var cy = (evt.clientY - rect.top) * (580 / rect.height);
+    return { x: cx, y: cy };
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', showMenu);
+  document.querySelectorAll('#controls button').forEach(function (btn) {
+    btn.addEventListener('click', function () { cycleGate(parseInt(btn.getAttribute('data-gate'), 10)); });
+  });
+
+  canvas.addEventListener('mousemove', function (e) {
+    var p = canvasPos(e); mouseX = p.x; mouseY = p.y;
+    hoverGate = gateFromY(e.clientY);
+  });
+  canvas.addEventListener('click', function (e) {
+    var g = gateFromY(e.clientY);
+    if (g >= 0) cycleGate(g);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    var g = gateFromY(t.clientY);
+    if (g >= 0) cycleGate(g);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    var p = canvasPos(t); mouseX = p.x; mouseY = p.y;
+    hoverGate = gateFromY(t.clientY);
+  }, { passive: false });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'r' || e.key === 'R') { if (over || !running) startGame(); return; }
+    if (e.key === 'Enter' && !running) { startGame(); return; }
+    if (!running || over) return;
+    if (e.key >= '1' && e.key <= '4') { selected = parseInt(e.key, 10) - 1; updateHUD(); soundFor('click'); }
+    else if (e.key === 'ArrowLeft') setGate(selected, -1);
+    else if (e.key === 'ArrowRight') setGate(selected, 1);
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') setGate(selected, 0);
+    else if (e.key === ' ') { e.preventDefault(); cycleGate(selected); }
+  });
+
+  pickNext();
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

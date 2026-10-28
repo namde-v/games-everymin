@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Zephyr Zookeeper</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0b1622;color:#eaf6ff;font-family:Arial,Helvetica,sans-serif;overflow:hidden}
+  #wrap{max-width:920px;margin:0 auto;padding:10px}
+  h1{margin:6px 0 2px;text-align:center;font-size:30px;letter-spacing:.5px}
+  p.sub{text-align:center;margin:0 0 8px;color:#bfe3ff}
+  #hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+  .pill{background:#17344d;border:1px solid #3a6b94;border-radius:20px;padding:6px 11px;font-weight:bold;font-size:14px}
+  .pill.warn{background:#5a2a1d;border-color:#e08a4a}
+  canvas{display:block;width:100%;height:560px;background:linear-gradient(#7ec8f2,#d8f2ff 55%,#cfe8c0);border:3px solid #274b66;border-radius:14px;touch-action:none}
+  #buttons{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:9px}
+  button{background:#ffd166;color:#1a2a1a;border:0;border-radius:10px;padding:11px 16px;font-size:16px;font-weight:bold;cursor:pointer}
+  button.secondary{background:#d7ecff;color:#16324a}
+  #msg{text-align:center;min-height:22px;margin-top:6px;color:#ffe9a8;font-weight:bold}
+  #help{background:#12293d;border:1px solid #345c7d;border-radius:10px;padding:10px 14px;font-size:14px;line-height:1.5}
+  @media(max-width:600px){canvas{height:520px}h1{font-size:25px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🌬️ Zephyr Zookeeper 🦜</h1>
+  <p class="sub">Strategy / Wind Aviary Management — keep the flock happy for 6 days!</p>
+  <div id="hud">
+    <span class="pill" id="day">Day 1 / 6</span>
+    <span class="pill" id="score">Score: 0</span>
+    <span class="pill" id="happy">Flock Happiness: 100%</span>
+    <span class="pill" id="escapes">Escapes: 0 / 5</span>
+    <span class="pill" id="status">Status: Title</span>
+    <span class="pill" id="selected">Selected: none</span>
+  </div>
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="buttons">
+    <button id="startBtn">▶ Start Game</button>
+    <button id="feedBtn" class="secondary">🍎 Feed Selected (F)</button>
+    <button id="restBtn" class="secondary">💤 Rest Selected (E)</button>
+    <button id="restartBtn" class="secondary">↻ Restart (R)</button>
+  </div>
+  <div id="msg">Welcome, Keeper! Press Start to open the aviary.</div>
+  <div id="help"><b>How to Play:</b> Wind-borne creatures arrive at the holding perch (bottom). Each creature loves one wind:
+  <b>Breeze, Gale, Thermal</b> or <b>Storm</b>. Drag a creature — or click it, then click an aviary — into its matching wind to raise happiness.
+  A wrong wind, hunger, or tiredness drains happiness; at zero, the creature escapes! Feed hungry creatures and rest tired ones.
+  Survive 6 days with fewer than 5 escapes to win. Keys: <b>1–4</b> assign selected creature to an aviary, <b>F</b> feed, <b>E</b> rest,
+  <b>← →</b> change selection, <b>Enter</b> start, <b>R</b> restart. Mouse and touch dragging both work.</div>
+</div>
+<script>
+(function(){
+"use strict";
+var cv=document.getElementById('game'), ctx=cv.getContext('2d');
+var dayEl=document.getElementById('day'), scoreEl=document.getElementById('score'), happyEl=document.getElementById('happy'),
+    escEl=document.getElementById('escapes'), statusEl=document.getElementById('status'), selEl=document.getElementById('selected'),
+    msgEl=document.getElementById('msg');
+var WINDS=['Breeze','Gale','Thermal','Storm'];
+var WIND_COLOR=['#a8e6ff','#9db8ff','#ffd9a0','#c9b8ff'];
+var SPECIES=[['Sky Finch','🐦'],['Cloud Fox','🦊'],['Storm Owl','🦉'],['Gale Sprite','🧚'],['Thermal Hawk','🦅'],['Breeze Lizard','🦎'],['Zephyr Cat','🐱'],['Mist Duck','🦆']];
+var state='title', score=0, day=1, dayTime=0, escapes=0, selected=-1, drag=-1, spawnTimer=0, nextId=1, frame=0;
+var creatures=[], audioCtx=null, muted=false;
+var aviaries=WINDS.map(function(w,i){return {wind:w,x:20+i*220,y:20,w:200,h:190};});
+
+function beep(freq,dur,type){
+  if(!audioCtx||muted) return;
+  try{
+    var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type=type||'sine'; o.frequency.value=freq;
+    g.gain.setValueAtTime(0.12,audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+  }catch(e){}
+}
+function initAudio(){
+  if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume();
+}
+function rnd(a,b){return a+Math.random()*(b-a);}
+function makeCreature(){
+  var sp=SPECIES[Math.floor(Math.random()*SPECIES.length)];
+  var wind=WINDS[Math.floor(Math.random()*WINDS.length)];
+  creatures.push({id:nextId++,name:sp[0],icon:sp[1],wind:wind,aviary:-1,
+    x:rnd(90,810),y:rnd(430,500),hunger:rnd(35,70),energy:rnd(45,80),happy:rnd(70,95),blink:0});
+  msgEl.textContent='A new '+sp[0]+' arrived! It loves '+wind+' wind.';
+  beep(660,0.12,'triangle');
+}
+function reset(){
+  state='playing'; score=0; day=1; dayTime=0; escapes=0; selected=-1; drag=-1; spawnTimer=0; nextId=1; creatures=[];
+  for(var i=0;i<4;i++) makeCreature();
+  statusEl.textContent='Status: Playing';
+  msgEl.textContent='Day 1 begins! Match each creature to its favourite wind.';
+  initAudio(); beep(520,0.18,'sine');
+}
+function feed(){
+  var c=creatures[selected]; if(!c||state!=='playing'){msgEl.textContent='Select a creature first!';return;}
+  c.hunger=Math.min(100,c.hunger+42); c.happy=Math.min(100,c.happy+6); score+=10; beep(880,0.12,'sine');
+  msgEl.textContent=c.name+' munched wind-seeds. Hunger restored!';
+}
+function rest(){
+  var c=creatures[selected]; if(!c||state!=='playing'){msgEl.textContent='Select a creature first!';return;}
+  c.energy=Math.min(100,c.energy+45); c.happy=Math.min(100,c.happy+6); score+=10; beep(440,0.16,'sine');
+  msgEl.textContent=c.name+' took a cosy nap on a calm perch.';
+}
+function assign(i){
+  var c=creatures[selected]; if(!c||state!=='playing') return;
+  c.aviary=i; c.x=aviaries[i].x+100; c.y=aviaries[i].y+115;
+  if(c.wind===WINDS[i]){ score+=25; c.happy=Math.min(100,c.happy+12); msgEl.textContent='Perfect! '+c.name+' loves the '+WINDS[i]+' aviary. +25'; beep(760,0.15,'sine'); }
+  else { msgEl.textContent=c.name+' is in the wrong wind. It prefers '+c.wind+'.'; beep(180,0.2,'square'); }
+}
+function update(dt){
+  if(state!=='playing') return;
+  frame++; dayTime+=dt; spawnTimer+=dt;
+  // Day length: 24 seconds. Six days = about 2.5 minutes of careful keeping.
+  if(dayTime>=24){ day++; dayTime=0; score+=100; msgEl.textContent='Day '+Math.min(day,6)+' dawns! +100 day bonus.'; beep(620,0.25,'sine');
+    if(day>6){ state='win'; statusEl.textContent='Status: YOU WIN!'; msgEl.textContent='You kept the flock happy for 6 days! Final score: '+score; beep(880,0.4,'sine'); return; } }
+  if(spawnTimer>9 && creatures.length<8){ spawnTimer=0; makeCreature(); }
+  for(var i=creatures.length-1;i>=0;i--){
+    var c=creatures[i];
+    c.hunger-=dt*1.1; c.energy-=dt*0.9;
+    var good=(c.aviary>=0 && WINDS[c.aviary]===c.wind);
+    if(c.aviary<0) c.happy-=dt*2.2;
+    else if(good) c.happy+=dt*1.4; else c.happy-=dt*3.2;
+    if(c.hunger<30) c.happy-=dt*2.5;
+    if(c.energy<30) c.happy-=dt*2.5;
+    if(c.hunger<15||c.energy<15) c.happy-=dt*2;
+    c.happy=Math.max(0,Math.min(100,c.happy)); c.hunger=Math.max(0,c.hunger); c.energy=Math.max(0,c.energy);
+    if(c.aviary>=0){ c.x+=Math.sin(frame/28+c.id)*0.35; c.y+=Math.cos(frame/34+c.id)*0.25; }
+    if(c.happy<=0){
+      creatures.splice(i,1); escapes++; score=Math.max(0,score-40); beep(140,0.35,'sawtooth');
+      msgEl.textContent='Oh no! A creature escaped on the wind! Escapes: '+escapes+'/5';
+      if(selected>=creatures.length) selected=creatures.length-1;
+      if(escapes>=5){ state='over'; statusEl.textContent='Status: GAME OVER'; msgEl.textContent='5 creatures escaped. The aviary is empty. Press Restart or R to try again.'; }
+    }
+  }
+  if(creatures.length) score+=Math.floor(dt*0.2);
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function draw(){
+  ctx.clearRect(0,0,900,560);
+  // sky and clouds
+  ctx.fillStyle='#7ec8f2'; ctx.fillRect(0,0,900,560);
+  ctx.fillStyle='rgba(255,255,255,0.85)';
+  [[90,55],[520,35],[760,80]].forEach(function(p){ ctx.beginPath(); ctx.arc(p[0],p[1],28,0,7); ctx.arc(p[0]+30,p[1]+6,22,0,7); ctx.arc(p[0]-30,p[1]+8,20,0,7); ctx.fill(); });
+  aviaries.forEach(function(a,i){
+    ctx.fillStyle=WIND_COLOR[i]; roundRect(a.x,a.y,a.w,a.h,16); ctx.fill();
+    ctx.strokeStyle='#274b66'; ctx.lineWidth=3; ctx.stroke();
+    ctx.fillStyle='#16324a'; ctx.font='bold 19px Arial'; ctx.textAlign='center';
+    ctx.fillText(a.wind+' Aviary',a.x+100,a.y+30);
+    ctx.font='14px Arial'; ctx.fillText('Wind zone '+(i+1),a.x+100,a.y+52);
+    ctx.font='26px Arial'; ctx.fillText(i===0?'🍃':i===1?'💨':i===2?'🔥':'⛈️',a.x+100,a.y+175);
+  });
+  ctx.fillStyle='rgba(60,80,40,0.35)'; roundRect(15,400,870,145,16); ctx.fill();
+  ctx.fillStyle='#16324a'; ctx.font='bold 16px Arial'; ctx.textAlign='left'; ctx.fillText('Holding Perch — new arrivals wait here',28,425);
+  creatures.forEach(function(c,idx){
+    var sel=(idx===selected);
+    if(sel){ ctx.strokeStyle='#ffcf3d'; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(c.x,c.y,38,0,7); ctx.stroke(); }
+    ctx.font='42px Arial'; ctx.textAlign='center'; ctx.fillText(c.icon,c.x,c.y+14);
+    ctx.fillStyle='#16324a'; ctx.font='bold 13px Arial'; ctx.fillText(c.name,c.x,c.y+44);
+    ctx.fillStyle='#fff'; ctx.fillRect(c.x-34,c.y+50,68,8);
+    ctx.fillStyle=c.happy>50?'#3aa64a':c.happy>25?'#e8a020':'#d23b2e'; ctx.fillRect(c.x-34,c.y+50,68*c.happy/100,8);
+    ctx.fillStyle='#16324a'; ctx.font='11px Arial'; ctx.fillText('♥'+c.wind+'  🍎'+Math.round(c.hunger)+'  💤'+Math.round(c.energy),c.x,c.y+72);
+  });
+  if(state==='title'){
+    ctx.fillStyle='rgba(8,25,40,0.72)'; ctx.fillRect(0,0,900,560);
+    ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.font='bold 52px Arial'; ctx.fillText('Zephyr Zookeeper',450,190);
+    ctx.font='20px Arial'; ctx.fillText('Match creatures to their favourite wind.',450,235);
+    ctx.fillText('Feed, rest, and survive 6 days with fewer than 5 escapes.',450,265);
+    ctx.font='bold 20px Arial'; ctx.fillStyle='#ffd166'; ctx.fillText('Press Start, Enter, or tap Start Game',450,320);
+  }
+  if(state==='win'||state==='over'){
+    ctx.fillStyle='rgba(8,25,40,0.72)'; ctx.fillRect(0,0,900,560);
+    ctx.fillStyle=state==='win'?'#ffd166':'#ff8a7a'; ctx.textAlign='center'; ctx.font='bold 54px Arial';
+    ctx.fillText(state==='win'?'🏆 YOU WIN!':'💨 GAME OVER',450,230);
+    ctx.fillStyle='#fff'; ctx.font='21px Arial';
+    ctx.fillText(state==='win'?'Six happy days in the aviary! Final score: '+score:'Five creatures escaped. Final score: '+score,450,280);
+    ctx.fillStyle='#ffd166'; ctx.font='bold 20px Arial'; ctx.fillText('Press Restart or R to play again',450,325);
+  }
+  dayEl.textContent='Day '+Math.min(day,6)+' / 6';
+  scoreEl.textContent='Score: '+score;
+  var avg=creatures.length?Math.round(creatures.reduce(function(s,c){return s+c.happy;},0)/creatures.length):100;
+  happyEl.textContent='Flock Happiness: '+avg+'%';
+  escEl.textContent='Escapes: '+escapes+' / 5';
+  if(state==='playing') statusEl.textContent='Status: Playing — Day timer: '+Math.round(24-dayTime)+'s left';
+  else if(state==='title') statusEl.textContent='Status: Title';
+  selEl.textContent='Selected: '+(selected>=0&&creatures[selected]?creatures[selected].name+' ('+creatures[selected].wind+')':'none');
+  if(escapes>=4) escEl.parentElement && (document.getElementById('escapes').style.background='#5a2a1d');
+}
+var last=performance.now();
+function loop(now){
+  var dt=Math.min(0.05,(now-last)/1000); last=now;
+  update(dt); draw(); requestAnimationFrame(loop);
+}
+function pos(e){
+  var r=cv.getBoundingClientRect();
+  var x=(e.clientX-r.left)*900/r.width, y=(e.clientY-r.top)*560/r.height;
+  return {x:x,y:y};
+}
+function pick(p){
+  for(var i=0;i<creatures.length;i++){ if(Math.abs(creatures[i].x-p.x)<48&&Math.abs(creatures[i].y-p.y)<48) return i; }
+  return -1;
+}
+function aviaryAt(p){
+  for(var i=0;i<aviaries.length;i++){ var a=aviaries[i]; if(p.x>=a.x&&p.x<=a.x+a.w&&p.y>=a.y&&p.y<=a.y+a.h) return i; }
+  return -1;
+}
+function onDown(e){
+  if(state!=='playing') return;
+  var p=pos(e); var idx=pick(p);
+  if(idx>=0){ selected=idx; drag=idx; beep(520,0.08,'triangle'); }
+}
+function onMove(e){
+  if(drag>=0&&creatures[drag]){ var p=pos(e); creatures[drag].x=p.x; creatures[drag].y=p.y; }
+}
+function onUp(e){
+  if(drag<0) return; var p=pos(e); var a=aviaryAt(p);
+  if(a>=0) assign(a); else { var c=creatures[drag]; if(c&&c.aviary<0){ c.y=Math.min(500,Math.max(430,c.y)); } }
+  drag=-1;
+}
+function onClick(e){
+  if(state!=='playing') return;
+  var p=pos(e); var idx=pick(p); if(idx>=0) selected=idx;
+  var a=aviaryAt(p); if(a>=0 && selected>=0 && pick(p)<0) assign(a);
+}
+cv.addEventListener('mousedown',onDown);
+cv.addEventListener('mousemove',onMove);
+window.addEventListener('mouseup',onUp);
+cv.addEventListener('click',onClick);
+cv.addEventListener('touchstart',function(e){ e.preventDefault(); if(e.touches[0]) onDown(e.touches[0]); },{passive:false});
+cv.addEventListener('touchmove',function(e){ e.preventDefault(); if(e.touches[0]) onMove(e.touches[0]); },{passive:false});
+cv.addEventListener('touchend',function(e){ e.preventDefault(); onUp(e); },{passive:false});
+document.addEventListener('keydown',function(e){
+  var k=e.key.toLowerCase();
+  if(k==='enter'&&state==='title'){ reset(); return; }
+  if(k==='r'){ reset(); return; }
+  if(state!=='playing') return;
+  if(k==='f') feed();
+  else if(k==='e') rest();
+  else if(k==='arrowright'&&creatures.length) selected=(selected+1)%creatures.length;
+  else if(k==='arrowleft'&&creatures.length) selected=(selected-1+creatures.length)%creatures.length;
+  else if(k>='1'&&k<='4') assign(parseInt(k,10)-1);
+  else if(k===' ') { e.preventDefault(); feed(); }
+});
+document.getElementById('startBtn').addEventListener('click',reset);
+document.getElementById('feedBtn').addEventListener('click',feed);
+document.getElementById('restBtn').addEventListener('click',rest);
+document.getElementById('restartBtn').addEventListener('click',reset);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

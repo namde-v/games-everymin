@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tempo Trawler</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #06121f; font-family: Arial, Helvetica, sans-serif; color: #eaf6ff; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; }
+  h1 { font-size: clamp(26px, 6vw, 44px); letter-spacing: 2px; color: #ffd166; text-shadow: 0 2px 0 #000, 0 0 18px rgba(255,209,102,.5); margin-bottom: 4px; text-align: center; }
+  p.sub { color: #9fd8ff; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; font-weight: bold; font-size: 15px; }
+  .pill { background: #12324f; border: 2px solid #2a6ea6; border-radius: 999px; padding: 5px 12px; }
+  .pill b { color: #ffd166; }
+  #beatBar { width: min(820px, 96vw); height: 12px; background: #0d2438; border: 2px solid #2a6ea6; border-radius: 999px; overflow: hidden; margin-bottom: 8px; }
+  #beatFill { height: 100%; width: 0%; background: linear-gradient(90deg, #06d6a0, #ffd166); transition: width .12s linear; }
+  canvas { width: min(820px, 96vw); height: min(440px, 58vh); background: #07293f; border: 3px solid #2a6ea6; border-radius: 14px; display: block; touch-action: none; }
+  #pads { display: flex; gap: 8px; margin-top: 10px; width: min(820px, 96vw); }
+  .pad { flex: 1; padding: 14px 4px; text-align: center; font-weight: bold; font-size: 16px; border-radius: 12px; border: 2px solid #2a6ea6; background: #12324f; cursor: pointer; user-select: none; }
+  .pad small { display: block; font-weight: normal; color: #9fd8ff; font-size: 12px; }
+  .pad.active, .pad:hover { background: #ffd166; color: #10222f; border-color: #ffd166; }
+  .pad.active small { color: #10222f; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(2,10,20,.82); z-index: 10; padding: 16px; }
+  #card { max-width: 560px; background: #0e2c46; border: 3px solid #ffd166; border-radius: 16px; padding: 22px; text-align: center; }
+  #card h2 { color: #ffd166; font-size: 32px; margin-bottom: 8px; }
+  #card p, #card li { text-align: left; line-height: 1.55; font-size: 15px; }
+  #card ul { margin: 10px 0 14px 18px; }
+  button { font-size: 20px; font-weight: bold; padding: 12px 26px; border-radius: 999px; border: none; background: #ffd166; color: #10222f; cursor: pointer; margin-top: 10px; }
+  button:hover { background: #ffe08a; }
+  #msg { margin-top: 8px; min-height: 22px; font-weight: bold; color: #06d6a0; text-align: center; }
+  #msg.bad { color: #ef476f; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#127907; TEMPO TRAWLER</h1>
+  <p class="sub">Rhythm / Beat Fishing &mdash; hook fish exactly on the beat!</p>
+  <div id="hud">
+    <span class="pill">Caught: <b id="caught">0</b> / 25</span>
+    <span class="pill">Misses: <b id="misses">0</b> / 10</span>
+    <span class="pill">Score: <b id="score">0</b></span>
+    <span class="pill">Combo: <b id="combo">x1</b></span>
+    <span class="pill">Beat: <b id="beat">-</b></span>
+    <span class="pill">Song: <b id="song">0%</b></span>
+  </div>
+  <div id="beatBar"><div id="beatFill"></div></div>
+  <canvas id="game" width="820" height="440"></canvas>
+  <div id="pads">
+    <div class="pad" data-lane="0">D <small>Shallow</small></div>
+    <div class="pad" data-lane="1">F <small>Reef</small></div>
+    <div class="pad" data-lane="2">J <small>Deep</small></div>
+    <div class="pad" data-lane="3">K <small>Abyss</small></div>
+  </div>
+  <div id="msg">Press Start and feel the beat!</div>
+</div>
+
+<div id="overlay">
+  <div id="card">
+    <h2>&#127907; TEMPO TRAWLER</h2>
+    <p><b>How to Play:</b></p>
+    <ul>
+      <li>Fish swim left to right along 4 lanes: Shallow, Reef, Deep, Abyss.</li>
+      <li>A glowing catch zone sits near the right side. When a fish is inside it <b>on a beat</b>, cast in that lane!</li>
+      <li>Keys: <b>D / F / J / K</b> for lanes 1-4. Or click / tap the lane pads below the water.</li>
+      <li>Perfect on-beat catches score more and build your combo. Off-beat or wrong-lane casts count as a miss.</li>
+      <li><b>WIN:</b> catch 25 fish before the song ends. <b>LOSE:</b> 10 misses, or the song ends first.</li>
+      <li>Restart instantly with the Restart button or the <b>R</b> key.</li>
+    </ul>
+    <p>Tip: watch the pulsing beat ring and the song bar &mdash; cast on the flash, not before it!</p>
+    <button id="startBtn">Start Fishing</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var overlay = document.getElementById('overlay');
+  var card = document.getElementById('card');
+  var startBtn = document.getElementById('startBtn');
+  var msgEl = document.getElementById('msg');
+  var caughtEl = document.getElementById('caught');
+  var missesEl = document.getElementById('misses');
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var beatEl = document.getElementById('beat');
+  var songEl = document.getElementById('song');
+  var beatFill = document.getElementById('beatFill');
+  var pads = Array.prototype.slice.call(document.querySelectorAll('.pad'));
+
+  var W = canvas.width, H = canvas.height;
+  var LANES = ['Shallow', 'Reef', 'Deep', 'Abyss'];
+  var LANE_COLORS = ['#06d6a0', '#ffd166', '#4cc9f0', '#ef476f'];
+  var KEYS = { d: 0, f: 1, j: 2, k: 3 };
+  var ZONE_X = 640, ZONE_W = 64;
+  var BPM = 116, BEAT_MS = 60000 / BPM, TOTAL_BEATS = 112;
+  var WIN_CATCH = 25, MAX_MISS = 10;
+
+  var state = 'title'; // title | playing | win | over
+  var fishes = [], particles = [], splashes = [];
+  var caught = 0, misses = 0, score = 0, combo = 0;
+  var beatCount = 0, lastBeat = 0, startTime = 0, spawnTimer = 0;
+  var hoverLane = -1, flashLane = -1, flashUntil = 0, beatPulse = 0;
+  var audioCtx = null, master = null;
+
+  function ensureAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      master = audioCtx.createGain();
+      master.gain.value = 0.35;
+      master.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+    g.gain.setValueAtTime(vol || 0.2, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + dur);
+  }
+  function beatSound() { tone(110, 0.14, 'sine', 0.5, 55); tone(880, 0.06, 'triangle', 0.08); }
+  function catchSound(perfect) {
+    tone(520, 0.18, 'triangle', 0.3, 1040);
+    setTimeout(function () { tone(780, 0.16, 'triangle', 0.25, 1560); }, 70);
+    if (perfect) setTimeout(function () { tone(1560, 0.2, 'sine', 0.2); }, 140);
+  }
+  function missSound() { tone(220, 0.22, 'sawtooth', 0.18, 110); }
+  function winSound() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, 'triangle', 0.3); }, i * 130); }); }
+  function loseSound() { [392, 330, 262, 196].forEach(function (f, i) { setTimeout(function () { tone(f, 0.3, 'sawtooth', 0.2); }, i * 150); }); }
+
+  function laneY(lane) { return 70 + lane * 88; }
+  function spawnFish() {
+    var lane = Math.floor(Math.random() * 4);
+    var kinds = ['Trout', 'Bass', 'Koi', 'Eel', 'Puffer', 'Marlin'];
+    var kind = kinds[Math.floor(Math.random() * kinds.length)];
+    var speed = 1.1 + Math.random() * 0.9 + Math.min(beatCount / 40, 0.8);
+    fishes.push({ x: -50, lane: lane, kind: kind, speed: speed, wob: Math.random() * 6.28, size: 16 + Math.random() * 10, golden: Math.random() < 0.12, caught: false });
+  }
+  function reset() {
+    fishes = []; particles = []; splashes = [];
+    caught = 0; misses = 0; score = 0; combo = 0; beatCount = 0;
+    lastBeat = performance.now(); startTime = lastBeat; spawnTimer = 0;
+    flashLane = -1; updateHUD(); setMsg('Cast on the beat!', false);
+  }
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = 'playing';
+    overlay.style.display = 'none';
+    setMsg('On the beat... cast!', false);
+  }
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    if (win) winSound(); else loseSound();
+    card.innerHTML = '<h2>' + (win ? '&#127881; YOU WIN!' : '&#128031; GAME OVER') + '</h2>' +
+      '<p style="text-align:center;font-size:18px;">' + (win ? 'You reeled in 25 fish before the song ended!' : 'The song ended or you missed too many casts.') + '<br>' +
+      'Final score: <b>' + score + '</b> &nbsp;|&nbsp; Caught: <b>' + caught + '</b> &nbsp;|&nbsp; Misses: <b>' + misses + '</b></p>' +
+      '<button id="restartBtn">Restart (R)</button>' +
+      '<p style="text-align:center;margin-top:10px;">Press R or click Restart to fish again.</p>';
+    overlay.style.display = 'flex';
+    document.getElementById('restartBtn').addEventListener('click', function () { startGame(); });
+  }
+  function updateHUD() {
+    caughtEl.textContent = caught; missesEl.textContent = misses;
+    scoreEl.textContent = score; comboEl.textContent = 'x' + (1 + Math.min(combo, 8));
+    beatEl.textContent = state === 'playing' ? (beatCount + 1) : '-';
+    var pct = state === 'playing' ? Math.min(100, Math.round(beatCount / TOTAL_BEATS * 100)) : 0;
+    songEl.textContent = pct + '%'; beatFill.style.width = pct + '%';
+  }
+  function setMsg(t, bad) { msgEl.textContent = t; msgEl.className = bad ? 'bad' : ''; }
+  function burst(x, y, color) {
+    for (var i = 0; i < 14; i++) particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, life: 1, color: color });
+  }
+  function cast(lane) {
+    if (state !== 'playing') return;
+    flashLane = lane; flashUntil = performance.now() + 160;
+    pads.forEach(function (p, i) { p.classList.toggle('active', i === lane); });
+    setTimeout(function () { pads[lane].classList.remove('active'); }, 160);
+    var now = performance.now();
+    var sinceBeat = now - lastBeat;
+    var toBeat = BEAT_MS - sinceBeat;
+    var offBeat = Math.min(sinceBeat, toBeat);
+    var target = null, best = 1e9;
+    fishes.forEach(function (f) {
+      if (f.lane === lane && !f.caught) {
+        var d = Math.abs((f.x + 20) - (ZONE_X + ZONE_W / 2));
+        if (d < best) { best = d; target = f; }
+      }
+    });
+    var inZone = target && best < ZONE_W + 26;
+    var onBeat = offBeat < 170;
+    if (inZone && onBeat) {
+      target.caught = true;
+      fishes = fishes.filter(function (f) { return f !== target; });
+      caught++; combo++;
+      var perfect = offBeat < 80;
+      var pts = (perfect ? 150 : 100) * (1 + Math.min(combo, 8)) + (target.golden ? 200 : 0);
+      score += pts;
+      burst(target.x + 20, laneY(target.lane), target.golden ? '#ffd166' : LANE_COLORS[lane]);
+      splashes.push({ x: target.x + 20, y: laneY(target.lane), life: 1 });
+      catchSound(perfect);
+      setMsg((perfect ? 'PERFECT! ' : 'Nice catch! ') + target.kind + ' +' + pts, false);
+      if (caught >= WIN_CATCH) { updateHUD(); endGame(true); return; }
+    } else {
+      misses++; combo = 0; missSound();
+      setMsg(!inZone ? 'Miss! No fish in that lane zone.' : 'Off beat! Cast on the flash.', true);
+      if (misses >= MAX_MISS) { updateHUD(); endGame(false); return; }
+    }
+    updateHUD();
+  }
+  function loop(now) {
+    requestAnimationFrame(loop);
+    // Water background
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0a3a5c'); grad.addColorStop(1, '#041a2e');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (var w = 0; w < 5; w++) ctx.fillRect(0, 30 + w * 88, W, 2);
+    // Lanes
+    LANES.forEach(function (name, i) {
+      var y = laneY(i);
+      ctx.fillStyle = (hoverLane === i || flashLane === i) ? 'rgba(255,209,102,0.14)' : 'rgba(255,255,255,0.03)';
+      ctx.fillRect(0, y - 38, W, 76);
+      ctx.fillStyle = '#9fd8ff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+      ctx.fillText(name, 10, y - 24);
+      ctx.fillStyle = LANE_COLORS[i]; ctx.font = 'bold 13px Arial';
+      ctx.fillText('D F J K'.split(' ')[i], 10, y + 32);
+    });
+    // Catch zone
+    var pulse = state === 'playing' ? (1 + Math.sin(now / 90) * 0.25) : 1;
+    ctx.fillStyle = 'rgba(255,209,102,' + (0.16 * pulse) + ')';
+    ctx.fillRect(ZONE_X, 20, ZONE_W, H - 40);
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.strokeRect(ZONE_X, 20, ZONE_W, H - 40);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('CATCH', ZONE_X + ZONE_W / 2, 14);
+    // Beat ring
+    if (state === 'playing' && beatPulse > 0) {
+      ctx.beginPath(); ctx.arc(ZONE_X + ZONE_W / 2, H / 2, 30 + (1 - beatPulse) * 70, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,209,102,' + beatPulse.toFixed(2) + ')'; ctx.lineWidth = 4; ctx.stroke();
+      beatPulse = Math.max(0, beatPulse - 0.02);
+    }
+    // Fish
+    fishes.forEach(function (f) {
+      var y = laneY(f.lane) + Math.sin(f.wob) * 6;
+      ctx.fillStyle = f.golden ? '#ffd166' : LANE_COLORS[f.lane];
+      ctx.beginPath(); ctx.ellipse(f.x + 20, y, f.size, f.size * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(f.x - 2, y); ctx.lineTo(f.x - 16, y - 10); ctx.lineTo(f.x - 16, y + 10); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#06121f'; ctx.beginPath(); ctx.arc(f.x + 30, y - 3, 3, 0, Math.PI * 2); ctx.fill();
+      if (f.golden) { ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.fillText('*', f.x + 14, y - 14); }
+    });
+    // Particles / splashes
+    particles = particles.filter(function (p) { return p.life > 0; });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.life -= 0.04; ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life); ctx.fillRect(p.x, p.y, 5, 5); ctx.globalAlpha = 1; });
+    splashes = splashes.filter(function (s) { return s.life > 0; });
+    splashes.forEach(function (s) { s.life -= 0.03; ctx.strokeStyle = 'rgba(255,255,255,' + Math.max(0, s.life).toFixed(2) + ')'; ctx.beginPath(); ctx.arc(s.x, s.y, (1 - s.life) * 50 + 8, 0, Math.PI * 2); ctx.stroke(); });
+    // Title / end hint on canvas
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start, then cast on the beat!', W / 2, H / 2);
+    }
+    if (state !== 'playing') return;
+    // Beat clock + song progress
+    if (now - lastBeat >= BEAT_MS) {
+      lastBeat += BEAT_MS; beatCount++; beatPulse = 1; beatSound();
+      if (beatCount % 2 === 0) spawnFish();
+      if (beatCount >= TOTAL_BEATS) { updateHUD(); endGame(caught >= WIN_CATCH); return; }
+      updateHUD();
+    }
+    // Move fish; a fish escaping past the zone counts as a miss
+    var escaped = [];
+    fishes.forEach(function (f) { f.x += f.speed; f.wob += 0.08; if (f.x > W + 30) escaped.push(f); });
+    if (escaped.length) {
+      fishes = fishes.filter(function (f) { return escaped.indexOf(f) === -1; });
+      misses += escaped.length; combo = 0; missSound();
+      setMsg('A fish got away! Miss +' + escaped.length, true);
+      if (misses >= MAX_MISS) { updateHUD(); endGame(false); return; }
+      updateHUD();
+    }
+    if (flashLane >= 0 && now > flashUntil) flashLane = -1;
+  }
+
+  startBtn.addEventListener('click', startGame);
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    if (k === 'r' && (state === 'win' || state === 'over')) { startGame(); return; }
+    if (k === 'enter' && state === 'title') { startGame(); return; }
+    if (KEYS.hasOwnProperty(k)) { ensureAudio(); cast(KEYS[k]); }
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    var r = canvas.getBoundingClientRect();
+    var y = (e.clientY - r.top) * (H / r.height);
+    hoverLane = Math.max(0, Math.min(3, Math.floor((y - 32) / 88)));
+  });
+  canvas.addEventListener('click', function (e) {
+    ensureAudio();
+    var r = canvas.getBoundingClientRect();
+    var y = (e.clientY - r.top) * (H / r.height);
+    var lane = Math.max(0, Math.min(3, Math.floor((y - 32) / 88)));
+    cast(lane);
+  });
+  pads.forEach(function (pad) {
+    pad.addEventListener('click', function () { ensureAudio(); cast(parseInt(pad.getAttribute('data-lane'), 10)); });
+    pad.addEventListener('touchstart', function (ev) { ev.preventDefault(); ensureAudio(); cast(parseInt(pad.getAttribute('data-lane'), 10)); }, { passive: false });
+  });
+  document.addEventListener('touchstart', function () { ensureAudio(); }, { passive: true });
+  document.addEventListener('touchmove', function (e) {
+    if (!e.touches || !e.touches.length) return;
+    var r = canvas.getBoundingClientRect();
+    var y = (e.touches[0].clientY - r.top) * (H / r.height);
+    hoverLane = Math.max(0, Math.min(3, Math.floor((y - 32) / 88)));
+  }, { passive: true });
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
