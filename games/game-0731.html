@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Canyon River Raft Rush</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; background: #0b2a3a; font-family: Arial, Helvetica, sans-serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 8px; }
+  h1 { color: #ffe9a8; text-shadow: 2px 2px 0 #7a3c00; font-size: clamp(22px, 5vw, 40px); text-align: center; margin-bottom: 6px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: min(720px, 96vw); margin-bottom: 8px; }
+  .pill { background: #123f52; color: #fff; border: 2px solid #ffd166; border-radius: 999px; padding: 6px 12px; font-weight: bold; font-size: 14px; }
+  .pill b { color: #ffd166; }
+  #stage { position: relative; width: min(720px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 3 / 5; background: #2a7fb8; border: 4px solid #ffd166; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(4, 28, 42, 0.82); border-radius: 14px; color: #fff; text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: clamp(26px, 6vw, 42px); color: #ffd166; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 15px; }
+  .overlay ul { text-align: left; max-width: 520px; line-height: 1.6; font-size: 14px; margin-left: 18px; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 13px 26px; font-size: 18px; font-weight: bold; background: #ffd166; color: #3a2200; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b8860b; }
+  button.secondary { background: #ffffff; color: #123f52; box-shadow: 0 4px 0 #7a8a94; }
+  #hint { color: #cfeeff; font-size: 13px; margin-top: 8px; text-align: center; }
+  #status { color: #ffe9a8; font-weight: bold; min-height: 20px; margin-top: 6px; text-align: center; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🛶 Canyon River Raft Rush</h1>
+  <div id="hud">
+    <div class="pill">Score: <b id="score">0</b></div>
+    <div class="pill">Distance: <b id="dist">0</b> m</div>
+    <div class="pill">Lives: <b id="lives">❤️❤️❤️</b></div>
+    <div class="pill">Crates: <b id="crates">0</b></div>
+    <div class="pill">Speed: <b id="speed">1x</b></div>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="600" height="1000"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Canyon River Raft Rush</h2>
+      <p>Steer your raft down a wild canyon river! Dodge rocks and logs, grab floating supply crates, and survive 3000 metres to reach calm water.</p>
+      <ul>
+        <li><b>How to Play:</b> Move left and right to steer. Avoid grey rocks and brown logs.</li>
+        <li><b>Crates:</b> Collect supply crates for +50 points and a bonus life every 10 crates.</li>
+        <li><b>Controls:</b> Arrow keys / A and D, mouse move, or drag with touch.</li>
+        <li><b>Lives:</b> You have 3 lives. A crash costs one life and briefly makes you invulnerable.</li>
+        <li><b>Win:</b> Reach 3000 m. The river gets faster and busier as you go!</li>
+      </ul>
+      <button id="startBtn">▶ Start Rafting</button>
+      <p>Sound starts only after you press Start.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">Game Over</h2>
+      <p id="endText"></p>
+      <div class="row">
+        <button id="restartBtn">↻ Restart Instantly</button>
+        <button id="menuBtn" class="secondary">Title Screen</button>
+      </div>
+    </div>
+  </div>
+  <div id="status">Ready — press Start to ride the river!</div>
+  <div id="hint">← → or A / D to steer &nbsp;•&nbsp; Mouse: move over the river &nbsp;•&nbsp; Touch: drag to steer &nbsp;•&nbsp; P pauses</div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var distEl = document.getElementById('dist');
+  var livesEl = document.getElementById('lives');
+  var cratesEl = document.getElementById('crates');
+  var speedEl = document.getElementById('speed');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title | playing | paused | over | won
+  var raft, obstacles, crates, particles, splashes;
+  var keys = {};
+  var targetX = W / 2;
+  var scroll = 0;
+  var spawnTimer = 0;
+  var crateTimer = 0;
+  var frame = 0;
+  var audioCtx = null, masterGain = null;
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.18;
+      masterGain.connect(audioCtx.destination);
+    } catch (e) { audioCtx = null; }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.5, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(masterGain);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(name) {
+    if (name === 'crash') { tone(140, 0.35, 'sawtooth', 0.7, 40); tone(70, 0.3, 'square', 0.5, 30); }
+    else if (name === 'crate') { tone(660, 0.12, 'sine', 0.6); setTimeout(function(){ tone(880, 0.16, 'sine', 0.6); }, 90); }
+    else if (name === 'win') { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, 'triangle', 0.6); }, i * 130); }); }
+    else if (name === 'lose') { [400, 300, 200, 120].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.25, 'sawtooth', 0.5); }, i * 140); }); }
+    else if (name === 'splash') { tone(900, 0.15, 'sine', 0.3, 300); }
+  }
+
+  function reset() {
+    raft = { x: W / 2, y: H - 150, w: 84, h: 110, lives: 3, inv: 0, tilt: 0 };
+    obstacles = []; crates = []; particles = []; splashes = [];
+    scroll = 0; spawnTimer = 0; crateTimer = 0; frame = 0;
+    state = 'playing';
+    targetX = W / 2;
+    updateHUD(0, 0, 0);
+    statusEl.textContent = 'Rafting! Dodge rocks and logs, grab crates!';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+  }
+
+  function updateHUD(score, dist, crateCount) {
+    scoreEl.textContent = Math.floor(score);
+    distEl.textContent = Math.floor(dist);
+    cratesEl.textContent = crateCount;
+    var hearts = '';
+    for (var i = 0; i < raft.lives; i++) hearts += '❤️';
+    livesEl.textContent = hearts || '—';
+    speedEl.textContent = (1 + Math.min(2.2, dist / 1500)).toFixed(1) + 'x';
+  }
+
+  function riverSpeed(dist) { return 3.2 + Math.min(6.5, dist / 320); }
+  function spawnObstacle(dist) {
+    var kind = Math.random() < 0.55 ? 'rock' : 'log';
+    var bank = 52, riverW = W - bank * 2;
+    var x = bank + 20 + Math.random() * (riverW - 40);
+    var size = kind === 'rock' ? 34 + Math.random() * 30 : 26 + Math.random() * 18;
+    obstacles.push({ kind: kind, x: x, y: -80, w: size * 1.7, h: size * 1.2, r: size * 0.7, rot: Math.random() * 6.28, spin: (Math.random() - 0.5) * 0.03, drift: (Math.random() - 0.5) * 0.7 });
+  }
+  function spawnCrate() {
+    var bank = 52;
+    crates.push({ x: bank + 30 + Math.random() * (W - bank * 2 - 60), y: -50, w: 44, h: 44, bob: Math.random() * 6.28 });
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 7, vy: (Math.random() - 0.5) * 7 - 2, life: 22 + Math.random() * 18, color: color });
+  }
+  function hit(a, b) {
+    return Math.abs(a.x - b.x) < (a.w + b.w) / 2 - 14 && Math.abs(a.y - b.y) < (a.h + b.h) / 2 - 14;
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#2a7fb8'; ctx.fillRect(0, 0, W, H);
+    // canyon banks
+    ctx.fillStyle = '#b5651d'; ctx.fillRect(0, 0, 52, H); ctx.fillRect(W - 52, 0, 52, H);
+    ctx.fillStyle = '#8a4b12';
+    for (var y = 0; y < H + 80; y += 80) {
+      var yy = (y + scroll) % (H + 80) - 40;
+      ctx.beginPath(); ctx.ellipse(26, yy, 30, 38, 0, 0, 6.29); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(W - 26, yy + 40, 30, 38, 0, 0, 6.29); ctx.fill();
+    }
+    // flowing water streaks
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    for (var i = 0; i < 14; i++) {
+      var sx = 70 + i * 36 + Math.sin(i * 7) * 8;
+      var sy = ((i * 173 + scroll * 1.6) % (H + 120)) - 60;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 6, sy + 34); ctx.stroke();
+    }
+    // foam lines at banks
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    for (var j = 0; j < 10; j++) {
+      var fy = ((j * 211 + scroll * 2) % (H + 60)) - 30;
+      ctx.beginPath(); ctx.ellipse(58, fy, 10, 5, 0, 0, 6.29); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(W - 58, fy + 50, 10, 5, 0, 0, 6.29); ctx.fill();
+    }
+  }
+  function drawRaft() {
+    if (raft.inv > 0 && Math.floor(frame / 5) % 2 === 0) return; // blink while invulnerable
+    ctx.save(); ctx.translate(raft.x, raft.y); ctx.rotate(raft.tilt);
+    ctx.fillStyle = '#8b5a2b'; ctx.strokeStyle = '#5d3a17'; ctx.lineWidth = 3;
+    for (var i = -1; i <= 1; i++) {
+      ctx.beginPath(); ctx.roundRect(-38 + i * 0, -52, 76, 104, 16); ctx.fill(); ctx.stroke();
+    }
+    ctx.fillStyle = '#a67c52';
+    ctx.fillRect(-40, -46, 80, 14); ctx.fillRect(-40, -6, 80, 14); ctx.fillRect(-40, 34, 80, 14);
+    ctx.fillStyle = '#d9a441'; ctx.fillRect(-42, -58, 84, 10);
+    ctx.fillStyle = '#2e6b8a'; ctx.beginPath(); ctx.arc(-14, -10, 11, 0, 6.29); ctx.fill();
+    ctx.beginPath(); ctx.arc(16, 14, 11, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center'; ctx.fillText('🧑', -14, -4); ctx.fillText('🧑', 16, 20);
+    ctx.restore();
+    // splash behind raft
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath(); ctx.ellipse(raft.x - 28, raft.y + 58, 14, 6, 0, 0, 6.29); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(raft.x + 28, raft.y + 58, 14, 6, 0, 0, 6.29); ctx.fill();
+  }
+  function drawObstacle(o) {
+    ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.rot);
+    if (o.kind === 'rock') {
+      ctx.fillStyle = '#6b7280'; ctx.strokeStyle = '#374151'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(0, 0, o.w / 2, o.h / 2, 0, 0, 6.29); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#9ca3af'; ctx.beginPath(); ctx.ellipse(-o.w * 0.15, -o.h * 0.2, o.w * 0.22, o.h * 0.2, 0, 0, 6.29); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center'; ctx.fillText('🪨', 0, 7);
+    } else {
+      ctx.fillStyle = '#7c4a21'; ctx.strokeStyle = '#4a2c12'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect(-o.w / 2, -o.h / 2, o.w, o.h, 10); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#d9a441'; ctx.beginPath(); ctx.moveTo(-o.w / 2 + 10, 0); ctx.lineTo(o.w / 2 - 10, 0); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center'; ctx.fillText('🪵', 0, 6);
+    }
+    ctx.restore();
+  }
+  function drawCrate(c) {
+    ctx.save(); ctx.translate(c.x, c.y + Math.sin(c.bob) * 3);
+    ctx.fillStyle = '#c98f2e'; ctx.strokeStyle = '#7a5410'; ctx.lineWidth = 3;
+    ctx.fillRect(-22, -22, 44, 44); ctx.strokeRect(-22, -22, 44, 44);
+    ctx.strokeStyle = '#7a5410'; ctx.beginPath(); ctx.moveTo(-22, -22); ctx.lineTo(22, 22); ctx.moveTo(22, -22); ctx.lineTo(-22, 22); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'center'; ctx.fillText('📦', 0, 8);
+    ctx.restore();
+  }
+
+  var score = 0, dist = 0, crateCount = 0;
+  function finish(won) {
+    state = won ? 'won' : 'over';
+    endTitle.textContent = won ? '🏆 You Win! Calm Water!' : '💥 Capsized! Game Over';
+    endText.textContent = won
+      ? 'You survived the canyon! Final score: ' + Math.floor(score) + ' • Distance: ' + Math.floor(dist) + ' m • Crates: ' + crateCount + '. Brilliant rafting!'
+      : 'The river got you this time. Final score: ' + Math.floor(score) + ' • Distance: ' + Math.floor(dist) + ' m • Crates: ' + crateCount + '. Try again — the river is waiting!';
+    endScreen.classList.remove('hidden');
+    statusEl.textContent = won ? 'Victory! You reached calm water.' : 'Game Over — press Restart to go again.';
+    sfx(won ? 'win' : 'lose');
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    var speed = riverSpeed(dist);
+    dist += speed * 0.55;
+    score += speed * 0.35;
+    scroll += speed;
+
+    if (keys.ArrowLeft || keys.a || keys.A) targetX -= 7;
+    if (keys.ArrowRight || keys.d || keys.D) targetX += 7;
+    targetX = Math.max(78, Math.min(W - 78, targetX));
+    var prevX = raft.x;
+    raft.x += (targetX - raft.x) * 0.22;
+    raft.tilt = Math.max(-0.28, Math.min(0.28, (raft.x - prevX) * 0.06));
+    if (raft.inv > 0) raft.inv--;
+
+    spawnTimer -= speed;
+    if (spawnTimer <= 0) {
+      spawnObstacle(dist);
+      if (dist > 900 && Math.random() < 0.55) spawnObstacle(dist);
+      spawnTimer = Math.max(46, 95 - dist / 28) + Math.random() * 30;
+    }
+    crateTimer -= speed;
+    if (crateTimer <= 0) { spawnCrate(); crateTimer = 170 + Math.random() * 160; }
+
+    obstacles.forEach(function(o){ o.y += speed * 0.92; o.x += o.drift; o.rot += o.spin; });
+    crates.forEach(function(c){ c.y += speed * 0.92; c.bob += 0.08; });
+    obstacles = obstacles.filter(function(o){ return o.y < H + 100; });
+    crates = crates.filter(function(c){ return c.y < H + 80; });
+
+    crates.forEach(function(c){
+      if (!c.taken && hit(raft, c)) {
+        c.taken = true; crateCount++; score += 50;
+        burst(c.x, c.y, '#ffd166', 14); sfx('crate');
+        if (crateCount % 10 === 0 && raft.lives < 5) { raft.lives++; statusEl.textContent = 'Bonus life! 10 crates collected!'; }
+      }
+    });
+    crates = crates.filter(function(c){ return !c.taken; });
+
+    if (raft.inv === 0) {
+      for (var i = 0; i < obstacles.length; i++) {
+        if (hit(raft, obstacles[i])) {
+          obstacles.splice(i, 1);
+          raft.lives--; raft.inv = 90;
+          burst(raft.x, raft.y, '#ffffff', 26); sfx('crash');
+          statusEl.textContent = raft.lives > 0 ? 'Crash! ' + raft.lives + ' lives left — steer clear!' : 'Capsized!';
+          if (raft.lives <= 0) { updateHUD(score, dist, crateCount); finish(false); return; }
+          break;
+        }
+      }
+    }
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    updateHUD(score, dist, crateCount);
+    if (dist >= 3000) { finish(true); }
+  }
+
+  function draw() {
+    drawBackground();
+    crates.forEach(drawCrate);
+    obstacles.forEach(drawObstacle);
+    if (state === 'playing' || state === 'paused') drawRaft();
+    particles.forEach(function(p){
+      ctx.globalAlpha = Math.max(0, p.life / 35);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 6.29); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 40px Arial'; ctx.textAlign = 'center'; ctx.fillText('PAUSED', W / 2, H / 2);
+      ctx.font = '18px Arial'; ctx.fillText('Press P to resume', W / 2, H / 2 + 36);
+    }
+  }
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+  function canvasX(clientX) {
+    var r = canvas.getBoundingClientRect();
+    return (clientX - r.left) * (W / r.width);
+  }
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if (e.key === 'p' || e.key === 'P') {
+      if (state === 'playing') { state = 'paused'; statusEl.textContent = 'Paused — press P to resume.'; }
+      else if (state === 'paused') { state = 'playing'; statusEl.textContent = 'Rafting again!'; }
+    }
+    if (e.key === 'Enter' && state === 'title') { initAudio(); score = 0; dist = 0; crateCount = 0; reset(); }
+    if (e.key === 'Enter' && (state === 'over' || state === 'won')) { score = 0; dist = 0; crateCount = 0; reset(); }
+    if (['ArrowLeft', 'ArrowRight'].indexOf(e.key) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function(e){ if (state === 'playing') targetX = canvasX(e.clientX); });
+  canvas.addEventListener('mousedown', function(e){ if (state === 'playing') targetX = canvasX(e.clientX); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); if (state === 'playing') targetX = canvasX(e.touches[0].clientX); }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); if (state === 'playing') targetX = canvasX(e.touches[0].clientX); }, { passive: false });
+  document.addEventListener('touchstart', function(e){ if (state === 'playing' && e.target === canvas) e.preventDefault(); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', function(){ initAudio(); score = 0; dist = 0; crateCount = 0; reset(); sfx('splash'); });
+  document.getElementById('restartBtn').addEventListener('click', function(){ initAudio(); score = 0; dist = 0; crateCount = 0; reset(); });
+  document.getElementById('menuBtn').addEventListener('click', function(){
+    state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+    statusEl.textContent = 'Ready — press Start to ride the river!';
+  });
+
+  score = 0; dist = 0; crateCount = 0;
+  raft = { x: W / 2, y: H - 150, w: 84, h: 110, lives: 3, inv: 0, tilt: 0 };
+  obstacles = []; crates = []; particles = [];
+  updateHUD(0, 0, 0);
+  drawBackground(); drawRaft();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

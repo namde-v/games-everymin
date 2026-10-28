@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Firefly Lantern Beat</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #06121f; font-family: Arial, Helvetica, sans-serif; color: #eaf6ff; }
+  #wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 50% 30%, #14324d 0%, #06121f 60%, #030a12 100%); }
+  canvas { display: block; background: linear-gradient(#0a2438, #06121f 55%, #0b2a1a); border: 3px solid #ffd76a; border-radius: 14px; box-shadow: 0 0 40px rgba(255,215,106,.35); touch-action: none; max-width: 96vw; max-height: 92vh; }
+  #hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; pointer-events: none; z-index: 5; width: 96%; }
+  .pill { background: rgba(0,0,0,.62); border: 1px solid #ffd76a; border-radius: 999px; padding: 7px 14px; font-weight: bold; font-size: 15px; white-space: nowrap; }
+  .pill span { color: #ffe98a; }
+  #beatbar { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); width: min(520px, 88vw); height: 18px; background: rgba(0,0,0,.6); border: 1px solid #7fe7ff; border-radius: 999px; overflow: hidden; z-index: 5; }
+  #beatfill { height: 100%; width: 50%; background: linear-gradient(90deg,#ffd76a,#7fe7ff); transition: width .08s linear; }
+  #beatlabel { position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%); font-weight: bold; letter-spacing: 1px; text-shadow: 0 2px 6px #000; z-index: 5; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; background: rgba(2,10,18,.82); padding: 22px; z-index: 10; }
+  .screen.hidden { display: none; }
+  h1 { font-size: clamp(30px, 6vw, 52px); color: #ffe98a; text-shadow: 0 0 18px rgba(255,215,106,.8); line-height: 1.05; }
+  h2 { font-size: clamp(26px, 5vw, 40px); color: #ffe98a; }
+  p { max-width: 560px; line-height: 1.55; font-size: 16px; }
+  .howto { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25); border-radius: 12px; padding: 14px 18px; text-align: left; max-width: 560px; }
+  .howto li { margin: 6px 0 6px 18px; line-height: 1.45; }
+  button { cursor: pointer; font-size: 20px; font-weight: bold; padding: 14px 30px; border-radius: 999px; border: none; background: #ffd76a; color: #1a1200; box-shadow: 0 6px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: 0 3px 0 #b8860b; }
+  button.secondary { background: #7fe7ff; box-shadow: 0 6px 0 #1a7a99; }
+  #msg { font-size: 20px; font-weight: bold; min-height: 28px; color: #aef7c0; text-shadow: 0 2px 6px #000; }
+  #netHint { font-size: 13px; opacity: .85; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud" aria-label="game status">
+    <div class="pill">Score: <span id="score">0</span></div>
+    <div class="pill">Caught: <span id="caught">0</span> / 20</div>
+    <div class="pill">Combo: <span id="combo">x0</span></div>
+    <div class="pill">Lantern: <span id="lives">● ● ●</span></div>
+    <div class="pill">Status: <span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="820" height="560"></canvas>
+  <div id="beatlabel">BEAT METER — tap when the bar flashes and fireflies glow brightest</div>
+  <div id="beatbar"><div id="beatfill"></div></div>
+
+  <div id="titleScreen" class="screen">
+    <h1>Firefly Lantern Beat</h1>
+    <p><strong>A rhythm firefly-catching night!</strong> Fireflies drift through the garden and pulse in time with the beat. Trap them in your lantern exactly on the beat to build combos.</p>
+    <div class="howto">
+      <strong>How to Play</strong>
+      <ul>
+        <li><strong>Mouse / Touch:</strong> tap a glowing firefly directly when it shines brightest on the beat.</li>
+        <li><strong>Keyboard:</strong> move the net with Arrow keys or WASD, press <strong>Space</strong> or <strong>Enter</strong> to catch.</li>
+        <li><strong>Perfect</strong> (right on the beat) = 100 pts · <strong>Good</strong> = 50 pts · off-beat tap = 20 pts.</li>
+        <li>If a firefly escapes, your lantern dims — lose all 3 glows and the night ends.</li>
+        <li><strong>Win</strong> by catching 20 fireflies. Chain catches without a miss to raise your combo multiplier.</li>
+      </ul>
+    </div>
+    <button id="startBtn">Start the Night</button>
+    <div id="netHint">Tip: watch the beat bar — the flash marks the perfect moment.</div>
+  </div>
+
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">Play Again</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+<div id="msg"></div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var scoreEl = document.getElementById('score');
+  var caughtEl = document.getElementById('caught');
+  var comboEl = document.getElementById('combo');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var beatFill = document.getElementById('beatfill');
+  var msgEl = document.getElementById('msg');
+
+  var BPM = 112;
+  var beatMs = 60000 / BPM;
+  var state = 'title'; // title, playing, over
+  var score = 0, caught = 0, combo = 0, bestCombo = 0, lives = 3;
+  var flies = [], sparks = [], stars = [], grasses = [];
+  var net = { x: W / 2, y: H / 2, r: 46 };
+  var startTime = 0, lastSpawn = 0, rafId = 0;
+  var audioCtx = null, beatTimer = null, lastBeatAt = 0, beatPulse = 0;
+  var flashMsgUntil = 0, flashText = '';
+
+  for (var i = 0; i < 70; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H * 0.55, r: Math.random() * 1.8 + 0.4, tw: Math.random() * Math.PI * 2 });
+  }
+  for (var g = 0; g < 26; g++) {
+    grasses.push({ x: Math.random() * W, h: 22 + Math.random() * 42, sway: Math.random() * Math.PI * 2 });
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = when || audioCtx.currentTime;
+    var o = audioCtx.createOscillator();
+    var gn = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+    gn.gain.setValueAtTime(vol || 0.12, t);
+    gn.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(gn); gn.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function beatTick() {
+    lastBeatAt = performance.now();
+    beatPulse = 1;
+    tone(220, 0.12, 'sine', 0.16);
+    tone(440, 0.08, 'triangle', 0.06, audioCtx ? audioCtx.currentTime + 0.02 : 0);
+  }
+  function catchSound(perfect) {
+    tone(perfect ? 880 : 660, 0.18, 'sine', 0.16);
+    tone(perfect ? 1320 : 990, 0.22, 'triangle', 0.10, audioCtx ? audioCtx.currentTime + 0.05 : 0);
+  }
+  function missSound() { tone(160, 0.3, 'sawtooth', 0.10); }
+  function winSound() { [523, 659, 784, 1047].forEach(function (f, i) { tone(f, 0.3, 'triangle', 0.14, audioCtx ? audioCtx.currentTime + i * 0.14 : 0); }); }
+
+  function beatPhase(now) {
+    if (!startTime) return 0;
+    var elapsed = now - startTime;
+    var phase = (elapsed % beatMs) / beatMs; // 0 = exactly on beat
+    return Math.min(phase, 1 - phase); // distance to nearest beat, 0..0.5
+  }
+  function glowFor(fly, now) {
+    var d = beatPhase(now);
+    var base = 0.45 + 0.55 * Math.max(0, 1 - d / 0.22);
+    return Math.min(1, base + fly.twinkle);
+  }
+
+  function spawnFly() {
+    var colors = ['#ffe98a', '#aef7c0', '#7fe7ff', '#ffb3e6'];
+    var side = Math.random() < 0.5 ? -20 : W + 20;
+    flies.push({
+      x: side, y: 90 + Math.random() * 300,
+      vx: (side < 0 ? 1 : -1) * (0.5 + Math.random() * 0.9),
+      vy: (Math.random() - 0.5) * 0.5,
+      r: 15 + Math.random() * 8,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      twinkle: Math.random() * 0.25,
+      age: 0, life: 9000 + Math.random() * 5000,
+      wob: Math.random() * Math.PI * 2
+    });
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    caughtEl.textContent = caught;
+    comboEl.textContent = 'x' + combo;
+    livesEl.textContent = lives > 0 ? '● '.repeat(lives).trim() : '○ dim';
+    statusEl.textContent = state === 'playing' ? (combo >= 5 ? 'ON FIRE!' : 'Catching…') : (state === 'over' ? 'Finished' : 'Ready');
+  }
+  function flash(text) { flashText = text; flashMsgUntil = performance.now() + 1300; msgEl.textContent = text; }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 16; i++) {
+      var a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 3;
+      sparks.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 500, max: 500, color: color });
+    }
+  }
+
+  function tryCatch(px, py) {
+    if (state !== 'playing') return;
+    var now = performance.now();
+    var best = -1, bestD = 999;
+    for (var i = 0; i < flies.length; i++) {
+      var f = flies[i];
+      var d = Math.hypot(f.x - px, f.y - py);
+      if (d < f.r + 34 && d < bestD) { bestD = d; best = i; }
+    }
+    if (best < 0) {
+      combo = 0; updateHUD(); flash('Missed the air — keep the beat!');
+      return;
+    }
+    var f2 = flies.splice(best, 1)[0];
+    var dist = beatPhase(now); // 0 = perfect
+    var pts, label, perfect = false;
+    if (dist < 0.07) { pts = 100; label = 'PERFECT!'; perfect = true; }
+    else if (dist < 0.16) { pts = 50; label = 'Good!'; }
+    else { pts = 20; label = 'Caught (off-beat)'; }
+    combo++; bestCombo = Math.max(bestCombo, combo);
+    var mult = 1 + Math.floor(combo / 5) * 0.5;
+    var gained = Math.round(pts * mult);
+    score += gained; caught++;
+    burst(f2.x, f2.y, f2.color);
+    catchSound(perfect);
+    flash(label + ' +' + gained + (mult > 1 ? ' (combo bonus!)' : ''));
+    updateHUD();
+    if (caught >= 20) endGame(true);
+  }
+
+  function endGame(won) {
+    state = 'over';
+    if (beatTimer) { clearInterval(beatTimer); beatTimer = null; }
+    if (won) winSound(); else missSound();
+    document.getElementById('endTitle').textContent = won ? 'You Win! Lantern Full!' : 'Game Over — Lantern Dimmed';
+    document.getElementById('endText').textContent = won
+      ? 'The garden glows! You trapped 20 fireflies in perfect rhythm.'
+      : 'Your lantern faded before the night was done. Try again and follow the beat!';
+    document.getElementById('endStats').textContent = 'Final score: ' + score + ' · Fireflies caught: ' + caught + ' · Best combo: x' + bestCombo;
+    endScreen.classList.remove('hidden');
+    updateHUD();
+  }
+
+  function resetGame() {
+    score = 0; caught = 0; combo = 0; bestCombo = 0; lives = 3;
+    flies = []; sparks = [];
+    net.x = W / 2; net.y = H / 2;
+    startTime = performance.now(); lastSpawn = startTime; lastBeatAt = startTime;
+    updateHUD(); msgEl.textContent = '';
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    beatTick();
+    if (beatTimer) clearInterval(beatTimer);
+    beatTimer = setInterval(beatTick, beatMs);
+    flash('On the beat… GO!');
+  }
+
+  function draw(now) {
+    ctx.clearRect(0, 0, W, H);
+    // sky + moon
+    ctx.fillStyle = '#0a2438'; ctx.fillRect(0, 0, W, H);
+    ctx.beginPath(); ctx.arc(700, 70, 34, 0, Math.PI * 2); ctx.fillStyle = '#fff3b0'; ctx.fill();
+    ctx.beginPath(); ctx.arc(688, 60, 28, 0, Math.PI * 2); ctx.fillStyle = '#0a2438'; ctx.fill();
+    stars.forEach(function (s) {
+      var a = 0.4 + 0.6 * Math.abs(Math.sin(now / 900 + s.tw));
+      ctx.globalAlpha = a; ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    // grass
+    ctx.fillStyle = '#0b2a1a'; ctx.fillRect(0, H - 70, W, 70);
+    grasses.forEach(function (g) {
+      ctx.strokeStyle = '#2f7a4d'; ctx.lineWidth = 3; ctx.beginPath();
+      ctx.moveTo(g.x, H); ctx.quadraticCurveTo(g.x + Math.sin(now / 700 + g.sway) * 8, H - g.h / 2, g.x + Math.sin(now / 700 + g.sway) * 12, H - g.h);
+      ctx.stroke();
+    });
+    // lantern at bottom centre
+    var lanternGlow = state === 'playing' ? (0.35 + lives * 0.22) : 0.4;
+    var lg = ctx.createRadialGradient(W / 2, H - 62, 6, W / 2, H - 62, 130);
+    lg.addColorStop(0, 'rgba(255,215,106,' + lanternGlow + ')');
+    lg.addColorStop(1, 'rgba(255,215,106,0)');
+    ctx.fillStyle = lg; ctx.fillRect(W / 2 - 150, H - 200, 300, 200);
+    ctx.fillStyle = '#3a2a08'; ctx.fillRect(W / 2 - 26, H - 92, 52, 52);
+    ctx.strokeStyle = '#ffd76a'; ctx.lineWidth = 3; ctx.strokeRect(W / 2 - 26, H - 92, 52, 52);
+    ctx.fillStyle = lives > 0 ? '#ffe98a' : '#555';
+    for (var li = 0; li < Math.min(3, lives); li++) {
+      ctx.beginPath(); ctx.arc(W / 2 - 14 + li * 14, H - 66, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = '#ddd'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('YOUR LANTERN', W / 2, H - 100);
+
+    // fireflies
+    flies.forEach(function (f) {
+      var glow = glowFor(f, now);
+      var rad = f.r + glow * 22;
+      var g2 = ctx.createRadialGradient(f.x, f.y, 2, f.x, f.y, rad);
+      g2.addColorStop(0, f.color); g2.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = 0.25 + glow * 0.65; ctx.fillStyle = g2;
+      ctx.beginPath(); ctx.arc(f.x, f.y, rad, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1; ctx.fillStyle = f.color;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.55, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(f.x + 3, f.y - 2, 2, 0, Math.PI * 2); ctx.fill();
+      if (glow > 0.82) {
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(f.x, f.y, f.r + 10, 0, Math.PI * 2); ctx.stroke();
+      }
+    });
+    // sparks
+    sparks.forEach(function (s) {
+      ctx.globalAlpha = Math.max(0, s.life / s.max); ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+    // net cursor
+    if (state === 'playing') {
+      ctx.strokeStyle = '#7fe7ff'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(net.x, net.y, net.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(net.x + net.r, net.y); ctx.lineTo(net.x + net.r + 22, net.y + 22); ctx.stroke();
+      ctx.fillStyle = 'rgba(127,231,255,.18)';
+      ctx.beginPath(); ctx.arc(net.x, net.y, net.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial';
+      ctx.fillText('NET', net.x, net.y - net.r - 6);
+    }
+    // beat flash overlay
+    if (beatPulse > 0.05) {
+      ctx.fillStyle = 'rgba(255,215,106,' + (beatPulse * 0.10) + ')';
+      ctx.fillRect(0, 0, W, 8);
+      ctx.fillRect(0, H - 8, W, 8);
+    }
+    // message
+    if (now < flashMsgUntil) {
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 26px Arial'; ctx.textAlign = 'center';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 8;
+      ctx.fillText(flashText, W / 2, 66); ctx.shadowBlur = 0;
+    }
+  }
+
+  function loop(now) {
+    rafId = requestAnimationFrame(loop);
+    if (beatPulse > 0) beatPulse = Math.max(0, beatPulse - 0.04);
+    if (state === 'playing') {
+      if (now - lastSpawn > 1400 && flies.length < 6) { spawnFly(); lastSpawn = now; }
+      for (var i = flies.length - 1; i >= 0; i--) {
+        var f = flies[i];
+        f.age += 16; f.wob += 0.05;
+        f.x += f.vx + Math.sin(f.wob) * 0.4;
+        f.y += f.vy + Math.cos(f.wob * 0.8) * 0.35;
+        if (f.y < 60) f.y = 60; if (f.y > H - 110) f.y = H - 110;
+        if (f.age > f.life || f.x < -40 || f.x > W + 40) {
+          flies.splice(i, 1);
+          lives--; combo = 0; missSound();
+          flash('A firefly escaped! Lantern dims…');
+          updateHUD();
+          if (lives <= 0) { endGame(false); }
+        }
+      }
+      for (var j = sparks.length - 1; j >= 0; j--) {
+        var s = sparks[j]; s.x += s.vx; s.y += s.vy; s.life -= 16;
+        if (s.life <= 0) sparks.splice(j, 1);
+      }
+      // beat bar: fills toward next beat, flashes at beat
+      var ph = ((now - startTime) % beatMs) / beatMs;
+      beatFill.style.width = Math.round(ph * 100) + '%';
+      beatFill.style.background = ph < 0.12 || ph > 0.88 ? '#ffffff' : 'linear-gradient(90deg,#ffd76a,#7fe7ff)';
+    }
+    draw(now);
+  }
+
+  function canvasPos(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined ? evt.clientX : (evt.touches && evt.touches[0] ? evt.touches[0].clientX : 0));
+    var cy = (evt.clientY !== undefined ? evt.clientY : (evt.touches && evt.touches[0] ? evt.touches[0].clientY : 0));
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+
+  canvas.addEventListener('mousedown', function (e) {
+    ensureAudio();
+    var p = canvasPos(e); net.x = p.x; net.y = p.y; tryCatch(p.x, p.y);
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault(); ensureAudio();
+    var p = canvasPos(e); net.x = p.x; net.y = p.y; tryCatch(p.x, p.y);
+  }, { passive: false });
+  canvas.addEventListener('mousemove', function (e) {
+    var p = canvasPos(e); net.x = p.x; net.y = p.y;
+  });
+  document.addEventListener('keydown', function (e) {
+    var step = 28;
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { net.x = Math.max(20, net.x - step); e.preventDefault(); }
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { net.x = Math.min(W - 20, net.x + step); e.preventDefault(); }
+    else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { net.y = Math.max(20, net.y - step); e.preventDefault(); }
+    else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { net.y = Math.min(H - 20, net.y + step); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault(); ensureAudio();
+      if (state === 'title') startGame();
+      else if (state === 'playing') tryCatch(net.x, net.y);
+      else if (state === 'over') { endScreen.classList.add('hidden'); startGame(); }
+    }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', function () { endScreen.classList.add('hidden'); startGame(); });
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+    state = 'title'; statusEl.textContent = 'Ready';
+  });
+  updateHUD();
+  rafId = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

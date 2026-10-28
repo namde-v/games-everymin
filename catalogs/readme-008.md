@@ -34,3 +34,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0728 | Railway Switch Yard | Strategy / Train Switching | Mouse/touch tap switches, Arrow Keys select, Space toggle | [Play](./../games/game-0728.html) |
 | 0729 | Rain Tap Symphony | Rhythm / Rain Drop Catch Beat | Keys tap pads, mouse/touch tap drops | [Play](./../games/game-0729.html) |
 | 0730 | Glassblower Breath Control | Precision / Breath Pressure Crafting | Space hold/release, mouse/touch hold | [Play](./../games/game-0730.html) |
+| 0731 | Canyon River Raft Rush | Arcade / Whitewater Raft Dodge | Arrow Keys/A-D steer, mouse move, touch drag | [Play](./../games/game-0731.html) |
+| 0732 | Clockwork Beetle Maze | Puzzle / Gear Path Logic | Mouse/touch tap tile to rotate, Arrow Keys select, Space rotate | [Play](./../games/game-0732.html) |
+| 0733 | Harbor Lighthouse Keeper | Strategy / Ship Guidance | Arrow Keys aim beam, Space toggle beam, mouse/touch aim | [Play](./../games/game-0733.html) |
+| 0734 | Drumline Parade March | Rhythm / Marching Beat | Keys tap pads, mouse click pad, touch tap pad | [Play](./../games/game-0734.html) |
+| 0735 | Ice Sculptor Chisel Master | Precision / Carving Timing | Space/Enter strike, mouse click, touch tap | [Play](./../games/game-0735.html) |
+| 0736 | Storm Cloud Sailor | Arcade / Storm Sailing | Arrow Keys/WASD sail, Space reef, mouse/touch drag | [Play](./../games/game-0736.html) |
+| 0737 | Tidepool Shell Sorter | Puzzle / Shell Sorting | Arrow Keys/A-D select basket, Space confirm, mouse/touch tap | [Play](./../games/game-0737.html) |
+| 0738 | Arctic Research Station Manager | Strategy / Station Management | Mouse/touch assign crew, Space pause, R restart | [Play](./../games/game-0738.html) |
+| 0739 | Firefly Lantern Beat | Rhythm / Firefly Catch Beat | Arrow Keys/WASD move, Space catch, mouse/touch tap | [Play](./../games/game-0739.html) |
+| 0740 | Tightrope Acrobatic Balance | Precision / Balance | Arrow Keys lean, mouse/touch on-screen buttons | [Play](./../games/game-0740.html) |

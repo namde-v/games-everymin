@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Harbor Lighthouse Keeper</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #06121f; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin: 6px 0 2px; text-align: center; }
+  p.tag { color: #9fd8ff; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: min(860px, 100%); margin-bottom: 8px; }
+  #hud div { background: #102a44; border: 1px solid #2c5a7d; border-radius: 8px; padding: 7px 11px; font-size: 14px; font-weight: bold; }
+  #hud span { color: #ffe066; }
+  #wrap { position: relative; width: min(860px, 100%); }
+  canvas { width: 100%; height: auto; display: block; background: #0a3550; border: 3px solid #2c5a7d; border-radius: 12px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(2, 12, 24, 0.86); border-radius: 12px; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffe066; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 15px; color: #d6ecff; }
+  .overlay .small { font-size: 13px; color: #9fd8ff; }
+  button { background: #ffcf3d; color: #12202e; border: none; border-radius: 10px; padding: 13px 24px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 6px; }
+  button:hover { background: #ffe066; }
+  button.secondary { background: #2c5a7d; color: white; }
+  #controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; width: min(860px, 100%); }
+  #controls button { padding: 9px 14px; font-size: 14px; margin: 0; }
+  #msg { min-height: 22px; margin-top: 8px; color: #ffe066; font-weight: bold; text-align: center; }
+  #legend { font-size: 13px; color: #9fd8ff; text-align: center; margin-top: 4px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>⚓ Harbor Lighthouse Keeper</h1>
+<p class="tag">Strategy / Ship Guidance — Guide every ship home through reef and storm.</p>
+
+<div id="hud">
+  <div>Score: <span id="score">0</span></div>
+  <div>Saved: <span id="saved">0</span> / 12</div>
+  <div>Lives: <span id="lives">❤❤❤</span></div>
+  <div>Wave: <span id="wave">1</span></div>
+  <div>Beam Fuel: <span id="fuel">100%</span></div>
+  <div>Status: <span id="status">Ready</span></div>
+  <div>Buoys: <span id="buoys">4</span></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="560"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Harbor Lighthouse Keeper</h2>
+    <p><b>How to Play:</b> Ships arrive from the open sea on the left and must reach the harbor mouth on the right. Your lighthouse beam is their guide. A ship inside the golden beam steers safely toward harbor; a ship left in darkness drifts with the current and can strike a reef.</p>
+    <p><b>Controls:</b> Move the mouse or drag a finger to aim the beam. Click or tap the sea to drop a signal buoy (you have 4) — ships near a buoy also steer safely. Arrow keys aim the beam, Up / Down change beam range, Space toggles the beam, B drops a buoy at the beam tip. Beam fuel drains while the beam is on and slowly refills when it is off.</p>
+    <p><b>Goal:</b> Save 12 ships to win. Lose 3 ships to reefs or storms and the harbor closes. Watch for storms: they shrink your beam and push ships off course!</p>
+    <button id="startBtn">▶ Start Keeping the Light</button>
+    <p class="small">Keyboard, mouse and touch all work. Sound starts only after you press Start.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ Play Again — Instant Restart</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+
+<div id="msg">Aim the beam at the nearest ship to guide it home.</div>
+
+<div id="controls">
+  <button id="beamBtn">💡 Beam: ON</button>
+  <button id="buoyBtn">🛟 Drop Buoy (4 left)</button>
+  <button id="rangeBtn">Beam Range: Medium</button>
+  <button id="pauseBtn">⏸ Pause</button>
+</div>
+<p id="legend">Golden wedge = lighthouse beam &nbsp;•&nbsp; Red rocks = reefs &nbsp;•&nbsp; Green circles = signal buoys &nbsp;•&nbsp; Ships glow gold when guided, grey when drifting.</p>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var state = 'title'; // title, playing, paused, won, lost
+  var score = 0, saved = 0, lost = 0, wave = 1;
+  var fuel = 100, beamOn = true, beamAngle = -0.25, beamRange = 330, rangeLevel = 1;
+  var buoysLeft = 4, buoys = [], ships = [], particles = [];
+  var spawnTimer = 0, stormTimer = 18, stormTime = 0, stormActive = false;
+  var mouseX = 650, mouseY = 200, lastBuoy = 0;
+  var lighthouse = { x: 700, y: 260 };
+  var harbor = { x: 850, y: 260, r: 52 };
+  var reefs = [
+    { x: 210, y: 140, r: 34 }, { x: 360, y: 430, r: 40 }, { x: 480, y: 150, r: 30 },
+    { x: 560, y: 420, r: 36 }, { x: 300, y: 280, r: 26 }, { x: 620, y: 130, r: 28 }
+  ];
+  var rangeNames = ['Short', 'Medium', 'Long'];
+  var rangeVals = [240, 330, 440];
+
+  // ---------- Audio (procedural, only after user gesture) ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfx(kind) {
+    if (!audioCtx) return;
+    if (kind === 'save') { tone(660, 0.18, 'sine', 0.14); setTimeout(function(){ tone(880, 0.22, 'sine', 0.14); }, 120); }
+    if (kind === 'crash') { tone(140, 0.4, 'sawtooth', 0.16); setTimeout(function(){ tone(90, 0.4, 'square', 0.12); }, 100); }
+    if (kind === 'click') { tone(520, 0.08, 'triangle', 0.1); }
+    if (kind === 'win') { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, 'sine', 0.14); }, i * 150); }); }
+    if (kind === 'lose') { [392, 330, 262, 196].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, 'triangle', 0.13); }, i * 170); }); }
+    if (kind === 'storm') { tone(220, 0.5, 'sawtooth', 0.1); }
+  }
+
+  // ---------- Helpers ----------
+  function $(id) { return document.getElementById(id); }
+  function setMsg(t) { $('msg').textContent = t; }
+  function updateHUD() {
+    $('score').textContent = score;
+    $('saved').textContent = saved;
+    $('lives').textContent = '❤'.repeat(Math.max(0, 3 - lost)) + '♡'.repeat(Math.min(3, lost));
+    $('wave').textContent = wave;
+    $('fuel').textContent = Math.round(fuel) + '%';
+    $('status').textContent = stormActive ? '⛈ STORM!' : (beamOn ? 'Beam ON' : 'Beam OFF');
+    $('buoys').textContent = buoysLeft;
+    $('beamBtn').textContent = beamOn ? '💡 Beam: ON' : '💡 Beam: OFF';
+    $('buoyBtn').textContent = '🛟 Drop Buoy (' + buoysLeft + ' left)';
+    $('rangeBtn').textContent = 'Beam Range: ' + rangeNames[rangeLevel];
+  }
+  function angleDiff(a, b) {
+    var d = a - b;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+  function dist(x1, y1, x2, y2) { return Math.hypot(x2 - x1, y2 - y1); }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < (n || 14); i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 30 + Math.random() * 20, color: color });
+    }
+  }
+
+  // ---------- Game setup ----------
+  function spawnShip() {
+    var types = [
+      { name: 'Fishing Boat', speed: 1.15, points: 100, color: '#7dd3fc' },
+      { name: 'Cargo Freighter', speed: 0.8, points: 150, color: '#fbbf24' },
+      { name: 'Fast Ferry', speed: 1.5, points: 200, color: '#a7f3d0' }
+    ];
+    var t = types[Math.floor(Math.random() * types.length)];
+    ships.push({
+      x: -30, y: 60 + Math.random() * (H - 120),
+      vx: 0, vy: 0, speed: t.speed * (1 + (wave - 1) * 0.08),
+      points: t.points, color: t.color, name: t.name,
+      drift: (Math.random() - 0.5) * 0.7, guided: false, wobble: Math.random() * 10
+    });
+  }
+  function resetGame() {
+    score = 0; saved = 0; lost = 0; wave = 1;
+    fuel = 100; beamOn = true; beamAngle = -0.25; beamRange = 330; rangeLevel = 1;
+    buoysLeft = 4; buoys = []; ships = []; particles = [];
+    spawnTimer = 0; stormTimer = 18; stormTime = 0; stormActive = false;
+    $('endScreen').classList.add('hidden');
+    updateHUD(); setMsg('Aim the beam at the nearest ship to guide it home.');
+  }
+  function startGame() {
+    ensureAudio(); resetGame(); state = 'playing';
+    $('titleScreen').classList.add('hidden');
+    sfx('click'); setMsg('Ships inbound! Keep them in the beam.');
+  }
+  function endGame(won) {
+    state = won ? 'won' : 'lost';
+    $('endTitle').textContent = won ? '🏆 HARBOR SAVED — You Win!' : '💥 HARBOR CLOSED — Game Over';
+    $('endText').textContent = won
+      ? 'You guided 12 ships safely past the reefs and through the storms. The harbor salutes its keeper!'
+      : 'Three ships were lost to the reefs. The harbor must close until the seas calm.';
+    $('endScore').textContent = 'Final Score: ' + score + '  •  Ships Saved: ' + saved + '  •  Wave reached: ' + wave;
+    $('endScreen').classList.remove('hidden');
+    sfx(won ? 'win' : 'lose');
+    updateHUD();
+  }
+
+  // ---------- Input ----------
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  function aimAt(p) {
+    mouseX = p.x; mouseY = p.y;
+    beamAngle = Math.atan2(p.y - lighthouse.y, p.x - lighthouse.x);
+  }
+  function dropBuoyAt(x, y) {
+    if (state !== 'playing') return;
+    if (buoysLeft <= 0) { setMsg('No buoys left! Rely on the beam.'); return; }
+    if (x > 660 && y > 120 && y < 400) { setMsg('Too close to the harbor — place buoys in open water.'); return; }
+    buoys.push({ x: x, y: y, r: 62, life: 900 });
+    buoysLeft--; sfx('click'); burst(x, y, '#4ade80', 10);
+    setMsg('Signal buoy placed! Ships near it will steer toward harbor.');
+    updateHUD();
+  }
+  canvas.addEventListener('mousemove', function(e) { aimAt(canvasPos(e)); });
+  canvas.addEventListener('mousedown', function(e) { ensureAudio(); aimAt(canvasPos(e)); var p = canvasPos(e); dropBuoyAt(p.x, p.y); });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); ensureAudio(); var p = canvasPos(e); aimAt(p); dropBuoyAt(p.x, p.y); }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); aimAt(canvasPos(e)); }, { passive: false });
+  document.addEventListener('keydown', function(e) {
+    if (state !== 'playing' && !(e.key === 'Enter' && state === 'title')) return;
+    if (e.key === 'ArrowLeft') beamAngle -= 0.12;
+    if (e.key === 'ArrowRight') beamAngle += 0.12;
+    if (e.key === 'ArrowUp') { rangeLevel = Math.min(2, rangeLevel + 1); beamRange = rangeVals[rangeLevel]; updateHUD(); }
+    if (e.key === 'ArrowDown') { rangeLevel = Math.max(0, rangeLevel - 1); beamRange = rangeVals[rangeLevel]; updateHUD(); }
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); beamOn = !beamOn; sfx('click'); updateHUD(); }
+    if (e.key === 'b' || e.key === 'B') {
+      var bx = lighthouse.x + Math.cos(beamAngle) * (beamRange * 0.6);
+      var by = lighthouse.y + Math.sin(beamAngle) * (beamRange * 0.6);
+      dropBuoyAt(bx, by);
+    }
+    if (e.key === 'Enter' && state === 'title') startGame();
+    if (e.key === 'p' || e.key === 'P') togglePause();
+  });
+  $('startBtn').addEventListener('click', startGame);
+  $('restartBtn').addEventListener('click', function() { ensureAudio(); startGame(); });
+  $('menuBtn').addEventListener('click', function() { state = 'title'; $('endScreen').classList.add('hidden'); $('titleScreen').classList.remove('hidden'); });
+  $('beamBtn').addEventListener('click', function() { ensureAudio(); beamOn = !beamOn; sfx('click'); updateHUD(); });
+  $('buoyBtn').addEventListener('click', function() { ensureAudio(); var bx = lighthouse.x + Math.cos(beamAngle) * (beamRange * 0.6); var by = lighthouse.y + Math.sin(beamAngle) * (beamRange * 0.6); dropBuoyAt(bx, by); });
+  $('rangeBtn').addEventListener('click', function() { ensureAudio(); rangeLevel = (rangeLevel + 1) % 3; beamRange = rangeVals[rangeLevel]; sfx('click'); updateHUD(); });
+  function togglePause() {
+    if (state === 'playing') { state = 'paused'; $('pauseBtn').textContent = '▶ Resume'; setMsg('Paused. Press Pause again to resume.'); }
+    else if (state === 'paused') { state = 'playing'; $('pauseBtn').textContent = '⏸ Pause'; setMsg('Back on watch!'); }
+  }
+  $('pauseBtn').addEventListener('click', function() { ensureAudio(); togglePause(); });
+
+  // ---------- Update ----------
+  function update() {
+    if (state !== 'playing') return;
+    // Fuel
+    if (beamOn && fuel > 0) { fuel = Math.max(0, fuel - 0.045 - rangeLevel * 0.02); if (fuel <= 0) { beamOn = false; setMsg('Beam fuel empty! Beam off — let it refill.'); } }
+    else if (!beamOn) { fuel = Math.min(100, fuel + 0.12); }
+    // Storm cycle
+    if (!stormActive) { stormTimer -= 1 / 60; if (stormTimer <= 0) { stormActive = true; stormTime = 8; sfx('storm'); setMsg('⛈ STORM! Beam range shrinks and waves push ships off course!'); } }
+    else { stormTime -= 1 / 60; if (stormTime <= 0) { stormActive = false; stormTimer = 16 + Math.random() * 10; setMsg('Storm passed. Seas calming.'); } }
+    var effRange = stormActive ? beamRange * 0.62 : beamRange;
+    // Spawning
+    spawnTimer -= 1 / 60;
+    if (spawnTimer <= 0 && ships.length < 4) { spawnShip(); spawnTimer = 2.2 + Math.random() * 2.0; }
+    // Buoy decay
+    for (var i = buoys.length - 1; i >= 0; i--) { buoys[i].life--; if (buoys[i].life <= 0) buoys.splice(i, 1); }
+    // Ships
+    for (var s = ships.length - 1; s >= 0; s--) {
+      var sh = ships[s];
+      var dLight = dist(sh.x, sh.y, lighthouse.x, lighthouse.y);
+      var angTo = Math.atan2(sh.y - lighthouse.y, sh.x - lighthouse.x);
+      var inBeam = beamOn && fuel > 0 && dLight <= effRange && Math.abs(angleDiff(angTo, beamAngle)) < 0.42;
+      var nearBuoy = false;
+      for (var b = 0; b < buoys.length; b++) { if (dist(sh.x, sh.y, buoys[b].x, buoys[b].y) < buoys[b].r) { nearBuoy = true; break; } }
+      sh.guided = inBeam || nearBuoy;
+      var tx, ty;
+      if (sh.guided) { tx = harbor.x - 40; ty = harbor.y; }
+      else { tx = sh.x + 60; ty = sh.y + sh.drift * 40; }
+      if (stormActive && !sh.guided) { ty += 55; }
+      var dx = tx - sh.x, dy = ty - sh.y, dl = Math.hypot(dx, dy) || 1;
+      var sp = sh.speed * (sh.guided ? 1.35 : 0.85);
+      sh.x += (dx / dl) * sp; sh.y += (dy / dl) * sp;
+      sh.wobble += 0.05;
+      // Reef collision
+      var wrecked = false;
+      for (var r = 0; r < reefs.length; r++) {
+        if (dist(sh.x, sh.y, reefs[r].x, reefs[r].y) < reefs[r].r + 10) { wrecked = true; break; }
+      }
+      if (wrecked || sh.y < -20 || sh.y > H + 20) {
+        ships.splice(s, 1); lost++; burst(sh.x, sh.y, '#ef4444', 22); sfx('crash');
+        setMsg('💥 A ' + sh.name + ' struck a reef! Lives left: ' + (3 - lost));
+        if (lost >= 3) { updateHUD(); endGame(false); return; }
+      } else if (dist(sh.x, sh.y, harbor.x, harbor.y) < harbor.r + 8) {
+        ships.splice(s, 1); saved++; score += sh.points + (stormActive ? 50 : 0);
+        burst(harbor.x - 30, harbor.y, '#fde68a', 18); sfx('save');
+        setMsg('✅ ' + sh.name + ' safely in harbor! +' + sh.points + ' points.');
+        if (saved % 4 === 0) { wave++; setMsg('Wave ' + wave + '! Ships arrive faster.'); }
+        if (saved >= 12) { updateHUD(); endGame(true); return; }
+      }
+    }
+    // Particles
+    for (var p = particles.length - 1; p >= 0; p--) {
+      particles[p].x += particles[p].vx; particles[p].y += particles[p].vy; particles[p].life--;
+      if (particles[p].life <= 0) particles.splice(p, 1);
+    }
+    updateHUD();
+  }
+
+  // ---------- Draw ----------
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Sea
+    var grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, '#0a3550'); grad.addColorStop(0.7, '#0e4a6b'); grad.addColorStop(1, '#155e75');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // Waves
+    ctx.strokeStyle = 'rgba(125,211,252,0.25)'; ctx.lineWidth = 1.5;
+    for (var wy = 30; wy < H; wy += 70) {
+      ctx.beginPath();
+      for (var wx = 0; wx <= W; wx += 20) { var yy = wy + Math.sin(wx / 40 + Date.now() / 900 + wy) * 5; if (wx === 0) ctx.moveTo(wx, yy); else ctx.lineTo(wx, yy); }
+      ctx.stroke();
+    }
+    // Harbor land
+    ctx.fillStyle = '#3f6212'; ctx.beginPath(); ctx.moveTo(800, 0); ctx.lineTo(W, 0); ctx.lineTo(W, H); ctx.lineTo(800, H); ctx.lineTo(800, 340); ctx.arc(harbor.x, harbor.y, harbor.r, Math.PI / 2, Math.PI * 1.5, false); ctx.lineTo(800, 180); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#facc15'; ctx.font = 'bold 15px Arial'; ctx.fillText('HARBOR', 782, 30);
+    ctx.fillStyle = '#166534'; ctx.fillRect(800, 180, 60, 8); ctx.fillRect(800, 332, 60, 8);
+    // Reefs
+    reefs.forEach(function(r) {
+      ctx.fillStyle = '#7f1d1d'; ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#991b1b'; ctx.beginPath(); ctx.arc(r.x - 8, r.y - 6, r.r * 0.55, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'white'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center'; ctx.fillText('⚠', r.x, r.y + 6);
+    });
+    ctx.textAlign = 'left';
+    // Buoys
+    buoys.forEach(function(b) {
+      ctx.strokeStyle = 'rgba(74,222,128,0.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(b.x, b.y, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'white'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('◉', b.x, b.y + 4); ctx.textAlign = 'left';
+    });
+    // Beam
+    if (beamOn && fuel > 0 && state !== 'title') {
+      var effRange = stormActive ? beamRange * 0.62 : beamRange;
+      ctx.save(); ctx.translate(lighthouse.x, lighthouse.y); ctx.rotate(beamAngle);
+      var bg = ctx.createLinearGradient(0, 0, -effRange, 0);
+      bg.addColorStop(0, 'rgba(253,224,71,0.55)'); bg.addColorStop(1, 'rgba(253,224,71,0)');
+      ctx.fillStyle = bg; ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.arc(0, 0, effRange, -0.42, 0.42); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    // Lighthouse
+    ctx.fillStyle = '#e2e8f0'; ctx.fillRect(lighthouse.x - 14, lighthouse.y - 55, 28, 55);
+    ctx.fillStyle = '#ef4444'; ctx.fillRect(lighthouse.x - 14, lighthouse.y - 42, 28, 12); ctx.fillRect(lighthouse.x - 14, lighthouse.y - 18, 28, 12);
+    ctx.fillStyle = '#fde047'; ctx.beginPath(); ctx.arc(lighthouse.x, lighthouse.y - 62, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#334155'; ctx.fillRect(lighthouse.x - 20, lighthouse.y, 40, 10);
+    // Ships
+    ships.forEach(function(sh) {
+      ctx.save(); ctx.translate(sh.x, sh.y);
+      ctx.fillStyle = sh.guided ? '#fde047' : '#94a3b8';
+      ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = sh.color; ctx.beginPath(); ctx.moveTo(-18, 0); ctx.lineTo(6, -11); ctx.lineTo(20, 0); ctx.lineTo(6, 11); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(-4, -6, 10, 12);
+      ctx.restore();
+      ctx.fillStyle = 'white'; ctx.font = '11px Arial'; ctx.textAlign = 'center'; ctx.fillText(sh.name, sh.x, sh.y - 26); ctx.textAlign = 'left';
+    });
+    // Particles
+    particles.forEach(function(pt) {
+      ctx.globalAlpha = Math.max(0, pt.life / 50); ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    });
+    // Storm overlay
+    if (stormActive) {
+      ctx.fillStyle = 'rgba(15,23,42,0.28)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'white'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('⛈ STORM — beam range reduced!', W / 2, 32); ctx.textAlign = 'left';
+    }
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'white'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center'; ctx.fillText('PAUSED', W / 2, H / 2); ctx.textAlign = 'left';
+    }
+  }
+
+  function loop() { update(); draw(); requestAnimationFrame(loop); }
+  updateHUD(); loop();
+})();
+</script>
+</body>
+</html>
