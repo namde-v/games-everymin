@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Volcano Lava Runner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a0a08; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+  h1 { font-size: 28px; margin: 10px 0 4px; color: #ff6b1a; text-shadow: 0 0 14px #ff3300; letter-spacing: 1px; }
+  p.sub { color: #ffb27a; font-size: 13px; margin-bottom: 10px; }
+  #wrap { position: relative; width: 900px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: 480px; background: #2b0f0a; border: 3px solid #ff4400; border-radius: 12px; touch-action: none; }
+  #hud { display: flex; justify-content: space-between; padding: 8px 12px; background: #3d1408; border: 2px solid #ff4400; border-radius: 8px; margin-bottom: 8px; font-weight: bold; font-size: 16px; }
+  #hud span { color: #ffd166; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,2,0,0.82); border-radius: 12px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 38px; color: #ff6b1a; margin-bottom: 10px; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #ffe0c2; margin: 6px 0; }
+  .overlay .keys { background: #2b1408; border: 1px solid #ff6b1a; border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 14px; }
+  button { cursor: pointer; background: #ff4400; color: #fff; border: none; border-radius: 10px; padding: 14px 28px; font-size: 20px; font-weight: bold; margin-top: 14px; box-shadow: 0 4px 0 #a32c00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #444; box-shadow: 0 4px 0 #222; font-size: 16px; padding: 10px 20px; }
+  #hint { text-align: center; color: #ccc; font-size: 13px; margin-top: 8px; }
+  .lava-text { color: #ff3300; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>🌋 VOLCANO LAVA RUNNER</h1>
+<p class="sub">Outrun the eruption — jump the lava, dodge the rocks, reach the safe peak!</p>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Distance: <span id="dist">0</span>m / 3000m</div>
+    <div>Lives: <span id="lives">❤️❤️❤️</span></div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="900" height="480"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🌋 VOLCANO LAVA RUNNER</h2>
+    <p>You are sprinting down a volcano slope as it erupts! Lava pools block the path and burning rocks rain from the sky.</p>
+    <div class="keys">
+      <strong>How to Play:</strong><br>
+      ⬆️ / SPACE / TAP — Jump over lava gaps &amp; low rocks<br>
+      ⬇️ / S / SWIPE DOWN — Slide under high falling rocks<br>
+      ← → / A D — Move left / right slightly to dodge<br>
+      CLICK the Start button or press ENTER to begin<br>
+      Reach <strong>3000m</strong> to WIN. You have 3 lives — one hit = one life lost.
+    </div>
+    <p>Speed increases as you run further. Collect ember crystals for +50 points!</p>
+    <button id="startBtn">▶ START RUN</button>
+    <button id="howBtn" class="secondary">How to Play</button>
+    <p id="howExtra" style="display:none;">Tip: Jump early for wide lava pools. Slide only when a rock is high — sliding into lava still hurts! Grab crystals, but never trade a life for one. Good luck, runner!</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endMsg"></p>
+    <p>Final Score: <strong id="finalScore">0</strong> &nbsp;|&nbsp; Distance: <strong id="finalDist">0</strong>m</p>
+    <button id="restartBtn">↻ RESTART INSTANTLY</button>
+  </div>
+</div>
+<p id="hint">Keyboard: SPACE / ↑ jump &nbsp;•&nbsp; ↓ slide &nbsp;•&nbsp; Mouse: click to jump &nbsp;•&nbsp; Touch: tap to jump, swipe down to slide</p>
+
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 900, H = 480, GROUND = 400;
+  var scoreEl = document.getElementById('score');
+  var distEl = document.getElementById('dist');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endMsg = document.getElementById('endMsg');
+
+  var state = 'title'; // title, playing, over, win
+  var player, obstacles, rocks, crystals, particles;
+  var score, distance, lives, speed, frame, invuln, spawnTimer, rockTimer, crystalTimer;
+  var keys = {};
+  var touchY = null;
+
+  // ---- Procedural Web Audio (only after user interaction) ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch(e) {}
+  }
+  function sfxJump() { beep(300, 0.18, 'square', 0.07); beep(520, 0.12, 'sine', 0.05); }
+  function sfxHit() { beep(120, 0.3, 'sawtooth', 0.12); }
+  function sfxCoin() { beep(880, 0.1, 'sine', 0.08); beep(1320, 0.14, 'sine', 0.08); }
+  function sfxWin() { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,0.25,'triangle',0.1); }, i*140); }); }
+
+  function reset() {
+    player = { x: 140, y: GROUND - 64, w: 44, h: 64, vy: 0, grounded: true, sliding: false, slideTimer: 0 };
+    obstacles = []; rocks = []; crystals = []; particles = [];
+    score = 0; distance = 0; lives = 3; speed = 5; frame = 0; invuln = 0;
+    spawnTimer = 0; rockTimer = 60; crystalTimer = 120;
+    updateHUD('Running!');
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = Math.floor(score);
+    distEl.textContent = Math.floor(distance);
+    livesEl.textContent = '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(Math.max(0, 3 - lives));
+    if (status) statusEl.textContent = status;
+  }
+
+  function spawnObstacle() {
+    var kind = Math.random();
+    if (kind < 0.45) {
+      // Lava pool on ground: must jump
+      var w = 70 + Math.random() * 70;
+      obstacles.push({ type: 'lava', x: W + 20, y: GROUND, w: w, h: 26 });
+    } else if (kind < 0.75) {
+      // Low rock: jump over
+      obstacles.push({ type: 'rock', x: W + 20, y: GROUND - 38, w: 48, h: 38 });
+    } else {
+      // Tall barrier with high gap hint: slide under? Actually tall rock blocks jump path - dodge sideways
+      obstacles.push({ type: 'pillar', x: W + 20, y: GROUND - 90, w: 52, h: 90 });
+    }
+  }
+  function spawnRock() {
+    rocks.push({ x: 120 + Math.random() * (W - 200), y: -30, r: 16 + Math.random() * 14, vy: 3 + Math.random() * 2, vx: (Math.random() - 0.5) * 1.5, rot: 0 });
+  }
+  function spawnCrystal() {
+    crystals.push({ x: W + 20, y: GROUND - 110 - Math.random() * 90, r: 14, taken: false });
+  }
+
+  function hitPlayer() {
+    if (invuln > 0) return;
+    lives--; invuln = 90; sfxHit();
+    for (var i = 0; i < 22; i++) particles.push({ x: player.x + 22, y: player.y + 30, vx: (Math.random()-0.5)*8, vy: -Math.random()*6, life: 30, color: '#ff4400' });
+    updateHUD(lives > 0 ? 'Ouch! Lost a life!' : 'Game Over');
+    if (lives <= 0) endGame(false);
+  }
+
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endScreen.classList.remove('hidden');
+    if (won) {
+      endTitle.textContent = '🏆 YOU WIN!';
+      endMsg.textContent = 'You reached the safe peak at 3000m and escaped the eruption! Amazing running!';
+      sfxWin();
+    } else {
+      endTitle.textContent = '💥 GAME OVER';
+      endMsg.textContent = 'The volcano got you this time. The lava is unforgiving — try again, runner!';
+    }
+    document.getElementById('finalScore').textContent = Math.floor(score);
+    document.getElementById('finalDist').textContent = Math.floor(distance);
+    updateHUD(won ? 'You Win!' : 'Game Over');
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHUD('Running!');
+  }
+
+  function rectsOverlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    speed = 5 + Math.min(6, distance / 600);
+    distance += speed * 0.22;
+    score += speed * 0.18;
+    if (invuln > 0) invuln--;
+
+    // Player physics
+    if (!player.grounded) {
+      player.vy += 0.85;
+      player.y += player.vy;
+      if (player.y >= GROUND - player.h) { player.y = GROUND - player.h; player.vy = 0; player.grounded = true; }
+    }
+    if (player.sliding) {
+      player.slideTimer--;
+      if (player.slideTimer <= 0) player.sliding = false;
+    }
+    // Horizontal nudge
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) player.x = Math.max(30, player.x - 4);
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) player.x = Math.min(W - 90, player.x + 4);
+    if ((keys['ArrowDown'] || keys['s'] || keys['S']) && player.grounded && !player.sliding) {
+      player.sliding = true; player.slideTimer = 26;
+    }
+
+    // Spawning
+    spawnTimer--;
+    if (spawnTimer <= 0) { spawnObstacle(); spawnTimer = 75 + Math.random() * 55 - Math.min(25, distance / 150); if (spawnTimer < 45) spawnTimer = 45; }
+    rockTimer--;
+    if (rockTimer <= 0) { spawnRock(); rockTimer = 90 + Math.random() * 80; }
+    crystalTimer--;
+    if (crystalTimer <= 0) { spawnCrystal(); crystalTimer = 220 + Math.random() * 180; }
+
+    // Move world
+    obstacles.forEach(function(o) { o.x -= speed; });
+    crystals.forEach(function(c) { c.x -= speed; });
+    rocks.forEach(function(r) { r.y += r.vy; r.x += r.vx; r.rot += 0.08; });
+    particles.forEach(function(p) { p.x += p.vx; p.y += p.vy; p.vy += 0.3; p.life--; });
+    particles = particles.filter(function(p) { return p.life > 0; });
+    obstacles = obstacles.filter(function(o) { return o.x + o.w > -20; });
+    crystals = crystals.filter(function(c) { return c.x > -30 && !c.taken; });
+    rocks = rocks.filter(function(r) { return r.y < H + 40; });
+
+    // Collisions
+    var pBox = { x: player.x + 6, y: player.y + (player.sliding ? 30 : 0), w: player.w - 12, h: player.sliding ? 34 : player.h };
+    obstacles.forEach(function(o) {
+      var box = { x: o.x, y: o.y, w: o.w, h: o.h };
+      if (o.type === 'lava') {
+        // Lava sits on ground: only hurts if player is on ground over it
+        if (player.grounded && player.x + player.w - 10 > o.x && player.x + 10 < o.x + o.w) hitPlayer();
+      } else if (rectsOverlap(pBox, box)) {
+        if (o.type === 'pillar' && player.sliding) {
+          // sliding under pillar is safe only if pillar is high? pillar is tall, so sliding still hits - treat as hit unless dodged sideways
+          hitPlayer();
+        } else {
+          hitPlayer();
+        }
+      }
+    });
+    rocks.forEach(function(r) {
+      var dx = (player.x + 22) - r.x, dy = (player.y + 32) - r.y;
+      if (Math.sqrt(dx*dx + dy*dy) < r.r + 22 && !player.sliding) hitPlayer();
+      else if (Math.sqrt(dx*dx + dy*dy) < r.r + 10 && player.sliding) { /* sliding dodges glancing rocks */ }
+    });
+    crystals.forEach(function(c) {
+      var dx = (player.x + 22) - c.x, dy = (player.y + 30) - c.y;
+      if (Math.sqrt(dx*dx + dy*dy) < 38) { c.taken = true; score += 50; sfxCoin(); }
+    });
+
+    // Win check
+    if (distance >= 3000) { score += 500; endGame(true); return; }
+    updateHUD();
+  }
+
+  function drawBackground() {
+    // Sky gradient (volcano dusk)
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#2b0f1a'); g.addColorStop(0.5, '#5a1a0a'); g.addColorStop(1, '#1a0a08');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // Volcano silhouette
+    ctx.fillStyle = '#120404';
+    ctx.beginPath(); ctx.moveTo(520, GROUND); ctx.lineTo(700, 90); ctx.lineTo(760, 90); ctx.lineTo(900, GROUND); ctx.closePath(); ctx.fill();
+    // Lava glow at crater
+    ctx.fillStyle = '#ff3300';
+    ctx.beginPath(); ctx.ellipse(730, 92, 32, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,80,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(730, 110, 70, 22, 0, 0, Math.PI * 2); ctx.fill();
+    // Stars / embers in sky
+    ctx.fillStyle = '#ffcc88';
+    for (var i = 0; i < 18; i++) {
+      var sx = (i * 97 + frame * 0.2) % W;
+      ctx.fillRect(sx, (i * 37) % 180, 3, 3);
+    }
+    // Ground
+    ctx.fillStyle = '#3a1c10'; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#552812'; ctx.fillRect(0, GROUND, W, 8);
+    // Moving ground dashes
+    ctx.fillStyle = '#6b3418';
+    for (var x = -((frame * speed) % 80); x < W; x += 80) ctx.fillRect(x, GROUND + 40, 40, 6);
+  }
+
+  function draw() {
+    drawBackground();
+    // Crystals
+    crystals.forEach(function(c) {
+      ctx.save(); ctx.translate(c.x, c.y + Math.sin(frame * 0.1 + c.x * 0.01) * 4);
+      ctx.fillStyle = '#ffd166'; ctx.beginPath();
+      ctx.moveTo(0, -16); ctx.lineTo(10, 0); ctx.lineTo(0, 16); ctx.lineTo(-10, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fff3b0'; ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(5, 0); ctx.lineTo(0, 16); ctx.lineTo(-5, 0); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    });
+    // Obstacles
+    obstacles.forEach(function(o) {
+      if (o.type === 'lava') {
+        ctx.fillStyle = '#ff3300'; ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.fillStyle = '#ffcc00';
+        for (var bx = o.x + 6; bx < o.x + o.w - 6; bx += 18) {
+          ctx.beginPath(); ctx.arc(bx + Math.sin(frame * 0.2 + bx) * 2, o.y + 6, 5, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = '#ff6600'; ctx.fillRect(o.x, o.y - 4, o.w, 6);
+      } else if (o.type === 'rock') {
+        ctx.fillStyle = '#777'; ctx.beginPath(); ctx.moveTo(o.x, o.y + o.h); ctx.lineTo(o.x + 8, o.y); ctx.lineTo(o.x + o.w - 8, o.y); ctx.lineTo(o.x + o.w, o.y + o.h); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ff4400'; ctx.fillRect(o.x + 14, o.y + 8, 20, 6);
+      } else {
+        ctx.fillStyle = '#4a4a4a'; ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.fillStyle = '#ff3300'; ctx.fillRect(o.x, o.y, o.w, 8);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 18px Arial'; ctx.fillText('▲', o.x + 14, o.y + 50);
+      }
+    });
+    // Falling rocks
+    rocks.forEach(function(r) {
+      ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.rot);
+      ctx.fillStyle = '#8a5a2a'; ctx.beginPath(); ctx.arc(0, 0, r.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ff4400'; ctx.beginPath(); ctx.arc(-4, -4, r.r * 0.4, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // Warning shadow
+      ctx.fillStyle = 'rgba(255,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(r.x, GROUND + 10, r.r, 6, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    // Particles
+    particles.forEach(function(p) {
+      ctx.fillStyle = p.color; ctx.globalAlpha = p.life / 30; ctx.fillRect(p.x, p.y, 6, 6); ctx.globalAlpha = 1;
+    });
+    // Player (runner)
+    if (player) {
+      ctx.save();
+      if (invuln > 0 && Math.floor(frame / 5) % 2 === 0) ctx.globalAlpha = 0.4;
+      var py = player.y, ph = player.sliding ? 34 : player.h;
+      if (player.sliding) py = GROUND - 34;
+      ctx.fillStyle = '#1e90ff'; ctx.fillRect(player.x, py, player.w, ph);
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(player.x + 8, py + 6, 28, 14); // visor / face
+      ctx.fillStyle = '#003366'; ctx.fillRect(player.x + 2, py + ph - 10, 18, 10);
+      ctx.fillRect(player.x + 24, py + ph - 10, 18, 10);
+      if (!player.grounded) { ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.fillText('💨', player.x - 8, py + 20); }
+      ctx.restore();
+    }
+    // Title / end hint on canvas when not playing
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press START to run from the volcano!', W / 2, 250);
+      ctx.textAlign = 'left';
+    }
+    // Progress bar to win
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(20, 18, W - 40, 10);
+    ctx.fillStyle = '#ff6600'; ctx.fillRect(20, 18, (W - 40) * Math.min(1, distance / 3000), 10);
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function doJump() {
+    if (state !== 'playing') return;
+    if (player.grounded) { player.vy = -17; player.grounded = false; player.sliding = false; ensureAudio(); sfxJump(); }
+  }
+  function doSlide() {
+    if (state !== 'playing') return;
+    if (player.grounded) { player.sliding = true; player.slideTimer = 26; }
+  }
+
+  // ---- Controls: keyboard + mouse + touch ----
+  document.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); if (state === 'title' || state === 'over' || state === 'win') startGame(); else doJump(); }
+    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') doSlide();
+    if (e.key === 'Enter') { if (state !== 'playing') startGame(); }
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+  document.addEventListener('click', function(e) {
+    if (e.target && (e.target.id === 'startBtn' || e.target.id === 'restartBtn')) return;
+    if (state === 'playing') doJump();
+  });
+  canvas.addEventListener('click', function() { if (state === 'playing') doJump(); });
+  canvas.addEventListener('mousedown', function() { ensureAudio(); if (state === 'playing') doJump(); });
+  document.addEventListener('touchstart', function(e) {
+    ensureAudio();
+    if (e.touches && e.touches[0]) touchY = e.touches[0].clientY;
+    if (state === 'playing') doJump();
+  }, { passive: true });
+  document.addEventListener('touchend', function(e) {
+    if (touchY !== null && e.changedTouches && e.changedTouches[0]) {
+      var dy = e.changedTouches[0].clientY - touchY;
+      if (dy > 40) doSlide();
+    }
+    touchY = null;
+  }, { passive: true });
+  document.addEventListener('touchmove', function(e) { if (state === 'playing') e.preventDefault(); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('howBtn').addEventListener('click', function() {
+    var el = document.getElementById('howExtra');
+    el.style.display = (el.style.display === 'none' ? 'block' : 'none');
+  });
+
+  reset();
+  state = 'title';
+  updateHUD('Ready');
+  loop();
+})();
+</script>
+</body>
+</html>

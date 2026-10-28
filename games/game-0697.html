@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Snowy Yeti Snowball Toss</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b2a4a; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; overflow-x: hidden; }
+  h1 { font-size: 26px; text-align: center; margin: 6px 0 2px; text-shadow: 0 2px 0 #123; }
+  p.sub { color: #bfe6ff; font-size: 13px; text-align: center; margin-bottom: 8px; }
+  #hud { width: min(920px, 96vw); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: #123a5e; border: 2px solid #7ec8ff; border-radius: 10px; padding: 8px 12px; font-weight: bold; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  #wrap { position: relative; width: min(920px, 96vw); margin-top: 10px; }
+  canvas { width: 100%; height: auto; aspect-ratio: 920 / 520; display: block; background: linear-gradient(#8ed0ff, #e8f7ff 62%, #ffffff); border: 3px solid #ffffff; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(6, 30, 54, 0.88); border-radius: 12px; text-align: center; padding: 22px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffe066; }
+  .overlay p { max-width: 620px; line-height: 1.55; font-size: 16px; color: #eaf7ff; }
+  .overlay .small { font-size: 14px; color: #bfe6ff; }
+  button { background: #ffca2e; color: #14213d; border: none; border-radius: 999px; padding: 14px 30px; font-size: 19px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:hover { filter: brightness(1.08); }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #controls { width: min(920px, 96vw); display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+  #controls button { padding: 10px 18px; font-size: 15px; background: #eaf7ff; }
+  .meter { width: min(420px, 80vw); height: 16px; background: #234; border-radius: 99px; overflow: hidden; border: 1px solid #fff; }
+  #powerFill { height: 100%; width: 0%; background: linear-gradient(90deg, #6ee7ff, #ffe066, #ff5d5d); }
+  #msg { min-height: 22px; font-weight: bold; color: #ffe066; text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>❄️ Snowy Yeti Snowball Toss ❄️</h1>
+<p class="sub">Aim, charge, and knock every target off its icy ledge before you run out of snowballs!</p>
+<div id="hud">
+  <span>⭐ Score: <b id="score">0</b></span>
+  <span>❄️ Snowballs: <b id="balls">8</b></span>
+  <span>🏔️ Level: <b id="level">1 / 5</b></span>
+  <span>💨 Wind: <b id="wind">0</b></span>
+  <span>🎯 Targets left: <b id="left">0</b></span>
+  <span id="status">Ready</span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="920" height="520"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>Snowy Yeti Snowball Toss</h2>
+    <p><b>How to Play:</b> Drag from the yeti (or use arrow keys) to aim. The longer you drag, the more power you charge. Release to throw! Watch the wind — it pushes snowballs sideways. Snowballs bounce off ice and snow, so bank a shot around a ledge if you need to.</p>
+    <p>Knock every target off its ledge to clear a level. You get a limited number of snowballs per level. Score points for each target, with bonus points for long shots and for snowballs left over.</p>
+    <p class="small">Mouse / touch: drag and release &nbsp;•&nbsp; Keyboard: ← → aim, ↑ ↓ power, Space throw, R restart &nbsp;•&nbsp; Sound starts only after you press Start.</p>
+    <button id="startBtn" type="button">▶ Start Game</button>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText">Amazing tossing!</p>
+    <p class="small">Press Restart to play again from Level 1.</p>
+    <button id="restartBtn" type="button">↻ Restart</button>
+  </div>
+</div>
+<div id="msg">Drag from the yeti to aim.</div>
+<div class="meter"><div id="powerFill"></div></div>
+<div id="controls">
+  <button id="aimLeftBtn" type="button">◀ Aim Left</button>
+  <button id="aimRightBtn" type="button">Aim Right ▶</button>
+  <button id="powerBtn" type="button">Charge / Throw (Space)</button>
+  <button id="restartSmallBtn" type="button">↻ Restart</button>
+</div>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var ballsEl = document.getElementById('balls');
+  var levelEl = document.getElementById('level');
+  var windEl = document.getElementById('wind');
+  var leftEl = document.getElementById('left');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var powerFill = document.getElementById('powerFill');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var audioCtx = null;
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function initAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  // Levels: yeti stays left; targets sit on icy ledges to the right.
+  var levels = [
+    { wind: 0, balls: 8, targets: [ {x:620,y:300,led:330}, {x:760,y:220,led:250}, {x:850,y:360,led:390} ] },
+    { wind: 0.35, balls: 8, targets: [ {x:600,y:260,led:290}, {x:720,y:340,led:370}, {x:830,y:200,led:230}, {x:880,y:400,led:430} ] },
+    { wind: -0.55, balls: 9, targets: [ {x:580,y:300,led:330}, {x:700,y:210,led:240}, {x:800,y:330,led:360}, {x:880,y:230,led:260} ] },
+    { wind: 0.8, balls: 9, targets: [ {x:560,y:240,led:270}, {x:680,y:350,led:380}, {x:790,y:210,led:240}, {x:870,y:360,led:390} ] },
+    { wind: -0.9, balls: 10, targets: [ {x:560,y:280,led:310}, {x:660,y:200,led:230}, {x:760,y:340,led:370}, {x:840,y:220,led:250}, {x:890,y:390,led:420} ] }
+  ];
+
+  var state = 'title'; // title, aiming, flying, levelDone, over
+  var levelIndex = 0, score = 0, ballsLeft = 8, targets = [], ledges = [];
+  var ball = null, particles = [], knocked = [];
+  var yeti = { x: 110, y: 430 };
+  var aim = { angle: -0.7, power: 0.55, dragging: false, startX: 0, startY: 0 };
+  var charging = false, chargeDir = 1;
+  var wind = 0;
+
+  function loadLevel(i) {
+    levelIndex = i;
+    var L = levels[i];
+    wind = L.wind; ballsLeft = L.balls;
+    targets = L.targets.map(function(t, k) {
+      return { x: t.x, y: t.y, led: t.led, alive: true, falling: false, vx: 0, vy: 0, kind: k % 3, rot: 0 };
+    });
+    ledges = L.targets.map(function(t) { return { x: t.x - 55, y: t.led, w: 110 }; });
+    ball = null; particles = []; knocked = [];
+    aim.angle = -0.7; aim.power = 0.55; charging = false;
+    state = 'aiming';
+    updateHUD(); setMsg('Level ' + (i + 1) + ': knock all targets off their ledges!');
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    ballsEl.textContent = ballsLeft;
+    levelEl.textContent = (levelIndex + 1) + ' / ' + levels.length;
+    windEl.textContent = (wind > 0 ? '→ +' : wind < 0 ? '← ' : '') + Math.abs(wind).toFixed(2);
+    leftEl.textContent = targets.filter(function(t) { return t.alive; }).length;
+    statusEl.textContent = state === 'flying' ? 'Snowball flying!' : state === 'aiming' ? 'Aim & throw' : state;
+    powerFill.style.width = Math.round(aim.power * 100) + '%';
+  }
+
+  function setMsg(t) { msgEl.textContent = t; }
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - r.left) * canvas.width / r.width, y: (cy - r.top) * canvas.height / r.height };
+  }
+
+  function startDrag(e) {
+    if (state !== 'aiming') return;
+    initAudio();
+    var p = canvasPos(e);
+    aim.dragging = true; aim.startX = p.x; aim.startY = p.y;
+    e.preventDefault();
+  }
+  function moveDrag(e) {
+    if (!aim.dragging || state !== 'aiming') return;
+    var p = canvasPos(e);
+    var dx = p.x - yeti.x, dy = p.y - yeti.y;
+    // Aim points from yeti toward pointer, but throwing goes opposite drag like a slingshot? No: direct aim.
+    // Direct aim: angle toward pointer, power by distance.
+    aim.angle = Math.atan2(dy, dx);
+    if (aim.angle > -0.05) aim.angle = -0.05;
+    if (aim.angle < -1.5) aim.angle = -1.5;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    aim.power = Math.max(0.2, Math.min(1, dist / 320));
+    updateHUD();
+    if (e.cancelable) e.preventDefault();
+  }
+  function endDrag(e) {
+    if (!aim.dragging) return;
+    aim.dragging = false;
+    if (state === 'aiming') throwBall();
+  }
+
+  function throwBall() {
+    if (ballsLeft <= 0) return;
+    ballsLeft--;
+    var speed = 7 + aim.power * 11;
+    ball = { x: yeti.x + 28, y: yeti.y - 28, vx: Math.cos(aim.angle) * speed, vy: Math.sin(aim.angle) * speed, bounces: 0 };
+    state = 'flying';
+    beep(500, 0.15, 'triangle', 0.2); beep(700, 0.12, 'sine', 0.12);
+    setMsg('Whoosh! Watch the wind...');
+    updateHUD();
+  }
+
+  function burst(x, y, color) {
+    for (var i = 0; i < 18; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.7) * 6, life: 30 + Math.random() * 20, color: color });
+    }
+  }
+
+  function checkLevelEnd() {
+    var alive = targets.filter(function(t) { return t.alive; }).length;
+    if (alive === 0) {
+      var bonus = ballsLeft * 50;
+      score += bonus;
+      setMsg('Level cleared! Bonus +' + bonus + ' for ' + ballsLeft + ' snowballs left.');
+      beep(660, 0.15, 'sine', 0.2); setTimeout(function(){ beep(880, 0.2, 'sine', 0.2); }, 150);
+      if (levelIndex + 1 >= levels.length) { showEnd(true); }
+      else { state = 'levelDone'; setTimeout(function(){ if (state === 'levelDone') loadLevel(levelIndex + 1); }, 1800); }
+      updateHUD();
+      return true;
+    }
+    if (ballsLeft <= 0 && !ball) {
+      showEnd(false);
+      return true;
+    }
+    return false;
+  }
+
+  function showEnd(win) {
+    state = 'over';
+    endTitle.textContent = win ? '🏆 You Win!' : '💙 Game Over';
+    endText.textContent = win
+      ? 'You cleared all 5 snowy levels! Final score: ' + score + '. The yeti is proud of you!'
+      : 'Out of snowballs with targets still standing. Final score: ' + score + '. Try again — mind the wind!';
+    endScreen.classList.remove('hidden');
+    if (win) { beep(523, 0.2, 'sine', 0.2); setTimeout(function(){ beep(659, 0.2, 'sine', 0.2); }, 180); setTimeout(function(){ beep(784, 0.3, 'sine', 0.2); }, 360); }
+    else { beep(220, 0.4, 'sawtooth', 0.12); }
+    updateHUD();
+  }
+
+  function startGame() {
+    initAudio();
+    score = 0;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    loadLevel(0);
+    beep(440, 0.15, 'sine', 0.2);
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#8ed0ff'; ctx.fillRect(0, 0, 920, 520);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.moveTo(0, 380); ctx.lineTo(180, 300); ctx.lineTo(360, 380); ctx.lineTo(540, 290); ctx.lineTo(720, 380); ctx.lineTo(920, 310); ctx.lineTo(920, 520); ctx.lineTo(0, 520); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e8f7ff'; ctx.fillRect(0, 450, 920, 70);
+    // Snowflakes drifting (decorative, deterministic-ish)
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    var t = Date.now() / 1000;
+    for (var i = 0; i < 24; i++) {
+      var sx = (i * 73 + t * (8 + i % 5)) % 920;
+      var sy = (i * 47 + t * 14) % 380;
+      ctx.beginPath(); ctx.arc(sx, sy, 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+    // Wind arrows
+    if (wind !== 0) {
+      ctx.fillStyle = 'rgba(11,42,74,0.75)'; ctx.font = 'bold 18px Arial';
+      ctx.fillText(wind > 0 ? 'Wind →→' : '←← Wind', wind > 0 ? 700 : 90, 40);
+    }
+  }
+
+  function drawYeti() {
+    ctx.save(); ctx.translate(yeti.x, yeti.y);
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(0, -42, 34, 48, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#dbeafe'; ctx.beginPath(); ctx.ellipse(0, -30, 22, 30, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#14213d'; ctx.beginPath(); ctx.arc(-10, -58, 4, 0, Math.PI * 2); ctx.arc(10, -58, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff5d5d'; ctx.beginPath(); ctx.arc(0, -42, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#14213d'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, -38, 10, 0.15, Math.PI - 0.15); ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(28, -52, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // Aim arrow + trajectory dots
+    if (state === 'aiming') {
+      var speed = 7 + aim.power * 11;
+      ctx.fillStyle = '#ffca2e';
+      for (var i = 1; i <= 14; i++) {
+        var tt = i * 0.35;
+        var px = yeti.x + 28 + Math.cos(aim.angle) * speed * tt * 4;
+        var py = yeti.y - 28 + Math.sin(aim.angle) * speed * tt * 4 + 0.22 * Math.pow(tt * 4, 2) + wind * tt * tt * 8;
+        if (px > 920 || py > 520) break;
+        ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.strokeStyle = '#ffca2e'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(yeti.x + 28, yeti.y - 28);
+      ctx.lineTo(yeti.x + 28 + Math.cos(aim.angle) * 70, yeti.y - 28 + Math.sin(aim.angle) * 70); ctx.stroke();
+    }
+  }
+
+  function drawTargets() {
+    ledges.forEach(function(l) {
+      ctx.fillStyle = '#aee6ff'; ctx.fillRect(l.x, l.y, l.w, 14);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(l.x, l.y, l.w, 5);
+    });
+    targets.forEach(function(t) {
+      if (!t.alive && !t.falling) return;
+      ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.rot || 0);
+      if (t.kind === 0) { // snowman
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0, -8, 20, 0, Math.PI * 2); ctx.arc(0, -30, 14, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#14213d'; ctx.beginPath(); ctx.arc(-5, -32, 2, 0, Math.PI * 2); ctx.arc(5, -32, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ff7a1a'; ctx.beginPath(); ctx.moveTo(0, -29); ctx.lineTo(14, -27); ctx.lineTo(0, -25); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#e63946'; ctx.fillRect(-14, -42, 28, 6);
+      } else if (t.kind === 1) { // penguin
+        ctx.fillStyle = '#14213d'; ctx.beginPath(); ctx.ellipse(0, -18, 16, 22, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(0, -14, 9, 15, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffca2e'; ctx.beginPath(); ctx.moveTo(-4, -34); ctx.lineTo(4, -34); ctx.lineTo(0, -29); ctx.closePath(); ctx.fill();
+      } else { // ice crystal
+        ctx.fillStyle = '#6ee7ff'; ctx.beginPath(); ctx.moveTo(0, -48); ctx.lineTo(16, -12); ctx.lineTo(-16, -12); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(8, -14); ctx.lineTo(-8, -14); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    });
+  }
+
+  function drawBall() {
+    if (!ball) return;
+    ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#7ec8ff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, 11, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#dbeafe'; ctx.beginPath(); ctx.arc(ball.x - 3, ball.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawParticles() {
+    particles.forEach(function(p) {
+      ctx.globalAlpha = Math.max(0, p.life / 40);
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function update() {
+    if (ball) {
+      ball.vy += 0.22;
+      ball.vx += wind * 0.02;
+      ball.x += ball.vx; ball.y += ball.vy;
+      // Bounce off ground and ledges
+      if (ball.y > 452) { ball.y = 452; ball.vy *= -0.62; ball.vx *= 0.85; ball.bounces++; beep(180, 0.08, 'triangle', 0.1); }
+      ledges.forEach(function(l) {
+        if (ball.x > l.x && ball.x < l.x + l.w && ball.y > l.y - 12 && ball.y < l.y + 14 && ball.vy > 0) {
+          ball.y = l.y - 12; ball.vy *= -0.6; ball.vx *= 0.9; ball.bounces++;
+        }
+      });
+      // Hit targets
+      targets.forEach(function(t) {
+        if (!t.alive || t.falling) return;
+        var dx = ball.x - t.x, dy = ball.y - (t.y - 22);
+        if (dx * dx + dy * dy < 34 * 34) {
+          t.alive = false; t.falling = true; t.vx = ball.vx * 0.7 + 2; t.vy = -4;
+          var pts = 100 + Math.round(Math.abs(ball.vx)) * 5 + (ball.bounces > 0 ? 50 : 0);
+          score += pts;
+          burst(t.x, t.y - 20, '#ffffff'); burst(ball.x, ball.y, '#bfe6ff');
+          beep(880, 0.15, 'sine', 0.22); setTimeout(function(){ beep(440, 0.12, 'triangle', 0.15); }, 80);
+          setMsg('Hit! +' + pts + (ball.bounces > 0 ? ' (bounce bonus!)' : ''));
+        }
+      });
+      if (ball.x < -20 || ball.x > 940 || ball.y > 520 || (Math.abs(ball.vx) < 0.4 && Math.abs(ball.vy) < 0.4 && ball.y > 440)) {
+        ball = null; state = 'aiming'; checkLevelEnd(); updateHUD();
+      }
+    }
+    // Falling targets tumble off screen
+    targets.forEach(function(t) {
+      if (t.falling) { t.vy += 0.3; t.x += t.vx; t.y += t.vy; t.rot += 0.15; if (t.y > 560) t.falling = false; }
+    });
+    particles.forEach(function(p) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; });
+    particles = particles.filter(function(p) { return p.life > 0; });
+    // Keyboard charging animation
+    if (charging && state === 'aiming') {
+      aim.power += 0.012 * chargeDir;
+      if (aim.power >= 1) { aim.power = 1; chargeDir = -1; }
+      if (aim.power <= 0.2) { aim.power = 0.2; chargeDir = 1; }
+      updateHUD();
+    }
+  }
+
+  function loop() {
+    update();
+    drawBackground();
+    drawTargets();
+    drawYeti();
+    drawBall();
+    drawParticles();
+    requestAnimationFrame(loop);
+  }
+
+  // Events: mouse, touch, keyboard
+  canvas.addEventListener('mousedown', startDrag);
+  canvas.addEventListener('mousemove', moveDrag);
+  canvas.addEventListener('mouseup', endDrag);
+  canvas.addEventListener('mouseleave', function() { aim.dragging = false; });
+  canvas.addEventListener('touchstart', startDrag, { passive: false });
+  canvas.addEventListener('touchmove', moveDrag, { passive: false });
+  canvas.addEventListener('touchend', endDrag);
+  canvas.addEventListener('touchcancel', function() { aim.dragging = false; });
+  document.addEventListener('keydown', function(e) {
+    initAudio();
+    if (e.key === 'Enter' && state === 'title') { startGame(); return; }
+    if (e.key === 'r' || e.key === 'R') { startGame(); return; }
+    if (state !== 'aiming') return;
+    if (e.key === 'ArrowLeft') aim.angle = Math.max(-1.5, aim.angle - 0.06);
+    if (e.key === 'ArrowRight') aim.angle = Math.min(-0.05, aim.angle + 0.06);
+    if (e.key === 'ArrowUp') aim.power = Math.min(1, aim.power + 0.07);
+    if (e.key === 'ArrowDown') aim.power = Math.max(0.2, aim.power - 0.07);
+    if (e.key === ' ') { e.preventDefault(); if (!charging) { charging = true; chargeDir = 1; } else { charging = false; throwBall(); } }
+    updateHUD();
+  });
+  document.addEventListener('keyup', function(e) { if (e.key === ' ') charging = false; });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('restartSmallBtn').addEventListener('click', startGame);
+  document.getElementById('aimLeftBtn').addEventListener('click', function() { initAudio(); aim.angle = Math.max(-1.5, aim.angle - 0.12); updateHUD(); });
+  document.getElementById('aimRightBtn').addEventListener('click', function() { initAudio(); aim.angle = Math.min(-0.05, aim.angle + 0.12); updateHUD(); });
+  document.getElementById('powerBtn').addEventListener('click', function() {
+    initAudio();
+    if (state !== 'aiming') return;
+    if (!charging) { charging = true; chargeDir = 1; } else { charging = false; throwBall(); }
+  });
+
+  loadLevel(0);
+  state = 'title';
+  updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

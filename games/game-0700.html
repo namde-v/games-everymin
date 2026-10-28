@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sky Lantern Festival</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0b1026; color: #fff7e0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: clamp(22px, 5vw, 36px); letter-spacing: 1px; text-shadow: 0 0 18px #ff9d2e; margin: 6px 0 2px; text-align: center; }
+  p.sub { color: #ffd98a; font-size: 14px; margin-bottom: 10px; text-align: center; }
+  #wrap { position: relative; width: min(92vw, 640px); }
+  canvas { width: 100%; height: 520px; display: block; background: linear-gradient(#141b4a, #2a1a5e 45%, #4a1e4d 75%, #1a1030); border: 3px solid #ff9d2e; border-radius: 16px; box-shadow: 0 0 30px rgba(255,157,46,.35); touch-action: none; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; width: min(92vw, 640px); margin: 10px 0; font-weight: 700; font-size: 14px; }
+  #hud span { background: #1e2450; border: 1px solid #ff9d2e55; padding: 7px 10px; border-radius: 999px; }
+  #fuelWrap { width: min(92vw, 640px); height: 14px; background: #222; border-radius: 999px; overflow: hidden; border: 1px solid #555; margin-bottom: 10px; }
+  #fuelBar { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5722, #ffc107); transition: width .15s; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 12px; padding: 24px; background: rgba(5,8,25,.82); border-radius: 16px; }
+  .overlay h2 { font-size: 30px; color: #ffcc4d; }
+  .overlay p { line-height: 1.55; color: #e8e2ff; max-width: 480px; font-size: 15px; }
+  .overlay small { color: #ffb3c1; }
+  button { cursor: pointer; border: none; border-radius: 999px; padding: 13px 26px; font-size: 17px; font-weight: 800; background: #ff9d2e; color: #231200; box-shadow: 0 4px 0 #b35400; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #7c5cff; color: white; box-shadow: 0 4px 0 #3d2a99; }
+  #controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+  #msg { min-height: 22px; color: #ffe082; font-weight: 700; text-align: center; }
+  .hidden { display: none !important; }
+  @media (max-width: 520px) { canvas { height: 460px; } }
+</style>
+</head>
+<body>
+<h1>🏮 Sky Lantern Festival 🏮</h1>
+<p class="sub">Release lanterns into the night sky — ride the wind, dodge the night birds, and light the festival gates!</p>
+<div id="hud">
+  <span>⭐ Score: <b id="score">0</b></span>
+  <span>🏮 Delivered: <b id="delivered">0</b> / 8</span>
+  <span>❤️ Lives: <b id="lives">3</b></span>
+  <span>🌬️ Wind: <b id="wind">Calm</b></span>
+  <span>📍 Status: <b id="status">Ready</b></span>
+</div>
+<div id="fuelWrap"><div id="fuelBar"></div></div>
+<div id="wrap">
+  <canvas id="game" width="640" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Sky Lantern Festival</h2>
+    <p><b>How to Play:</b> Press <b>Start Festival</b>, then press <b>SPACE</b>, click, or tap <b>Launch</b> to release a lantern. Steer it with <b>Arrow Keys / WASD</b>, by dragging with the <b>mouse</b>, or by dragging with your <b>finger</b> on touch screens.</p>
+    <p>Guide each lantern through a glowing golden gate at the top. Watch the flame fuel — if it runs out, the lantern falls! Avoid night birds, kites and storm clouds. Deliver <b>8 lanterns</b> to win the festival. You have <b>3 lives</b>.</p>
+    <p><small>Tip: ride gusts to the right when the wind arrow points right, and slow down near birds. A perfect gate (dead centre) scores bonus points!</small></p>
+    <button id="startBtn">🎆 Start Festival</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">🔄 Play Again — Instant Restart</button>
+  </div>
+</div>
+<div id="controls">
+  <button id="launchBtn" class="secondary">🏮 Launch Lantern (Space / Tap)</button>
+  <button id="leftBtn">◀ Left</button>
+  <button id="rightBtn">Right ▶</button>
+</div>
+<p id="msg">Press Start Festival to begin. Then launch your first lantern!</p>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var delEl = document.getElementById('delivered');
+  var livesEl = document.getElementById('lives');
+  var windEl = document.getElementById('wind');
+  var statusEl = document.getElementById('status');
+  var fuelBar = document.getElementById('fuelBar');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title, ready, flying, win, over
+  var score = 0, delivered = 0, lives = 3;
+  var keys = {};
+  var pointerX = null, pointerActive = false;
+  var lantern = null, obstacles = [], gates = [], stars = [], embers = [];
+  var wind = 0, windTimer = 0, gust = 0, time = 0, frame = 0;
+  var audioCtx = null;
+
+  for (var i = 0; i < 90; i++) stars.push({ x: Math.random()*W, y: Math.random()*H*0.75, r: Math.random()*1.8+0.4, tw: Math.random()*6.28 });
+
+  function initAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function fanfare() { [523,659,784,1047].forEach(function(f, idx){ setTimeout(function(){ beep(f, 0.35, 'triangle', 0.18); }, idx*130); }); }
+  function sad() { [392,330,262,196].forEach(function(f, idx){ setTimeout(function(){ beep(f, 0.3, 'sawtooth', 0.08); }, idx*140); }); }
+
+  function makeGates() {
+    gates = [];
+    var xs = [110, 320, 530];
+    xs.forEach(function(x, idx) {
+      gates.push({ x: x + (Math.random()*40-20), y: 58 + idx*6, w: 96, lit: false, hue: idx });
+    });
+  }
+  function makeObstacles() {
+    obstacles = [];
+    for (var i = 0; i < 7; i++) {
+      var kind = ['bird','kite','cloud'][i % 3];
+      obstacles.push({
+        kind: kind,
+        x: Math.random()*W, y: 120 + i*52 + Math.random()*20,
+        vx: (kind === 'bird' ? (Math.random()<0.5?-1.1:1.1) : (kind==='kite'?0.6:0.25)),
+        dir: Math.random()<0.5?-1:1, w: kind==='cloud'?70:44, h: kind==='cloud'?30:26, phase: Math.random()*6.28
+      });
+    }
+  }
+  function newLantern() {
+    lantern = { x: W/2, y: H-70, vx: 0, vy: 0, fuel: 100, flying: false, trail: [] };
+    statusEl.textContent = 'Ready — Launch!';
+    msgEl.textContent = 'Lantern ready! Press SPACE, click Launch, or tap the sky to release it.';
+  }
+  function resetGame() {
+    score = 0; delivered = 0; lives = 3; wind = 0; gust = 0; time = 0;
+    makeGates(); makeObstacles(); newLantern();
+    state = 'ready'; updateHUD();
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    msgEl.textContent = 'Festival started! Launch your lantern and aim for a golden gate.';
+  }
+  function launch() {
+    initAudio();
+    if (state === 'ready' && lantern && !lantern.flying) {
+      lantern.flying = true; lantern.vy = -1.2; state = 'flying';
+      statusEl.textContent = 'Flying!';
+      msgEl.textContent = 'Flying! Steer with arrows, mouse drag, or touch drag.';
+      beep(660, 0.25, 'sine', 0.15); setTimeout(function(){ beep(880, 0.3, 'sine', 0.15); }, 120);
+    }
+  }
+  function updateHUD() {
+    scoreEl.textContent = score; delEl.textContent = delivered; livesEl.textContent = lives;
+    fuelBar.style.width = (lantern ? Math.max(0, lantern.fuel) : 100) + '%';
+    windEl.textContent = gust > 0.7 ? 'Strong →' : gust < -0.7 ? '← Strong' : gust > 0.2 ? 'Breeze →' : gust < -0.2 ? '← Breeze' : 'Calm';
+  }
+  function loseLantern(reason) {
+    lives--; beep(180, 0.4, 'sawtooth', 0.12);
+    msgEl.textContent = reason + ' Lives left: ' + lives + '.';
+    if (lives <= 0) { endGame(false); return; }
+    state = 'ready'; makeObstacles(); newLantern(); updateHUD();
+  }
+  function deliverLantern(gate) {
+    var centreDist = Math.abs(lantern.x - gate.x);
+    var bonus = centreDist < 18 ? 50 : centreDist < 35 ? 25 : 10;
+    score += 100 + bonus; delivered++;
+    gate.lit = true; fanfare();
+    msgEl.textContent = centreDist < 18 ? 'PERFECT GATE! + ' + (100+bonus) + ' points!' : 'Gate lit! + ' + (100+bonus) + ' points.';
+    for (var i = 0; i < 22; i++) embers.push({ x: lantern.x, y: lantern.y, vx: (Math.random()-0.5)*3, vy: (Math.random()-0.5)*3, life: 40 });
+    if (delivered >= 8) { endGame(true); return; }
+    // New round of gates every 3 deliveries for variety
+    if (delivered % 3 === 0) makeGates();
+    state = 'ready'; newLantern(); updateHUD();
+  }
+  function endGame(won) {
+    state = won ? 'win' : 'over';
+    endScreen.classList.remove('hidden');
+    endTitle.textContent = won ? '🎆 Festival Complete — You Win!' : '💔 Game Over';
+    endText.textContent = won
+      ? 'You delivered 8 lanterns and lit the whole night sky! Final score: ' + score + '. Play again to beat it!'
+      : 'The festival sky went dark. You delivered ' + delivered + ' of 8 lanterns. Final score: ' + score + '. Try again!';
+    statusEl.textContent = won ? 'You Win!' : 'Game Over';
+    if (won) fanfare(); else sad();
+    updateHUD();
+  }
+
+  function update(dt) {
+    time += dt; frame++;
+    windTimer -= dt;
+    if (windTimer <= 0) { gust = (Math.random()*2-1) * 1.6; windTimer = 2 + Math.random()*2.5; }
+    wind += (gust - wind) * 0.02;
+    obstacles.forEach(function(o) {
+      o.x += o.vx * o.dir;
+      o.y += Math.sin(time*1.5 + o.phase) * 0.4;
+      if (o.x < -60) { o.x = W+50; }
+      if (o.x > W+60) { o.x = -50; }
+    });
+    embers.forEach(function(e){ e.x += e.vx; e.y += e.vy; e.life--; });
+    embers = embers.filter(function(e){ return e.life > 0; });
+    if (lantern && lantern.flying) {
+      // Steering
+      if (keys['ArrowLeft'] || keys['a'] || keys['A']) lantern.vx -= 0.18;
+      if (keys['ArrowRight'] || keys['d'] || keys['D']) lantern.vx += 0.18;
+      if (keys['ArrowUp'] || keys['w'] || keys['W']) lantern.vy -= 0.08;
+      if (keys['ArrowDown'] || keys['s'] || keys['S']) lantern.vy += 0.08;
+      if (pointerActive && pointerX !== null) {
+        var dx = pointerX - lantern.x;
+        lantern.vx += Math.max(-0.25, Math.min(0.25, dx * 0.012));
+      }
+      lantern.vx += wind * 0.03;
+      lantern.vx *= 0.97; lantern.vy *= 0.99;
+      lantern.vy = Math.max(-2.6, Math.min(1.2, lantern.vy - 0.045)); // hot air lift
+      lantern.x += lantern.vx; lantern.y += lantern.vy;
+      lantern.fuel -= 0.14 + Math.abs(lantern.vx) * 0.02;
+      lantern.trail.push({ x: lantern.x, y: lantern.y + 18, life: 26 });
+      if (lantern.trail.length > 40) lantern.trail.shift();
+      lantern.trail.forEach(function(t){ t.life--; });
+      if (lantern.x < 18) lantern.x = 18; if (lantern.x > W-18) lantern.x = W-18;
+      if (lantern.y > H-40) { loseLantern('The flame sputtered and the lantern fell.'); return; }
+      if (lantern.fuel <= 0) { loseLantern('Out of flame fuel! The lantern went dark.'); return; }
+      // Gate collision
+      gates.forEach(function(g) {
+        if (!g.lit && Math.abs(lantern.x - g.x) < g.w/2 && Math.abs(lantern.y - g.y) < 26) deliverLantern(g);
+      });
+      if (state !== 'flying') return;
+      // Obstacle collision
+      for (var i = 0; i < obstacles.length; i++) {
+        var o = obstacles[i];
+        if (Math.abs(lantern.x - o.x) < (o.w/2 + 14) && Math.abs(lantern.y - o.y) < (o.h/2 + 16)) {
+          loseLantern(o.kind === 'bird' ? 'A night bird clipped your lantern!' : o.kind === 'kite' ? 'A stray kite tangled your lantern!' : 'A storm cloud soaked your flame!');
+          return;
+        }
+      }
+      if (lantern.y < 20) { // reached open sky without a gate: small consolation, lantern drifts on
+        score += 10; lantern.y = 30; lantern.vy = 0.5;
+        msgEl.textContent = 'So close! Aim through a golden gate for full points (+10 for reaching the sky).';
+      }
+    }
+    updateHUD();
+  }
+
+  function drawLantern(x, y, flying) {
+    ctx.save(); ctx.translate(x, y);
+    var sway = Math.sin(time*2) * (flying ? 0.08 : 0.02);
+    ctx.rotate(sway);
+    // glow
+    var glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 62);
+    glow.addColorStop(0, 'rgba(255,180,60,0.55)'); glow.addColorStop(1, 'rgba(255,180,60,0)');
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 62, 0, Math.PI*2); ctx.fill();
+    // body
+    ctx.fillStyle = '#ffcf5e'; ctx.strokeStyle = '#c75b00'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-18, -14); ctx.quadraticCurveTo(0, -26, 18, -14); ctx.lineTo(14, 14); ctx.quadraticCurveTo(0, 22, -14, 14); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = 'rgba(180,80,0,0.7)'; ctx.lineWidth = 1;
+    [-9, 0, 9].forEach(function(dx){ ctx.beginPath(); ctx.moveTo(dx, -20); ctx.lineTo(dx*0.7, 18); ctx.stroke(); });
+    // flame
+    ctx.fillStyle = '#ff5722'; ctx.beginPath(); ctx.ellipse(0, 10, 5, 8, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffe082'; ctx.beginPath(); ctx.ellipse(0, 10, 2.5, 4.5, 0, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // stars
+    stars.forEach(function(s){ ctx.globalAlpha = 0.4 + 0.6*Math.abs(Math.sin(time + s.tw)); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    // moon
+    ctx.fillStyle = '#fff3c4'; ctx.beginPath(); ctx.arc(560, 52, 26, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#e8d48a'; ctx.beginPath(); ctx.arc(552, 46, 7, 0, Math.PI*2); ctx.arc(568, 60, 5, 0, Math.PI*2); ctx.fill();
+    // distant hills and rooftops
+    ctx.fillStyle = '#120a2e'; ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, H-70); ctx.quadraticCurveTo(160, H-120, 320, H-70); ctx.quadraticCurveTo(480, H-110, 640, H-70); ctx.lineTo(640, H); ctx.closePath(); ctx.fill();
+    // wind arrow
+    ctx.fillStyle = '#bfe3ff'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(wind >= 0 ? 'Wind → ' + Math.abs(wind).toFixed(1) : '← Wind ' + Math.abs(wind).toFixed(1), 14, 26);
+    // gates
+    gates.forEach(function(g, idx) {
+      ctx.save(); ctx.translate(g.x, g.y);
+      ctx.strokeStyle = g.lit ? '#7dff9a' : '#ffcc4d'; ctx.lineWidth = 5; ctx.shadowColor = g.lit ? '#7dff9a' : '#ffcc4d'; ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(0, 0, 34, 0, Math.PI*2); ctx.stroke();
+      ctx.shadowBlur = 0; ctx.fillStyle = g.lit ? '#c8ffd4' : '#fff3c4'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(g.lit ? '✓ LIT' : 'GATE ' + (idx+1), 0, 4);
+      ctx.restore();
+    });
+    // obstacles
+    obstacles.forEach(function(o) {
+      ctx.save(); ctx.translate(o.x, o.y);
+      if (o.kind === 'bird') {
+        ctx.fillStyle = '#1a1a2e'; ctx.beginPath(); ctx.ellipse(0, 0, 22, 9, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.arc(16, -3, 4, 0, Math.PI*2); ctx.fill();
+        var flap = Math.sin(time*10 + o.phase) * 8;
+        ctx.strokeStyle = '#1a1a2e'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(-18, -10 - flap); ctx.moveTo(-4, 0); ctx.lineTo(-18, 10 + flap); ctx.stroke();
+      } else if (o.kind === 'kite') {
+        ctx.fillStyle = '#ff4081'; ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(18, 0); ctx.lineTo(0, 16); ctx.lineTo(-18, 0); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(0, 16); ctx.moveTo(-18, 0); ctx.lineTo(18, 0); ctx.stroke();
+        ctx.strokeStyle = '#cccccc'; ctx.beginPath(); ctx.moveTo(0, 16); ctx.quadraticCurveTo(14, 40, 0, 58); ctx.stroke();
+      } else {
+        ctx.fillStyle = 'rgba(90,90,130,0.95)'; ctx.beginPath(); ctx.arc(-16, 4, 14, 0, Math.PI*2); ctx.arc(0, -4, 18, 0, Math.PI*2); ctx.arc(16, 4, 14, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ffe082'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('⚡', 0, 10);
+      }
+      ctx.restore();
+    });
+    // trail embers
+    if (lantern) lantern.trail.forEach(function(t){ ctx.globalAlpha = Math.max(0, t.life/26); ctx.fillStyle = '#ff9d2e'; ctx.beginPath(); ctx.arc(t.x, t.y, 3, 0, Math.PI*2); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    embers.forEach(function(e){ ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.arc(e.x, e.y, 3, 0, Math.PI*2); ctx.fill(); });
+    if (lantern) drawLantern(lantern.x, lantern.y, lantern.flying);
+    // launch pad
+    ctx.fillStyle = '#3d2a1a'; ctx.fillRect(W/2 - 60, H-34, 120, 12);
+    ctx.fillStyle = '#ff9d2e'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('LAUNCH PAD', W/2, H-38);
+    if (state === 'ready') { ctx.fillStyle = '#ffffff'; ctx.font = 'bold 15px sans-serif'; ctx.fillText('↑ Press SPACE or Launch to release ↑', W/2, H-90); }
+  }
+  function loop(ts) {
+    if (state === 'flying' || state === 'ready') update(1);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function(){ initAudio(); resetGame(); beep(523, 0.3, 'triangle', 0.15); });
+  document.getElementById('restartBtn').addEventListener('click', function(){ initAudio(); resetGame(); });
+  document.getElementById('launchBtn').addEventListener('click', function(){ initAudio(); launch(); });
+  document.getElementById('leftBtn').addEventListener('click', function(){ if (lantern) lantern.vx -= 1.2; });
+  document.getElementById('rightBtn').addEventListener('click', function(){ if (lantern) lantern.vx += 1.2; });
+
+  document.addEventListener('keydown', function(e) {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); initAudio(); if (state === 'title') resetGame(); else launch(); }
+    if (e.key === 'Enter' && (state === 'win' || state === 'over')) resetGame();
+  });
+  document.addEventListener('keyup', function(e) { keys[e.key] = false; });
+  canvas.addEventListener('mousedown', function(e) { initAudio(); var r = canvas.getBoundingClientRect(); pointerX = (e.clientX - r.left) * (W / r.width); pointerActive = true; if (state === 'ready') launch(); });
+  canvas.addEventListener('mousemove', function(e) { if (!pointerActive) return; var r = canvas.getBoundingClientRect(); pointerX = (e.clientX - r.left) * (W / r.width); });
+  document.addEventListener('mouseup', function() { pointerActive = false; pointerX = null; });
+  canvas.addEventListener('touchstart', function(e) { e.preventDefault(); initAudio(); var r = canvas.getBoundingClientRect(); var t = e.touches[0]; pointerX = (t.clientX - r.left) * (W / r.width); pointerActive = true; if (state === 'ready') launch(); }, { passive: false });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); var r = canvas.getBoundingClientRect(); var t = e.touches[0]; pointerX = (t.clientX - r.left) * (W / r.width); }, { passive: false });
+  canvas.addEventListener('touchend', function() { pointerActive = false; pointerX = null; });
+
+  makeGates(); makeObstacles(); newLantern(); updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

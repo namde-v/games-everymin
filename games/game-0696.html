@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Echo Cave Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #05070d; color: #e8f4ff; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 26px; letter-spacing: 1px; color: #7dd3fc; text-shadow: 0 0 14px #0ea5e9; margin: 6px 0 8px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: min(680px, 96vw); margin-bottom: 8px; }
+  .pill { background: #0f172a; border: 1px solid #334155; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .pill b { color: #facc15; }
+  #wrap { position: relative; width: min(680px, 96vw); }
+  canvas { width: 100%; height: auto; display: block; background: #020617; border: 2px solid #38bdf8; border-radius: 12px; touch-action: none; box-shadow: 0 0 28px rgba(56,189,248,.25); }
+  .overlay { position: absolute; inset: 0; background: rgba(2,6,23,.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #fde68a; }
+  .overlay p { font-size: 15px; line-height: 1.55; max-width: 520px; color: #e2e8f0; }
+  .overlay .small { font-size: 13px; color: #94a3b8; }
+  button { background: #facc15; color: #111827; border: none; border-radius: 999px; padding: 12px 26px; font-size: 17px; font-weight: 900; cursor: pointer; margin-top: 6px; }
+  button:hover { background: #fde047; transform: scale(1.03); }
+  button.secondary { background: #38bdf8; }
+  #controls { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  #controls button { padding: 10px 14px; font-size: 15px; margin: 0; }
+  #msg { min-height: 22px; margin-top: 8px; font-weight: bold; color: #7dd3fc; text-align: center; }
+  .legend { font-size: 13px; color: #94a3b8; margin-top: 6px; text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🦇 Echo Cave Explorer</h1>
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Lives: <b id="lives">❤️❤️❤️</b></div>
+  <div class="pill">Pings: <b id="pings">30</b></div>
+  <div class="pill">Gems: <b id="gems">0 / 8</b></div>
+  <div class="pill">Status: <b id="status">Ready</b></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="680" height="520"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Echo Cave Explorer</h2>
+    <p><b>How to Play:</b> You are lost in a pitch-dark cave. You can only see a tiny glow around you — unless you send out a sonar ping!</p>
+    <p>Move with <b>WASD / Arrow Keys</b>, or tap / click a direction pad below. Press <b>SPACE</b>, click the <b>Ping</b> button, or tap the cave to send a sonar pulse that briefly reveals walls, gems, pits and the exit. Pings are limited — use them wisely!</p>
+    <p>Collect all <b>8 glowing gems</b> and reach the golden <b>EXIT</b>. Falling into a pit or triggering a cave-in costs a life. You have 3 lives. Avoid the red danger tiles revealed by your pings!</p>
+    <p class="small">Sound is procedural Web Audio and starts only after you press Start. No downloads, no network — fully offline.</p>
+    <button id="startBtn">▶ Start Exploring</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p class="small">Press Restart to explore a fresh cave.</p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+<div id="controls">
+  <button id="upBtn">⬆ Up</button>
+  <button id="leftBtn">⬅ Left</button>
+  <button id="pingBtn">📡 Ping (Space)</button>
+  <button id="rightBtn">Right ➡</button>
+  <button id="downBtn">⬇ Down</button>
+</div>
+<div id="msg">Press Start, then explore the dark!</div>
+<div class="legend">🟡 You &nbsp; 💎 Gem (+100) &nbsp; 🚪 Exit &nbsp; 🕳️ Pit = lose a life &nbsp; 🪨 Cave-in = lose a life &nbsp; 📡 Ping reveals the cave for a few seconds</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const pingsEl = document.getElementById('pings');
+  const gemsEl = document.getElementById('gems');
+  const statusEl = document.getElementById('status');
+  const msgEl = document.getElementById('msg');
+  const titleScreen = document.getElementById('titleScreen');
+  const endScreen = document.getElementById('endScreen');
+  const endTitle = document.getElementById('endTitle');
+  const endText = document.getElementById('endText');
+
+  // Maze: 17 x 13 grid. 0=floor, 1=wall, 2=pit, 3=cave-in, 4=gem, 5=exit
+  const COLS = 17, ROWS = 13, TILE = 40;
+  const baseMaze = [
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,1,0,4,0,1,0,0,2,0,0,0,4,1],
+    [1,0,1,0,1,0,1,0,1,0,1,1,1,0,1,0,1],
+    [1,0,1,0,0,0,1,0,0,0,0,0,1,0,1,0,1],
+    [1,0,1,1,1,0,1,1,1,1,1,0,1,0,0,0,1],
+    [1,4,0,0,1,0,0,2,0,0,1,0,0,0,1,3,1],
+    [1,1,1,0,1,1,1,0,1,0,1,1,1,0,1,0,1],
+    [1,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,1],
+    [1,0,1,1,1,0,1,0,1,1,1,0,0,0,1,4,1],
+    [1,0,0,3,1,0,0,0,0,0,1,1,1,0,1,0,1],
+    [1,1,1,0,1,1,1,1,1,0,0,4,1,0,1,0,1],
+    [1,4,0,0,0,0,0,2,0,0,1,0,0,0,4,0,5],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+  ];
+  let maze, player, score, lives, pings, gemsCollected, totalGems, playing, over;
+  let revealUntil = 0, pingWaves = [], particles = [], shake = 0;
+  let audioCtx = null;
+
+  function initAudio(){
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function pingSound(){
+    if (!audioCtx) return;
+    for (let i = 0; i < 3; i++) setTimeout(function(){ beep(220 + i * 180, 0.28, 'sine', 0.18); }, i * 70);
+  }
+
+  function reset(){
+    maze = baseMaze.map(function(r){ return r.slice(); });
+    player = { x: 1, y: 1 };
+    score = 0; lives = 3; pings = 30; gemsCollected = 0; totalGems = 8;
+    playing = true; over = false; revealUntil = 0; pingWaves = []; particles = [];
+    statusEl.textContent = 'Exploring';
+    msgEl.textContent = 'Ping to reveal the cave! Collect 8 gems, then reach the EXIT.';
+    endScreen.classList.add('hidden');
+    updateHUD();
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = score;
+    livesEl.textContent = '❤️'.repeat(Math.max(0, lives)) || '💀';
+    pingsEl.textContent = pings;
+    gemsEl.textContent = gemsCollected + ' / ' + totalGems;
+  }
+
+  function tryMove(dx, dy){
+    if (!playing || over) return;
+    const nx = player.x + dx, ny = player.y + dy;
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return;
+    const t = maze[ny][nx];
+    if (t === 1) { beep(90, 0.12, 'square', 0.08); msgEl.textContent = 'Bonk! A wall blocks the way.'; return; }
+    player.x = nx; player.y = ny;
+    beep(320, 0.06, 'triangle', 0.06);
+    if (t === 4) {
+      maze[ny][nx] = 0; gemsCollected++; score += 100;
+      beep(880, 0.18, 'sine', 0.18); setTimeout(function(){ beep(1320, 0.2, 'sine', 0.15); }, 90);
+      msgEl.textContent = 'Gem found! ' + gemsCollected + ' of 8 collected.';
+      burst(nx, ny, '#facc15');
+    } else if (t === 2 || t === 3) {
+      lives--; maze[ny][nx] = 0; shake = 10;
+      beep(140, 0.4, 'sawtooth', 0.2);
+      msgEl.textContent = (t === 2 ? 'You fell into a pit!' : 'Cave-in!') + ' A life is lost.';
+      player.x = 1; player.y = 1;
+      if (lives <= 0) return gameOver(false);
+    } else if (t === 5) {
+      if (gemsCollected >= totalGems) return gameOver(true);
+      msgEl.textContent = 'The exit is sealed — collect all 8 gems first!';
+      beep(200, 0.2, 'square', 0.12);
+    }
+    updateHUD();
+  }
+
+  function burst(gx, gy, color){
+    for (let i = 0; i < 18; i++) particles.push({ x: gx * TILE + 20, y: gy * TILE + 20, vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, life: 30, color: color });
+  }
+
+  function doPing(){
+    if (!playing || over) return;
+    if (pings <= 0) { msgEl.textContent = 'No pings left! Use your memory and the small glow.'; beep(160, 0.25, 'square', 0.12); return; }
+    pings--; revealUntil = performance.now() + 4200;
+    pingWaves.push({ x: player.x * TILE + 20, y: player.y * TILE + 20, r: 10 });
+    pingSound();
+    msgEl.textContent = 'Sonar ping! The cave is revealed for a few seconds.';
+    updateHUD();
+  }
+
+  function gameOver(won){
+    over = true; playing = false;
+    statusEl.textContent = won ? 'Victory!' : 'Game Over';
+    if (won) {
+      score += 500 + lives * 100 + pings * 10;
+      endTitle.textContent = '🏆 You Win!';
+      endText.textContent = 'You escaped the Echo Cave with all 8 gems! Final score: ' + score + '. Lives left: ' + lives + ', pings left: ' + pings + '.';
+      beep(523, 0.2, 'sine', 0.18); setTimeout(function(){ beep(659, 0.2, 'sine', 0.18); }, 150); setTimeout(function(){ beep(784, 0.35, 'sine', 0.18); }, 300);
+    } else {
+      endTitle.textContent = '💀 Game Over';
+      endText.textContent = 'The cave claimed you. You collected ' + gemsCollected + ' of 8 gems and scored ' + score + '. Try again — the cave awaits!';
+    }
+    updateHUD();
+    endScreen.classList.remove('hidden');
+  }
+
+  function startGame(){
+    initAudio();
+    reset();
+    titleScreen.classList.add('hidden');
+    beep(440, 0.15, 'sine', 0.15);
+  }
+
+  function draw(){
+    ctx.save();
+    if (shake > 0) { ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); shake *= 0.9; }
+    ctx.fillStyle = '#020617'; ctx.fillRect(-20, -20, canvas.width + 40, canvas.height + 40);
+    const now = performance.now();
+    const revealed = now < revealUntil;
+    const px = player.x * TILE + 20, py = player.y * TILE + 20;
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const cx = x * TILE, cy = y * TILE;
+        const dist = Math.hypot(x - player.x, y - player.y);
+        const near = dist <= 1.6;
+        const visible = revealed || near;
+        if (!visible) continue;
+        const t = maze[y][x];
+        const alpha = revealed ? Math.max(0.35, 1 - (now - (revealUntil - 4200)) / 4200) : 1;
+        ctx.globalAlpha = near ? 1 : alpha;
+        if (t === 1) { ctx.fillStyle = '#475569'; ctx.fillRect(cx + 1, cy + 1, TILE - 2, TILE - 2); ctx.fillStyle = '#64748b'; ctx.fillRect(cx + 5, cy + 5, TILE - 10, 6); }
+        else if (t === 2) { ctx.fillStyle = '#7f1d1d'; ctx.beginPath(); ctx.ellipse(cx + 20, cy + 20, 17, 13, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = '18px Arial'; ctx.textAlign = 'center'; ctx.fillText('🕳️', cx + 20, cy + 27); }
+        else if (t === 3) { ctx.fillStyle = '#78350f'; ctx.fillRect(cx + 4, cy + 8, TILE - 8, TILE - 16); ctx.fillStyle = '#fff'; ctx.font = '18px Arial'; ctx.textAlign = 'center'; ctx.fillText('🪨', cx + 20, cy + 27); }
+        else if (t === 4) { ctx.fillStyle = '#fef08a'; ctx.beginPath(); ctx.arc(cx + 20, cy + 20, 11, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = '16px Arial'; ctx.textAlign = 'center'; ctx.fillText('💎', cx + 20, cy + 26); }
+        else if (t === 5) { ctx.fillStyle = '#facc15'; ctx.fillRect(cx + 2, cy + 2, TILE - 4, TILE - 4); ctx.fillStyle = '#111827'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText('EXIT', cx + 20, cy + 24); }
+        else { ctx.fillStyle = '#1e293b'; ctx.fillRect(cx + 1, cy + 1, TILE - 2, TILE - 2); }
+        ctx.globalAlpha = 1;
+      }
+    }
+    // Player glow + sprite
+    const glow = ctx.createRadialGradient(px, py, 5, px, py, 90);
+    glow.addColorStop(0, 'rgba(125,211,252,0.55)'); glow.addColorStop(1, 'rgba(125,211,252,0)');
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(px, py, 90, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fde68a'; ctx.beginPath(); ctx.arc(px, py, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#111827'; ctx.font = '18px Arial'; ctx.textAlign = 'center'; ctx.fillText('🦇', px, py + 6);
+    // Ping waves
+    pingWaves = pingWaves.filter(function(w){ w.r += 7; return w.r < 340; });
+    pingWaves.forEach(function(w){
+      ctx.strokeStyle = 'rgba(56,189,248,' + Math.max(0, 0.8 - w.r / 340) + ')';
+      ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(w.x, w.y, w.r, 0, Math.PI * 2); ctx.stroke();
+    });
+    // Particles
+    particles = particles.filter(function(p){ return p.life > 0; });
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 4, 4); });
+    if (!revealed) {
+      ctx.fillStyle = 'rgba(2,6,23,0.15)'; ctx.font = '13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Darkness hides the cave — press SPACE or Ping to reveal it.', canvas.width / 2, 18);
+    }
+    ctx.restore();
+  }
+
+  function loop(){ draw(); requestAnimationFrame(loop); }
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { e.preventDefault(); tryMove(0, -1); }
+    else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { e.preventDefault(); tryMove(0, 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { e.preventDefault(); tryMove(-1, 0); }
+    else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { e.preventDefault(); tryMove(1, 0); }
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!playing && !titleScreen.classList.contains('hidden')) startGame(); else doPing(); }
+  });
+  document.addEventListener('mousedown', function(e){
+    if (e.target && (e.target.tagName === 'BUTTON')) return;
+    initAudio(); doPing();
+  });
+  canvas.addEventListener('click', function(){ initAudio(); doPing(); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); initAudio(); doPing(); }, { passive: false });
+  document.addEventListener('touchstart', function(){ initAudio(); }, { passive: true });
+  document.addEventListener('mousemove', function(){ /* mouse presence keeps HUD responsive; movement uses buttons and clicks */ });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', function(){ initAudio(); reset(); });
+  document.getElementById('pingBtn').addEventListener('click', function(){ initAudio(); doPing(); });
+  document.getElementById('upBtn').addEventListener('click', function(){ initAudio(); tryMove(0, -1); });
+  document.getElementById('downBtn').addEventListener('click', function(){ initAudio(); tryMove(0, 1); });
+  document.getElementById('leftBtn').addEventListener('click', function(){ initAudio(); tryMove(-1, 0); });
+  document.getElementById('rightBtn').addEventListener('click', function(){ initAudio(); tryMove(1, 0); });
+
+  reset(); playing = false; statusEl.textContent = 'Ready';
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

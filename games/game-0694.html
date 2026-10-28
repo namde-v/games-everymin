@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tide Pool Crab Catcher</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #062a3a;
+    color: #fff;
+    font-family: "Trebuchet MS", Verdana, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 12px;
+    -webkit-user-select: none; user-select: none;
+    touch-action: none;
+  }
+  h1 { font-size: 30px; color: #ffd166; text-shadow: 2px 2px 0 #003049; margin-bottom: 6px; text-align: center; }
+  #wrap { position: relative; width: min(860px, 96vw); }
+  canvas {
+    display: block; width: 100%; height: auto; aspect-ratio: 860 / 520;
+    background: linear-gradient(#7ed6e8, #2fa8c9 45%, #1b7f9e);
+    border: 4px solid #ffd166; border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  #hud {
+    display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+    background: #003049; border-radius: 10px; padding: 8px 12px; margin-bottom: 8px;
+    font-weight: bold; font-size: 16px;
+  }
+  #hud span { color: #ffd166; }
+  #hud .lives { color: #ff6b6b; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(0, 48, 73, 0.88); border-radius: 12px; padding: 20px; gap: 10px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; font-size: 16px; }
+  .overlay .howto { background: rgba(255,255,255,0.12); border-radius: 10px; padding: 12px 16px; text-align: left; }
+  .overlay .howto b { color: #ffd166; }
+  button {
+    background: #ffd166; color: #003049; border: none; border-radius: 999px;
+    padding: 14px 34px; font-size: 20px; font-weight: bold; cursor: pointer;
+    box-shadow: 0 4px 0 #c98f1b; margin-top: 6px;
+  }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #c98f1b; }
+  button.secondary { background: #7ed6e8; box-shadow: 0 4px 0 #1b7f9e; }
+  #hint { margin-top: 8px; color: #cdeef7; font-size: 14px; text-align: center; }
+  #swingBtn {
+    width: 100%; margin-top: 10px; background: #ef476f; color: #fff;
+    box-shadow: 0 4px 0 #a52a4a; font-size: 18px; padding: 12px;
+  }
+  #comboPop { color: #ffd166; font-size: 20px; min-height: 26px; }
+</style>
+</head>
+<body>
+<h1>🦀 Tide Pool Crab Catcher 🪼</h1>
+<div id="wrap">
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Caught: <span id="caught">0</span> / 15</div>
+    <div>Combo: <span id="combo">x1</span></div>
+    <div>Time: <span id="time">90</span>s</div>
+    <div>Lives: <span class="lives" id="lives">❤️❤️❤️</span></div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <canvas id="game" width="860" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>🦀 Tide Pool Crab Catcher</h2>
+    <p>Crabs are scuttling across the tide pools! Time your swinging net perfectly to scoop them up — but watch out for jellyfish.</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      • Move the net: <b>Mouse</b>, <b>Touch drag</b>, or <b>← → / A D keys</b><br>
+      • Swing the net: <b>SPACE</b>, <b>Click</b>, <b>Tap</b>, or the big SWING button<br>
+      • Catch a crab: <b>+10 points</b> (combo multiplies consecutive catches!)<br>
+      • Catch a jellyfish or miss badly: <b>lose a life</b> and break your combo<br>
+      • <b>WIN</b> by catching <b>15 crabs</b> before the 90-second timer runs out<br>
+      • Lose all 3 lives, or run out of time short of the goal, and it is Game Over
+    </div>
+    <button id="startBtn">▶ Start Catching!</button>
+    <p>Tip: wait until the crab is right under the swinging net, then strike!</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <div id="comboPop"></div>
+    <button id="restartBtn">↻ Play Again</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+<p id="hint">← → move &nbsp;|&nbsp; SPACE / Click / Tap to swing the net &nbsp;|&nbsp; Goal: 15 crabs in 90 seconds</p>
+<button id="swingBtn">🕸️ SWING NET</button>
+
+<script>
+(function () {
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var W = canvas.width, H = canvas.height;
+
+  var scoreEl = document.getElementById("score");
+  var caughtEl = document.getElementById("caught");
+  var comboEl = document.getElementById("combo");
+  var timeEl = document.getElementById("time");
+  var livesEl = document.getElementById("lives");
+  var statusEl = document.getElementById("status");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+  var comboPop = document.getElementById("comboPop");
+
+  // ---------- Audio (procedural, starts only after user interaction) ----------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === "suspended") { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || "sine";
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.18, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function sfxCatch(combo) { tone(520 + combo * 60, 0.18, "triangle", 0.22, 880 + combo * 60); setTimeout(function(){ tone(880 + combo * 60, 0.14, "sine", 0.15, 1200); }, 70); }
+  function sfxSting() { tone(180, 0.35, "sawtooth", 0.2, 90); }
+  function sfxSwing() { tone(300, 0.16, "sine", 0.12, 620); }
+  function sfxWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, "triangle", 0.22); }, i * 130); }); }
+  function sfxLose() { [392, 330, 262, 196].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, "sawtooth", 0.16); }, i * 140); }); }
+
+  // ---------- Game state ----------
+  var state = "title"; // title | playing | over
+  var score, caught, combo, comboCount, lives, timeLeft, lastTime, spawnTimer, swingTimer;
+  var net = { x: W / 2, angle: 0, swinging: false, swingT: 0, dir: 1 };
+  var crabs = [], jellies = [], particles = [], floats = [];
+  var keys = {};
+  var GOAL = 15, ROUND_TIME = 90;
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function spawnCrab() {
+    var fromLeft = Math.random() < 0.5;
+    var laneY = pick([300, 360, 425, 470]);
+    crabs.push({
+      x: fromLeft ? -40 : W + 40,
+      y: laneY,
+      dir: fromLeft ? 1 : -1,
+      speed: rand(55, 130) * (1 + caught * 0.03),
+      size: rand(20, 30),
+      legPhase: Math.random() * 6.28,
+      color: pick(["#ef476f", "#ff7b54", "#f78c6b", "#e63946"]),
+      wiggle: rand(0, 6.28)
+    });
+  }
+  function spawnJelly() {
+    jellies.push({
+      x: rand(60, W - 60), y: -30,
+      vy: rand(25, 55), vx: rand(-20, 20),
+      size: rand(18, 28), phase: Math.random() * 6.28, drift: rand(0.5, 1.5)
+    });
+  }
+
+  function resetGame() {
+    score = 0; caught = 0; combo = 1; comboCount = 0; lives = 3;
+    timeLeft = ROUND_TIME; spawnTimer = 0; swingTimer = 0;
+    crabs = []; jellies = []; particles = []; floats = [];
+    net.x = W / 2; net.swinging = false; net.swingT = 0;
+    for (var i = 0; i < 4; i++) spawnCrab();
+    updateHUD("Catching!");
+  }
+  function updateHUD(status) {
+    scoreEl.textContent = score;
+    caughtEl.textContent = caught;
+    comboEl.textContent = "x" + combo;
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+    livesEl.textContent = "❤️".repeat(Math.max(0, lives)) + "🤍".repeat(Math.max(0, 3 - lives));
+    if (status) statusEl.textContent = status;
+  }
+
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) {
+      particles.push({ x: x, y: y, vx: rand(-160, 160), vy: rand(-220, -20), life: rand(0.4, 0.9), max: 0.9, color: color, size: rand(3, 8) });
+    }
+  }
+  function floatText(x, y, text, color) {
+    floats.push({ x: x, y: y, text: text, color: color, life: 1.1 });
+  }
+
+  function swingNet() {
+    if (state !== "playing" || net.swinging) return;
+    ensureAudio();
+    net.swinging = true; net.swingT = 0; sfxSwing();
+    // Resolve the catch at the peak of the swing, a beat later, for timing feel.
+    setTimeout(function () {
+      if (state !== "playing") return;
+      var nx = net.x, ny = 250;
+      var hitCrab = -1, hitJelly = -1, best = 1e9;
+      for (var i = 0; i < crabs.length; i++) {
+        var d = Math.hypot(crabs[i].x - nx, crabs[i].y - ny);
+        if (d < best) { best = d; hitCrab = i; }
+      }
+      var bestJ = 1e9;
+      for (var j = 0; j < jellies.length; j++) {
+        var dj = Math.hypot(jellies[j].x - nx, jellies[j].y - ny);
+        if (dj < bestJ) { bestJ = dj; hitJelly = j; }
+      }
+      if (hitJelly >= 0 && bestJ < 95 && bestJ <= best + 30) {
+        var jel = jellies.splice(hitJelly, 1)[0];
+        burst(jel.x, jel.y, "#b388ff", 18);
+        floatText(jel.x, jel.y - 20, "OUCH! Jellyfish!", "#ff6b6b");
+        combo = 1; comboCount = 0; lives--;
+        sfxSting(); updateHUD("Stung!");
+        if (lives <= 0) endGame(false, "The jellyfish got you! You ran out of lives.");
+      } else if (hitCrab >= 0 && best < 110) {
+        var c = crabs.splice(hitCrab, 1)[0];
+        var pts = 10 * combo;
+        score += pts; caught++; comboCount++;
+        if (comboCount >= 3) { combo = Math.min(5, combo + 1); comboCount = 0; }
+        burst(c.x, c.y, "#ffd166", 16);
+        floatText(c.x, c.y - 30, "+" + pts + (combo > 1 ? " COMBO x" + combo : ""), "#ffd166");
+        sfxCatch(combo); updateHUD("Nice catch!");
+        if (caught >= GOAL) endGame(true, "You caught all " + GOAL + " crabs with " + Math.ceil(timeLeft) + " seconds to spare!");
+      } else {
+        combo = 1; comboCount = 0;
+        floatText(nx, 210, "Miss! Time it better!", "#ffffff");
+        updateHUD("Missed...");
+      }
+    }, 160);
+  }
+
+  function endGame(won, reason) {
+    state = "over";
+    endTitle.textContent = won ? "🏆 YOU WIN!" : "💦 Game Over";
+    endText.textContent = reason + " Final score: " + score + " | Crabs caught: " + caught + " / " + GOAL + ".";
+    comboPop.textContent = won ? "Crab-tastic timing! The tide pool celebrates you!" : "The crabs scuttle away... try again!";
+    endScreen.classList.remove("hidden");
+    statusEl.textContent = won ? "You Win!" : "Game Over";
+    if (won) sfxWin(); else sfxLose();
+  }
+
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Drawing ----------
+  function drawBackground(t) {
+    ctx.fillStyle = "#2fa8c9";
+    ctx.fillRect(0, 0, W, H);
+    // Sand at the bottom
+    ctx.fillStyle = "#f4d58d";
+    ctx.beginPath(); ctx.ellipse(W / 2, H + 40, W * 0.7, 110, 0, Math.PI, 2 * Math.PI); ctx.fill();
+    // Tide pools
+    var pools = [[140, 330, 150, 34], [430, 390, 170, 38], [700, 330, 150, 34], [290, 465, 180, 36], [600, 470, 170, 36]];
+    pools.forEach(function (p) {
+      ctx.fillStyle = "rgba(255,255,255,0.28)";
+      ctx.beginPath(); ctx.ellipse(p[0], p[1], p[2], p[3], 0, 0, 2 * Math.PI); ctx.fill();
+      ctx.fillStyle = "rgba(6,60,90,0.25)";
+      ctx.beginPath(); ctx.ellipse(p[0], p[1] + 6, p[2] * 0.82, p[3] * 0.7, 0, 0, 2 * Math.PI); ctx.fill();
+    });
+    // Bubbles
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    for (var i = 0; i < 12; i++) {
+      var bx = (i * 73 + 30) % W, by = (t * 0.03 + i * 47) % H;
+      ctx.beginPath(); ctx.arc(bx, H - by, 3 + (i % 3), 0, 2 * Math.PI); ctx.fill();
+    }
+    // Sun
+    ctx.fillStyle = "#ffe066";
+    ctx.beginPath(); ctx.arc(770, 60, 34, 0, 2 * Math.PI); ctx.fill();
+  }
+
+  function drawCrab(c, t) {
+    ctx.save(); ctx.translate(c.x, c.y + Math.sin(t * 0.01 + c.wiggle) * 2);
+    ctx.scale(c.dir, 1);
+    ctx.fillStyle = c.color;
+    ctx.beginPath(); ctx.ellipse(0, 0, c.size, c.size * 0.62, 0, 0, 2 * Math.PI); ctx.fill();
+    // Claws
+    ctx.beginPath(); ctx.arc(c.size * 0.95, -c.size * 0.45, c.size * 0.42, 0, 2 * Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(-c.size * 0.95, -c.size * 0.45, c.size * 0.42, 0, 2 * Math.PI); ctx.fill();
+    // Legs wiggling
+    ctx.strokeStyle = c.color; ctx.lineWidth = 3;
+    for (var i = -1; i <= 1; i++) {
+      var ph = Math.sin(t * 0.03 + c.legPhase + i) * 5;
+      ctx.beginPath(); ctx.moveTo(i * c.size * 0.5, c.size * 0.4); ctx.lineTo(i * c.size * 0.6 + ph, c.size * 0.95); ctx.stroke();
+    }
+    // Eyes
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(c.size * 0.3, -c.size * 0.55, 5, 0, 2 * Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(-c.size * 0.3, -c.size * 0.55, 5, 0, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = "#111";
+    ctx.beginPath(); ctx.arc(c.size * 0.3, -c.size * 0.55, 2.5, 0, 2 * Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(-c.size * 0.3, -c.size * 0.55, 2.5, 0, 2 * Math.PI); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawJelly(j, t) {
+    var wob = Math.sin(t * 0.008 + j.phase) * 6;
+    ctx.save(); ctx.translate(j.x + wob, j.y);
+    ctx.fillStyle = "rgba(179,136,255,0.9)";
+    ctx.beginPath(); ctx.arc(0, 0, j.size, Math.PI, 0); ctx.fill();
+    ctx.strokeStyle = "rgba(179,136,255,0.8)"; ctx.lineWidth = 2;
+    for (var i = -2; i <= 2; i++) {
+      ctx.beginPath(); ctx.moveTo(i * j.size * 0.32, j.size * 0.1);
+      ctx.quadraticCurveTo(i * j.size * 0.32 + wob * 0.4, j.size * 0.9, i * j.size * 0.32, j.size * 1.5 + Math.sin(t * 0.01 + i) * 6);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(-j.size * 0.3, -j.size * 0.35, 3, 0, 2 * Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(j.size * 0.3, -j.size * 0.35, 3, 0, 2 * Math.PI); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawNet(t) {
+    // Rope from the top, swinging pendulum
+    var pivotX = net.x, pivotY = 0;
+    var swing = net.swinging ? Math.sin(net.swingT * 0.045) * 0.5 : Math.sin(t * 0.002) * 0.22;
+    var len = 210;
+    var nx = pivotX + Math.sin(swing) * len;
+    var ny = pivotY + Math.cos(swing) * len;
+    ctx.strokeStyle = "#8d6e63"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(pivotX, pivotY); ctx.lineTo(nx, ny); ctx.stroke();
+    // Net hoop + mesh
+    ctx.save(); ctx.translate(nx, ny); ctx.rotate(swing);
+    ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.ellipse(0, 28, 52, 26, 0, 0, 2 * Math.PI); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.beginPath(); ctx.ellipse(0, 28, 48, 22, 0, 0, 2 * Math.PI); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 1;
+    for (var i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * 18, 8); ctx.lineTo(i * 18, 48); ctx.stroke(); }
+    ctx.restore();
+    // Aim guide
+    ctx.strokeStyle = "rgba(255,209,102,0.45)"; ctx.setLineDash([6, 8]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(nx, ny + 50); ctx.lineTo(nx, H - 40); ctx.stroke();
+    ctx.setLineDash([]);
+    net.renderX = nx; net.renderY = ny + 28;
+  }
+
+  function draw() {
+    var t = performance.now();
+    drawBackground(t);
+    crabs.forEach(function (c) { drawCrab(c, t); });
+    jellies.forEach(function (j) { drawJelly(j, t); });
+    drawNet(t);
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 2 * Math.PI); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    floats.forEach(function (f) {
+      ctx.globalAlpha = Math.max(0, f.life / 1.1);
+      ctx.fillStyle = f.color; ctx.font = "bold 20px Verdana"; ctx.textAlign = "center";
+      ctx.fillText(f.text, f.x, f.y);
+      ctx.globalAlpha = 1;
+    });
+    if (state === "playing") {
+      ctx.fillStyle = "#003049"; ctx.font = "bold 18px Verdana"; ctx.textAlign = "center";
+      ctx.fillText("Catch " + (GOAL - caught) + " more crab" + ((GOAL - caught) === 1 ? "" : "s") + "!", W / 2, 28);
+    }
+  }
+
+  // ---------- Update / loop ----------
+  function update(dt) {
+    timeLeft -= dt;
+    if (timeLeft <= 0) {
+      timeLeft = 0; updateHUD();
+      endGame(false, "Time ran out with " + caught + " of " + GOAL + " crabs caught.");
+      return;
+    }
+    if (keys.ArrowLeft || keys.a || keys.A) net.x -= 420 * dt;
+    if (keys.ArrowRight || keys.d || keys.D) net.x += 420 * dt;
+    net.x = Math.max(60, Math.min(W - 60, net.x));
+
+    if (net.swinging) {
+      net.swingT += dt * 1000;
+      if (net.swingT > 320) { net.swinging = false; net.swingT = 0; }
+    }
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) { spawnCrab(); spawnTimer = rand(0.7, 1.6); if (Math.random() < 0.4) spawnJelly(); }
+    crabs.forEach(function (c) { c.x += c.dir * c.speed * dt; c.legPhase += dt * 12; });
+    crabs = crabs.filter(function (c) { return c.x > -60 && c.x < W + 60; });
+    jellies.forEach(function (j) { j.y += j.vy * dt; j.x += Math.sin(performance.now() * 0.001 * j.drift + j.phase) * 0.6; });
+    jellies = jellies.filter(function (j) { return j.y < H + 50; });
+    particles.forEach(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    floats.forEach(function (f) { f.y -= 30 * dt; f.life -= dt; });
+    floats = floats.filter(function (f) { return f.life > 0; });
+    updateHUD();
+  }
+
+  function loop(now) {
+    if (state !== "playing") { draw(); return; }
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Input: keyboard, mouse, touch ----------
+  document.addEventListener("keydown", function (e) {
+    keys[e.key] = true;
+    if ((e.key === " " || e.key === "Spacebar") && state === "playing") { e.preventDefault(); swingNet(); }
+    if (e.key === "Enter" && state === "title") startGame();
+    if (e.key === "Enter" && state === "over") startGame();
+  });
+  document.addEventListener("keyup", function (e) { keys[e.key] = false; });
+
+  function canvasXFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    return (clientX - rect.left) * (W / rect.width);
+  }
+  canvas.addEventListener("mousemove", function (e) { if (state === "playing") net.x = canvasXFromEvent(e); });
+  canvas.addEventListener("mousedown", function (e) { ensureAudio(); if (state === "playing") { net.x = canvasXFromEvent(e); swingNet(); } });
+  canvas.addEventListener("click", function (e) { ensureAudio(); });
+  canvas.addEventListener("touchstart", function (e) {
+    ensureAudio();
+    if (state !== "playing") return;
+    e.preventDefault();
+    net.touchStartX = canvasXFromEvent(e); net.touchMoved = false;
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function (e) {
+    if (state !== "playing") return;
+    e.preventDefault();
+    var x = canvasXFromEvent(e);
+    if (Math.abs(x - (net.touchStartX || x)) > 12) net.touchMoved = true;
+    net.x = x;
+  }, { passive: false });
+  canvas.addEventListener("touchend", function (e) {
+    if (state !== "playing") return;
+    e.preventDefault();
+    if (!net.touchMoved) swingNet();
+  }, { passive: false });
+
+  document.getElementById("startBtn").addEventListener("click", function () { startGame(); });
+  document.getElementById("restartBtn").addEventListener("click", function () { startGame(); });
+  document.getElementById("menuBtn").addEventListener("click", function () {
+    state = "title"; endScreen.classList.add("hidden"); titleScreen.classList.remove("hidden"); draw();
+  });
+  document.getElementById("swingBtn").addEventListener("click", function () { ensureAudio(); swingNet(); });
+  document.getElementById("swingBtn").addEventListener("touchstart", function (e) { e.preventDefault(); ensureAudio(); swingNet(); }, { passive: false });
+
+  // Initial idle scene behind the title screen
+  resetGame(); state = "title"; updateHUD("Ready");
+  for (var k = 0; k < 3; k++) spawnJelly();
+  draw();
+})();
+</script>
+</body>
+</html>

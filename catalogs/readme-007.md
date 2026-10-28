@@ -94,3 +94,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0688 | Airport Runway Controller | Strategy / Air Traffic Routing | Mouse/touch assign runways, Keys 1-3/H assign | [Play](./../games/game-0688.html) |
 | 0689 | Neon Beat Boxer | Rhythm / Beat Punch Timing | Keys D/F/J/K punch lanes, mouse/touch tap lanes | [Play](./../games/game-0689.html) |
 | 0690 | Coral Reef Turtle Race | Arcade / Underwater Racing | Arrow Keys/WASD steer, mouse/touch drag | [Play](./../games/game-0690.html) |
+| 0691 | Volcano Lava Runner | Arcade / Lava Dodging Runner | Arrow Keys/WASD jump/slide, mouse/touch tap | [Play](./../games/game-0691.html) |
+| 0692 | Starlight Constellation Connect | Puzzle / Constellation Drawing Logic | Mouse/touch click stars, Arrow Keys select, Enter confirm | [Play](./../games/game-0692.html) |
+| 0693 | Desert Oasis Trader | Strategy / Caravan Trading Simulation | Mouse/touch select oases, Keys 1-5 travel, B buy, S sell | [Play](./../games/game-0693.html) |
+| 0694 | Tide Pool Crab Catcher | Precision / Timing Net Catch | Mouse/touch drag net, Arrow Keys move, Space swing | [Play](./../games/game-0694.html) |
+| 0695 | Windmill Power Grid | Strategy / Energy Routing Puzzle | Mouse/touch rotate windmills, Arrow Keys select, Space/Enter rotate | [Play](./../games/game-0695.html) |
+| 0696 | Echo Cave Explorer | Puzzle / Sound Echo Maze | Arrow Keys/WASD move, Space ping, mouse/touch tap | [Play](./../games/game-0696.html) |
+| 0697 | Snowy Yeti Snowball Toss | Precision / Snowball Aim Toss | Mouse/touch drag aim, Arrow Keys aim, Space release | [Play](./../games/game-0697.html) |
+| 0698 | Clock Tower Bell Ringer | Rhythm / Bell Timing Sequence | Keys D/F/J/K ring bells, mouse/touch tap lanes | [Play](./../games/game-0698.html) |
+| 0699 | Mushroom Forest Forager | Arcade / Foraging Collection Avoidance | Arrow Keys/WASD move, mouse/touch drag | [Play](./../games/game-0699.html) |
+| 0700 | Sky Lantern Festival | Arcade / Lantern Release Flight | Arrow Keys/WASD steer, Space launch, mouse/touch drag | [Play](./../games/game-0700.html) |
