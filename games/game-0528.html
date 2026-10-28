@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Taproot Tango</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #14102a; color: #fff; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 2rem; margin: 8px 0 2px; letter-spacing: 2px; text-align: center; }
+  h1 span { color: #ff5da2; }
+  .tagline { color: #b9b3e8; font-size: .9rem; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 520px; margin-bottom: 8px; }
+  .stat { background: #241d4d; border: 1px solid #4a3f8f; border-radius: 10px; padding: 6px 12px; font-size: .95rem; min-width: 92px; text-align: center; }
+  .stat b { display: block; font-size: 1.15rem; color: #ffd166; }
+  #combo { color: #ff5da2; font-weight: bold; }
+  #stage { position: relative; width: 100%; max-width: 520px; }
+  canvas { display: block; width: 100%; height: 460px; background: linear-gradient(#1e1747, #0f0b26); border: 2px solid #6c5ce7; border-radius: 14px; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10,8,30,.88); border-radius: 14px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 1.8rem; margin-bottom: 10px; }
+  .overlay p { color: #d8d2f5; line-height: 1.55; max-width: 420px; margin: 6px 0; }
+  .keys { font-size: 1.6rem; letter-spacing: 6px; margin: 10px 0; }
+  button { background: #ff5da2; color: #fff; border: none; border-radius: 999px; padding: 13px 30px; font-size: 1.1rem; font-weight: bold; cursor: pointer; margin-top: 14px; }
+  button:hover { background: #ff7db4; }
+  button.secondary { background: #6c5ce7; }
+  #judge { text-align: center; height: 30px; font-size: 1.35rem; font-weight: bold; margin: 6px 0 2px; }
+  #pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; width: 100%; max-width: 520px; margin-top: 6px; }
+  .pad { background: #241d4d; border: 2px solid #6c5ce7; border-radius: 14px; height: 72px; font-size: 2rem; color: #fff; cursor: pointer; touch-action: manipulation; user-select: none; }
+  .pad:active, .pad.hit { background: #ff5da2; border-color: #ffd166; transform: scale(.95); }
+  .pad.wrong { background: #e74c3c; }
+  #progressWrap { width: 100%; max-width: 520px; height: 10px; background: #241d4d; border-radius: 99px; margin-top: 8px; overflow: hidden; }
+  #progressBar { height: 100%; width: 0%; background: linear-gradient(90deg, #ff5da2, #ffd166); transition: width .2s; }
+  #status { color: #b9b3e8; font-size: .85rem; margin-top: 6px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>TAPROOT <span>TANGO</span></h1>
+<p class="tagline">Step on the arrows in time to the beat. Keep the combo alive!</p>
+
+<div id="hud">
+  <div class="stat">Score<b id="score">0</b></div>
+  <div class="stat">Combo<b id="combo">x0</b></div>
+  <div class="stat">Lives<b id="lives">♥♥♥</b></div>
+  <div class="stat">Steps<b id="steps">0 / 60</b></div>
+</div>
+
+<div id="stage">
+  <canvas id="game" width="520" height="460"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>🕺 Taproot Tango 💃</h2>
+    <p><strong>How to Play:</strong> Dance arrows scroll down four lanes toward the glowing target zone. Hit the matching arrow exactly when it lands in the zone.</p>
+    <p class="keys">◀ ▲ ▼ ▶</p>
+    <p>Use Arrow Keys / WASD, click the on-screen pads, or tap them on touch screens. Perfect steps score 300, Good steps 100, misses break your combo and cost a life.</p>
+    <p>Finish all 60 steps with at least one life left to win the dance!</p>
+    <button id="startBtn">▶ Start Dancing</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn">↻ Dance Again</button>
+  </div>
+</div>
+
+<div id="judge">&nbsp;</div>
+<div id="progressWrap"><div id="progressBar"></div></div>
+<div id="pads">
+  <button class="pad" data-dir="0" aria-label="Left">◀</button>
+  <button class="pad" data-dir="1" aria-label="Up">▲</button>
+  <button class="pad" data-dir="2" aria-label="Down">▼</button>
+  <button class="pad" data-dir="3" aria-label="Right">▶</button>
+</div>
+<p id="status">Tip: Perfect timing is within a blink of the beat — listen for the metronome tick!</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var livesEl = document.getElementById('lives');
+  var stepsEl = document.getElementById('steps');
+  var judgeEl = document.getElementById('judge');
+  var barEl = document.getElementById('progressBar');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endStats = document.getElementById('endStats');
+  var pads = Array.prototype.slice.call(document.querySelectorAll('.pad'));
+
+  var DIRS = ['◀', '▲', '▼', '▶'];
+  var COLORS = ['#ff5da2', '#ffd166', '#2ee6a8', '#4cc9f0'];
+  var TOTAL = 60, BPM = 116, BEAT = 60000 / BPM, SPEED = 0.34; // px per ms
+  var TARGET_Y = 380, LANES = [70, 195, 320, 445];
+  var audioCtx = null, running = false, lastTime = 0, spawnTimer = 0, spawnIndex = 0;
+  var notes = [], score = 0, combo = 0, bestCombo = 0, lives = 3, done = 0, perfect = 0, good = 0, missed = 0;
+  var flash = 0, flashColor = '#fff', beatPulse = 0;
+
+  // Choreography: hand-written-feeling pattern, no long repeats, runs in phrases.
+  var PHRASES = [
+    [0,1,2,3,2,1,0,3], [3,3,1,1,2,0,2,3], [0,2,0,2,1,3,1,3],
+    [1,0,3,2,0,1,3,2], [2,2,1,0,3,1,0,2], [3,1,0,2,3,2,1,0],
+    [0,3,1,2,0,2,3,1], [1,2,3,0,1,3,2,0]
+  ];
+  var choreo = [];
+  PHRASES.forEach(function (p) { p.forEach(function (d) { choreo.push(d); }); });
+  while (choreo.length < TOTAL) choreo.push(Math.floor(Math.random() * 4));
+
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function tick() { tone(880, 0.08, 'square', 0.06); }
+  function hitSound(ok) { if (ok) { tone(660, 0.12, 'triangle', 0.2); tone(990, 0.1, 'sine', 0.12); } else { tone(140, 0.22, 'sawtooth', 0.14); } }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    comboEl.textContent = 'x' + combo;
+    livesEl.textContent = '♥'.repeat(Math.max(lives, 0)) + '♡'.repeat(Math.max(3 - lives, 0));
+    stepsEl.textContent = done + ' / ' + TOTAL;
+    barEl.style.width = (done / TOTAL * 100) + '%';
+  }
+  function showJudge(text, color) { judgeEl.textContent = text; judgeEl.style.color = color; }
+
+  function reset() {
+    notes = []; score = 0; combo = 0; bestCombo = 0; lives = 3; done = 0;
+    perfect = 0; good = 0; missed = 0; spawnTimer = 0; spawnIndex = 0; flash = 0;
+    updateHUD(); showJudge('Get ready…', '#ffd166');
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    running = true;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(won) {
+    running = false;
+    endTitle.textContent = won ? '🏆 You Win! Encore!' : '💔 Game Over';
+    endText.textContent = won
+      ? 'The crowd goes wild! You danced every step of the Taproot Tango.'
+      : 'The music stopped early. The dance floor awaits your comeback!';
+    endStats.textContent = 'Final Score: ' + score + '  •  Best Combo: x' + bestCombo +
+      '  •  Perfect: ' + perfect + '  •  Good: ' + good + '  •  Missed: ' + missed;
+    endScreen.classList.remove('hidden');
+    if (won) { tone(523, 0.2, 'triangle', 0.2); setTimeout(function(){ tone(659, 0.2, 'triangle', 0.2); }, 180); setTimeout(function(){ tone(784, 0.35, 'triangle', 0.2); }, 360); }
+  }
+
+  function registerHit(dir) {
+    if (!running) return;
+    var best = null, bestDist = 1e9;
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].dir === dir) {
+        var d = Math.abs(notes[i].y - TARGET_Y);
+        if (d < bestDist) { bestDist = d; best = notes[i]; }
+      }
+    }
+    flash = 1; flashColor = COLORS[dir];
+    if (best && bestDist <= 70) {
+      var isPerfect = bestDist <= 28;
+      notes.splice(notes.indexOf(best), 1);
+      done++;
+      if (isPerfect) { score += 300; perfect++; showJudge('PERFECT! +300', '#ffd166'); }
+      else { score += 100; good++; showJudge('Good! +100', '#2ee6a8'); }
+      combo++; if (combo > bestCombo) bestCombo = combo;
+      if (combo > 0 && combo % 10 === 0) score += 500;
+      hitSound(true); updateHUD();
+      if (done >= TOTAL) endGame(true);
+    } else {
+      combo = 0; missed++;
+      showJudge('Miss!', '#ff5d5d');
+      hitSound(false);
+      var pad = pads[dir]; pad.classList.add('wrong');
+      setTimeout(function () { pad.classList.remove('wrong'); }, 200);
+      updateHUD();
+    }
+  }
+
+  function loop(now) {
+    if (!running) return;
+    var dt = Math.min(now - lastTime, 50); lastTime = now;
+    spawnTimer += dt;
+    if (spawnIndex < TOTAL && spawnTimer >= BEAT) {
+      spawnTimer -= BEAT;
+      notes.push({ dir: choreo[spawnIndex], y: -40 });
+      spawnIndex++;
+      beatPulse = 1; tick();
+    }
+    beatPulse = Math.max(0, beatPulse - dt / 300);
+    flash = Math.max(0, flash - dt / 250);
+    // Move notes, expire misses.
+    for (var i = notes.length - 1; i >= 0; i--) {
+      notes[i].y += SPEED * dt;
+      if (notes[i].y > TARGET_Y + 70) {
+        notes.splice(i, 1);
+        combo = 0; missed++; lives--;
+        showJudge('Missed step! -1 life', '#ff5d5d');
+        hitSound(false); updateHUD();
+        if (lives <= 0) { endGame(false); return; }
+      }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Lane guides
+    for (var l = 0; l < 4; l++) {
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillRect(LANES[l] - 38, 0, 76, canvas.height);
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.beginPath(); ctx.moveTo(LANES[l] - 38, 0); ctx.lineTo(LANES[l] - 38, canvas.height); ctx.stroke();
+    }
+    // Target zone
+    ctx.fillStyle = 'rgba(255,209,102,' + (0.12 + beatPulse * 0.15) + ')';
+    ctx.fillRect(10, TARGET_Y - 42, canvas.width - 20, 84);
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
+    ctx.strokeRect(10, TARGET_Y - 42, canvas.width - 20, 84);
+    // Target receptors
+    for (var r = 0; r < 4; r++) {
+      ctx.fillStyle = COLORS[r];
+      ctx.beginPath(); ctx.arc(LANES[r], TARGET_Y, 30 + flash * 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#14102a'; ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(DIRS[r], LANES[r], TARGET_Y + 1);
+    }
+    // Falling notes
+    notes.forEach(function (n) {
+      ctx.fillStyle = COLORS[n.dir];
+      ctx.beginPath(); ctx.arc(LANES[n.dir], n.y, 28, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#14102a'; ctx.font = 'bold 26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(DIRS[n.dir], LANES[n.dir], n.y + 1);
+    });
+    // Flash ring on hit
+    if (flash > 0) {
+      ctx.strokeStyle = flashColor; ctx.globalAlpha = flash; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(canvas.width / 2, TARGET_Y, 60 + (1 - flash) * 60, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = '#b9b3e8'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('Hit arrows as they reach the gold zone', canvas.width / 2, 24);
+  }
+
+  var KEYMAP = { ArrowLeft: 0, a: 0, A: 0, ArrowUp: 1, w: 1, W: 1, ArrowDown: 2, s: 2, S: 2, ArrowRight: 3, d: 3, D: 3 };
+  document.addEventListener('keydown', function (e) {
+    if (KEYMAP.hasOwnProperty(e.key)) { e.preventDefault(); registerHit(KEYMAP[e.key]); }
+    if ((e.key === 'Enter' || e.key === ' ') && !running && !endScreen.classList.contains('hidden') === false) { /* no-op */ }
+    if ((e.key === 'Enter' || e.key === ' ') && !running && titleScreen.classList.contains('hidden') === false) startGame();
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  pads.forEach(function (pad) {
+    var fire = function (e) { e.preventDefault(); ensureAudio(); registerHit(parseInt(pad.getAttribute('data-dir'), 10)); pad.classList.add('hit'); setTimeout(function () { pad.classList.remove('hit'); }, 150); };
+    pad.addEventListener('click', fire);
+    pad.addEventListener('touchstart', fire, { passive: false });
+    pad.addEventListener('mousedown', fire);
+  });
+  canvas.addEventListener('click', function () { ensureAudio(); });
+  canvas.addEventListener('touchstart', function () { ensureAudio(); }, { passive: true });
+  canvas.addEventListener('mousemove', function () { /* mouse presence keeps focus for keyboard play */ });
+
+  reset(); draw();
+})();
+</script>
+</body>
+</html>

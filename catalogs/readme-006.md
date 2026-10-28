@@ -25,3 +25,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0518 | Steelpan Serenade | Rhythm / Steel Drum Melody | 1-8 / A/S/D/F/G/H/J/K play pans, mouse click, touch tap pans | [Play](./../games/game-0518.html) |
 | 0519 | Asteroid Angler | Precision / Star Fishing Aim | Mouse/touch drag aim and release, Arrow Keys aim, Space cast/reel | [Play](./../games/game-0519.html) |
 | 0520 | Amber Archivist | Puzzle / Fossil Sequence Deduction | Mouse/touch click fossils/clues, Arrow Keys select, Enter guess, 1-6 keys | [Play](./../games/game-0520.html) |
+| 0521 | Avalanche Ace | Arcade / Snowboard Dodger | Arrow Keys/WASD steer and jump, mouse/touch steer | [Play](./../games/game-0521.html) |
+| 0522 | Circuit Sage | Puzzle / Wiring Logic | Mouse/touch click tiles to rotate, Arrow Keys select, Enter rotate | [Play](./../games/game-0522.html) |
+| 0523 | Lighthouse Luminary | Strategy / Lighthouse Keeper Simulation | Mouse/touch click lamp and controls, Arrow Keys select, Keys manage oil/focus | [Play](./../games/game-0523.html) |
+| 0524 | Choir Conductor | Rhythm / Vocal Beat Conducting | Keys cue sections on beat, mouse/touch tap sections, Arrow Keys select | [Play](./../games/game-0524.html) |
+| 0525 | Magnet Marauder | Arcade / Magnetic Maze Runner | Arrow Keys/WASD move, Space flip polarity, mouse/touch steer | [Play](./../games/game-0525.html) |
+| 0526 | Rune Reorder | Puzzle / Rune Sequence Logic | Mouse/touch click runes, Arrow Keys select, Enter guess | [Play](./../games/game-0526.html) |
+| 0527 | Hive Herald | Strategy / Beehive Management | Mouse/touch click assignments, 1-3 assign roles, N next day | [Play](./../games/game-0527.html) |
+| 0528 | Taproot Tango | Rhythm / Dance Step Timing | Arrow Keys step on beat, mouse/touch tap arrows | [Play](./../games/game-0528.html) |
+| 0529 | Comet Catcher | Precision / Orbital Slingshot Aim | Mouse/touch drag aim and release, Arrow Keys aim, Space launch | [Play](./../games/game-0529.html) |
+| 0530 | Kaleidoscope Keeper | Puzzle / Mirror Reflection Logic | Mouse/touch click mirrors to rotate, Arrow Keys select, Enter rotate | [Play](./../games/game-0530.html) |
