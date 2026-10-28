@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Solar Shepherd — Orbit Herding</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050816; color: #eef2ff; font-family: Georgia, serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 30px; letter-spacing: 1px; color: #ffd166; text-shadow: 0 0 14px rgba(255,209,102,.6); margin: 6px 0 2px; text-align: center; }
+  .tagline { color: #aab4e8; font-style: italic; margin-bottom: 10px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 860px; margin-bottom: 8px; }
+  .pill { background: #131a3a; border: 1px solid #3a4a8c; border-radius: 999px; padding: 7px 14px; font-size: 15px; }
+  .pill b { color: #ffd166; }
+  #wrap { position: relative; width: 100%; max-width: 860px; }
+  canvas { display: block; width: 100%; height: 540px; background: radial-gradient(circle at 30% 30%, #16224f 0%, #070b22 55%, #03040f 100%); border: 2px solid #4a5fc1; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(3,5,18,.86); border-radius: 14px; padding: 22px; text-align: center; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 32px; color: #ffd166; }
+  .overlay p { max-width: 560px; line-height: 1.55; color: #d7dcf5; }
+  .howto { background: #101736; border: 1px solid #35448a; border-radius: 12px; padding: 14px 18px; text-align: left; max-width: 580px; }
+  .howto h3 { color: #8ecbff; margin-bottom: 6px; }
+  .howto li { margin: 4px 0 4px 18px; line-height: 1.5; }
+  button { background: #ffd166; color: #1a1400; border: none; border-radius: 999px; padding: 13px 30px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #8ecbff; box-shadow: 0 4px 0 #3a6ea5; }
+  .legend { font-size: 13px; color: #aab4e8; text-align: center; margin-top: 8px; max-width: 860px; line-height: 1.5; }
+  .big { font-size: 44px; }
+</style>
+</head>
+<body>
+<h1>✦ Solar Shepherd ✦</h1>
+<p class="tagline">Guide the lost star-lambs home — gently. Space is not kind to the careless.</p>
+
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Penned: <b id="penned">0 / 6</b></div>
+  <div class="pill">Lives: <b id="lives">♥♥♥</b></div>
+  <div class="pill">Status: <b id="status">Waiting to launch</b></div>
+  <div class="pill">Time: <b id="time">0s</b></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="860" height="540"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="big">🐑 ✦ 🐑</div>
+    <h2>Solar Shepherd</h2>
+    <p>Six star-lambs are drifting through a dangerous stellar pasture. Two black holes are hungry. One glowing orbit pen is home. Lead every lamb into the pen — without losing three of them to the dark.</p>
+    <div class="howto">
+      <h3>How to Play</h3>
+      <ul>
+        <li><b>Move your shepherd ship:</b> Arrow keys / WASD, or drag with mouse / touch. The ship steers toward your pointer.</li>
+        <li><b>Herd:</b> Fly close to a lamb and it will trust you and follow. Lead it slowly into the glowing golden pen.</li>
+        <li><b>Gravity nudge:</b> Click or tap anywhere to send a gentle pulse that tugs nearby lambs toward that point. Use it to rescue a lamb sliding toward a black hole.</li>
+        <li><b>Penning:</b> A lamb inside the pen settles into orbit and stays. Pen all 6 to win.</li>
+        <li><b>Danger:</b> Black holes pull everything nearby. If a lamb is swallowed, you lose a life. Lose 3 lives and the flock is lost.</li>
+      </ul>
+    </div>
+    <button id="startBtn">▶ Start Herding</button>
+    <p>Tip: slow and steady wins. Fast turns scatter the flock.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div class="big" id="endEmoji">🏆</div>
+    <h2 id="endTitle">You Did It!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Play Again</button>
+    <button id="menuBtn" class="secondary">Back to Title</button>
+  </div>
+</div>
+
+<p class="legend">Controls: WASD / Arrow keys to fly &nbsp;•&nbsp; Mouse drag to steer &nbsp;•&nbsp; Click / tap for a gravity nudge &nbsp;•&nbsp; Touch drag works on mobile &nbsp;•&nbsp; Press P to pause, R to restart</p>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var scoreEl = document.getElementById('score');
+  var pennedEl = document.getElementById('penned');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var timeEl = document.getElementById('time');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endEmoji = document.getElementById('endEmoji');
+
+  var state = 'title'; // title, playing, paused, win, over
+  var score = 0, lives = 3, startTime = 0, elapsed = 0, frame = 0;
+  var keys = {};
+  var pointer = { x: W / 2, y: H / 2, active: false, down: false };
+  var pulses = [];
+
+  var pen = { x: 640, y: 270, r: 78 };
+  var holes = [
+    { x: 250, y: 120, r: 26 },
+    { x: 300, y: 430, r: 30 }
+  ];
+
+  var ship = { x: 120, y: 270, vx: 0, vy: 0, angle: 0 };
+  var lambs = [];
+
+  // ---- Procedural audio, created only after user interaction ----
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function soundPen() { tone(523, 0.18, 'sine', 0.15); setTimeout(function(){ tone(784, 0.28, 'sine', 0.15); }, 110); }
+  function soundLost() { tone(220, 0.35, 'sawtooth', 0.12); setTimeout(function(){ tone(110, 0.45, 'sawtooth', 0.12); }, 120); }
+  function soundNudge() { tone(392, 0.12, 'triangle', 0.10); }
+  function soundWin() { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ tone(f, 0.3, 'sine', 0.15); }, i * 140); }); }
+
+  function reset() {
+    score = 0; lives = 3; elapsed = 0; startTime = Date.now(); frame = 0;
+    pulses = [];
+    ship = { x: 120, y: 270, vx: 0, vy: 0, angle: 0 };
+    lambs = [];
+    var spots = [[150,120],[180,400],[380,180],[420,380],[120,270],[520,120]];
+    for (var i = 0; i < 6; i++) {
+      lambs.push({
+        x: spots[i][0], y: spots[i][1],
+        vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6,
+        penned: false, angle: Math.random() * Math.PI * 2, bob: Math.random() * 10
+      });
+    }
+    updateHUD('Herding in progress — guide lambs to the golden pen!');
+  }
+
+  function pennedCount() { var n = 0; lambs.forEach(function(l){ if (l.penned) n++; }); return n; }
+
+  function updateHUD(msg) {
+    scoreEl.textContent = score;
+    pennedEl.textContent = pennedCount() + ' / 6';
+    livesEl.textContent = lives > 0 ? '♥'.repeat(lives) : '—';
+    if (msg) statusEl.textContent = msg;
+    timeEl.textContent = Math.floor(elapsed) + 's';
+  }
+
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    endScreen.classList.remove('hidden');
+    if (win) {
+      endEmoji.textContent = '🏆';
+      endTitle.textContent = 'Flock Home Safe!';
+      endText.textContent = 'You penned all 6 star-lambs in ' + Math.floor(elapsed) + ' seconds, scoring ' + score + ' points. The pasture glows a little brighter tonight.';
+      updateHUD('Victory! All lambs home.');
+      soundWin();
+    } else {
+      endEmoji.textContent = '🌑';
+      endTitle.textContent = 'The Flock Is Lost';
+      endText.textContent = 'Three lambs were swallowed by the dark. You penned ' + pennedCount() + ' of 6 and scored ' + score + ' points. Try a slower, gentler route.';
+      updateHUD('Game Over — the flock was lost.');
+      soundLost();
+    }
+  }
+
+  function startGame() {
+    ensureAudio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    tone(440, 0.15, 'sine', 0.12);
+  }
+
+  // ---- Input: keyboard, mouse, touch ----
+  document.addEventListener('keydown', function (e) {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key === 'p' || e.key === 'P') {
+      if (state === 'playing') { state = 'paused'; updateHUD('Paused — press P to resume'); }
+      else if (state === 'paused') { state = 'playing'; updateHUD('Herding in progress'); }
+    }
+    if ((e.key === 'r' || e.key === 'R') && (state === 'win' || state === 'over' || state === 'paused')) { startGame(); }
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(e.key.toLowerCase()) >= 0) { e.preventDefault(); }
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key.toLowerCase()] = false; });
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (cx - r.left) * (W / r.width), y: (cy - r.top) * (H / r.height) };
+  }
+  function nudgeAt(x, y) {
+    if (state !== 'playing') return;
+    ensureAudio(); soundNudge();
+    pulses.push({ x: x, y: y, r: 10, life: 1 });
+    lambs.forEach(function (l) {
+      if (l.penned) return;
+      var dx = x - l.x, dy = y - l.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (d < 190) { l.vx += (dx / d) * 1.1 * (1 - d / 220); l.vy += (dy / d) * 1.1 * (1 - d / 220); }
+    });
+  }
+
+  canvas.addEventListener('mousedown', function (e) {
+    ensureAudio();
+    var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true; pointer.down = true;
+    nudgeAt(p.x, p.y);
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    if (!pointer.down) return;
+    var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true;
+  });
+  document.addEventListener('mouseup', function () { pointer.down = false; });
+  canvas.addEventListener('click', function (e) {
+    ensureAudio();
+    var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true;
+  });
+  canvas.addEventListener('touchstart', function (e) {
+    ensureAudio(); e.preventDefault();
+    var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true; pointer.down = true;
+    nudgeAt(p.x, p.y);
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var p = canvasPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true;
+  }, { passive: false });
+  document.addEventListener('touchend', function () { pointer.down = false; });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function () {
+    state = 'title'; endScreen.classList.add('hidden'); titleScreen.classList.remove('hidden');
+    updateHUD('Waiting to launch');
+  });
+
+  // ---- Update ----
+  function update() {
+    if (state !== 'playing') return;
+    frame++;
+    elapsed = (Date.now() - startTime) / 1000;
+
+    // Ship steering: keyboard overrides pointer, pointer steering otherwise
+    var ax = 0, ay = 0;
+    if (keys['arrowleft'] || keys['a']) ax -= 1;
+    if (keys['arrowright'] || keys['d']) ax += 1;
+    if (keys['arrowup'] || keys['w']) ay -= 1;
+    if (keys['arrowdown'] || keys['s']) ay += 1;
+    if (ax !== 0 || ay !== 0) {
+      ship.vx += ax * 0.22; ship.vy += ay * 0.22; pointer.active = false;
+    } else if (pointer.active) {
+      var dx = pointer.x - ship.x, dy = pointer.y - ship.y;
+      var d = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (d > 8) { ship.vx += (dx / d) * 0.18; ship.vy += (dy / d) * 0.18; }
+    }
+    ship.vx *= 0.96; ship.vy *= 0.96;
+    ship.x += ship.vx; ship.y += ship.vy;
+    ship.x = Math.max(16, Math.min(W - 16, ship.x));
+    ship.y = Math.max(16, Math.min(H - 16, ship.y));
+    if (Math.abs(ship.vx) + Math.abs(ship.vy) > 0.2) ship.angle = Math.atan2(ship.vy, ship.vx);
+
+    // Pulses expand and fade
+    pulses.forEach(function (p) { p.r += 4; p.life -= 0.04; });
+    pulses = pulses.filter(function (p) { return p.life > 0; });
+
+    // Lambs
+    lambs.forEach(function (l) {
+      if (l.penned) {
+        // Gentle orbit inside the pen
+        l.angle += 0.015;
+        var targetX = pen.x + Math.cos(l.angle) * 48;
+        var targetY = pen.y + Math.sin(l.angle) * 48;
+        l.x += (targetX - l.x) * 0.05; l.y += (targetY - l.y) * 0.05;
+        return;
+      }
+      // Drift + wander
+      l.vx += Math.sin(frame * 0.01 + l.bob) * 0.008;
+      l.vy += Math.cos(frame * 0.013 + l.bob) * 0.008;
+      // Herding: follow the shepherd when close
+      var sdx = ship.x - l.x, sdy = ship.y - l.y;
+      var sd = Math.sqrt(sdx * sdx + sdy * sdy) || 1;
+      if (sd < 190) { l.vx += (sdx / sd) * 0.045; l.vy += (sdy / sd) * 0.045; }
+      // Black holes pull, strongly when near
+      holes.forEach(function (h) {
+        var hdx = h.x - l.x, hdy = h.y - l.y;
+        var hd = Math.sqrt(hdx * hdx + hdy * hdy) || 1;
+        if (hd < 220) { var pull = 90 / (hd + 20); l.vx += (hdx / hd) * pull * 0.02; l.vy += (hdy / hd) * pull * 0.02; }
+        if (hd < h.r + 12) { l.eaten = true; }
+      });
+      // Pen edge is gentle: slow lambs near it so they settle, not bounce
+      var pdx = l.x - pen.x, pdy = l.y - pen.y;
+      var pd = Math.sqrt(pdx * pdx + pdy * pdy) || 1;
+      if (pd < pen.r + 30 && pd > pen.r) { l.vx *= 0.97; l.vy *= 0.97; }
+      l.vx *= 0.985; l.vy *= 0.985;
+      l.x += l.vx; l.y += l.vy;
+      l.x = Math.max(14, Math.min(W - 14, l.x));
+      l.y = Math.max(14, Math.min(H - 14, l.y));
+      // Penned?
+      if (pd < pen.r - 8) {
+        l.penned = true; score += 100;
+        soundPen();
+        updateHUD('A lamb is home! ' + pennedCount() + ' of 6 penned.');
+        if (pennedCount() >= 6) { score += Math.max(0, 500 - Math.floor(elapsed) * 2); endGame(true); }
+      }
+    });
+
+    // Eaten lambs
+    var before = lambs.length;
+    lambs = lambs.filter(function (l) { return !l.eaten; });
+    if (lambs.length < before) {
+      lives -= (before - lambs.length);
+      soundLost();
+      if (lives <= 0) { endGame(false); return; }
+      updateHUD('A lamb was lost to the dark! ' + lives + ' lives left.');
+      // If all remaining lambs are penned but some were eaten, that is not a win:
+      // respawn one stray lamb far from holes so the game can continue
+      if (lambs.length > 0 && lambs.every(function (l) { return l.penned; })) {
+        lambs.push({ x: 90, y: 90, vx: 0.4, vy: 0.3, penned: false, angle: 0, bob: 3 });
+        updateHUD('A stray lamb appeared! Herd it home.');
+      }
+      if (lambs.length === 0) { endGame(false); return; }
+    }
+    updateHUD();
+  }
+
+  // ---- Draw ----
+  function drawStar(x, y, r, tw) {
+    ctx.fillStyle = 'rgba(255,255,255,' + (0.4 + tw * 0.6) + ')';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // Background stars
+    for (var i = 0; i < 70; i++) {
+      var sx = (i * 137) % W, sy = (i * 211) % H;
+      drawStar(sx, sy, 1 + (i % 3) * 0.6, Math.abs(Math.sin(frame * 0.02 + i)));
+    }
+    // Orbit pen
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(pen.x, pen.y, pen.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,209,102,0.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(pen.x, pen.y, pen.r + 12, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,209,102,0.08)';
+    ctx.beginPath(); ctx.arc(pen.x, pen.y, pen.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px Georgia, serif'; ctx.textAlign = 'center';
+    ctx.fillText('HOME PEN', pen.x, pen.y - pen.r - 18);
+    // Black holes
+    holes.forEach(function (h) {
+      var grad = ctx.createRadialGradient(h.x, h.y, 2, h.x, h.y, h.r + 40);
+      grad.addColorStop(0, '#000000'); grad.addColorStop(0.5, '#1a0b2e'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(h.x, h.y, h.r + 40, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#b967ff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#b967ff'; ctx.font = 'bold 12px Georgia, serif';
+      ctx.fillText('BLACK HOLE', h.x, h.y - h.r - 10);
+    });
+    // Pulses
+    pulses.forEach(function (p) {
+      ctx.strokeStyle = 'rgba(142,203,255,' + p.life + ')'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
+    });
+    // Herding radius hint
+    if (state === 'playing') {
+      ctx.strokeStyle = 'rgba(142,203,255,0.18)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(ship.x, ship.y, 190, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Lambs
+    lambs.forEach(function (l) {
+      ctx.font = '28px Georgia, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(l.penned ? '🐑' : '✦🐑', l.x, l.y + Math.sin(frame * 0.05 + l.bob) * 2);
+      if (!l.penned) { ctx.fillStyle = '#ffffff'; ctx.font = '11px Georgia, serif'; ctx.fillText('lamb', l.x, l.y + 22); }
+    });
+    // Shepherd ship
+    ctx.save(); ctx.translate(ship.x, ship.y); ctx.rotate(ship.angle);
+    ctx.fillStyle = '#8ecbff';
+    ctx.beginPath(); ctx.moveTo(18, 0); ctx.lineTo(-12, -11); ctx.lineTo(-6, 0); ctx.lineTo(-12, 11); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#ffffff'; ctx.font = '13px Georgia, serif'; ctx.textAlign = 'center';
+    ctx.fillText('Shepherd', ship.x, ship.y - 26);
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = 'italic 16px Georgia, serif';
+      ctx.fillText('Press Start to begin your watch among the stars.', W / 2, H - 18);
+    }
+    if (state === 'paused') {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#ffd166'; ctx.font = 'bold 34px Georgia, serif';
+      ctx.fillText('PAUSED — press P to resume', W / 2, H / 2);
+    }
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  reset();
+  updateHUD('Waiting to launch');
+  loop();
+})();
+</script>
+</body>
+</html>

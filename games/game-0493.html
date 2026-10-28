@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Meteor Mechanic — Arcade Asteroid Repair Action</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#050816; color:#eaf6ff; font-family:Arial, Helvetica, sans-serif; overflow:hidden; display:flex; align-items:center; justify-content:center; height:100vh; }
+  #wrap { position:relative; width:960px; max-width:98vw; }
+  canvas { display:block; width:100%; height:600px; max-height:92vh; background:radial-gradient(circle at 50% 30%, #16224a 0%, #050816 70%); border:2px solid #3dd6ff; border-radius:12px; box-shadow:0 0 28px rgba(61,214,255,.35); }
+  #hud { display:flex; justify-content:space-between; gap:8px; padding:8px 4px; font-weight:bold; font-size:15px; flex-wrap:wrap; }
+  #hud span { background:#0e1c3d; border:1px solid #2a4a8a; border-radius:8px; padding:5px 10px; }
+  #hud .warn { color:#ffb02e; border-color:#ffb02e; }
+  #hud .danger { color:#ff5a5a; border-color:#ff5a5a; animation:blink .7s infinite alternate; }
+  @keyframes blink { from { opacity:1; } to { opacity:.55; } }
+  .overlay { position:absolute; inset:48px 0 0 0; display:flex; align-items:center; justify-content:center; background:rgba(3,6,18,.82); border-radius:10px; text-align:center; padding:20px; }
+  .overlay.hidden { display:none; }
+  .card { max-width:640px; }
+  h1 { font-size:44px; color:#ffd23d; text-shadow:0 0 18px rgba(255,210,61,.6); margin-bottom:8px; letter-spacing:1px; }
+  h2 { font-size:36px; color:#3dd6ff; margin-bottom:10px; }
+  p { line-height:1.55; margin:8px 0; font-size:16px; }
+  .howto { text-align:left; background:#0d1a38; border:1px solid #2a4a8a; border-radius:10px; padding:14px 18px; margin:14px 0; }
+  .howto li { margin:6px 0 6px 18px; line-height:1.5; }
+  button { font-size:20px; font-weight:bold; padding:13px 30px; margin:10px 6px; border:none; border-radius:10px; cursor:pointer; background:#ffd23d; color:#111; box-shadow:0 4px 0 #b8930a; }
+  button:hover { filter:brightness(1.1); }
+  button.secondary { background:#3dd6ff; box-shadow:0 4px 0 #1789ad; }
+  .small { font-size:13px; opacity:.85; }
+  #touch { display:none; }
+  @media (max-width:700px){ h1{font-size:32px} #touch{display:block} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span id="hScore">Score: 0</span>
+    <span id="hLives">Drone Hull: 3</span>
+    <span id="hIntegrity">Station Hull: 100%</span>
+    <span id="hBreaches">Breaches: 0 / 6 repaired</span>
+    <span id="hScrap">Scrap: 0</span>
+    <span id="hLevel">Wave: 1</span>
+  </div>
+  <canvas id="game" width="960" height="600"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="card">
+      <h1>METEOR MECHANIC</h1>
+      <p><strong>Pilot a repair drone. Dodge the meteor storm. Save the station.</strong></p>
+      <div class="howto">
+        <h3>How to Play</h3>
+        <ul>
+          <li><strong>Move:</strong> Arrow keys / WASD, or mouse / touch-drag to steer the drone.</li>
+          <li><strong>Collect scrap:</strong> Fly over glowing scrap (yellow bolts) to earn repair material and score.</li>
+          <li><strong>Weld breaches:</strong> Fly to a red sparking breach on the station ring and hold position briefly to weld it. Each weld costs 2 scrap.</li>
+          <li><strong>Dodge meteors:</strong> Meteors fall from above. A hit costs 1 drone hull. If a meteor strikes an open breach, station hull drops fast.</li>
+          <li><strong>Win:</strong> Repair all 6 breaches before station hull reaches 0%.</li>
+          <li><strong>Lose:</strong> Station hull hits 0% or your drone hull hits 0.</li>
+          <li><strong>Tip:</strong> Grab scrap early, weld the breach nearest a falling meteor first, and use the station ring as a shield lane.</li>
+        </ul>
+      </div>
+      <button id="startBtn" type="button">START REPAIR MISSION</button>
+      <p class="small">Sound starts only after you press Start. Fully offline — no downloads needed.</p>
+    </div>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div class="card">
+      <h2 id="endTitle">MISSION COMPLETE</h2>
+      <p id="endText"></p>
+      <p id="endStats"></p>
+      <button id="restartBtn" type="button">RESTART INSTANTLY</button>
+      <button id="menuBtn" type="button" class="secondary">BACK TO TITLE</button>
+    </div>
+  </div>
+  <p id="touch" style="text-align:center;padding:6px;">Touch and drag anywhere on the screen to steer.</p>
+</div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var state = 'title'; // title, playing, win, over
+  var score = 0, lives = 3, scrap = 0, integrity = 100, repaired = 0, wave = 1, time = 0;
+  var keys = {};
+  var pointer = { active:false, x:W/2, y:H/2 };
+  var drone = { x:W/2, y:H-120, r:18, vx:0, vy:0, weld:0, inv:0, angle:0 };
+  var meteors = [], scraps = [], breaches = [], particles = [], stars = [];
+  var audioCtx = null, muted = false;
+
+  for (var i=0;i<90;i++){ stars.push({x:Math.random()*W, y:Math.random()*H, s:Math.random()*2+0.5, tw:Math.random()*Math.PI*2}); }
+
+  // The station is a ring in the upper-middle of the screen.
+  var station = { x:W/2, y:210, r:150 };
+
+  function initAudio(){
+    if (audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch(e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol){
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.08, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function sfx(kind){
+    if (kind==='pickup'){ beep(880, .12, 'sine', .10); setTimeout(function(){beep(1320,.12,'sine',.08);},60); }
+    else if (kind==='weld'){ beep(220, .18, 'sawtooth', .07); setTimeout(function(){beep(330,.18,'sawtooth',.06);},90); }
+    else if (kind==='hit'){ beep(120, .3, 'sawtooth', .14); }
+    else if (kind==='win'){ [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){beep(f,.25,'triangle',.12);}, i*140); }); }
+    else if (kind==='lose'){ [392,330,262,196].forEach(function(f,i){ setTimeout(function(){beep(f,.3,'sawtooth',.10);}, i*160); }); }
+  }
+
+  function resetGame(){
+    score = 0; lives = 3; scrap = 4; integrity = 100; repaired = 0; wave = 1; time = 0;
+    meteors = []; scraps = []; breaches = []; particles = [];
+    drone = { x:W/2, y:H-120, r:18, vx:0, vy:0, weld:0, inv:0, angle:0 };
+    // Six breaches around the station ring at fixed angles.
+    var angles = [0.15, 1.25, 2.15, 3.35, 4.35, 5.55];
+    for (var i=0;i<6;i++){
+      breaches.push({ angle:angles[i], x:station.x + Math.cos(angles[i])*station.r, y:station.y + Math.sin(angles[i])*station.r, fixed:false, weldProgress:0, spark:Math.random()*10 });
+    }
+    for (var j=0;j<8;j++) spawnScrap();
+    for (var k=0;k<5;k++) spawnMeteor();
+    updateHUD();
+  }
+
+  function spawnMeteor(){
+    meteors.push({ x:60+Math.random()*(W-120), y:-30, r:14+Math.random()*16, vy:1.4+Math.random()*1.6+wave*0.25, vx:(Math.random()-0.5)*0.8, rot:Math.random()*Math.PI, spin:(Math.random()-0.5)*0.08 });
+  }
+  function spawnScrap(){
+    scraps.push({ x:50+Math.random()*(W-100), y:320+Math.random()*220, r:10, bob:Math.random()*Math.PI*2, taken:false });
+  }
+  function burst(x,y,color,n){
+    for (var i=0;i<n;i++){ particles.push({x:x,y:y,vx:(Math.random()-0.5)*5,vy:(Math.random()-0.5)*5,life:30+Math.random()*25,color:color}); }
+  }
+  function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function updateHUD(){
+    document.getElementById('hScore').textContent = 'Score: ' + score;
+    document.getElementById('hLives').textContent = 'Drone Hull: ' + lives;
+    var hi = document.getElementById('hIntegrity');
+    hi.textContent = 'Station Hull: ' + Math.max(0, Math.round(integrity)) + '%';
+    hi.className = integrity <= 30 ? 'danger' : (integrity <= 60 ? 'warn' : '');
+    document.getElementById('hBreaches').textContent = 'Breaches: ' + repaired + ' / 6 repaired';
+    document.getElementById('hScrap').textContent = 'Scrap: ' + scrap;
+    document.getElementById('hLevel').textContent = 'Wave: ' + wave;
+  }
+
+  function endGame(win){
+    state = win ? 'win' : 'over';
+    document.getElementById('endTitle').textContent = win ? 'STATION SAVED!' : 'STATION LOST';
+    document.getElementById('endText').textContent = win
+      ? 'All six breaches welded. The crew is safe, the station holds, and the storm is clearing.'
+      : (lives <= 0 ? 'Your repair drone was destroyed before the station could be saved.' : 'Station hull integrity collapsed under the meteor storm.');
+    document.getElementById('endStats').textContent = 'Final Score: ' + score + '  |  Breaches repaired: ' + repaired + ' / 6  |  Wave reached: ' + wave + '  |  Scrap collected: ' + scrap;
+    document.getElementById('endScreen').classList.remove('hidden');
+    sfx(win ? 'win' : 'lose');
+  }
+
+  function update(){
+    if (state !== 'playing') return;
+    time += 1/60;
+    wave = 1 + Math.floor(time / 25);
+    // Movement: keyboard velocity + pointer steering.
+    var speed = 5.2;
+    if (keys['arrowleft'] || keys['a']) drone.vx -= 0.7;
+    if (keys['arrowright'] || keys['d']) drone.vx += 0.7;
+    if (keys['arrowup'] || keys['w']) drone.vy -= 0.7;
+    if (keys['arrowdown'] || keys['s']) drone.vy += 0.7;
+    if (pointer.active){
+      var dx = pointer.x - drone.x, dy = pointer.y - drone.y, d = Math.hypot(dx,dy);
+      if (d > 8){ drone.vx += dx/d*0.6; drone.vy += dy/d*0.6; }
+    }
+    drone.vx *= 0.88; drone.vy *= 0.88;
+    drone.x = Math.max(20, Math.min(W-20, drone.x + drone.vx));
+    drone.y = Math.max(20, Math.min(H-20, drone.y + drone.vy));
+    drone.angle = Math.atan2(drone.vy, drone.vx);
+    if (drone.inv > 0) drone.inv--;
+
+    // Meteors fall, rotate, and threaten drone + open breaches.
+    if (Math.random() < 0.025 + wave*0.004) spawnMeteor();
+    for (var i=meteors.length-1;i>=0;i--){
+      var m = meteors[i];
+      m.y += m.vy; m.x += m.vx; m.rot += m.spin;
+      if (m.y > H+40 || m.x < -40 || m.x > W+40){ meteors.splice(i,1); continue; }
+      if (drone.inv === 0 && dist(m, drone) < m.r + drone.r){
+        lives--; drone.inv = 90; burst(drone.x, drone.y, '#ff5a5a', 22); sfx('hit'); score = Math.max(0, score-25);
+        meteors.splice(i,1); updateHUD();
+        if (lives <= 0){ endGame(false); return; }
+        continue;
+      }
+      // Meteor hits an open breach: heavy station damage.
+      for (var b=0;b<breaches.length;b++){
+        var br = breaches[b];
+        if (!br.fixed && dist(m, br) < m.r + 22){
+          integrity -= 12; burst(br.x, br.y, '#ff5a5a', 24); sfx('hit'); meteors.splice(i,1); break;
+        }
+      }
+    }
+    // Open breaches slowly leak hull integrity.
+    breaches.forEach(function(br){
+      if (!br.fixed){ br.spark += 0.2; integrity -= 0.006; }
+    });
+    if (integrity <= 0){ integrity = 0; updateHUD(); endGame(false); return; }
+
+    // Scrap pickup.
+    for (var s=scraps.length-1;s>=0;s--){
+      var sc = scraps[s]; sc.bob += 0.06;
+      if (dist(sc, drone) < drone.r + sc.r + 6){
+        scrap++; score += 10; burst(sc.x, sc.y, '#ffd23d', 12); sfx('pickup');
+        scraps.splice(s,1); spawnScrap();
+      }
+    }
+
+    // Welding: stand near an open breach with at least 2 scrap.
+    var welding = false;
+    breaches.forEach(function(br){
+      if (br.fixed) return;
+      if (dist(br, drone) < 52){
+        if (scrap >= 2){
+          welding = true; br.weldProgress += 1.4;
+          if (Math.random() < 0.35) burst(br.x, br.y, '#3dd6ff', 2);
+          if (br.weldProgress >= 100){
+            br.fixed = true; scrap -= 2; repaired++; score += 150; burst(br.x, br.y, '#3dff7a', 30); sfx('weld');
+            if (repaired >= 6){ updateHUD(); endGame(true); }
+          }
+        }
+      } else { br.weldProgress = Math.max(0, br.weldProgress - 0.5); }
+    });
+    drone.weld = welding ? 1 : 0;
+    if (Math.random() < 0.05) score += 1; // survival tick, keeps HUD alive
+
+    // Particles.
+    for (var p=particles.length-1;p>=0;p--){
+      var pt = particles[p]; pt.x += pt.vx; pt.y += pt.vy; pt.life--;
+      if (pt.life <= 0) particles.splice(p,1);
+    }
+    updateHUD();
+  }
+
+  function drawStation(){
+    // Starfield.
+    stars.forEach(function(st){
+      st.tw += 0.03; ctx.fillStyle = 'rgba(255,255,255,' + (0.35 + 0.3*Math.sin(st.tw)) + ')';
+      ctx.fillRect(st.x, st.y, st.s, st.s);
+    });
+    // Station ring and core.
+    ctx.strokeStyle = '#8aa8d8'; ctx.lineWidth = 14;
+    ctx.beginPath(); ctx.arc(station.x, station.y, station.r, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#16294f'; ctx.beginPath(); ctx.arc(station.x, station.y, 62, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#3dd6ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(station.x, station.y, 62, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#eaf6ff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('STATION', station.x, station.y - 4);
+    ctx.fillText('HULL ' + Math.max(0, Math.round(integrity)) + '%', station.x, station.y + 16);
+    // Breaches.
+    breaches.forEach(function(br){
+      if (br.fixed){
+        ctx.fillStyle = '#3dff7a'; ctx.beginPath(); ctx.arc(br.x, br.y, 14, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#052'; ctx.font = 'bold 14px Arial'; ctx.fillText('OK', br.x, br.y + 5);
+      } else {
+        var flick = 12 + Math.sin(br.spark) * 4;
+        ctx.fillStyle = '#ff3b30'; ctx.beginPath(); ctx.arc(br.x, br.y, flick, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ffb02e'; ctx.beginPath(); ctx.arc(br.x, br.y, flick*0.55, 0, Math.PI*2); ctx.fill();
+        if (br.weldProgress > 0){
+          ctx.fillStyle = '#222'; ctx.fillRect(br.x-22, br.y-34, 44, 8);
+          ctx.fillStyle = '#3dd6ff'; ctx.fillRect(br.x-22, br.y-34, 44*br.weldProgress/100, 8);
+        }
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.fillText('!', br.x, br.y + 4);
+      }
+    });
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    drawStation();
+    // Scrap.
+    scraps.forEach(function(sc){
+      var y = sc.y + Math.sin(sc.bob)*5;
+      ctx.fillStyle = '#ffd23d'; ctx.save(); ctx.translate(sc.x, y); ctx.rotate(sc.bob*0.4);
+      ctx.fillRect(-8,-4,16,8); ctx.fillStyle = '#8a6a00'; ctx.fillRect(-3,-7,6,14); ctx.restore();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('SCRAP', sc.x, y+24);
+    });
+    // Meteors: cratered rocks.
+    meteors.forEach(function(m){
+      ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.rot);
+      ctx.fillStyle = '#7a5a3d'; ctx.beginPath();
+      for (var a=0;a<8;a++){ var ang=a*Math.PI/4, rr=m.r*(0.82+0.18*Math.sin(a*2.7)); var px=Math.cos(ang)*rr, py=Math.sin(ang)*rr; if(a===0) ctx.moveTo(px,py); else ctx.lineTo(px,py); }
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#4a3423'; ctx.beginPath(); ctx.arc(-m.r*0.3, -m.r*0.2, m.r*0.22, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(m.r*0.35, m.r*0.3, m.r*0.16, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
+    // Drone.
+    if (state === 'playing' || state === 'win' || state === 'over'){
+      if (!(drone.inv > 0 && Math.floor(time*12) % 2 === 0)){
+        ctx.save(); ctx.translate(drone.x, drone.y); ctx.rotate(isFinite(drone.angle) ? drone.angle : 0);
+        ctx.fillStyle = '#3dd6ff'; ctx.beginPath(); ctx.moveTo(20,0); ctx.lineTo(-14,-13); ctx.lineTo(-7,0); ctx.lineTo(-14,13); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ffd23d'; ctx.beginPath(); ctx.arc(2,0,7,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(4,0,3,0,Math.PI*2); ctx.fill();
+        if (drone.weld){ ctx.fillStyle = 'rgba(61,214,255,.9)'; ctx.beginPath(); ctx.arc(24,0,5,0,Math.PI*2); ctx.fill(); }
+        ctx.restore();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('MECHANIC', drone.x, drone.y + 32);
+      }
+    }
+    // Particles.
+    particles.forEach(function(pt){
+      ctx.globalAlpha = Math.max(0, pt.life/50); ctx.fillStyle = pt.color;
+      ctx.fillRect(pt.x-2, pt.y-2, 4, 4); ctx.globalAlpha = 1;
+    });
+    if (state === 'title'){
+      ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = 'bold 18px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('A meteor storm is tearing the station apart — press START to begin repairs.', W/2, H-30);
+    }
+    if (state === 'playing' && scrap < 2){
+      var open = breaches.some(function(br){ return !br.fixed; });
+      if (open){ ctx.fillStyle = '#ffb02e'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText('NEED 2 SCRAP TO WELD — grab the yellow scrap first!', W/2, 34); }
+    }
+  }
+
+  function loop(){
+    update(); draw();
+    requestAnimationFrame(loop);
+  }
+
+  function startGame(){
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    resetGame();
+    state = 'playing';
+    document.getElementById('titleScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    beep(660, .15, 'triangle', .10);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('menuBtn').addEventListener('click', function(){
+    state = 'title';
+    document.getElementById('endScreen').classList.add('hidden');
+    document.getElementById('titleScreen').classList.remove('hidden');
+  });
+
+  document.addEventListener('keydown', function(e){
+    var k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === ' ' || k === 'enter'){
+      if (state === 'title') startGame();
+      else if (state === 'win' || state === 'over') startGame();
+      e.preventDefault();
+    }
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+
+  function setPointer(e){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0));
+    var cy = (e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0));
+    pointer.x = (cx - rect.left) * (W / rect.width);
+    pointer.y = (cy - rect.top) * (H / rect.height);
+  }
+  canvas.addEventListener('mousedown', function(e){ pointer.active = true; setPointer(e); });
+  document.addEventListener('mouseup', function(){ pointer.active = false; });
+  canvas.addEventListener('mousemove', function(e){ if (pointer.active) setPointer(e); });
+  canvas.addEventListener('click', function(e){ setPointer(e); pointer.active = true; setTimeout(function(){ pointer.active = false; }, 250); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); pointer.active = true; setPointer(e); }, {passive:false});
+  canvas.addEventListener('touchmove', function(e){ e.preventDefault(); setPointer(e); }, {passive:false});
+  canvas.addEventListener('touchend', function(){ pointer.active = false; });
+
+  resetGame();
+  state = 'title';
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

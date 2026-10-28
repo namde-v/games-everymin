@@ -103,6 +103,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0489 | Inkwell Investigator | Puzzle / Mystery Ink Deduction | Mouse/touch click clues and suspects, Arrow Keys select, Enter accuse | [Play](./../games/game-0489.html) |
 | 0490 | Jetstream Juggler | Arcade / Wind Balloon Juggling | Mouse/touch tap balloons, Arrow Keys move, Space gust | [Play](./../games/game-0490.html) |
 
+| 0491 | Kelp Keeper | Strategy / Underwater Farm Management | Mouse/touch click kelp beds, Keys plant/feed/harvest | [Play](./../games/game-0491.html) |
+| 0492 | Lantern Labyrinth | Puzzle / Light Maze | Arrow Keys/WASD move, mouse/touch tap to move | [Play](./../games/game-0492.html) |
+| 0493 | Meteor Mechanic | Arcade / Asteroid Repair Action | Arrow Keys/WASD fly, Space weld, mouse/touch steer | [Play](./../games/game-0493.html) |
+| 0494 | Nightingale Navigator | Strategy / Star Chart Navigation | Mouse/touch click stars to plot route, Arrow Keys select | [Play](./../games/game-0494.html) |
+| 0495 | Obsidian Oracle | Puzzle / Rune Prophecy Logic | Mouse/touch click runes, Keys select, Enter submit guess | [Play](./../games/game-0495.html) |
+| 0496 | Prism Pilot | Arcade / Color Refraction Shooter | Arrow Keys/WASD fly, Keys switch beam color, mouse/touch aim | [Play](./../games/game-0496.html) |
+| 0497 | Quarry Quest | Strategy / Mining Tycoon | Mouse/touch click tiles to dig, Arrow Keys select, Space dig | [Play](./../games/game-0497.html) |
+| 0498 | Ripple Racer | Rhythm / Wave Surf Timing | Space/Arrow Keys surf on beat, mouse/touch tap in rhythm | [Play](./../games/game-0498.html) |
+| 0499 | Solar Shepherd | Strategy / Orbit Herding Simulation | WASD/Arrow Keys fly, mouse/touch nudge lambs | [Play](./../games/game-0499.html) |
+| 0500 | Tempest Tactician | Strategy / Storm Battle Tactics | Mouse/touch select units and targets, Arrow Keys select, Enter confirm | [Play](./../games/game-0500.html) |
+
 ## Batch notes
 
 - Batch 041: 10 games, produced in one cycle (0401–0410). Volume 005 opened at game 0401.
@@ -114,3 +125,4 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 047: 10 games, produced in one cycle (0461–0470).
 - Batch 048: 10 games, produced in one cycle (0471–0480).
 - Batch 049: 10 games, produced in one cycle (0481–0490).
+- Batch 050: 10 games, produced in one cycle (0491–0500). Volume 005 complete at game 0500.
