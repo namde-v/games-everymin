@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Ivory Inventor</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:#1a1712;color:#f5ead2;font-family:Georgia,serif;overflow:hidden;touch-action:none}
+  #wrap{display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:8px}
+  h1{margin:4px 0 2px;font-size:26px;letter-spacing:2px;color:#e8c87a;text-align:center}
+  #hud{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;background:#2d2418;border:2px solid #a8842f;border-radius:10px;padding:6px 10px;margin:4px 0;font-weight:bold}
+  #hud span{white-space:nowrap}
+  #canvas{background:#f7ecd0;border:3px solid #8a6a2a;border-radius:10px;max-width:96vw;max-height:58vh;cursor:crosshair}
+  #panel{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+  button{font-family:Georgia,serif;font-size:16px;padding:9px 14px;border-radius:10px;border:2px solid #a8842f;background:#e8c87a;color:#241a08;cursor:pointer;font-weight:bold}
+  button:hover{background:#ffd97a}
+  button.sel{background:#7fb069;border-color:#2f5d23;color:#fff}
+  button:disabled{opacity:.45}
+  #msg{min-height:24px;font-weight:bold;text-align:center;color:#ffd97a}
+  #help{background:#2d2418;border:1px solid #a8842f;border-radius:10px;padding:8px 12px;max-width:720px;font-size:14px;line-height:1.5;display:none}
+  .overlay{position:fixed;inset:0;background:rgba(15,10,4,.92);display:flex;align-items:center;justify-content:center;z-index:10;padding:18px}
+  .card{background:#2d2418;border:3px solid #e8c87a;border-radius:16px;max-width:620px;padding:24px;text-align:center}
+  .card h2{color:#e8c87a;font-size:34px;margin:0 0 10px}
+  .card p{line-height:1.6}
+  .card button{font-size:20px;padding:12px 24px;margin:6px}
+  .big{font-size:22px}
+  kbd{background:#111;padding:1px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9881; IVORY INVENTOR &#9881;</h1>
+  <div id="hud">
+    <span>Score: <span id="score">0</span></span>
+    <span>Lives: <span id="lives">&#10084;&#10084;&#10084;</span></span>
+    <span>Level: <span id="level">1 / 5</span></span>
+    <span>Status: <span id="status">Build mode</span></span>
+    <span>Parts left: <span id="parts">8</span></span>
+  </div>
+  <canvas id="canvas" width="600" height="500"></canvas>
+  <div id="panel">
+    <button id="bGear" class="sel">1 &#9881; Gear (bounce)</button>
+    <button id="bRamp">2 &#9650; Ramp (deflect)</button>
+    <button id="bSpring">3 &#8635; Spring (launch)</button>
+    <button id="bRot">R Rotate</button>
+    <button id="bErase">Erase</button>
+    <button id="bClear">Clear All</button>
+    <button id="bLaunch">LAUNCH &#9654;</button>
+    <button id="bHow">How to Play</button>
+  </div>
+  <div id="msg">Place parts on the ivory grid, then press LAUNCH.</div>
+  <div id="help">
+    <b>How to Play:</b> Choose a part with buttons or keys <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>. Click or tap a grid square to place it.
+    Click a placed part to rotate it. <kbd>R</kbd> rotates the selected part type. <kbd>E</kbd> erases, <kbd>L</kbd> launches, <kbd>Enter</kbd> restarts.
+    Gears bounce the ball, ramps deflect it left or right, springs launch it high. Guide the brass ball to the golden bell in each of 5 contraptions.
+    If the ball falls off the board you lose a life. Finish all 5 to win. Score bonus for unused parts!
+  </div>
+</div>
+
+<div class="overlay" id="titleScreen">
+  <div class="card">
+    <h2>&#9881; Ivory Inventor</h2>
+    <p class="big">A Clockwork Chain Reaction Puzzle</p>
+    <p>Place gears, ramps and springs on the grid. Launch the brass ball and ring the golden bell.
+    Solve 5 ingenious contraptions to become Master Inventor!</p>
+    <p>Controls: Mouse / Touch to place &bull; Keys 1/2/3 select &bull; R rotate &bull; L launch</p>
+    <button id="startBtn">▶ START GAME</button>
+    <button id="howBtn2">How to Play</button>
+    <div id="titleHelp" style="display:none;text-align:left;margin-top:12px">
+      <p>Gear = bouncy wheel. Ramp = deflects the ball diagonally (rotate to flip direction). Spring = powerful upward launch.
+      Watch walls and gaps: the ball obeys gravity. Ring the bell, do not drop the ball!</p>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="endScreen" style="display:none">
+  <div class="card">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText" class="big"></p>
+    <p id="endScore"></p>
+    <button id="restartBtn">↻ RESTART INSTANTLY</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var cv=document.getElementById('canvas'), ctx=cv.getContext('2d');
+  var COLS=12, ROWS=10, CELL=50;
+  var score=0, lives=3, levelIdx=0, selected='gear', rot=0, mode='build', partsLeft=8;
+  var placed={}, ball=null, raf=0, running=false, audioCtx=null, started=false;
+  var levels=[
+    {name:'First Bell', sx:1, sy:0, bell:{x:10,y:8}, walls:[{x:5,y:6},{x:6,y:6}], parts:8, hint:'Drop straight, bounce on a gear to the bell.'},
+    {name:'The Deflection', sx:1, sy:0, bell:{x:10,y:3}, walls:[{x:5,y:8},{x:6,y:8},{x:7,y:8}], parts:9, hint:'Use ramps to steer right across the floor.'},
+    {name:'Spring Surprise', sx:2, sy:0, bell:{x:10,y:1}, walls:[{x:4,y:7},{x:5,y:7},{x:8,y:5}], parts:9, hint:'A spring near the floor launches over the wall.'},
+    {name:'Gear Garden', sx:0, sy:0, bell:{x:11,y:8}, walls:[{x:3,y:6},{x:7,y:4}], parts:10, hint:'Chain gears like stepping stones.'},
+    {name:'Master Contraption', sx:1, sy:0, bell:{x:11,y:2}, walls:[{x:4,y:8},{x:5,y:8},{x:8,y:6},{x:9,y:6}], parts:12, hint:'Ramp, gear, spring — use every trick!'}
+  ];
+  function $(id){return document.getElementById(id);}
+  function beep(f,d,type){ try{
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') audioCtx.resume();
+    var o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type=type||'sine'; o.frequency.value=f; g.gain.value=0.12;
+    o.connect(g); g.connect(audioCtx.destination); o.start();
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+d); o.stop(audioCtx.currentTime+d);
+  }catch(e){} }
+  function bellSound(){ beep(880,0.5,'sine'); setTimeout(function(){beep(1174,0.6,'sine');},120); setTimeout(function(){beep(1568,0.8,'sine');},240); }
+  function updateHUD(st){
+    $('score').textContent=score;
+    $('lives').textContent='\u2764'.repeat(Math.max(0,lives));
+    $('level').textContent=(levelIdx+1)+' / 5 — '+levels[levelIdx].name;
+    $('status').textContent=st|| (mode==='build'?'Build mode':'Ball rolling!');
+    $('parts').textContent=partsLeft;
+    $('msg').textContent=levels[levelIdx].hint;
+  }
+  function key(x,y){return x+','+y;}
+  function resetLevel(){
+    placed={}; partsLeft=levels[levelIdx].parts; mode='build'; running=false; ball=null;
+    if(raf) cancelAnimationFrame(raf);
+    updateHUD(); draw();
+  }
+  function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    ctx.fillStyle='#f7ecd0'; ctx.fillRect(0,0,cv.width,cv.height);
+    ctx.strokeStyle='#d8c69a'; ctx.lineWidth=1;
+    for(var x=0;x<=COLS;x++){ctx.beginPath();ctx.moveTo(x*CELL,0);ctx.lineTo(x*CELL,ROWS*CELL);ctx.stroke();}
+    for(var y=0;y<=ROWS;y++){ctx.beginPath();ctx.moveTo(0,y*CELL);ctx.lineTo(COLS*CELL,y*CELL);ctx.stroke();}
+    var lv=levels[levelIdx];
+    ctx.fillStyle='#7a5a24';
+    lv.walls.forEach(function(w){ctx.fillRect(w.x*CELL+2,w.y*CELL+2,CELL-4,CELL-4); ctx.fillStyle='#5d4218'; ctx.fillRect(w.x*CELL+2,w.y*CELL+2,CELL-4,8); ctx.fillStyle='#7a5a24';});
+    Object.keys(placed).forEach(function(k){
+      var p=placed[k], px=p.x*CELL, py=p.y*CELL;
+      if(p.type==='gear'){ ctx.fillStyle='#b8860b'; ctx.beginPath(); ctx.arc(px+25,py+25,20,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff3c4'; ctx.beginPath(); ctx.arc(px+25,py+25,8,0,Math.PI*2); ctx.fill(); }
+      else if(p.type==='ramp'){ ctx.fillStyle='#2f6f4e'; ctx.beginPath(); if(p.rot%2===0){ctx.moveTo(px+4,py+46);ctx.lineTo(px+46,py+46);ctx.lineTo(px+46,py+4);} else {ctx.moveTo(px+4,py+4);ctx.lineTo(px+4,py+46);ctx.lineTo(px+46,py+46);} ctx.closePath(); ctx.fill(); }
+      else { ctx.fillStyle='#a33'; ctx.fillRect(px+10,py+22,30,24); ctx.fillStyle='#ffdd55'; ctx.fillRect(px+10,py+22,30,8); }
+    });
+    // start marker
+    ctx.fillStyle='#333'; ctx.font='bold 13px Georgia'; ctx.fillText('START', lv.sx*CELL+4, lv.sy*CELL+16);
+    // bell
+    var bx=lv.bell.x*CELL+25, by=lv.bell.y*CELL+25;
+    ctx.fillStyle='#e8b400'; ctx.beginPath(); ctx.arc(bx,by,21,Math.PI,0); ctx.fill(); ctx.fillRect(bx-21,by-2,42,6);
+    ctx.fillStyle='#333'; ctx.font='24px Georgia'; ctx.fillText('\u{1F514}', bx-12, by+8);
+    if(ball){ ctx.fillStyle='#8a6a00'; ctx.beginPath(); ctx.arc(ball.x,ball.y,11,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(ball.x-3,ball.y-3,5,0,Math.PI*2); ctx.fill(); }
+  }
+  function hitWall(px,py){
+    var lv=levels[levelIdx];
+    for(var i=0;i<lv.walls.length;i++){ var w=lv.walls[i];
+      if(px>=w.x*CELL && px<w.x*CELL+CELL && py>=w.y*CELL && py<w.y*CELL+CELL) return w; }
+    return null;
+  }
+  function step(){
+    if(!running) return;
+    ball.vy+=0.35; ball.x+=ball.vx; ball.y+=ball.vy;
+    var gx=Math.floor(ball.x/CELL), gy=Math.floor(ball.y/CELL);
+    var lv=levels[levelIdx];
+    // bell check
+    var bx=lv.bell.x*CELL+25, by=lv.bell.y*CELL+25;
+    if(Math.hypot(ball.x-bx,ball.y-by)<30){ winLevel(); return; }
+    // walls bounce
+    var w=hitWall(ball.x,ball.y);
+    if(w){ if(ball.vy>0){ball.y=w.y*CELL-11; ball.vy=-ball.vy*0.55;} else {ball.y=w.y*CELL+CELL+11; ball.vy=Math.abs(ball.vy)*0.5;} ball.vx*=0.9; beep(180,0.08,'square'); }
+    var p=placed[key(gx,gy)];
+    if(p && !p.used){
+      if(p.type==='gear'){ ball.vy=-Math.abs(ball.vy)*0.85-3; if(Math.abs(ball.vy)<3) ball.vy=-6; ball.vx+=(Math.random()-0.5)*1; beep(520,0.1,'triangle'); }
+      else if(p.type==='ramp'){ ball.vy=-5; ball.vx=(p.rot%2===0)? 4 : -4; beep(420,0.1,'triangle'); }
+      else if(p.type==='spring'){ ball.vy=-13; ball.vx*=0.3; beep(700,0.15,'square'); }
+    }
+    if(ball.x<10){ball.x=10;ball.vx=Math.abs(ball.vx);}
+    if(ball.x>cv.width-10){ball.x=cv.width-10;ball.vx=-Math.abs(ball.vx);}
+    if(ball.y>cv.height+20){ loseLife(); return; }
+    draw(); raf=requestAnimationFrame(step);
+  }
+  function launch(){
+    if(mode!=='build') return;
+    beep(300,0.2,'sawtooth');
+    var lv=levels[levelIdx];
+    ball={x:lv.sx*CELL+25,y:lv.sy*CELL+15,vx:0.5,vy:1};
+    mode='run'; running=true; updateHUD('Ball rolling!');
+    raf=requestAnimationFrame(step);
+  }
+  function winLevel(){
+    running=false; bellSound();
+    var bonus=partsLeft*10; score+=100+bonus;
+    if(levelIdx>=4){ endGame(true); }
+    else { levelIdx++; $('msg').textContent='Bell rung! Bonus +'+bonus+'. Next contraption!'; resetLevel(); updateHUD('Bell rung!'); }
+  }
+  function loseLife(){
+    running=false; lives--; beep(120,0.3,'sawtooth');
+    if(lives<=0){ endGame(false); }
+    else { mode='build'; ball=null; updateHUD('Ball dropped — try again'); draw(); }
+  }
+  function endGame(won){
+    $('endTitle').textContent=won?'🏆 You Win — Master Inventor!':'💥 Game Over';
+    $('endText').textContent=won?'You rang all 5 bells!':'The ball dropped too many times. Try again, inventor!';
+    $('endScore').textContent='Final Score: '+score+' | Level reached: '+(levelIdx+1)+' / 5';
+    $('endScreen').style.display='flex';
+    if(won) bellSound();
+  }
+  function restart(){
+    score=0; lives=3; levelIdx=0; $('endScreen').style.display='none';
+    resetLevel(); updateHUD('Build mode');
+  }
+  function placeAt(e){
+    if(mode!=='build') return;
+    var r=cv.getBoundingClientRect();
+    var cx=(e.clientX-r.left)*(cv.width/r.width), cy=(e.clientY-r.top)*(cv.height/r.height);
+    var gx=Math.floor(cx/CELL), gy=Math.floor(cy/CELL);
+    if(gx<0||gx>=COLS||gy<0||gy>=ROWS) return;
+    var lv=levels[levelIdx];
+    if(gx===lv.bell.x && gy===lv.bell.y) return;
+    var k=key(gx,gy);
+    if(placed[k]){ placed[k].rot=(placed[k].rot+1)%2; beep(600,0.07,'triangle'); }
+    else if(partsLeft>0){ placed[k]={x:gx,y:gy,type:selected,rot:rot}; partsLeft--; beep(440,0.07,'sine'); }
+    else { $('msg').textContent='No parts left — erase one or launch!'; }
+    updateHUD(); draw();
+  }
+  function select(t,btn){
+    selected=t;
+    ['bGear','bRamp','bSpring'].forEach(function(id){$(id).classList.remove('sel');});
+    if(btn) btn.classList.add('sel');
+    beep(500,0.05,'sine');
+  }
+  cv.addEventListener('click', placeAt);
+  cv.addEventListener('touchstart', function(e){ e.preventDefault(); placeAt(e.touches[0]); }, {passive:false});
+  cv.addEventListener('mousemove', function(e){ if(e.buttons===1) placeAt(e); });
+  document.addEventListener('keydown', function(e){
+    var k=e.key.toLowerCase();
+    if(k==='1') select('gear',$('bGear'));
+    else if(k==='2') select('ramp',$('bRamp'));
+    else if(k==='3') select('spring',$('bSpring'));
+    else if(k==='r'){ rot=(rot+1)%2; $('msg').textContent='Rotation flipped'; }
+    else if(k==='l') launch();
+    else if(k==='enter' && $('endScreen').style.display==='flex') restart();
+    else if(k==='e'){ selected='erase'; }
+  });
+  document.addEventListener('keyup', function(){});
+  $('bGear').addEventListener('click', function(){select('gear',this);});
+  $('bRamp').addEventListener('click', function(){select('ramp',this);});
+  $('bSpring').addEventListener('click', function(){select('spring',this);});
+  $('bRot').addEventListener('click', function(){rot=(rot+1)%2;});
+  $('bErase').addEventListener('click', function(){ if(confirm('Erase all placed parts and refund them?')) resetLevel(); });
+  $('bClear').addEventListener('click', function(){ resetLevel(); });
+  $('bLaunch').addEventListener('click', launch);
+  $('bHow').addEventListener('click', function(){ var h=$('help'); h.style.display=h.style.display==='block'?'none':'block'; });
+  $('startBtn').addEventListener('click', function(){ beep(660,0.15,'sine'); started=true; $('titleScreen').style.display='none'; resetLevel(); });
+  $('howBtn2').addEventListener('click', function(){ var h=$('titleHelp'); h.style.display=h.style.display==='block'?'none':'block'; });
+  $('restartBtn').addEventListener('click', restart);
+  document.addEventListener('touchstart', function(){ if(!audioCtx){ try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } }, {once:true});
+  resetLevel();
+  raf=requestAnimationFrame(function loop(){ if(mode==='build') draw(); if(!running) raf=requestAnimationFrame(loop); });
+})();
+</script>
+</body>
+</html>

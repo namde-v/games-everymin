@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bramble Bandit</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #12261a; color: #fff8e7; font-family: Verdana, Geneva, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 28px; letter-spacing: 1px; color: #ffe08a; text-shadow: 2px 2px 0 #3a2a10; margin-bottom: 6px; text-align: center; }
+  #hud { width: min(920px, 96vw); display: flex; justify-content: space-between; gap: 8px; background: #1e3a26; border: 2px solid #ffe08a; border-radius: 10px; padding: 8px 12px; font-weight: bold; font-size: 15px; }
+  #hud span { white-space: nowrap; }
+  #wrap { position: relative; width: min(920px, 96vw); margin-top: 10px; }
+  canvas { width: 100%; height: auto; display: block; background: linear-gradient(#8fd3f4, #c8f0c8); border: 3px solid #ffe08a; border-radius: 12px; touch-action: none; }
+  #screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(10, 30, 16, 0.88); border-radius: 12px; padding: 20px; gap: 10px; }
+  #screen.hidden { display: none; }
+  #screen h2 { font-size: 30px; color: #ffe08a; }
+  #screen p { max-width: 620px; line-height: 1.55; font-size: 15px; }
+  #screen .howto { background: rgba(255,255,255,0.12); border: 1px solid #ffe08a; border-radius: 10px; padding: 12px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  button { background: #ff9f1c; color: #231503; border: none; border-radius: 999px; padding: 13px 30px; font-size: 19px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #b86a00; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  #hint { margin-top: 8px; font-size: 13px; opacity: 0.9; text-align: center; max-width: 920px; line-height: 1.5; }
+  #controlsRow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  .ctl { background: #2f5d3a; border: 1px solid #ffe08a; border-radius: 999px; padding: 8px 14px; font-size: 13px; font-weight: bold; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>🌿 Bramble Bandit 🌿</h1>
+<div id="hud">
+  <span id="hudScore">Score: 0</span>
+  <span id="hudLives">Lives: ❤️❤️❤️</span>
+  <span id="hudStatus">Status: Ready</span>
+  <span id="hudBerries">Berries: 0 / 8</span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="900" height="520"></canvas>
+  <div id="screen">
+    <h2 id="screenTitle">Bramble Bandit</h2>
+    <p id="screenText">Swing through the thorny valley, grab every berry, and reach the far treehouse!</p>
+    <div class="howto">
+      <strong>How to Play</strong><br>
+      • HOLD Space, mouse button, or touch the screen to grab the nearest vine.<br>
+      • While swinging, press Left / Right (or A / D) to pump your swing.<br>
+      • RELEASE at the top of the arc to fly to the next vine or platform.<br>
+      • On a platform, use Left / Right to walk and Up / W to jump.<br>
+      • Collect berries for 100 points each. Falling into thorns costs a life.<br>
+      • Reach the treehouse on the far right to WIN. You have 3 lives.
+    </div>
+    <button id="startBtn">Start Game</button>
+    <p>Tip: release when you are swinging forward and high — that gives the longest leap!</p>
+  </div>
+</div>
+<div id="controlsRow">
+  <button class="ctl" id="grabBtn">🤚 Hold to Grab</button>
+  <button class="ctl" id="leftBtn">◀ Left</button>
+  <button class="ctl" id="rightBtn">Right ▶</button>
+  <button class="ctl" id="jumpBtn">⬆ Jump</button>
+</div>
+<p id="hint">Keyboard: Space = grab / hold &nbsp;|&nbsp; Arrows / A D = move &amp; pump &nbsp;|&nbsp; Mouse: hold to grab &nbsp;|&nbsp; Touch: hold screen to grab. Press Enter to start or restart.</p>
+<script>
+(function() {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 900, H = 520;
+  var hudScore = document.getElementById('hudScore');
+  var hudLives = document.getElementById('hudLives');
+  var hudStatus = document.getElementById('hudStatus');
+  var hudBerries = document.getElementById('hudBerries');
+  var screen = document.getElementById('screen');
+  var screenTitle = document.getElementById('screenTitle');
+  var screenText = document.getElementById('screenText');
+  var startBtn = document.getElementById('startBtn');
+
+  var state = 'title'; // title, playing, win, over
+  var score = 0, lives = 3, berriesGot = 0, timeLeft = 0;
+  var keys = {};
+  var grabHeld = false, mouseHeld = false, touchHeld = false;
+  var audioCtx = null, muted = false;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, slide) {
+    if (!audioCtx || muted) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + dur);
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+  }
+  function playBerry() { tone(880, 0.12, 'sine', 0.14); setTimeout(function(){ tone(1320, 0.14, 'sine', 0.12); }, 70); }
+  function playJump() { tone(300, 0.15, 'triangle', 0.12, 620); }
+  function playGrab() { tone(520, 0.1, 'square', 0.07, 380); }
+  function playFall() { tone(400, 0.35, 'sawtooth', 0.12, 90); }
+  function playWin() { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.25, 'triangle', 0.14); }, i*140); }); }
+  function playLose() { [392,330,262,196].forEach(function(f,i){ setTimeout(function(){ tone(f, 0.25, 'sawtooth', 0.10); }, i*160); }); }
+
+  var platforms = [
+    {x: 0, y: 430, w: 120, h: 90, label: 'START'},
+    {x: 285, y: 430, w: 110, h: 90, label: ''},
+    {x: 505, y: 410, w: 110, h: 110, label: ''},
+    {x: 790, y: 390, w: 110, h: 130, label: 'TREEHOUSE'}
+  ];
+  var vines = [
+    {ax: 205, ay: 55, len: 195, angle: -0.35, vel: 0},
+    {ax: 400, ay: 50, len: 205, angle: 0.30, vel: 0},
+    {ax: 605, ay: 55, len: 195, angle: -0.30, vel: 0},
+    {ax: 735, ay: 50, len: 190, angle: 0.25, vel: 0}
+  ];
+  var berrySpots = [
+    {x: 205, y: 235, taken: false}, {x: 275, y: 300, taken: false},
+    {x: 400, y: 225, taken: false}, {x: 470, y: 290, taken: false},
+    {x: 605, y: 235, taken: false}, {x: 665, y: 310, taken: false},
+    {x: 350, y: 380, taken: false}, {x: 560, y: 360, taken: false}
+  ];
+  var player, checkpoint;
+
+  function resetGame() {
+    score = 0; lives = 3; berriesGot = 0;
+    berrySpots.forEach(function(b){ b.taken = false; });
+    vines[0].angle = -0.35; vines[1].angle = 0.30; vines[2].angle = -0.30; vines[3].angle = 0.25;
+    vines.forEach(function(v){ v.vel = 0; });
+    checkpoint = {x: 60, y: 400};
+    spawnPlayer(checkpoint.x, checkpoint.y);
+    updateHUD('Swinging...');
+  }
+  function spawnPlayer(x, y) {
+    player = {x: x, y: y, vx: 0, vy: 0, r: 18, onGround: true, swinging: null, facing: 1};
+  }
+  function updateHUD(status) {
+    hudScore.textContent = 'Score: ' + score;
+    hudLives.textContent = 'Lives: ' + '❤️'.repeat(Math.max(0, lives)) + (lives <= 0 ? ' 💀' : '');
+    hudStatus.textContent = 'Status: ' + (status || (state === 'playing' ? 'Swinging...' : state));
+    hudBerries.textContent = 'Berries: ' + berriesGot + ' / ' + berrySpots.length;
+  }
+  function showScreen(title, text, btn) {
+    screenTitle.textContent = title;
+    screenText.textContent = text;
+    startBtn.textContent = btn;
+    screen.classList.remove('hidden');
+  }
+  function hideScreen() { screen.classList.add('hidden'); }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    hideScreen();
+    updateHUD('Swinging...');
+  }
+  function loseLife(reason) {
+    lives -= 1;
+    playFall();
+    updateHUD(reason);
+    if (lives <= 0) {
+      state = 'over';
+      playLose();
+      updateHUD('Game Over');
+      showScreen('Game Over!', 'The brambles got you! You scored ' + score + ' points and collected ' + berriesGot + ' berries. Try again, brave bandit!', 'Restart');
+    } else {
+      spawnPlayer(checkpoint.x, checkpoint.y);
+      updateHUD('Ouch! Lives left: ' + lives);
+    }
+  }
+  function winGame() {
+    state = 'win';
+    score += lives * 250;
+    playWin();
+    updateHUD('You Win!');
+    showScreen('You Win! 🏡', 'You reached the treehouse! Final score: ' + score + ' points, berries: ' + berriesGot + ' / ' + berrySpots.length + '. Bramble Bandit saves the day!', 'Play Again');
+  }
+
+  function isGrabbing() { return grabHeld || mouseHeld || touchHeld; }
+  function vineBob(v) {
+    return {x: v.ax + Math.sin(v.angle) * v.len, y: v.ay + Math.cos(v.angle) * v.len};
+  }
+  function tryGrab() {
+    if (player.swinging) return;
+    var best = null, bestD = 190;
+    vines.forEach(function(v, i) {
+      var b = vineBob(v);
+      var d = Math.hypot(player.x - b.x, player.y - b.y);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    if (best !== null) {
+      var v = vines[best];
+      v.angle = Math.atan2(player.x - v.ax, player.y - v.ay);
+      v.vel = player.vx * 0.004;
+      player.swinging = best;
+      player.onGround = false;
+      player.vx = 0; player.vy = 0;
+      playGrab();
+      updateHUD('Swinging on vine ' + (best + 1) + ' — release at the top!');
+    }
+  }
+  function releaseSwing() {
+    if (player.swinging === null) return;
+    var v = vines[player.swinging];
+    var speed = v.vel * v.len;
+    player.vx = Math.cos(v.angle) * speed;
+    player.vy = -Math.sin(v.angle) * speed;
+    // Give a helpful forward boost so leaps reach the next platform
+    player.vx += player.facing * 40;
+    if (player.vy > -60) player.vy = -120;
+    player.swinging = null;
+    updateHUD('Flying! Grab the next vine!');
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+    // Idle vine sway for visual life and reachable bobs
+    vines.forEach(function(v, i) {
+      if (player.swinging !== i) {
+        v.vel += (-0.35 * Math.sin(v.angle)) * dt;
+        v.vel *= 0.995;
+        v.angle += v.vel * dt;
+      }
+    });
+    var left = keys['ArrowLeft'] || keys['a'] || keys['A'];
+    var right = keys['ArrowRight'] || keys['d'] || keys['D'];
+
+    if (player.swinging !== null) {
+      var v = vines[player.swinging];
+      var g = 900;
+      var acc = -(g / v.len) * Math.sin(v.angle);
+      if (left) acc -= 1.6;
+      if (right) acc += 1.6;
+      if (left) player.facing = -1;
+      if (right) player.facing = 1;
+      v.vel += acc * dt;
+      v.vel *= 0.999;
+      v.angle += v.vel * dt;
+      v.angle = Math.max(-1.35, Math.min(1.35, v.angle));
+      player.x = v.ax + Math.sin(v.angle) * v.len;
+      player.y = v.ay + Math.cos(v.angle) * v.len;
+      player.facing = v.vel >= 0 ? 1 : -1;
+      if (!isGrabbing()) releaseSwing();
+    } else {
+      if (isGrabbing()) tryGrab();
+      if (player.swinging === null) {
+        if (player.onGround) {
+          if (left) { player.x -= 210 * dt; player.facing = -1; }
+          if (right) { player.x += 210 * dt; player.facing = 1; }
+          if (keys['ArrowUp'] || keys['w'] || keys['W']) {
+            player.vy = -520; player.onGround = false; playJump();
+            keys['ArrowUp'] = false; keys['w'] = false; keys['W'] = false;
+          }
+        } else {
+          if (left) player.vx -= 420 * dt;
+          if (right) player.vx += 420 * dt;
+          player.vx = Math.max(-380, Math.min(380, player.vx));
+        }
+        if (!player.onGround) {
+          player.vy += 900 * dt;
+          player.x += player.vx * dt;
+          player.y += player.vy * dt;
+        }
+        // Platform landing and standing
+        var landed = false;
+        platforms.forEach(function(p) {
+          if (player.x >= p.x - 8 && player.x <= p.x + p.w + 8 && player.y + player.r >= p.y && player.y + player.r <= p.y + 28 && player.vy >= 0) {
+            player.y = p.y - player.r; player.vy = 0; player.vx = 0; player.onGround = true; landed = true;
+            if (p.x > checkpoint.x) checkpoint = {x: Math.max(p.x + 20, 20), y: p.y - 30};
+            if (p.label === 'TREEHOUSE') winGame();
+          }
+        });
+        if (!landed && player.onGround) {
+          var still = platforms.some(function(p){ return player.x >= p.x - 4 && player.x <= p.x + p.w + 4 && Math.abs((player.y + player.r) - p.y) < 6; });
+          if (!still) player.onGround = false;
+        }
+        if (player.x < 14) player.x = 14;
+        if (player.x > W - 14) player.x = W - 14;
+      }
+    }
+    // Berries
+    berrySpots.forEach(function(b) {
+      if (!b.taken && Math.hypot(player.x - b.x, player.y - b.y) < 36) {
+        b.taken = true; berriesGot += 1; score += 100; playBerry(); updateHUD('Berry! +100');
+      }
+    });
+    // Thorn fall
+    if (player.y > 505 || (player.y > 470 && !player.onGround && player.swinging === null)) {
+      if (state === 'playing') loseLife('Fell in thorns!');
+    }
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#8fd3f4'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff8e7';
+    ctx.beginPath(); ctx.arc(120, 70, 34, 0, Math.PI * 2); ctx.arc(155, 62, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#7ec850'; ctx.fillRect(0, 452, W, 68);
+    ctx.fillStyle = '#3d7a35'; ctx.fillRect(0, 452, W, 10);
+    // Thorn pits between platforms
+    ctx.fillStyle = '#5b2333';
+    [[120, 285], [395, 505], [615, 790]].forEach(function(seg) {
+      ctx.beginPath();
+      ctx.moveTo(seg[0], 520); ctx.lineTo(seg[1], 520);
+      for (var x = seg[0]; x < seg[1]; x += 18) { ctx.lineTo(x + 9, 478); ctx.lineTo(x + 18, 520); }
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#c33'; 
+      for (var tx = seg[0] + 6; tx < seg[1]; tx += 22) {
+        ctx.beginPath(); ctx.moveTo(tx, 495); ctx.lineTo(tx + 6, 462); ctx.lineTo(tx + 12, 495); ctx.fill();
+      }
+      ctx.fillStyle = '#5b2333';
+    });
+  }
+  function drawPlatforms() {
+    platforms.forEach(function(p) {
+      ctx.fillStyle = '#7a4a21'; ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.fillStyle = '#4caf50'; ctx.fillRect(p.x, p.y, p.w, 12);
+      ctx.fillStyle = '#ffe08a'; ctx.font = 'bold 11px Verdana'; ctx.textAlign = 'center';
+      if (p.label) ctx.fillText(p.label, p.x + p.w / 2, p.y + 30);
+      if (p.label === 'TREEHOUSE') {
+        ctx.fillStyle = '#8b5a2b'; ctx.fillRect(p.x + 14, p.y - 72, 82, 72);
+        ctx.fillStyle = '#a52a2a'; ctx.beginPath(); ctx.moveTo(p.x + 4, p.y - 70); ctx.lineTo(p.x + 55, p.y - 112); ctx.lineTo(p.x + 106, p.y - 70); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#ffe08a'; ctx.fillRect(p.x + 42, p.y - 42, 26, 42);
+        ctx.fillStyle = '#2f5d3a'; ctx.beginPath(); ctx.arc(p.x + 20, p.y - 100, 26, 0, Math.PI * 2); ctx.arc(p.x + 88, p.y - 96, 22, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+  }
+  function drawVines() {
+    vines.forEach(function(v, i) {
+      var b = vineBob(v);
+      ctx.strokeStyle = '#2f7a2f'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(v.ax, v.ay); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.strokeStyle = '#3fae4a'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(v.ax, v.ay); ctx.quadraticCurveTo(v.ax + 12, (v.ay + b.y) / 2, b.x, b.y); ctx.stroke();
+      ctx.fillStyle = '#2f7a2f'; ctx.beginPath(); ctx.arc(v.ax, v.ay, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#57c84a'; ctx.beginPath(); ctx.ellipse(v.ax - 12, v.ay + 4, 12, 6, -0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = i === player.swinging ? '#ffe08a' : '#ff5a5a';
+      ctx.beginPath(); ctx.arc(b.x, b.y, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Verdana'; ctx.textAlign = 'center'; ctx.fillText(String(i + 1), b.x, b.y + 4);
+    });
+  }
+  function drawBerries() {
+    berrySpots.forEach(function(b) {
+      if (b.taken) return;
+      ctx.fillStyle = '#e91e63'; ctx.beginPath(); ctx.arc(b.x, b.y, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ff8fb3'; ctx.beginPath(); ctx.arc(b.x - 3, b.y - 3, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#2f7a2f'; ctx.beginPath(); ctx.arc(b.x + 5, b.y - 10, 5, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+  function drawPlayer() {
+    ctx.save(); ctx.translate(player.x, player.y);
+    if (player.swinging !== null) {
+      var v = vines[player.swinging];
+      ctx.strokeStyle = '#5b3a1a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo((v.ax - player.x) * 0.12, -player.r - 4); ctx.stroke();
+    }
+    ctx.fillStyle = '#ff9f1c'; ctx.beginPath(); ctx.arc(0, 0, player.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#231503'; ctx.beginPath(); ctx.arc(player.facing * 6, -5, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(player.facing * 6, -5, 1.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#3a2a10'; ctx.fillRect(-12, -player.r - 2, 24, 6);
+    ctx.fillStyle = '#e91e63'; ctx.beginPath(); ctx.arc(player.facing * 10, 6, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#231503'; ctx.font = 'bold 12px Verdana'; ctx.textAlign = 'center';
+    ctx.fillText('BANDIT', player.x, player.y - 28);
+  }
+  function draw() {
+    drawBackground(); drawPlatforms(); drawVines(); drawBerries(); drawPlayer();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.font = 'bold 14px Verdana'; ctx.textAlign = 'left';
+    ctx.fillText('Grab a vine: HOLD Space / mouse / touch', 14, 24);
+    if (player.swinging !== null) { ctx.fillText('Release at the top of the swing!', 14, 44); }
+  }
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000 || 0.016);
+    last = now;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Input: keyboard
+  document.addEventListener('keydown', function(e) {
+    ensureAudio();
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Spacebar') { grabHeld = true; e.preventDefault(); }
+    if (e.key === 'Enter' && state !== 'playing') startGame();
+  });
+  document.addEventListener('keyup', function(e) {
+    keys[e.key] = false;
+    if (e.key === ' ' || e.key === 'Spacebar') grabHeld = false;
+  });
+  // Input: mouse
+  canvas.addEventListener('mousedown', function(e) { ensureAudio(); mouseHeld = true; e.preventDefault(); });
+  document.addEventListener('mouseup', function() { mouseHeld = false; });
+  canvas.addEventListener('mousemove', function(e) { if (e.buttons) mouseHeld = true; });
+  // Input: touch
+  canvas.addEventListener('touchstart', function(e) { ensureAudio(); touchHeld = true; e.preventDefault(); }, {passive: false});
+  canvas.addEventListener('touchend', function(e) { touchHeld = false; e.preventDefault(); }, {passive: false});
+  canvas.addEventListener('touchcancel', function() { touchHeld = false; });
+  canvas.addEventListener('touchmove', function(e) { e.preventDefault(); }, {passive: false});
+  // Buttons
+  startBtn.addEventListener('click', function() { startGame(); });
+  document.getElementById('grabBtn').addEventListener('mousedown', function(){ ensureAudio(); touchHeld = true; });
+  document.getElementById('grabBtn').addEventListener('mouseup', function(){ touchHeld = false; });
+  document.getElementById('grabBtn').addEventListener('touchstart', function(e){ ensureAudio(); touchHeld = true; e.preventDefault(); }, {passive: false});
+  document.getElementById('grabBtn').addEventListener('touchend', function(){ touchHeld = false; });
+  document.getElementById('leftBtn').addEventListener('mousedown', function(){ keys['ArrowLeft'] = true; });
+  document.getElementById('leftBtn').addEventListener('mouseup', function(){ keys['ArrowLeft'] = false; });
+  document.getElementById('leftBtn').addEventListener('touchstart', function(e){ keys['ArrowLeft'] = true; e.preventDefault(); }, {passive: false});
+  document.getElementById('leftBtn').addEventListener('touchend', function(){ keys['ArrowLeft'] = false; });
+  document.getElementById('rightBtn').addEventListener('mousedown', function(){ keys['ArrowRight'] = true; });
+  document.getElementById('rightBtn').addEventListener('mouseup', function(){ keys['ArrowRight'] = false; });
+  document.getElementById('rightBtn').addEventListener('touchstart', function(e){ keys['ArrowRight'] = true; e.preventDefault(); }, {passive: false});
+  document.getElementById('rightBtn').addEventListener('touchend', function(){ keys['ArrowRight'] = false; });
+  document.getElementById('jumpBtn').addEventListener('click', function(){ ensureAudio(); if (player && player.onGround) { player.vy = -520; player.onGround = false; playJump(); } });
+
+  resetGame();
+  state = 'title';
+  showScreen('Bramble Bandit', 'Swing through the thorny valley, grab every berry, and reach the far treehouse!', 'Start Game');
+  updateHUD('Ready');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
