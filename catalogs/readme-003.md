@@ -46,10 +46,22 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0239 | Saxophone Soiree | Rhythm / Saxophone Note Run | D/F/J/K lanes, hold for long notes, mouse click/hold lanes, touch tap/hold lanes | [Play](./../games/game-0239.html) |
 | 0240 | Curling Champion | Precision / Curling Slide | Mouse/touch drag aim and release, Arrow Keys aim/power, Space slide/sweep | [Play](./../games/game-0240.html) |
 
+| 0241 | Kite Kraze | Arcade / Kite Flying | Arrow Keys / WASD steer, mouse move steer, touch drag | [Play](./../games/game-0241.html) |
+| 0242 | Rune Relay | Puzzle / Rune Sequence Memory | 1-6 / Q W E A S D keys, click/tap runes | [Play](./../games/game-0242.html) |
+| 0243 | Bakery Baron | Strategy / Bakery Management | Click/tap customers and buttons, mouse/touch | [Play](./../games/game-0243.html) |
+| 0244 | Marimba Marathon | Rhythm / Marimba Note Run | D/F/J/K lanes, click/tap lanes | [Play](./../games/game-0244.html) |
+| 0245 | Darts Dynamo | Precision / Darts | Space/click/tap throw, wind | [Play](./../games/game-0245.html) |
+| 0246 | Rocket Rodeo | Arcade / Asteroid Rider | Arrow Keys / WASD move, mouse/touch drag, Space tether | [Play](./../games/game-0246.html) |
+| 0247 | Circuit Splicer | Puzzle / Circuit Routing | Click/tap tiles rotate, Arrow Keys / WASD move, Space/R rotate | [Play](./../games/game-0247.html) |
+| 0248 | Harbor Haven | Strategy / Port Management | Click/tap ships and docks, 1-4 berth, Space service | [Play](./../games/game-0248.html) |
+| 0249 | Accordion Alley | Rhythm / Accordion Beat | Left/A and Right/D, tap on-screen buttons | [Play](./../games/game-0249.html) |
+| 0250 | Bowling Blitz | Precision / Bowling | Mouse/touch aim, Arrow Keys aim, A/D hook, Space throw | [Play](./../games/game-0250.html) |
+
 ## Batch notes
 
 - Batch 021: 10 games, produced in one cycle. Volume 003 opened at game 0201.
 - Batch 022: 10 games, produced in one cycle.
 - Batch 023: 10 games, produced in one cycle.
 - Batch 024: 10 games, produced in one cycle.
+- Batch 025: 10 games, produced in one cycle.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.

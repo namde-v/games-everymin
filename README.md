@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 240
-- **Latest game:** 0240 — Curling Champion
+- **Total games:** 250
+- **Latest game:** 0250 — Bowling Blitz
 - **Current volume:** 003 (Games 0201 to 0300)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -15,7 +15,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 |--------|-------|---------|
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
-| 003 | 0201–0240 (40 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
+| 003 | 0201–0250 (50 so far, up to 0300) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -29,20 +29,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 024
+## Latest batch — Batch 025
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0231 | Avalanche Ace | Arcade / Snowboard Downhill | [Play](./games/game-0231.html) |
-| 0232 | Orbit Oracle | Puzzle / Gravity Orbit Logic | [Play](./games/game-0232.html) |
-| 0233 | Tidepool Tycoon | Strategy / Tidepool Ecosystem Management | [Play](./games/game-0233.html) |
-| 0234 | Xylophone Xpress | Rhythm / Xylophone Note Run | [Play](./games/game-0234.html) |
-| 0235 | Boomerang Bounty | Precision / Boomerang Throwing | [Play](./games/game-0235.html) |
-| 0236 | Coral Cruiser | Arcade / Submarine Reef Explorer | [Play](./games/game-0236.html) |
-| 0237 | Lantern Labyrinth | Puzzle / Light Maze Logic | [Play](./games/game-0237.html) |
-| 0238 | Windmill Warden | Strategy / Windmill Farm Management | [Play](./games/game-0238.html) |
-| 0239 | Saxophone Soiree | Rhythm / Saxophone Note Run | [Play](./games/game-0239.html) |
-| 0240 | Curling Champion | Precision / Curling Slide | [Play](./games/game-0240.html) |
+| 0241 | Kite Kraze | Arcade / Kite Flying | [Play](./games/game-0241.html) |
+| 0242 | Rune Relay | Puzzle / Rune Sequence Memory | [Play](./games/game-0242.html) |
+| 0243 | Bakery Baron | Strategy / Bakery Management | [Play](./games/game-0243.html) |
+| 0244 | Marimba Marathon | Rhythm / Marimba Note Run | [Play](./games/game-0244.html) |
+| 0245 | Darts Dynamo | Precision / Darts | [Play](./games/game-0245.html) |
+| 0246 | Rocket Rodeo | Arcade / Asteroid Rider | [Play](./games/game-0246.html) |
+| 0247 | Circuit Splicer | Puzzle / Circuit Routing | [Play](./games/game-0247.html) |
+| 0248 | Harbor Haven | Strategy / Port Management | [Play](./games/game-0248.html) |
+| 0249 | Accordion Alley | Rhythm / Accordion Beat | [Play](./games/game-0249.html) |
+| 0250 | Bowling Blitz | Precision / Bowling | [Play](./games/game-0250.html) |
 
 
 ## Quality standard

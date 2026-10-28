@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Harbor Haven</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: #0b2233; color: #eaf6ff; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; padding: 10px; }
+  #wrap { width: 100%; max-width: 960px; }
+  h1 { margin: 6px 0 2px; text-align: center; font-size: 34px; letter-spacing: 1px; color: #ffd166; text-shadow: 0 2px 0 #000; }
+  .tag { text-align: center; color: #9fd8ff; margin-bottom: 8px; }
+  #hud { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 8px 0; }
+  .pill { background: #123a52; border: 2px solid #2a7aa8; border-radius: 999px; padding: 7px 12px; font-weight: bold; font-size: 14px; }
+  .pill b { color: #ffd166; }
+  .pill.warn b { color: #ff6b6b; }
+  #canvasWrap { position: relative; border: 3px solid #2a7aa8; border-radius: 12px; overflow: hidden; background: #0e4a6b; }
+  canvas { display: block; width: 100%; height: 190px; }
+  #boards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .panel { background: #102f44; border: 2px solid #2a7aa8; border-radius: 12px; padding: 10px; min-height: 180px; }
+  .panel h2 { margin: 0 0 8px; font-size: 18px; color: #7fe3ff; }
+  .ship { background: #173d57; border: 1px solid #3a8ab8; border-radius: 10px; padding: 8px; margin-bottom: 8px; cursor: pointer; }
+  .ship.sel { outline: 3px solid #ffd166; background: #214d6b; }
+  .ship .nm { font-weight: bold; }
+  .ship .meta { font-size: 13px; color: #cfeaff; }
+  .bar { height: 12px; background: #0b2233; border-radius: 999px; overflow: hidden; margin: 5px 0; border: 1px solid #3a8ab8; }
+  .bar i { display: block; height: 100%; background: #4ecdc4; }
+  .bar.t i { background: #ff9f43; }
+  button { background: #ffd166; color: #122233; border: none; border-radius: 10px; padding: 9px 13px; font-weight: bold; font-size: 14px; cursor: pointer; margin: 3px 3px 3px 0; }
+  button:hover { filter: brightness(1.1); }
+  button.secondary { background: #4ecdc4; }
+  button.danger { background: #ff6b6b; color: #fff; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .dock { background: #173d57; border: 2px dashed #3a8ab8; border-radius: 10px; padding: 8px; margin-bottom: 8px; min-height: 72px; }
+  .dock.free { border-style: solid; color: #9fd8ff; }
+  #actions { text-align: center; margin-top: 10px; background: #102f44; border: 2px solid #2a7aa8; border-radius: 12px; padding: 10px; }
+  #msg { text-align: center; min-height: 22px; font-weight: bold; color: #ffd166; margin-top: 6px; }
+  #hint { text-align: center; font-size: 13px; color: #9fd8ff; }
+  .overlay { position: fixed; inset: 0; background: rgba(3, 18, 30, 0.94); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 18px; }
+  .card { background: #123a52; border: 3px solid #ffd166; border-radius: 16px; padding: 22px; max-width: 620px; width: 100%; text-align: center; }
+  .card h2 { font-size: 38px; margin: 0 0 6px; color: #ffd166; }
+  .card ul { text-align: left; line-height: 1.6; }
+  .card p { line-height: 1.6; }
+  .big { font-size: 20px; font-weight: bold; }
+  @media (max-width: 640px) { #boards { grid-template-columns: 1fr; } h1 { font-size: 28px; } canvas { height: 150px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>&#9875; HARBOR HAVEN</h1>
+  <div class="tag">Strategy / Port Management &mdash; Run the harbor for 6 shifts. Earn 800 coins. Never let 3 ships leave unserved.</div>
+
+  <div id="hud" aria-live="polite">
+    <div class="pill">Coins: <b id="hudCoins">0</b> / 800</div>
+    <div class="pill">Shift: <b id="hudShift">1</b> / 6</div>
+    <div class="pill">Shift time: <b id="hudTime">40</b>s</div>
+    <div class="pill">Serviced: <b id="hudDone">0</b></div>
+    <div class="pill warn">Unserved: <b id="hudBad">0</b> / 3</div>
+    <div class="pill">Fuel: <b id="hudFuel">100</b></div>
+    <div class="pill">Crew: <b id="hudCrew">100</b></div>
+    <div class="pill">Status: <b id="hudStatus">Waiting to start</b></div>
+  </div>
+
+  <div id="canvasWrap"><canvas id="sea" width="960" height="190"></canvas></div>
+
+  <div id="boards">
+    <div class="panel">
+      <h2>Incoming Ships &mdash; tap one to select it</h2>
+      <div id="incoming"></div>
+      <div id="noIncoming" style="color:#9fd8ff;">No ships waiting. New ships arrive soon.</div>
+    </div>
+    <div class="panel">
+      <h2>Docks &mdash; tap a free dock to berth the selected ship</h2>
+      <div id="docks"></div>
+    </div>
+  </div>
+
+  <div id="actions">
+    <button id="serviceBtn" class="secondary">Service Selected Docked Ship (Space)</button>
+    <button id="refuelBtn">Refuel +40 (30 coins)</button>
+    <button id="restBtn">Rest Crew +40 (20 coins)</button>
+    <button id="pauseBtn">Pause / Resume</button>
+    <div id="msg">Press Start to begin your first shift.</div>
+    <div id="hint">Mouse: click ships and docks &bull; Touch: tap ships and docks &bull; Keyboard: 1-4 berth to dock, Space service, P pause, R restart, Enter start/restart</div>
+  </div>
+</div>
+
+<div id="titleScreen" class="overlay">
+  <div class="card">
+    <h2>&#9875; HARBOR HAVEN</h2>
+    <p class="big">Can you run a busy harbor for 6 shifts?</p>
+    <ul>
+      <li><b>Goal:</b> Earn <b>800 coins</b> across 6 shifts. Each fully loaded or unloaded ship pays its fee.</li>
+      <li><b>How to play:</b> Tap an incoming ship to select it, then tap a free dock to berth it. Tap <b>Service</b> (or press Space) repeatedly to load/unload its cargo before its departure timer runs out.</li>
+      <li><b>Watch your resources:</b> Every service uses fuel and crew. If either is too low, servicing stops &mdash; buy fuel or rest your crew, but that costs coins.</li>
+      <li><b>Lose if:</b> 3 ships depart unserved, or you finish shift 6 with fewer than 800 coins.</li>
+      <li><b>Tips:</b> Big ships pay more but take longer. Serve the ship with the shortest timer first. Keep fuel and crew above 20.</li>
+    </ul>
+    <button id="startBtn" style="font-size:20px; padding:14px 28px;">&#9654; START HARBOR</button>
+    <p>Keyboard: Enter to start &bull; 1-4 to berth &bull; Space to service &bull; R to restart</p>
+  </div>
+</div>
+
+<div id="endScreen" class="overlay" style="display:none;">
+  <div class="card">
+    <h2 id="endTitle">Shift Complete</h2>
+    <p id="endText" class="big"></p>
+    <p id="endStats"></p>
+    <button id="restartBtn" style="font-size:20px; padding:14px 28px;">&#8635; RESTART</button>
+    <p>Press R or Enter to restart instantly.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('sea');
+  var ctx = canvas.getContext('2d');
+  var SHIP_TYPES = [
+    { type: 'Container Ship', fee: 2, min: 50, max: 90 },
+    { type: 'Cargo Freighter', fee: 2, min: 40, max: 80 },
+    { type: 'Oil Tanker', fee: 3, min: 50, max: 70 },
+    { type: 'Cruise Liner', fee: 2, min: 30, max: 60 },
+    { type: 'Fishing Trawler', fee: 3, min: 30, max: 50 }
+  ];
+  var NAMES = ['SS Aurora', 'MV Coral', 'SS Tempest', 'MV Gull', 'SS Beacon', 'MV Tide', 'SS Harbor Light', 'MV Pelican', 'SS North Star', 'MV Dolphin', 'SS Wave Rider', 'MV Anchor'];
+  var state = null;
+  var audioCtx = null;
+  var paused = false;
+  var lastTime = 0;
+  var spawnTimer = 0;
+  var waveT = 0;
+
+  function el(id) { return document.getElementById(id); }
+  function msg(t) { el('msg').textContent = t; }
+  function rand(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function initAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (dur || 0.15));
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + (dur || 0.15));
+    } catch (e) {}
+  }
+  function sound(kind) {
+    if (kind === 'click') beep(520, 0.08, 'square');
+    else if (kind === 'coin') { beep(880, 0.12, 'sine'); setTimeout(function () { beep(1320, 0.15, 'sine'); }, 90); }
+    else if (kind === 'bad') beep(160, 0.3, 'sawtooth');
+    else if (kind === 'win') { beep(523, 0.2, 'sine'); setTimeout(function () { beep(659, 0.2, 'sine'); }, 150); setTimeout(function () { beep(784, 0.3, 'sine'); }, 300); }
+    else if (kind === 'select') beep(660, 0.07, 'triangle');
+  }
+
+  function newGame() {
+    state = {
+      playing: true, coins: 0, shift: 1, shiftTime: 40, serviced: 0, unserved: 0,
+      fuel: 100, crew: 100, ships: [], docks: [null, null, null, null],
+      selected: null, nextId: 1, gameOver: false, won: false
+    };
+    paused = false;
+    spawnTimer = 1.5;
+    el('titleScreen').style.display = 'none';
+    el('endScreen').style.display = 'none';
+    el('hudStatus').textContent = 'Shift 1 in progress';
+    msg('Shift 1 has begun. Select a ship, then a free dock.');
+    render();
+  }
+
+  function spawnShip() {
+    if (!state || !state.playing) return;
+    var t = pick(SHIP_TYPES);
+    var cargo = rand(t.min, t.max);
+    var ship = {
+      id: state.nextId++, name: pick(NAMES) + ' #' + state.nextId,
+      type: t.type, cargo: cargo, done: 0, fee: cargo * t.fee,
+      timer: rand(30, 42), dock: -1
+    };
+    state.ships.push(ship);
+    msg(ship.name + ' (' + ship.type + ') is arriving. Berth it before it leaves.');
+  }
+
+  function selectedShip() {
+    if (!state || state.selected == null) return null;
+    for (var i = 0; i < state.ships.length; i++) if (state.ships[i].id === state.selected) return state.ships[i];
+    return null;
+  }
+
+  function berth(dockIdx) {
+    var s = selectedShip();
+    if (!s) { msg('First select an incoming ship, then tap a free dock.'); sound('bad'); return; }
+    if (s.dock >= 0) { msg(s.name + ' is already docked.'); return; }
+    if (state.docks[dockIdx]) { msg('Dock ' + (dockIdx + 1) + ' is occupied. Pick a free dock.'); sound('bad'); return; }
+    s.dock = dockIdx; state.docks[dockIdx] = s.id;
+    state.selected = null;
+    sound('select');
+    msg(s.name + ' berthed at Dock ' + (dockIdx + 1) + '. Now press Service to load/unload it.');
+    render();
+  }
+
+  function serviceSelected() {
+    var s = selectedShip();
+    if (!s) {
+      // Service the most urgent docked ship if none selected
+      var best = null;
+      for (var i = 0; i < state.ships.length; i++) {
+        var sh = state.ships[i];
+        if (sh.dock >= 0 && (!best || sh.timer < best.timer)) best = sh;
+      }
+      s = best;
+    }
+    if (!s) { msg('No docked ship to service. Berth a ship first.'); return; }
+    if (s.dock < 0) { msg(s.name + ' is not docked yet. Berth it first.'); sound('bad'); return; }
+    if (state.fuel < 5 || state.crew < 3) { msg('Too low on fuel or crew to service. Refuel or rest the crew.'); sound('bad'); return; }
+    state.fuel = Math.max(0, state.fuel - 5);
+    state.crew = Math.max(0, state.crew - 3);
+    s.done = Math.min(s.cargo, s.done + 10);
+    sound('click');
+    if (s.done >= s.cargo) {
+      state.coins += s.fee; state.serviced++;
+      var dock = s.dock;
+      state.docks[dock] = null;
+      state.ships = state.ships.filter(function (x) { return x.id !== s.id; });
+      if (state.selected === s.id) state.selected = null;
+      sound('coin');
+      msg(s.name + ' fully serviced. +' + s.fee + ' coins. Total: ' + state.coins + '.');
+      checkWin();
+    }
+    render();
+  }
+
+  function checkWin() {
+    if (!state || !state.playing) return;
+    if (state.coins >= 800) endGame(true, 'You earned ' + state.coins + ' coins. The harbor is thriving.');
+  }
+  function endGame(won, reason) {
+    if (!state) return;
+    state.playing = false; state.won = won; state.gameOver = !won;
+    el('endTitle').textContent = won ? 'YOU WIN! Harbor Haven!' : 'GAME OVER';
+    el('endText').textContent = reason;
+    el('endStats').textContent = 'Coins: ' + state.coins + ' | Serviced: ' + state.serviced + ' | Unserved: ' + state.unserved + ' | Reached shift ' + state.shift + ' of 6.';
+    el('hudStatus').textContent = won ? 'You win!' : 'Game over';
+    el('endScreen').style.display = 'flex';
+    sound(won ? 'win' : 'bad');
+  }
+
+  function expireShip(ship) {
+    var dock = ship.dock;
+    if (dock >= 0) state.docks[dock] = null;
+    state.ships = state.ships.filter(function (x) { return x.id !== ship.id; });
+    if (state.selected === ship.id) state.selected = null;
+    state.unserved++;
+    sound('bad');
+    msg(ship.name + ' departed unserved. Unserved ships: ' + state.unserved + ' / 3.');
+    if (state.unserved >= 3) endGame(false, 'Three ships departed unserved. The port authority has closed your harbor.');
+    render();
+  }
+
+  function nextShift() {
+    state.shift++;
+    if (state.shift > 6) {
+      if (state.coins >= 800) endGame(true, 'Six shifts complete with ' + state.coins + ' coins.');
+      else endGame(false, 'Six shifts are over and you earned only ' + state.coins + ' of the 800 coins needed.');
+      return;
+    }
+    state.shiftTime = 40;
+    state.fuel = Math.min(100, state.fuel + 15);
+    state.crew = Math.min(100, state.crew + 15);
+    spawnTimer = 1;
+    el('hudStatus').textContent = 'Shift ' + state.shift + ' in progress';
+    msg('Shift ' + state.shift + ' begins. Fuel and crew partly restored. Keep earning.');
+    sound('select');
+  }
+
+  function update(dt) {
+    if (!state || !state.playing || paused) return;
+    waveT += dt;
+    state.shiftTime -= dt;
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      var waiting = state.ships.filter(function (s) { return s.dock < 0; }).length;
+      if (waiting < 3) spawnShip();
+      spawnTimer = rand(6, 10);
+    }
+    var expired = [];
+    for (var i = 0; i < state.ships.length; i++) {
+      state.ships[i].timer -= dt;
+      if (state.ships[i].timer <= 0) expired.push(state.ships[i]);
+    }
+    for (var j = 0; j < expired.length; j++) {
+      if (state.playing) expireShip(expired[j]);
+    }
+    if (state.playing && state.shiftTime <= 0) nextShift();
+    // Slow crew recovery so careful play is rewarded, but never free fuel.
+    state.crew = Math.min(100, state.crew + dt * 0.4);
+    renderHud();
+  }
+
+  function renderHud() {
+    if (!state) return;
+    el('hudCoins').textContent = state.coins;
+    el('hudShift').textContent = Math.min(6, state.shift);
+    el('hudTime').textContent = Math.max(0, Math.ceil(state.shiftTime));
+    el('hudDone').textContent = state.serviced;
+    el('hudBad').textContent = state.unserved;
+    el('hudFuel').textContent = Math.floor(state.fuel);
+    el('hudCrew').textContent = Math.floor(state.crew);
+  }
+
+  function render() {
+    if (!state) return;
+    renderHud();
+    var inc = el('incoming');
+    inc.innerHTML = '';
+    var waiting = state.ships.filter(function (s) { return s.dock < 0; });
+    el('noIncoming').style.display = waiting.length ? 'none' : 'block';
+    waiting.forEach(function (s) {
+      var d = document.createElement('div');
+      d.className = 'ship' + (state.selected === s.id ? ' sel' : '');
+      d.innerHTML = '<div class="nm">' + s.name + ' &mdash; ' + s.type + '</div>' +
+        '<div class="meta">Cargo: ' + s.done + '/' + s.cargo + ' &bull; Fee: ' + s.fee + ' coins &bull; Leaves in ' + Math.ceil(s.timer) + 's</div>' +
+        '<div class="bar t"><i style="width:' + Math.max(0, Math.min(100, s.timer / 42 * 100)) + '%"></i></div>';
+      d.addEventListener('click', function () { state.selected = s.id; sound('select'); msg(s.name + ' selected. Now tap a free dock.'); render(); });
+      d.addEventListener('touchstart', function (e) { e.preventDefault(); state.selected = s.id; sound('select'); msg(s.name + ' selected. Now tap a free dock.'); render(); }, { passive: false });
+      inc.appendChild(d);
+    });
+    var dk = el('docks');
+    dk.innerHTML = '';
+    for (var i = 0; i < 4; i++) {
+      (function (idx) {
+        var div = document.createElement('div');
+        div.className = 'dock' + (!state.docks[idx] ? ' free' : '');
+        var sid = state.docks[idx];
+        if (!sid) {
+          div.innerHTML = '<b>Dock ' + (idx + 1) + '</b> &mdash; FREE. Tap to berth the selected ship here.';
+        } else {
+          var s = null;
+          for (var k = 0; k < state.ships.length; k++) if (state.ships[k].id === sid) s = state.ships[k];
+          if (s) {
+            div.innerHTML = '<b>Dock ' + (idx + 1) + ':</b> ' + s.name + ' (' + s.type + ')<br>' +
+              'Cargo: ' + s.done + '/' + s.cargo + ' &bull; Fee: ' + s.fee + ' &bull; Leaves in ' + Math.ceil(s.timer) + 's' +
+              '<div class="bar"><i style="width:' + (s.done / s.cargo * 100) + '%"></i></div>' +
+              '<div class="bar t"><i style="width:' + Math.max(0, Math.min(100, s.timer / 42 * 100)) + '%"></i></div>';
+          } else { div.textContent = 'Dock ' + (idx + 1); }
+        }
+        div.addEventListener('click', function () {
+          if (!state.docks[idx]) berth(idx);
+          else { state.selected = sid; sound('select'); msg('Dock ' + (idx + 1) + ' ship selected. Press Service.'); render(); }
+        });
+        div.addEventListener('touchstart', function (e) {
+          e.preventDefault();
+          if (!state.docks[idx]) berth(idx);
+          else { state.selected = sid; sound('select'); render(); }
+        }, { passive: false });
+        dk.appendChild(div);
+      })(i);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0e5a85'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    for (var w = 0; w < 14; w++) {
+      var x = ((w * 90 + waveT * 24) % (canvas.width + 90)) - 45;
+      var y = 30 + (w % 4) * 32;
+      ctx.beginPath(); ctx.ellipse(x, y, 34, 7, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // Piers
+    ctx.fillStyle = '#8a5a2b';
+    for (var d = 0; d < 4; d++) ctx.fillRect(60 + d * 220, 108, 150, 70);
+    ctx.fillStyle = '#ffd166';
+    for (var d2 = 0; d2 < 4; d2++) ctx.fillRect(60 + d2 * 220, 108, 150, 8);
+    // Docked ships as simple hulls
+    if (state) {
+      for (var i = 0; i < state.ships.length; i++) {
+        var s = state.ships[i];
+        if (s.dock >= 0) {
+          var sx = 70 + s.dock * 220, sy = 72;
+          ctx.fillStyle = s.dock % 2 ? '#e74c3c' : '#2ecc71';
+          ctx.fillRect(sx, sy, 130, 28);
+          ctx.fillStyle = '#ecf0f1'; ctx.fillRect(sx + 20, sy - 16, 40, 16);
+          ctx.fillStyle = '#122233'; ctx.font = '11px Arial'; ctx.fillText(s.name, sx + 2, sy + 42);
+        }
+      }
+    }
+    ctx.fillStyle = '#eaf6ff'; ctx.font = 'bold 15px Arial';
+    ctx.fillText('HARBOR  |  Docks 1-4 below  |  Serve ships before their timers run out', 18, 20);
+  }
+
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.1, (ts - lastTime) / 1000);
+    lastTime = ts;
+    update(dt);
+    draw();
+    // Keep HUD fresh even when paused or on title screen
+    if (state) renderHud();
+  }
+
+  // Controls: mouse, touch, keyboard
+  el('startBtn').addEventListener('click', function () { initAudio(); sound('select'); newGame(); });
+  el('startBtn').addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); sound('select'); newGame(); }, { passive: false });
+  el('restartBtn').addEventListener('click', function () { initAudio(); sound('select'); newGame(); });
+  el('restartBtn').addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); sound('select'); newGame(); }, { passive: false });
+  el('serviceBtn').addEventListener('click', function () { initAudio(); if (state && state.playing && !paused) serviceSelected(); });
+  el('serviceBtn').addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); if (state && state.playing && !paused) serviceSelected(); }, { passive: false });
+  el('refuelBtn').addEventListener('click', function () {
+    if (!state || !state.playing) return;
+    if (state.coins < 30) { msg('Not enough coins to refuel. Service a ship first.'); sound('bad'); return; }
+    state.coins -= 30; state.fuel = Math.min(100, state.fuel + 40); sound('coin'); msg('Refueled. Fuel: ' + Math.floor(state.fuel) + '.'); render();
+  });
+  el('restBtn').addEventListener('click', function () {
+    if (!state || !state.playing) return;
+    if (state.coins < 20) { msg('Not enough coins to rest the crew.'); sound('bad'); return; }
+    state.coins -= 20; state.crew = Math.min(100, state.crew + 40); sound('coin'); msg('Crew rested. Crew: ' + Math.floor(state.crew) + '.'); render();
+  });
+  el('pauseBtn').addEventListener('click', function () {
+    if (!state || !state.playing) return;
+    paused = !paused; el('hudStatus').textContent = paused ? 'Paused' : 'Shift ' + state.shift + ' in progress';
+    msg(paused ? 'Paused. Press Pause again to resume.' : 'Resumed.');
+  });
+  canvas.addEventListener('mousedown', function () { initAudio(); if (state && state.playing) sound('select'); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); initAudio(); if (state && state.playing) sound('select'); }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      if (el('titleScreen').style.display !== 'none' || el('endScreen').style.display !== 'none') { initAudio(); newGame(); }
+      return;
+    }
+    if (e.key === 'r' || e.key === 'R') {
+      if (el('endScreen').style.display !== 'none' || (state && state.playing)) { initAudio(); newGame(); }
+      return;
+    }
+    if (!state || !state.playing || paused) return;
+    if (e.key >= '1' && e.key <= '4') berth(parseInt(e.key, 10) - 1);
+    else if (e.key === ' ') { e.preventDefault(); serviceSelected(); }
+    else if (e.key === 'p' || e.key === 'P') el('pauseBtn').click();
+  });
+  document.addEventListener('touchstart', function () { initAudio(); }, { passive: true });
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

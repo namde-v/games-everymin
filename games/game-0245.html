@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Darts Dynamo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #101418;
+    color: #f5f1e6;
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 12px;
+    overflow-x: hidden;
+  }
+  #wrap { width: min(680px, 100%); text-align: center; }
+  h1 { font-size: 42px; letter-spacing: 2px; color: #ffd54a; text-shadow: 2px 2px 0 #b71c1c; margin-bottom: 6px; }
+  .tagline { color: #b0bec5; margin-bottom: 12px; font-size: 15px; }
+  #hud {
+    display: flex; justify-content: space-between; gap: 8px;
+    background: #1e2a32; border: 2px solid #455a64; border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 10px; font-weight: bold; font-size: 15px; flex-wrap: wrap;
+  }
+  #hud span { white-space: nowrap; }
+  #status { color: #ffd54a; }
+  #windBox { color: #80d8ff; }
+  #canvasWrap { position: relative; width: 100%; aspect-ratio: 1 / 1; max-width: 620px; margin: 0 auto; }
+  canvas {
+    width: 100%; height: 100%; display: block; background: #263238;
+    border: 4px solid #5d4037; border-radius: 14px; touch-action: none; cursor: crosshair;
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    background: rgba(10, 16, 20, 0.88); border-radius: 10px; padding: 24px; z-index: 5;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffd54a; }
+  .overlay p { line-height: 1.55; max-width: 480px; font-size: 15px; color: #eceff1; }
+  .overlay .big { font-size: 22px; font-weight: bold; color: #ffffff; }
+  .howto { background: #263238; border: 1px solid #546e7a; border-radius: 10px; padding: 14px 16px; text-align: left; font-size: 14px; line-height: 1.6; }
+  .howto b { color: #ffd54a; }
+  button {
+    background: #e53935; color: white; border: none; border-radius: 10px;
+    padding: 14px 28px; font-size: 19px; font-weight: bold; cursor: pointer;
+    box-shadow: 0 4px 0 #8e0000;
+  }
+  button:hover { background: #ff5252; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  .small { font-size: 13px; color: #b0bec5; }
+  #controlsHint { margin-top: 10px; font-size: 13px; color: #90a4ae; line-height: 1.5; }
+  #lastThrow { min-height: 20px; font-weight: bold; color: #a5d6a7; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🎯 DARTS DYNAMO</h1>
+  <p class="tagline">Ten rounds. One wobbling reticle. Gusty wind. Chase 300 points!</p>
+
+  <div id="hud" role="status" aria-live="polite">
+    <span>Score: <span id="scoreVal">0</span> / 300</span>
+    <span>Round: <span id="roundVal">1</span> / 10</span>
+    <span id="windBox">Wind: Calm</span>
+    <span>Status: <span id="status">Ready</span></span>
+  </div>
+
+  <div id="canvasWrap">
+    <canvas id="game" width="620" height="620"></canvas>
+
+    <div id="titleScreen" class="overlay">
+      <h2>DARTS DYNAMO</h2>
+      <p>Step up to the oche! Your aim reticle wobbles, the wind pushes it around, and every throw counts across 10 rounds.</p>
+      <div class="howto">
+        <b>How to Play:</b><br>
+        • Watch the red reticle wobble around the dartboard.<br>
+        • Press <b>SPACE</b>, click, or tap the board to throw when the reticle is over the bullseye.<br>
+        • Bullseye = 50 pts, inner ring = 40, middle rings = 30 / 20, outer ring = 10, board edge = 5, miss = 0.<br>
+        • A new wind gust shifts your aim every round — check the HUD wind direction and strength.<br>
+        • Reach <b>300 points</b> to win. Fall short after round 10 and it is game over.<br>
+        • Press <b>R</b> at any time to restart.
+      </div>
+      <button id="startBtn" type="button">▶ Start Game</button>
+      <p class="small">Keyboard: SPACE to throw &nbsp;|&nbsp; Mouse: click to throw &nbsp;|&nbsp; Touch: tap to throw</p>
+    </div>
+
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">You Win!</h2>
+      <p class="big" id="endScore">Final Score: 0</p>
+      <p id="endDetail">Great throwing!</p>
+      <button id="restartBtn" type="button">↻ Play Again</button>
+      <p class="small">Press R or Enter to restart instantly.</p>
+    </div>
+  </div>
+
+  <div id="lastThrow">Aim steady... the wind is watching.</div>
+  <p id="controlsHint">Throw: SPACE / Click / Tap &nbsp;•&nbsp; Restart: R &nbsp;•&nbsp; Sound starts after you press Start.</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var cx = W / 2, cy = H / 2;
+  var scoreEl = document.getElementById('scoreVal');
+  var roundEl = document.getElementById('roundVal');
+  var statusEl = document.getElementById('status');
+  var windEl = document.getElementById('windBox');
+  var lastEl = document.getElementById('lastThrow');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endScore = document.getElementById('endScore');
+  var endDetail = document.getElementById('endDetail');
+
+  var state = 'title'; // title | aiming | flying | ended
+  var score = 0, round = 1, maxRounds = 10, winScore = 300;
+  var time = 0, lastTime = 0;
+  var aimX = cx, aimY = cy;
+  var windX = 0, windY = 0, windLabel = 'Calm', windStrength = 0;
+  var dart = null; // flying dart animation
+  var marks = []; // stuck darts from previous throws
+  var message = '', messageUntil = 0;
+  var audioCtx = null;
+
+  function ensureAudio() {
+    if (audioCtx) { if (audioCtx.state === 'suspended') { audioCtx.resume(); } return; }
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) { audioCtx = new AC(); }
+    } catch (e) { audioCtx = null; }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) { return; }
+    try {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+  function soundThrow() { beep(220, 0.18, 'sawtooth', 0.08); }
+  function soundHit(points) {
+    if (points >= 50) { beep(880, 0.35, 'sine', 0.16); setTimeout(function(){ beep(1320, 0.3, 'sine', 0.12); }, 90); }
+    else if (points >= 20) { beep(660, 0.22, 'triangle', 0.14); }
+    else if (points > 0) { beep(440, 0.18, 'triangle', 0.10); }
+    else { beep(160, 0.30, 'square', 0.07); }
+  }
+  function soundWin() { [523, 659, 784, 1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.35, 'sine', 0.14); }, i * 140); }); }
+  function soundLose() { [392, 330, 262, 196].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.35, 'triangle', 0.10); }, i * 150); }); }
+
+  function randomWind() {
+    var dirs = [
+      { label: 'Calm', dx: 0, dy: 0, s: 0 },
+      { label: '← West 1', dx: -1, dy: 0, s: 1 },
+      { label: '→ East 1', dx: 1, dy: 0, s: 1 },
+      { label: '↑ North 1', dx: 0, dy: -1, s: 1 },
+      { label: '↓ South 1', dx: 0, dy: 1, s: 1 },
+      { label: '↖ NW 2', dx: -0.7, dy: -0.7, s: 2 },
+      { label: '↗ NE 2', dx: 0.7, dy: -0.7, s: 2 },
+      { label: '↙ SW 2', dx: -0.7, dy: 0.7, s: 2 },
+      { label: '↘ SE 2', dx: 0.7, dy: 0.7, s: 2 },
+      { label: '→ East 3 STRONG', dx: 1, dy: 0, s: 3 },
+      { label: '← West 3 STRONG', dx: -1, dy: 0, s: 3 }
+    ];
+    var w = dirs[Math.floor(Math.random() * dirs.length)];
+    windLabel = w.label; windStrength = w.s;
+    windX = w.dx * w.s * 14;
+    windY = w.dy * w.s * 14;
+    windEl.textContent = 'Wind: ' + windLabel;
+  }
+
+  function updateHUD(statusText) {
+    scoreEl.textContent = score;
+    roundEl.textContent = Math.min(round, maxRounds);
+    if (statusText) { statusEl.textContent = statusText; }
+  }
+
+  function resetGame() {
+    score = 0; round = 1; marks = []; dart = null; message = '';
+    randomWind();
+    state = 'aiming';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    lastEl.textContent = 'Round 1 — aim for the bullseye!';
+    updateHUD('Aiming');
+  }
+
+  function showEnd(won) {
+    state = 'ended';
+    endScreen.classList.remove('hidden');
+    endScore.textContent = 'Final Score: ' + score + ' / ' + winScore;
+    if (won) {
+      endTitle.textContent = '🏆 YOU WIN!';
+      endDetail.textContent = 'Darts Dynamo! You reached ' + score + ' points in ' + (round) + ' rounds.';
+      statusEl.textContent = 'You Win!';
+      soundWin();
+    } else {
+      endTitle.textContent = 'Game Over';
+      endDetail.textContent = 'You finished with ' + score + ' points — just short of 300. Try again, sharper aim next time!';
+      statusEl.textContent = 'Game Over';
+      soundLose();
+    }
+  }
+
+  function scoreForDistance(d) {
+    if (d <= 22) { return 50; }
+    if (d <= 48) { return 40; }
+    if (d <= 95) { return 30; }
+    if (d <= 150) { return 20; }
+    if (d <= 200) { return 10; }
+    if (d <= 235) { return 5; }
+    return 0;
+  }
+  function zoneName(points) {
+    if (points === 50) { return 'BULLSEYE!'; }
+    if (points === 40) { return 'Inner bull ring!'; }
+    if (points === 30) { return 'Treble zone!'; }
+    if (points === 20) { return 'Double zone!'; }
+    if (points === 10) { return 'Outer ring!'; }
+    if (points === 5) { return 'Board edge!'; }
+    return 'Missed the board!';
+  }
+
+  function throwDart() {
+    if (state !== 'aiming') { return; }
+    state = 'flying';
+    updateHUD('Throwing...');
+    soundThrow();
+    // Dart flies from bottom toward the current aim point, with a little wind push.
+    var targetX = aimX + windX * 0.35;
+    var targetY = aimY + windY * 0.35;
+    dart = { x: cx, y: H - 20, tx: targetX, ty: targetY, t: 0 };
+  }
+
+  function resolveThrow() {
+    var dx = dart.tx - cx, dy = dart.ty - cy;
+    var d = Math.sqrt(dx * dx + dy * dy);
+    var points = scoreForDistance(d);
+    score += points;
+    marks.push({ x: dart.tx, y: dart.ty, points: points });
+    soundHit(points);
+    lastEl.textContent = 'Round ' + round + ': ' + zoneName(points) + ' +' + points + ' pts — Total ' + score;
+    updateHUD(points > 0 ? 'Nice throw!' : 'Miss!');
+
+    if (score >= winScore) {
+      setTimeout(function(){ showEnd(true); }, 650);
+      return;
+    }
+    if (round >= maxRounds) {
+      setTimeout(function(){ showEnd(false); }, 650);
+      return;
+    }
+    round += 1;
+    randomWind();
+    state = 'aiming';
+    updateHUD('Aiming — Round ' + round);
+    lastEl.textContent += '  |  Next: Round ' + round + ' — Wind: ' + windLabel;
+  }
+
+  function drawBoard() {
+    // Wall / cabinet backdrop
+    ctx.fillStyle = '#37474f'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#4e342e'; ctx.beginPath(); ctx.arc(cx, cy, 262, 0, Math.PI * 2); ctx.fill();
+    // Number ring
+    ctx.fillStyle = '#212121'; ctx.beginPath(); ctx.arc(cx, cy, 240, 0, Math.PI * 2); ctx.fill();
+    var rings = [
+      { r: 235, c: '#e8e8e8' }, { r: 200, c: '#212121' },
+      { r: 150, c: '#e53935' }, { r: 95, c: '#212121' },
+      { r: 48, c: '#43a047' }, { r: 22, c: '#e53935' }
+    ];
+    rings.forEach(function(ring){
+      ctx.fillStyle = ring.c; ctx.beginPath(); ctx.arc(cx, cy, ring.r, 0, Math.PI * 2); ctx.fill();
+    });
+    // Spokes
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+    for (var i = 0; i < 20; i++) {
+      var a = (i / 20) * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * 235, cy + Math.sin(a) * 235); ctx.stroke();
+    }
+    ctx.fillStyle = '#ffd54a'; ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.fill();
+    // Score labels on rings
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('50', cx, cy - 34);
+    ctx.fillText('40', cx, cy - 62);
+    ctx.fillText('30', cx, cy - 118);
+    ctx.fillText('20', cx, cy - 172);
+    ctx.fillText('10', cx, cy - 216);
+    // Stuck darts
+    marks.forEach(function(m){
+      ctx.strokeStyle = '#ffeb3b'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(m.x - 14, m.y - 14); ctx.lineTo(m.x, m.y); ctx.stroke();
+      ctx.fillStyle = '#e53935'; ctx.beginPath(); ctx.arc(m.x, m.y, 5, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  function drawAim() {
+    if (state !== 'aiming') { return; }
+    // Wobbling reticle: combined sine wobble plus wind drift, clamped to the board area.
+    var wobX = Math.sin(time * 2.1) * 62 + Math.sin(time * 4.7) * 26;
+    var wobY = Math.cos(time * 1.7) * 58 + Math.sin(time * 3.9) * 24;
+    aimX = cx + wobX + windX;
+    aimY = cy + wobY + windY;
+    ctx.strokeStyle = '#ff1744'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(aimX, aimY, 20, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(aimX - 32, aimY); ctx.lineTo(aimX - 10, aimY);
+    ctx.moveTo(aimX + 10, aimY); ctx.lineTo(aimX + 32, aimY);
+    ctx.moveTo(aimX, aimY - 32); ctx.lineTo(aimX, aimY - 10);
+    ctx.moveTo(aimX, aimY + 10); ctx.lineTo(aimX, aimY + 32); ctx.stroke();
+    ctx.fillStyle = '#ff1744'; ctx.beginPath(); ctx.arc(aimX, aimY, 4, 0, Math.PI * 2); ctx.fill();
+    // Wind arrow hint near the top
+    if (windStrength > 0) {
+      ctx.fillStyle = '#80d8ff'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Wind pushes aim: ' + windLabel, cx, 34);
+    }
+  }
+
+  function drawFlyingDart() {
+    if (!dart) { return; }
+    ctx.strokeStyle = '#ffeb3b'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(dart.x, dart.y); ctx.lineTo(dart.x + 10, dart.y + 18); ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(dart.x, dart.y, 5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function loop(now) {
+    requestAnimationFrame(loop);
+    var dt = lastTime ? (now - lastTime) / 1000 : 0.016;
+    lastTime = now;
+    time += Math.min(dt, 0.05);
+    drawBoard();
+    if (state === 'aiming') { drawAim(); }
+    if (state === 'flying' && dart) {
+      dart.t += dt * 2.6;
+      if (dart.t >= 1) {
+        dart.x = dart.tx; dart.y = dart.ty;
+        drawFlyingDart();
+        var finished = dart; dart = null;
+        // Keep the dart object for resolve, then clear after scoring.
+        dart = finished;
+        resolveThrow();
+        dart = null;
+      } else {
+        dart.x = cx + (dart.tx - cx) * dart.t;
+        dart.y = (H - 20) + (dart.ty - (H - 20)) * dart.t;
+        drawFlyingDart();
+      }
+    }
+    // Progress bar at the bottom: score toward 300
+    var pct = Math.min(score / winScore, 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(20, H - 34, W - 40, 18);
+    ctx.fillStyle = '#43a047'; ctx.fillRect(20, H - 34, (W - 40) * pct, 18);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(score + ' / ' + winScore + '  •  Round ' + Math.min(round, maxRounds) + ' / ' + maxRounds, cx, H - 20);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function(){
+    ensureAudio(); beep(523, 0.15, 'sine', 0.12); resetGame();
+  });
+  document.getElementById('restartBtn').addEventListener('click', function(){
+    ensureAudio(); resetGame();
+  });
+
+  // Keyboard: SPACE throws, R restarts, Enter restarts from end screen.
+  document.addEventListener('keydown', function(e){
+    if (e.code === 'Space') { e.preventDefault(); if (state === 'title') { ensureAudio(); resetGame(); } else { throwDart(); } }
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') { ensureAudio(); resetGame(); } }
+    if (e.key === 'Enter' && state === 'ended') { ensureAudio(); resetGame(); }
+  });
+
+  // Mouse: click on canvas throws (buttons handle their own clicks).
+  canvas.addEventListener('mousedown', function(e){
+    e.preventDefault();
+    if (state === 'title') { ensureAudio(); resetGame(); }
+    else { throwDart(); }
+  });
+  canvas.addEventListener('click', function(e){
+    e.preventDefault();
+    if (state === 'aiming') { throwDart(); }
+  });
+
+  // Touch: tap on canvas throws; passive false so the tap does not scroll.
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    if (state === 'title') { ensureAudio(); resetGame(); }
+    else { throwDart(); }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); }, { passive: false });
+
+  randomWind();
+  updateHUD('Press Start');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
