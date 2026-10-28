@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Hex Haven</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f172a; color: #f1f5f9; font-family: system-ui, -apple-system, Segoe UI, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 1.7rem; letter-spacing: 1px; margin: 6px 0 2px; color: #fbbf24; text-shadow: 0 2px 0 #7c2d12; }
+  p.tag { color: #94a3b8; font-size: .9rem; margin-bottom: 10px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px; width: min(520px, 96vw); }
+  .chip { background: #1e293b; border: 1px solid #334155; border-radius: 999px; padding: 6px 12px; font-size: .9rem; font-weight: 700; }
+  .chip b { color: #fbbf24; }
+  #wrap { position: relative; width: min(520px, 96vw); }
+  canvas { display: block; width: 100%; height: auto; background: #16213e; border: 2px solid #334155; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(2,6,23,.88); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 1.6rem; color: #fbbf24; }
+  .overlay p { color: #cbd5e1; line-height: 1.55; font-size: .95rem; max-width: 420px; }
+  .overlay ul { text-align: left; color: #cbd5e1; line-height: 1.6; font-size: .92rem; max-width: 420px; }
+  button { background: #f59e0b; color: #111827; border: none; border-radius: 10px; padding: 12px 22px; font-size: 1rem; font-weight: 800; cursor: pointer; }
+  button:hover { background: #fbbf24; }
+  button.secondary { background: #334155; color: #f1f5f9; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  #msg { min-height: 22px; color: #86efac; font-weight: 700; margin-top: 8px; }
+  .keys { color: #94a3b8; font-size: .85rem; margin-top: 4px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>⬡ HEX HAVEN ⬡</h1>
+<p class="tag">Rotate, place, match — keep the honeycomb from overflowing.</p>
+<div id="hud">
+  <div class="chip">Score: <b id="score">0</b></div>
+  <div class="chip">Cleared: <b id="cleared">0</b></div>
+  <div class="chip">Goal: <b id="goal">12</b> clusters</div>
+  <div class="chip">Lives: <b id="lives">❤❤❤</b></div>
+  <div class="chip">Status: <b id="status">Ready</b></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="520" height="620"></canvas>
+  <div class="overlay" id="titleScreen">
+    <h2>⬡ HEX HAVEN ⬡</h2>
+    <p>Welcome to the Haven! Rotate the incoming hex tile and place it on the honeycomb board.</p>
+    <ul>
+      <li><b>Match 3+ hexes</b> of the same color touching each other to clear a cluster and score.</li>
+      <li>Every placement spawns new tiles. Clear <b>12 clusters</b> to win.</li>
+      <li>If the board fills up or you run out of lives, the game ends.</li>
+      <li>Placing a tile that clears nothing costs nothing — but a full board costs a life.</li>
+    </ul>
+    <p><b>Controls:</b> Mouse / touch — click a glowing cell to place, click the tile tray or press Q / E to rotate. Keys 1–6 pick a color. R restarts. Space rotates.</p>
+    <button id="startBtn">▶ Start Game</button>
+    <button class="secondary" id="howBtn">How to Play</button>
+    <p id="howText" style="display:none">Tip: build clusters at the edges first, then chain clears in the middle. Chained clears in one move give bonus points. Bigger clusters are worth much more than the minimum three!</p>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Play Again</button>
+    <p class="keys">Press R to restart instantly.</p>
+  </div>
+</div>
+<div id="controls">
+  <button id="rotateBtn">⟳ Rotate Tile</button>
+  <button id="newTileBtn">New Tile</button>
+  <button id="muteBtn">🔊 Sound: On</button>
+</div>
+<div id="msg"></div>
+<p class="keys">Click a highlighted cell to place &nbsp;•&nbsp; Q / E / Space rotate &nbsp;•&nbsp; R restart &nbsp;•&nbsp; M mute</p>
+
+<script>
+(function(){
+  "use strict";
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d");
+  var scoreEl = document.getElementById("score");
+  var clearedEl = document.getElementById("cleared");
+  var goalEl = document.getElementById("goal");
+  var livesEl = document.getElementById("lives");
+  var statusEl = document.getElementById("status");
+  var msgEl = document.getElementById("msg");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+
+  // ---------- Audio (procedural, after user gesture) ----------
+  var audioCtx = null, muted = false;
+  function ensureAudio(){
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  }
+  function beep(freq, dur, type, vol){
+    if (muted || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch(e){}
+  }
+  function sfx(kind){
+    if (kind === "place") beep(320, 0.12, "triangle", 0.14);
+    else if (kind === "clear") { beep(520, 0.15, "sine", 0.15); setTimeout(function(){ beep(780, 0.2, "sine", 0.15); }, 70); }
+    else if (kind === "win") { [523,659,784,1047].forEach(function(f,i){ setTimeout(function(){ beep(f,0.3,"sine",0.15); }, i*110); }); }
+    else if (kind === "lose") { beep(220, 0.35, "sawtooth", 0.1); setTimeout(function(){ beep(160, 0.4, "sawtooth", 0.1); }, 150); }
+    else if (kind === "rotate") beep(440, 0.06, "square", 0.05);
+  }
+
+  // ---------- Board: pointy-top axial hex grid, radius 3 (37 cells) ----------
+  var COLORS = ["#ef4444","#f59e0b","#22c55e","#38bdf8","#a78bfa","#ec4899"];
+  var COLOR_NAMES = ["Ruby","Amber","Jade","Sky","Violet","Rose"];
+  var cells = {};       // key "q,r" -> {q,r,x,y,color:-1 empty, pulse}
+  var cellList = [];
+  var SIZE = 34, OX = 260, OY = 250;
+  function key(q,r){ return q + "," + r; }
+  function hexToPixel(q,r){
+    return { x: OX + SIZE * Math.sqrt(3) * (q + r/2), y: OY + SIZE * 1.5 * r };
+  }
+  function buildBoard(){
+    cells = {}; cellList = [];
+    for (var q=-3; q<=3; q++) for (var r=-3; r<=3; r++){
+      var s = -q - r;
+      if (Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= 3){
+        var p = hexToPixel(q,r);
+        var c = { q:q, r:r, x:p.x, y:p.y, color:-1, pulse:0 };
+        cells[key(q,r)] = c; cellList.push(c);
+      }
+    }
+  }
+  var DIRS = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+  function neighbours(c){
+    var out = [];
+    DIRS.forEach(function(d){
+      var n = cells[key(c.q+d[0], c.r+d[1])];
+      if (n) out.push(n);
+    });
+    return out;
+  }
+  function clusterOf(start){
+    if (start.color < 0) return [];
+    var seen = {}, stack = [start], out = [];
+    seen[key(start.q,start.r)] = true;
+    while (stack.length){
+      var c = stack.pop(); out.push(c);
+      neighbours(c).forEach(function(n){
+        if (n.color === start.color && !seen[key(n.q,n.r)]){ seen[key(n.q,n.r)] = true; stack.push(n); }
+      });
+    }
+    return out;
+  }
+  function findAllClusters(){
+    var seen = {}, clusters = [];
+    cellList.forEach(function(c){
+      if (c.color < 0 || seen[key(c.q,c.r)]) return;
+      var cl = clusterOf(c);
+      cl.forEach(function(x){ seen[key(x.q,x.r)] = true; });
+      if (cl.length >= 3) clusters.push(cl);
+    });
+    return clusters;
+  }
+
+  // ---------- Game state ----------
+  var state = "title"; // title | playing | won | over
+  var score = 0, clustersCleared = 0, lives = 3, goal = 12;
+  var currentColor = 0, hoverCell = null, selectedColor = 0;
+  var tray = []; // 3 upcoming tiles shown at bottom
+  var particles = [];
+  var flashText = "";
+  var flashTimer = 0;
+
+  function reset(){
+    buildBoard();
+    score = 0; clustersCleared = 0; lives = 3; goal = 12;
+    currentColor = Math.floor(Math.random()*6);
+    selectedColor = currentColor;
+    tray = [currentColor];
+    for (var i=0;i<2;i++) tray.push(Math.floor(Math.random()*6));
+    particles = []; flashText = ""; flashTimer = 0; hoverCell = null;
+    // Seed a few tiles so the first moves have targets, but no pre-made clusters.
+    var seeds = 0, guard = 0;
+    while (seeds < 7 && guard++ < 500){
+      var c = cellList[Math.floor(Math.random()*cellList.length)];
+      if (c.color >= 0) continue;
+      var col = Math.floor(Math.random()*6);
+      c.color = col;
+      if (findAllClusters().length > 0){ c.color = -1; continue; }
+      seeds++;
+    }
+    updateHUD("Place a tile!");
+    msg("");
+  }
+  function updateHUD(status){
+    scoreEl.textContent = score;
+    clearedEl.textContent = clustersCleared;
+    goalEl.textContent = goal;
+    livesEl.textContent = "❤".repeat(Math.max(0,lives)) || "—";
+    if (status) statusEl.textContent = status;
+  }
+  function msg(t){ msgEl.textContent = t; }
+
+  function spawnParticles(x, y, color){
+    for (var i=0;i<14;i++){
+      particles.push({ x:x, y:y, vx:(Math.random()-0.5)*3.2, vy:(Math.random()-0.5)*3.2, life:1, color:color });
+    }
+  }
+
+  function placeAt(cell){
+    if (state !== "playing" || !cell || cell.color >= 0) return;
+    cell.color = selectedColor;
+    cell.pulse = 1;
+    sfx("place");
+    var clusters = findAllClusters();
+    if (clusters.length){
+      var gained = 0;
+      clusters.forEach(function(cl){
+        var pts = cl.length * 10 + (cl.length - 3) * 25;
+        gained += pts;
+        clustersCleared++;
+        cl.forEach(function(c){ spawnParticles(c.x, c.y, COLORS[c.color]); c.color = -1; });
+      });
+      if (clusters.length > 1) gained += 50;
+      score += gained;
+      flashText = "+" + gained + (clusters.length > 1 ? " CHAIN!" : "");
+      flashTimer = 90;
+      sfx("clear");
+      msg("Cluster cleared! +" + gained);
+    } else {
+      msg("No match — keep building clusters.");
+    }
+    // Advance tray: placed color consumed, new tile spawns.
+    tray.shift();
+    tray.push(Math.floor(Math.random()*6));
+    selectedColor = tray[0];
+    currentColor = selectedColor;
+    updateHUD();
+    checkEnd();
+  }
+
+  function checkEnd(){
+    if (clustersCleared >= goal){
+      state = "won"; sfx("win");
+      endTitle.textContent = "🏆 You Win!";
+      endText.textContent = "You cleared " + clustersCleared + " clusters with a score of " + score + ". The Haven is safe!";
+      endScreen.classList.remove("hidden");
+      updateHUD("You Win!");
+      return;
+    }
+    var empty = cellList.filter(function(c){ return c.color < 0; });
+    if (empty.length === 0){
+      lives--;
+      if (lives <= 0){
+        state = "over"; sfx("lose");
+        endTitle.textContent = "Game Over";
+        endText.textContent = "The board filled up. Final score: " + score + " with " + clustersCleared + " clusters cleared.";
+        endScreen.classList.remove("hidden");
+        updateHUD("Game Over");
+      } else {
+        // Rescue: clear a random ring of tiles to keep playing.
+        var filled = cellList.filter(function(c){ return c.color >= 0; });
+        for (var i=0;i<8 && filled.length;i++){
+          var c = filled.splice(Math.floor(Math.random()*filled.length),1)[0];
+          spawnParticles(c.x, c.y, COLORS[c.color]); c.color = -1;
+        }
+        msg("Board overflow! Lost a life — 8 tiles cleared to make room.");
+        updateHUD("Life lost!");
+        sfx("lose");
+      }
+    }
+  }
+
+  function rotateTile(dir){
+    selectedColor = (selectedColor + dir + 6) % 6;
+    currentColor = selectedColor;
+    tray[0] = selectedColor;
+    sfx("rotate");
+    msg("Tile: " + COLOR_NAMES[selectedColor]);
+  }
+
+  // ---------- Drawing ----------
+  function drawHex(x, y, size, fill, stroke){
+    ctx.beginPath();
+    for (var i=0;i<6;i++){
+      var a = Math.PI/180 * (60*i - 30);
+      var px = x + size * Math.cos(a), py = y + size * Math.sin(a);
+      if (i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    if (fill){ ctx.fillStyle = fill; ctx.fill(); }
+    ctx.strokeStyle = stroke || "#475569"; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // Board cells
+    cellList.forEach(function(c){
+      var fill = c.color >= 0 ? COLORS[c.color] : "#1e293b";
+      var stroke = (hoverCell === c && state === "playing" && c.color < 0) ? "#fbbf24" : "#475569";
+      drawHex(c.x, c.y, SIZE - 2 + (c.pulse > 0 ? c.pulse*3 : 0), fill, stroke);
+      if (c.pulse > 0) c.pulse = Math.max(0, c.pulse - 0.05);
+      if (c.color >= 0){
+        ctx.fillStyle = "rgba(255,255,255,0.25)";
+        ctx.beginPath(); ctx.arc(c.x - 8, c.y - 10, 6, 0, Math.PI*2); ctx.fill();
+      }
+    });
+    // Tray at bottom
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(20, 520, 480, 84);
+    ctx.strokeStyle = "#334155"; ctx.strokeRect(20, 520, 480, 84);
+    ctx.fillStyle = "#94a3b8"; ctx.font = "bold 13px system-ui";
+    ctx.fillText("NEXT TILES  (click a tile, or press 1–6)", 32, 540);
+    tray.forEach(function(col, i){
+      var x = 70 + i*80, y = 572;
+      drawHex(x, y, 26, COLORS[col], i===0 ? "#fbbf24" : "#475569");
+      ctx.fillStyle = "#f1f5f9"; ctx.font = "bold 11px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(i===0 ? "PLACE" : "NEXT", x, y+4);
+      ctx.textAlign = "left";
+    });
+    ctx.fillStyle = "#94a3b8"; ctx.font = "13px system-ui";
+    ctx.fillText("Rotate: Q / E", 330, 566);
+    ctx.fillText("Current: " + COLOR_NAMES[selectedColor], 330, 586);
+    // Particles
+    particles = particles.filter(function(p){ return p.life > 0; });
+    particles.forEach(function(p){
+      p.x += p.vx; p.y += p.vy; p.life -= 0.03;
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    // Flash text
+    if (flashTimer > 0){
+      flashTimer--;
+      ctx.fillStyle = "#fbbf24"; ctx.font = "bold 26px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(flashText, 260, 120);
+      ctx.textAlign = "left";
+    }
+    if (state === "playing") requestAnimationFrame(draw);
+    else if (state !== "title") requestAnimationFrame(draw);
+  }
+
+  function startGame(){
+    ensureAudio();
+    reset();
+    state = "playing";
+    titleScreen.classList.add("hidden");
+    endScreen.classList.add("hidden");
+    updateHUD("Playing");
+    msg("Place the " + COLOR_NAMES[selectedColor] + " tile on a glowing cell.");
+    requestAnimationFrame(draw);
+  }
+
+  // ---------- Input ----------
+  function cellAt(px, py){
+    var rect = canvas.getBoundingClientRect();
+    var x = (px - rect.left) * (canvas.width / rect.width);
+    var y = (py - rect.top) * (canvas.height / rect.height);
+    var best = null, bestD = 1e9;
+    cellList.forEach(function(c){
+      var d = Math.hypot(c.x - x, c.y - y);
+      if (d < bestD){ bestD = d; best = c; }
+    });
+    if (bestD <= SIZE) return best;
+    // Tray clicks
+    if (y >= 520 && y <= 604){
+      for (var i=0;i<tray.length;i++){
+        var tx = 70 + i*80, ty = 572;
+        if (Math.hypot(tx - x, ty - y) <= 28){
+          selectedColor = tray[i]; currentColor = selectedColor;
+          msg("Tile: " + COLOR_NAMES[selectedColor]);
+          return "tray";
+        }
+      }
+    }
+    return null;
+  }
+  canvas.addEventListener("click", function(e){
+    ensureAudio();
+    if (state !== "playing") return;
+    var c = cellAt(e.clientX, e.clientY);
+    if (c && c !== "tray") placeAt(c);
+  });
+  canvas.addEventListener("mousemove", function(e){
+    if (state !== "playing") { hoverCell = null; return; }
+    var c = cellAt(e.clientX, e.clientY);
+    hoverCell = (c && c !== "tray") ? c : null;
+  });
+  canvas.addEventListener("touchstart", function(e){
+    ensureAudio();
+    e.preventDefault();
+    if (state !== "playing") return;
+    var t = e.touches[0];
+    var c = cellAt(t.clientX, t.clientY);
+    if (c && c !== "tray") placeAt(c);
+  }, { passive: false });
+  canvas.addEventListener("touchmove", function(e){
+    e.preventDefault();
+    if (state !== "playing") return;
+    var t = e.touches[0];
+    var c = cellAt(t.clientX, t.clientY);
+    hoverCell = (c && c !== "tray") ? c : null;
+  }, { passive: false });
+
+  document.addEventListener("keydown", function(e){
+    if (e.key === "r" || e.key === "R"){
+      if (state !== "title"){ startGame(); }
+      return;
+    }
+    if (state !== "playing") return;
+    if (e.key === "q" || e.key === "Q" || e.key === "ArrowLeft") rotateTile(-1);
+    else if (e.key === "e" || e.key === "E" || e.key === " " || e.key === "ArrowRight") { e.preventDefault(); rotateTile(1); }
+    else if (e.key === "m" || e.key === "M"){ muted = !muted; document.getElementById("muteBtn").textContent = muted ? "🔇 Sound: Off" : "🔊 Sound: On"; }
+    else if (e.key >= "1" && e.key <= "6"){
+      var idx = parseInt(e.key, 10) - 1;
+      if (idx < tray.length){ selectedColor = tray[idx]; msg("Tile: " + COLOR_NAMES[selectedColor]); }
+      else { selectedColor = idx; tray[0] = idx; msg("Tile: " + COLOR_NAMES[selectedColor]); }
+    }
+  });
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  document.getElementById("howBtn").addEventListener("click", function(){
+    var t = document.getElementById("howText");
+    t.style.display = t.style.display === "none" ? "block" : "none";
+  });
+  document.getElementById("rotateBtn").addEventListener("click", function(){ ensureAudio(); if (state==="playing") rotateTile(1); });
+  document.getElementById("newTileBtn").addEventListener("click", function(){
+    ensureAudio();
+    if (state !== "playing") return;
+    tray[0] = Math.floor(Math.random()*6); selectedColor = tray[0];
+    msg("New tile: " + COLOR_NAMES[selectedColor]);
+  });
+  document.getElementById("muteBtn").addEventListener("click", function(){
+    muted = !muted;
+    this.textContent = muted ? "🔇 Sound: Off" : "🔊 Sound: On";
+  });
+
+  // Initial render behind the title screen
+  reset();
+  state = "title";
+  (function titleLoop(){
+    draw();
+    if (state === "title") requestAnimationFrame(titleLoop);
+  })();
+})();
+</script>
+</body>
+</html>

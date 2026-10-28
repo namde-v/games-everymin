@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 350
-- **Latest game:** 0350 — Botanical Blueprint
+- **Total games:** 360
+- **Latest game:** 0360 — Labyrinth Ledger
 - **Current volume:** 004 (Games 0301 to 0400)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -16,7 +16,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 | 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 | 002 | 0101–0200 (100, complete) | [catalogs/readme-002.md](./catalogs/readme-002.md) |
 | 003 | 0201–0300 (100, complete) | [catalogs/readme-003.md](./catalogs/readme-003.md) |
-| 004 | 0301–0400 (50 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
+| 004 | 0301–0400 (60 so far) | [catalogs/readme-004.md](./catalogs/readme-004.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -30,20 +30,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 035
+## Latest batch — Batch 036
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0341 | Avalanche Aviator | Arcade / Mountain Flight | [Play](./games/game-0341.html) |
-| 0342 | Kaleido Keys | Puzzle / Color Sequence | [Play](./games/game-0342.html) |
-| 0343 | Timber Tycoon | Strategy / Forestry Management | [Play](./games/game-0343.html) |
-| 0344 | Pulse Pogo | Rhythm / Beat Hopping | [Play](./games/game-0344.html) |
-| 0345 | Tidepool Trawler | Arcade / Deep-Sea Fishing | [Play](./games/game-0345.html) |
-| 0346 | Enigma Engine | Puzzle / Code Machine | [Play](./games/game-0346.html) |
-| 0347 | Dockside Dynamo | Strategy / Port Logistics | [Play](./games/game-0347.html) |
-| 0348 | Samba Steps | Rhythm / Dance Timing | [Play](./games/game-0348.html) |
-| 0349 | Canyon Courier | Arcade / Delivery Dash | [Play](./games/game-0349.html) |
-| 0350 | Botanical Blueprint | Puzzle / Garden Layout | [Play](./games/game-0350.html) |
+| 0351 | Glacier Glider | Arcade / Ice Sliding | [Play](./games/game-0351.html) |
+| 0352 | Hex Haven | Puzzle / Hex Matching | [Play](./games/game-0352.html) |
+| 0353 | Bazaar Baron | Strategy / Market Trading | [Play](./games/game-0353.html) |
+| 0354 | Drumline Dash | Rhythm / Drum Timing | [Play](./games/game-0354.html) |
+| 0355 | Volcano Voyager | Arcade / Lava Platforming | [Play](./games/game-0355.html) |
+| 0356 | Cipher Citadel | Puzzle / Word Cipher | [Play](./games/game-0356.html) |
+| 0357 | Railway Regent | Strategy / Train Scheduling | [Play](./games/game-0357.html) |
+| 0358 | Waltz Waves | Rhythm / Waltz Timing | [Play](./games/game-0358.html) |
+| 0359 | Orchard Outlaw | Arcade / Fruit Catching | [Play](./games/game-0359.html) |
+| 0360 | Labyrinth Ledger | Puzzle / Maze Path Planning | [Play](./games/game-0360.html) |
 
 
 ## Quality standard

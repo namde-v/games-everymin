@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Waltz Waves</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#14101f; font-family: Georgia, 'Times New Roman', serif; }
+  #wrap { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
+  canvas { display:block; background:#1c1530; border:3px solid #c9a86a; border-radius:12px; max-width:98vw; max-height:98vh; touch-action:none; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; color:#fdf6e3; background:rgba(20,12,35,0.88); padding:20px; z-index:5; }
+  .overlay.hidden { display:none; }
+  h1 { font-size:52px; letter-spacing:3px; color:#f2d38a; text-shadow:0 0 18px rgba(242,211,138,0.6); margin-bottom:6px; }
+  .sub { font-size:18px; color:#d8c9f5; margin-bottom:18px; font-style:italic; }
+  .card { background:rgba(255,255,255,0.08); border:1px solid rgba(201,168,106,0.6); border-radius:12px; padding:16px 22px; max-width:560px; line-height:1.6; font-size:16px; }
+  .card b { color:#f2d38a; }
+  button { margin-top:18px; font-size:22px; font-weight:bold; padding:14px 34px; border:none; border-radius:30px; background:#c9a86a; color:#241a10; cursor:pointer; box-shadow:0 4px 0 #8a6d33; }
+  button:hover { background:#f2d38a; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #8a6d33; }
+  .small { margin-top:12px; font-size:14px; color:#b8a9d8; }
+  #hud { position:absolute; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:18px; color:#fdf6e3; font-size:17px; font-weight:bold; background:rgba(0,0,0,0.45); padding:8px 16px; border-radius:20px; z-index:4; white-space:nowrap; }
+  #hud span { color:#f2d38a; }
+  #beatbar { position:absolute; bottom:12px; left:50%; transform:translateX(-50%); display:flex; gap:10px; z-index:4; }
+  .beatdot { width:18px; height:18px; border-radius:50%; background:#4a3a6a; border:2px solid #c9a86a; }
+  .beatdot.on { background:#f2d38a; box-shadow:0 0 12px #f2d38a; }
+  .beatdot.strong { border-color:#ff8fa3; }
+  @media (max-width:600px){ h1{font-size:36px;} #hud{font-size:13px; gap:10px;} .card{font-size:14px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="900" height="560"></canvas>
+  <div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Combo: <span id="combo">0</span></div>
+    <div>Flow: <span id="flow">100</span>%</div>
+    <div>Measure: <span id="measure">1</span>/16</div>
+    <div>Status: <span id="status">Ready</span></div>
+  </div>
+  <div id="beatbar"><div class="beatdot strong" id="b0"></div><div class="beatdot" id="b1"></div><div class="beatdot" id="b2"></div></div>
+
+  <div id="titleScreen" class="overlay">
+    <h1>WALTZ WAVES</h1>
+    <div class="sub">A triple-time dance across a moonlit ballroom floor</div>
+    <div class="card">
+      <b>How to Play:</b><br>
+      Notes sweep in from the right in 3/4 waltz time — <b>ONE-two-three, ONE-two-three</b>.<br>
+      <b>Step notes (gold):</b> tap exactly as they reach the glowing target ring.<br>
+      <b>Hold notes (pink bars):</b> press AND HOLD until the bar fully passes through the ring.<br>
+      <b>Spin notes (purple stars):</b> hold through the whole spin for a big bonus.<br>
+      <b>Controls:</b> SPACE or click / tap and hold on the floor. Release early and the flow breaks.<br>
+      Perfect timing scores more. Misses drain your Flow. Finish all 16 measures to win the ball!
+    </div>
+    <button id="startBtn">Start Dancing</button>
+    <div class="small">Tip: listen for the strong first beat — OOM-pah-pah, OOM-pah-pah.</div>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h1 id="endTitle">You Win!</h1>
+    <div class="sub" id="endSub"></div>
+    <div class="card" id="endCard"></div>
+    <button id="restartBtn">Dance Again (R)</button>
+    <div class="small">Press R or tap the button to restart instantly.</div>
+  </div>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var comboEl = document.getElementById('combo');
+  var flowEl = document.getElementById('flow');
+  var measureEl = document.getElementById('measure');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endSub = document.getElementById('endSub');
+  var endCard = document.getElementById('endCard');
+  var beatDots = [document.getElementById('b0'), document.getElementById('b1'), document.getElementById('b2')];
+
+  // ---- Game state ----
+  var state = 'title'; // title, playing, win, over
+  var score = 0, combo = 0, bestCombo = 0, flow = 100;
+  var perfects = 0, goods = 0, misses = 0, spinsDone = 0, holdsDone = 0;
+  var notes = [], particles = [], ripples = [];
+  var holding = false, holdActive = null;
+  var startTime = 0, songTime = 0, lastTime = 0;
+  var targetX = 170, floorY = 330;
+  var BPM = 96, beatLen = 60 / BPM, measureLen = beatLen * 3;
+  var TOTAL_MEASURES = 16, TOTAL_TIME = TOTAL_MEASURES * measureLen;
+  var spawnIndex = 0, chart = [];
+  var lastBeat = -1, lastMeasure = -1, flash = 0, feedback = '', feedbackT = 0;
+  var dancerAngle = 0, dancerSpin = 0;
+
+  // ---- Audio: procedural Web Audio only, started after interaction ----
+  var actx = null, master = null;
+  function initAudio(){
+    if (actx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      master = actx.createGain();
+      master.gain.value = 0.22;
+      master.connect(actx.destination);
+    } catch(e) { actx = null; }
+  }
+  function tone(freq, t, dur, type, vol){
+    if (!actx) return;
+    var o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function beatSound(beatInMeasure){
+    if (!actx) return;
+    var t = actx.currentTime;
+    if (beatInMeasure === 0) {
+      tone(130, t, 0.32, 'sine', 0.55);
+      tone(261, t, 0.30, 'triangle', 0.22);
+    } else {
+      tone(196, t, 0.18, 'triangle', 0.22);
+      tone(392, t, 0.16, 'sine', 0.12);
+    }
+  }
+  function hitSound(kind){
+    if (!actx) return;
+    var t = actx.currentTime;
+    if (kind === 'perfect') { tone(660, t, 0.18, 'sine', 0.4); tone(990, t + 0.05, 0.2, 'sine', 0.3); }
+    else if (kind === 'good') { tone(523, t, 0.16, 'sine', 0.35); }
+    else if (kind === 'spin') { tone(523, t, 0.12, 'triangle', 0.35); tone(660, t + 0.08, 0.12, 'triangle', 0.35); tone(880, t + 0.16, 0.25, 'sine', 0.4); }
+    else if (kind === 'miss') { tone(160, t, 0.25, 'sawtooth', 0.25); }
+    else if (kind === 'hold') { tone(440, t, 0.12, 'sine', 0.3); }
+  }
+  function fanfare(){
+    if (!actx) return;
+    var t = actx.currentTime, seq = [523, 659, 784, 1046];
+    for (var i = 0; i < seq.length; i++) tone(seq[i], t + i * 0.16, 0.3, 'triangle', 0.35);
+  }
+
+  // ---- Chart: build a 16-measure waltz chart ----
+  function buildChart(){
+    chart = [];
+    var patterns = [
+      [{b:0,t:'step'},{b:1,t:'step'},{b:2,t:'step'}],
+      [{b:0,t:'step'},{b:1,t:'hold',len:1},{b:2,t:'step'}],
+      [{b:0,t:'step'},{b:2,t:'step'}],
+      [{b:0,t:'spin',len:2},{b:2,t:'step'}],
+      [{b:0,t:'step'},{b:1,t:'step'},{b:2,t:'hold',len:1}],
+      [{b:0,t:'hold',len:2},{b:2,t:'step'}]
+    ];
+    for (var m = 0; m < TOTAL_MEASURES; m++) {
+      var p = patterns[m % patterns.length];
+      for (var i = 0; i < p.length; i++) {
+        var n = p[i];
+        chart.push({ time: m * measureLen + n.b * beatLen, type: n.t, lenBeats: n.len || 0, hit:false, missed:false, holding:false, scored:false, judged:false });
+      }
+    }
+    // Final flourish: three spins in the last measure
+    chart.push({ time: (TOTAL_MEASURES - 1) * measureLen, type:'spin', lenBeats:1, hit:false, missed:false, holding:false, scored:false, judged:false });
+  }
+
+  function startGame(){
+    initAudio();
+    if (actx && actx.state === 'suspended') actx.resume();
+    buildChart();
+    score = 0; combo = 0; bestCombo = 0; flow = 100;
+    perfects = 0; goods = 0; misses = 0; spinsDone = 0; holdsDone = 0;
+    notes = []; particles = []; ripples = [];
+    holding = false; holdActive = null;
+    spawnIndex = 0; lastBeat = -1; lastMeasure = -1; flash = 0; feedback = ''; feedbackT = 0;
+    state = 'playing'; startTime = performance.now(); lastTime = startTime;
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    statusEl.textContent = 'Dancing';
+    updateHUD();
+  }
+
+  function endGame(win){
+    state = win ? 'win' : 'over';
+    statusEl.textContent = win ? 'You Win!' : 'Game Over';
+    endTitle.textContent = win ? 'You Win the Ball!' : 'The Music Stops...';
+    endSub.textContent = win ? 'Sixteen measures of perfect waltz time. Bravo!' : 'Your flow ran out before the final bow.';
+    endCard.innerHTML = 'Final Score: <b>' + score + '</b><br>Best Combo: <b>' + bestCombo + '</b><br>' +
+      'Perfect: ' + perfects + ' &nbsp; Good: ' + goods + ' &nbsp; Missed: ' + misses + '<br>' +
+      'Spins completed: ' + spinsDone + ' &nbsp; Holds completed: ' + holdsDone;
+    endScreen.classList.remove('hidden');
+    if (win) fanfare();
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = score; comboEl.textContent = combo;
+    flowEl.textContent = Math.max(0, Math.round(flow));
+    measureEl.textContent = Math.min(TOTAL_MEASURES, Math.floor(songTime / measureLen) + 1);
+  }
+
+  function addScore(pts, kind){
+    score += pts; combo++;
+    if (combo > bestCombo) bestCombo = combo;
+    if (kind === 'perfect') perfects++;
+    else if (kind === 'good') goods++;
+  }
+  function doMiss(note){
+    combo = 0; misses++; flow -= 22;
+    feedback = 'OFF-BEAT! Flow breaks'; feedbackT = 1.2;
+    hitSound('miss'); flash = 0.35;
+    if (note) note.missed = true;
+    if (flow <= 0) { flow = 0; updateHUD(); endGame(false); }
+  }
+  function burst(x, y, color, n){
+    for (var i = 0; i < n; i++) {
+      particles.push({ x:x, y:y, vx:(Math.random()-0.5)*260, vy:(Math.random()-0.5)*260, life:0.7, color:color });
+    }
+  }
+
+  // ---- Input: press / release ----
+  function press(){
+    if (state !== 'playing') return;
+    holding = true;
+    // Find nearest unjudged note near the target
+    var best = null, bestDist = 999;
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (n.judged || n.missed) continue;
+      var d = Math.abs(n.x - targetX);
+      if (d < bestDist) { bestDist = d; best = n; }
+    }
+    if (best && bestDist < 90) {
+      if (best.type === 'step') {
+        best.judged = true;
+        if (bestDist < 32) { addScore(300 + combo * 5, 'perfect'); feedback = 'PERFECT!'; hitSound('perfect'); burst(best.x, floorY, '#f2d38a', 14); }
+        else { addScore(150, 'good'); feedback = 'Good step'; hitSound('good'); burst(best.x, floorY, '#a8e6cf', 8); }
+        feedbackT = 1.0; flow = Math.min(100, flow + 3);
+      } else {
+        // Hold / spin: begin holding this note
+        best.holding = true; holdActive = best;
+        if (bestDist < 55) { feedback = best.type === 'spin' ? 'SPIN! Keep holding...' : 'HOLD...'; feedbackT = 1.0; hitSound('hold'); }
+        else { feedback = 'Late start — hold on!'; feedbackT = 1.0; }
+      }
+    } else {
+      // Tapping empty floor: small flow penalty, keeps timing honest
+      combo = 0; flow = Math.max(0, flow - 4);
+      feedback = 'Empty step...'; feedbackT = 0.7;
+      if (flow <= 0) endGame(false);
+    }
+    updateHUD();
+  }
+  function release(){
+    holding = false;
+    if (holdActive) {
+      // Released before the hold note finished passing: broken hold
+      if (!holdActive.scored) {
+        holdActive.judged = true; holdActive.holding = false;
+        doMiss(holdActive);
+      }
+      holdActive = null;
+    }
+  }
+
+  // ---- Events: keyboard + mouse + touch ----
+  document.addEventListener('keydown', function(e){
+    if (e.code === 'Space' || e.code === 'ArrowDown' || e.code === 'KeyJ') {
+      e.preventDefault();
+      if (state === 'title') startGame();
+      else if (state === 'win' || state === 'over') { /* R restarts, space ignored here */ }
+      else if (!e.repeat) press();
+    }
+    if (e.code === 'KeyR' && (state === 'win' || state === 'over')) startGame();
+  });
+  document.addEventListener('keyup', function(e){
+    if (e.code === 'Space' || e.code === 'ArrowDown' || e.code === 'KeyJ') release();
+  });
+  canvas.addEventListener('mousedown', function(e){ e.preventDefault(); if (state === 'playing') press(); });
+  canvas.addEventListener('mouseup', function(e){ release(); });
+  canvas.addEventListener('mouseleave', function(){ release(); });
+  canvas.addEventListener('touchstart', function(e){ e.preventDefault(); if (state === 'playing') press(); }, { passive:false });
+  canvas.addEventListener('touchend', function(e){ e.preventDefault(); release(); }, { passive:false });
+  canvas.addEventListener('touchcancel', function(){ release(); });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  // ---- Update ----
+  function update(dt){
+    if (state !== 'playing') return;
+    songTime += dt;
+    var beatFloat = songTime / beatLen;
+    var beatIdx = Math.floor(beatFloat);
+    if (beatIdx !== lastBeat) {
+      lastBeat = beatIdx;
+      var bim = ((beatIdx % 3) + 3) % 3;
+      beatSound(bim);
+      for (var d = 0; d < 3; d++) beatDots[d].classList.toggle('on', d === bim);
+    }
+    var meas = Math.floor(songTime / measureLen);
+    if (meas !== lastMeasure) { lastMeasure = meas; dancerAngle = 0; }
+
+    // Spawn notes 2.2 seconds ahead so they sweep in visibly
+    var lead = 2.2;
+    while (spawnIndex < chart.length && chart[spawnIndex].time <= songTime + lead) {
+      var c = chart[spawnIndex];
+      var durPx = c.lenBeats > 0 ? c.lenBeats * beatLen * 320 : 0;
+      notes.push({ time:c.time, type:c.type, lenBeats:c.lenBeats, x: canvas.width + 40, lenPx: durPx, judged:false, missed:false, holding:false, scored:false });
+      spawnIndex++;
+    }
+    // Move notes: speed tuned so a note crosses in `lead` seconds
+    var speed = (canvas.width + 40 - targetX) / lead;
+    for (var i = notes.length - 1; i >= 0; i--) {
+      var n = notes[i];
+      n.x -= speed * dt;
+      // Hold progress: while holding, note stays judged at completion
+      if ((n.type === 'hold' || n.type === 'spin') && n.holding) {
+        // The tail passes the target when x + lenPx crosses targetX going left; completion when tail passed
+        if (n.x + n.lenPx < targetX - 10 && !n.scored) {
+          n.scored = true; n.judged = true;
+          if (n.type === 'spin') { addScore(600 + combo * 5, 'perfect'); spinsDone++; feedback = 'SPIN BONUS +600!'; hitSound('spin'); burst(targetX, floorY, '#c792ea', 20); }
+          else { addScore(400, 'perfect'); holdsDone++; feedback = 'Hold complete +400!'; hitSound('spin'); burst(targetX, floorY, '#ff8fa3', 14); }
+          feedbackT = 1.2; flow = Math.min(100, flow + 5);
+          if (holdActive === n) holdActive = null;
+        }
+      }
+      // Step note missed when it passes the zone
+      if (n.type === 'step' && !n.judged && n.x < targetX - 90) {
+        n.judged = true; doMiss(n);
+        if (state !== 'playing') return;
+      }
+      // Hold note missed if it starts passing without being held
+      if ((n.type === 'hold' || n.type === 'spin') && !n.judged && !n.holding && n.x < targetX - 30) {
+        // Give a brief grace: if player grabs it just after target, still counts; otherwise miss at tail
+        if (n.x + n.lenPx < targetX - 30) { n.judged = true; doMiss(n); if (state !== 'playing') return; }
+      }
+      // Remove notes fully off screen
+      if (n.x + n.lenPx < -60) notes.splice(i, 1);
+    }
+    // Particles
+    for (var p = particles.length - 1; p >= 0; p--) {
+      var pt = particles[p];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= dt;
+      if (pt.life <= 0) particles.splice(p, 1);
+    }
+    for (var r = ripples.length - 1; r >= 0; r--) {
+      ripples[r].life -= dt;
+      if (ripples[r].life <= 0) ripples.splice(r, 1);
+    }
+    dancerAngle += dt * (holding ? 3.2 : 1.2);
+    if (holding) dancerSpin += dt * 6;
+    if (flash > 0) flash -= dt;
+    if (feedbackT > 0) feedbackT -= dt;
+    // Song complete = win
+    if (songTime >= TOTAL_TIME) {
+      // Only win if flow remains; notes still on screen are forgiven at the final bow
+      endGame(true);
+      return;
+    }
+    updateHUD();
+  }
+
+  // ---- Draw ----
+  function drawFloor(){
+    // Ballroom floor: checkerboard with a soft spotlight
+    var rows = 6, cols = 10;
+    var fw = canvas.width, fh = 300, fy = floorY - 60;
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        ctx.fillStyle = (r + c) % 2 === 0 ? '#3a2a5e' : '#2c2049';
+        ctx.fillRect(c * (fw / cols), fy + r * (fh / rows), fw / cols, fh / rows);
+      }
+    }
+    var grad = ctx.createRadialGradient(canvas.width/2, 280, 40, canvas.width/2, 280, 420);
+    grad.addColorStop(0, 'rgba(242,211,138,0.25)');
+    grad.addColorStop(1, 'rgba(242,211,138,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, fy, fw, fh);
+    // Chandelier glow
+    ctx.fillStyle = '#f2d38a';
+    ctx.beginPath(); ctx.arc(canvas.width/2, 30, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(242,211,138,0.5)';
+    ctx.beginPath(); ctx.arc(canvas.width/2, 30, 44, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawDancers(){
+    var cx = 620, cy = floorY + 40;
+    // Two dancers twirling: simple elegant figures
+    var bob = Math.sin(dancerAngle * 2) * 6;
+    ctx.save();
+    ctx.translate(cx, cy + bob);
+    ctx.rotate(Math.sin(dancerAngle) * 0.12 + (holding ? Math.sin(dancerSpin) * 0.25 : 0));
+    // Gown
+    ctx.fillStyle = '#ff8fa3';
+    ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(-46, 52); ctx.lineTo(46, 52); ctx.closePath(); ctx.fill();
+    // Bodice + head
+    ctx.fillStyle = '#7c3f54';
+    ctx.fillRect(-13, -58, 26, 24);
+    ctx.fillStyle = '#f6d7b8';
+    ctx.beginPath(); ctx.arc(0, -72, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#3a2330';
+    ctx.beginPath(); ctx.arc(0, -78, 15, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // Partner
+    ctx.save();
+    ctx.translate(cx + 78, cy + bob * 0.7);
+    ctx.fillStyle = '#1f2a4a';
+    ctx.fillRect(-14, -56, 28, 108);
+    ctx.fillStyle = '#f6d7b8';
+    ctx.beginPath(); ctx.arc(0, -70, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0e1428';
+    ctx.beginPath(); ctx.arc(0, -76, 14, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function draw(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Backdrop
+    var bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    bg.addColorStop(0, '#241a3d'); bg.addColorStop(1, '#14101f');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawFloor();
+    // Target ring
+    var pulse = 1 + Math.sin(performance.now() / 200) * 0.08;
+    ctx.strokeStyle = holding ? '#ff8fa3' : '#f2d38a';
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(targetX, floorY, 38 * pulse, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(242,211,138,0.4)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(targetX, floorY, 52 * pulse, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(242,211,138,0.15)';
+    ctx.fillRect(targetX - 3, 40, 6, canvas.height - 40);
+    // Notes
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (n.missed) continue;
+      if (n.type === 'step') {
+        ctx.fillStyle = '#f2d38a';
+        ctx.beginPath(); ctx.arc(n.x, floorY, 24, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#241a10';
+        ctx.font = 'bold 20px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('♪', n.x, floorY + 1);
+      } else {
+        var col = n.type === 'spin' ? '#c792ea' : '#ff8fa3';
+        ctx.fillStyle = col;
+        ctx.fillRect(n.x, floorY - 16, n.lenPx + 48, 32);
+        ctx.beginPath(); ctx.arc(n.x + n.lenPx + 48, floorY, 24, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(n.x, floorY, 24, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 20px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(n.type === 'spin' ? '✦' : '—', n.x + n.lenPx / 2 + 24, floorY + 1);
+      }
+    }
+    drawDancers();
+    // Particles
+    for (var p = 0; p < particles.length; p++) {
+      var pt = particles[p];
+      ctx.globalAlpha = Math.max(0, pt.life / 0.7);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // Feedback text
+    if (feedbackT > 0 && feedback) {
+      ctx.fillStyle = '#fdf6e3';
+      ctx.font = 'bold 30px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText(feedback, canvas.width / 2, 130);
+    }
+    // Waltz count + progress
+    ctx.fillStyle = '#d8c9f5'; ctx.font = '18px Georgia'; ctx.textAlign = 'left';
+    var beatNow = state === 'playing' ? (Math.floor(songTime / beatLen) % 3) + 1 : 1;
+    ctx.fillText('Waltz count: ' + beatNow + ' - 2 - 3   (ONE is strong)', 20, 500);
+    if (state === 'playing') {
+      var prog = Math.min(1, songTime / TOTAL_TIME);
+      ctx.fillStyle = '#4a3a6a'; ctx.fillRect(20, 515, canvas.width - 40, 10);
+      ctx.fillStyle = '#f2d38a'; ctx.fillRect(20, 515, (canvas.width - 40) * prog, 10);
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(253,246,227,0.9)'; ctx.font = 'italic 20px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText('Press Start and feel the ONE-two-three...', canvas.width / 2, 470);
+    }
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(255,60,80,' + (flash * 0.8) + ')';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  // ---- Main loop ----
+  function loop(now){
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
+    lastTime = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

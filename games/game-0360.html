@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Labyrinth Ledger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #12100c; color: #f3ead3; font-family: Georgia, 'Times New Roman', serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #f2c14e; text-shadow: 2px 2px 0 #000; margin: 6px 0 2px; text-align: center; }
+  .sub { color: #b8a888; font-size: 13px; margin-bottom: 10px; text-align: center; font-style: italic; }
+  #hud { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px; width: 100%; max-width: 560px; }
+  .pill { background: #241f16; border: 1px solid #6b5a2e; border-radius: 8px; padding: 6px 10px; font-size: 14px; min-width: 86px; text-align: center; }
+  .pill b { color: #f2c14e; }
+  #status { min-height: 22px; font-size: 14px; color: #ffe9a8; text-align: center; margin-bottom: 8px; }
+  #wrap { position: relative; width: min(92vw, 520px); }
+  canvas { display: block; width: 100%; background: #1d1a13; border: 3px solid #6b5a2e; border-radius: 10px; touch-action: none; }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  button { background: #f2c14e; color: #241a00; border: none; border-radius: 8px; padding: 10px 16px; font-size: 15px; font-weight: bold; cursor: pointer; font-family: inherit; }
+  button:hover { background: #ffd977; }
+  button.secondary { background: #3a3324; color: #f3ead3; border: 1px solid #6b5a2e; }
+  .overlay { position: absolute; inset: 0; background: rgba(10, 8, 4, 0.92); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 10px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #f2c14e; font-size: 28px; }
+  .overlay p { font-size: 15px; line-height: 1.55; color: #e8dcc0; max-width: 420px; }
+  .overlay .small { font-size: 13px; color: #b8a888; }
+  kbd { background: #3a3324; border: 1px solid #6b5a2e; border-bottom-width: 3px; border-radius: 4px; padding: 1px 6px; font-family: monospace; }
+  #legend { margin-top: 12px; font-size: 13px; color: #b8a888; text-align: center; line-height: 1.6; max-width: 560px; }
+  .keydot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #f2c14e; vertical-align: middle; margin: 0 2px; }
+</style>
+</head>
+<body>
+<h1>LABYRINTH LEDGER</h1>
+<p class="sub">Chart one unbroken route. Collect every key in order. Never retrace a step.</p>
+
+<div id="hud">
+  <div class="pill">Score: <b id="score">0</b></div>
+  <div class="pill">Lives: <b id="lives">3</b></div>
+  <div class="pill">Level: <b id="level">1 / 5</b></div>
+  <div class="pill">Keys: <b id="keys">0 / 1</b></div>
+  <div class="pill">Steps: <b id="steps">0</b></div>
+</div>
+<div id="status">Press Start and plot your route.</div>
+
+<div id="wrap">
+  <canvas id="game" width="520" height="520"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <h2>Labyrinth Ledger</h2>
+    <p><b>How to Play:</b> You are the cartographer. Draw a single continuous path from the start tile through the maze. Pick up every numbered key <span class="keydot"></span> <b>in order</b> (1, then 2, then 3), then reach the green exit gate.</p>
+    <p>Rules of the ledger: you may <b>never step on a tile twice</b>. A key taken out of order is refused. A wrong turn is not fatal — undo it step by step. But if you paint yourself into a corner with no free tile left, the route is ruined and you lose a life.</p>
+    <p class="small">Move with <kbd>Arrow keys</kbd> / <kbd>WASD</kbd>, click or tap a neighbouring tile to extend the path, click any tile already on your path to rewind to it. <kbd>Backspace</kbd> / <kbd>Z</kbd> undoes one step. <kbd>R</kbd> restarts the level.</p>
+    <button id="startBtn">Start Expedition</button>
+    <p class="small">Sound is generated live in your browser after you press Start. No downloads, no network.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Victory</h2>
+    <p id="endText"></p>
+    <p class="small" id="endSub"></p>
+    <button id="restartBtn">Play Again</button>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="undoBtn" class="secondary">Undo Step (Z)</button>
+  <button id="restartLevelBtn" class="secondary">Restart Level (R)</button>
+  <button id="soundBtn" class="secondary">Sound: On</button>
+</div>
+<p id="legend">Gold circles are keys — take them in numbered order. The green gate is the exit. The amber ribbon is your plotted path. A dead end costs one life; lose all three and the expedition ends.</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var statusEl = document.getElementById('status');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var keysEl = document.getElementById('keys');
+  var stepsEl = document.getElementById('steps');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+  var endSub = document.getElementById('endSub');
+
+  // ---- Audio: procedural Web Audio, created only after user interaction ----
+  var audioCtx = null, soundOn = true;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!soundOn || !audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (kind === 'move') tone(300 + Math.random() * 60, 0.08, 'triangle', 0.08);
+    else if (kind === 'key') { tone(520, 0.12, 'sine', 0.14); setTimeout(function () { tone(780, 0.16, 'sine', 0.14); }, 90); }
+    else if (kind === 'undo') tone(220, 0.09, 'sine', 0.08);
+    else if (kind === 'bad') tone(140, 0.18, 'square', 0.10);
+    else if (kind === 'trap') { tone(180, 0.3, 'sawtooth', 0.12); setTimeout(function () { tone(110, 0.35, 'sawtooth', 0.12); }, 140); }
+    else if (kind === 'win') { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.22, 'sine', 0.14); }, i * 110); }); }
+    else if (kind === 'lose') { [330, 262, 196, 131].forEach(function (f, i) { setTimeout(function () { tone(f, 0.25, 'triangle', 0.12); }, i * 150); }); }
+  }
+
+  // ---- Levels: '#' wall, '.' floor, 'S' start, 'E' exit, digits = keys in order ----
+  var LEVELS = [
+    { name: 'The Apprentice Vault', rows: [
+      '#########',
+      '#S.....1#',
+      '#.......#',
+      '#..###..#',
+      '#.......#',
+      '#..###..#',
+      '#.......#',
+      '#2.....E#',
+      '#########'] },
+    { name: 'Pillars of the Ledger', rows: [
+      '#########',
+      '#S.....1#',
+      '#..##...#',
+      '#..##.2.#',
+      '#.......#',
+      '#...##..#',
+      '#..3....#',
+      '#......E#',
+      '#########'] },
+    { name: 'The Scribe Spiral', rows: [
+      '###########',
+      '#S.......1#',
+      '#.........#',
+      '#..##.....#',
+      '#..##.2...#',
+      '#.........#',
+      '#.....##..#',
+      '#..3......#',
+      '#.........#',
+      '#........E#',
+      '###########'] },
+    { name: 'Hall of Echoes', rows: [
+      '###########',
+      '#S..#....1#',
+      '#...#.....#',
+      '#...#..2..#',
+      '#.........#',
+      '#.##...##.#',
+      '#.........#',
+      '#..3......#',
+      '#.....#...#',
+      '#........E#',
+      '###########'] },
+    { name: 'The Master Archive', rows: [
+      '#############',
+      '#S....#....1#',
+      '#.....#.....#',
+      '#.##..#..2..#',
+      '#.....#.....#',
+      '#..##....##.#',
+      '#...........#',
+      '#.##..3..##.#',
+      '#...........#',
+      '#..##....##.#',
+      '#...........#',
+      '#4.........E#',
+      '#############'] }
+  ];
+
+  var levelIndex = 0, score = 0, lives = 3, playing = false, gameOver = false;
+  var grid = [], rows = 0, cols = 0, start = null, exitCell = null, keyCells = [];
+  var path = [], visited = {}, nextKey = 1, totalKeys = 0, deadEnd = false, levelBonusAwarded = false;
+
+  function parseLevel(idx) {
+    var def = LEVELS[idx];
+    grid = def.rows.map(function (r) { return r.split(''); });
+    rows = grid.length; cols = grid[0].length;
+    start = null; exitCell = null; keyCells = [];
+    for (var y = 0; y < rows; y++) {
+      for (var x = 0; x < cols; x++) {
+        var c = grid[y][x];
+        if (c === 'S') start = { x: x, y: y };
+        else if (c === 'E') exitCell = { x: x, y: y };
+        else if (c >= '1' && c <= '9') keyCells.push({ x: x, y: y, n: parseInt(c, 10) });
+      }
+    }
+    keyCells.sort(function (a, b) { return a.n - b.n; });
+    totalKeys = keyCells.length;
+  }
+  function cellKey(x, y) { return x + ',' + y; }
+  function isWall(x, y) { return x < 0 || y < 0 || x >= cols || y >= rows || grid[y][x] === '#'; }
+  function isFloor(x, y) { return !isWall(x, y); }
+
+  function setupLevel(idx) {
+    parseLevel(idx);
+    path = [{ x: start.x, y: start.y }];
+    visited = {}; visited[cellKey(start.x, start.y)] = true;
+    nextKey = 1; deadEnd = false; levelBonusAwarded = false;
+    levelEl.textContent = (idx + 1) + ' / ' + LEVELS.length;
+    setStatus('Level ' + (idx + 1) + ': ' + LEVELS[idx].name + ' — collect key 1 first.');
+    updateHUD();
+  }
+  function setStatus(msg) { statusEl.textContent = msg; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives;
+    stepsEl.textContent = Math.max(0, path.length - 1);
+    keysEl.textContent = (nextKey - 1) + ' / ' + totalKeys;
+  }
+  function head() { return path[path.length - 1]; }
+  function isAdjacent(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1; }
+
+  function keyAt(x, y) {
+    for (var i = 0; i < keyCells.length; i++) if (keyCells[i].x === x && keyCells[i].y === y) return keyCells[i];
+    return null;
+  }
+  function isExit(x, y) { return exitCell && exitCell.x === x && exitCell.y === y; }
+
+  function tryStep(nx, ny) {
+    if (!playing || gameOver || deadEnd) return;
+    if (!isFloor(nx, ny)) { setStatus('That is a wall. Chart around it.'); sfx('bad'); return; }
+    if (visited[cellKey(nx, ny)]) { setStatus('Already charted — the ledger forbids retracing a tile.'); sfx('bad'); return; }
+    var k = keyAt(nx, ny);
+    if (k && k.n !== nextKey) { setStatus('Key ' + k.n + ' is sealed until key ' + nextKey + ' is collected first.'); sfx('bad'); return; }
+    if (isExit(nx, ny) && nextKey <= totalKeys) { setStatus('The exit gate stays shut until all ' + totalKeys + ' keys are collected.'); sfx('bad'); return; }
+    path.push({ x: nx, y: ny });
+    visited[cellKey(nx, ny)] = true;
+    sfx('move');
+    if (k) {
+      nextKey++;
+      score += 100;
+      setStatus('Key ' + k.n + ' collected! ' + (nextKey <= totalKeys ? 'Now find key ' + nextKey + '.' : 'All keys held — head for the green exit gate.'));
+      sfx('key');
+    } else if (isExit(nx, ny)) {
+      return winLevel();
+    } else {
+      setStatus('Path plotted. ' + (nextKey <= totalKeys ? 'Next key: ' + nextKey + '.' : 'All keys held — reach the exit.'));
+    }
+    updateHUD();
+    checkDeadEnd();
+  }
+
+  function checkDeadEnd() {
+    if (deadEnd) return;
+    var h = head();
+    var dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (var i = 0; i < dirs.length; i++) {
+      var nx = h.x + dirs[i][0], ny = h.y + dirs[i][1];
+      if (isFloor(nx, ny) && !visited[cellKey(nx, ny)]) return; // a way onward exists
+    }
+    // No free neighbour: trapped (the exit step itself would have ended the level).
+    deadEnd = true;
+    lives--;
+    sfx('trap');
+    updateHUD();
+    if (lives <= 0) {
+      endGame(false);
+    } else {
+      setStatus('Dead end! The route is ruined — a life is lost. Press R to redraw this level.');
+    }
+  }
+
+  function undoStep() {
+    if (!playing || gameOver) return;
+    if (path.length <= 1) { setStatus('Already at the start tile — nothing to undo.'); return; }
+    var last = path.pop();
+    delete visited[cellKey(last.x, last.y)];
+    // If we stepped off a key, that key returns to the ledger.
+    var k = keyAt(last.x, last.y);
+    if (k && k.n === nextKey - 1) nextKey--;
+    deadEnd = false;
+    sfx('undo');
+    setStatus('Step undone. Re-plot from here.');
+    updateHUD();
+  }
+  function truncateTo(idx) {
+    if (!playing || gameOver) return;
+    while (path.length > idx + 1) {
+      var last = path.pop();
+      delete visited[cellKey(last.x, last.y)];
+      var k = keyAt(last.x, last.y);
+      if (k && k.n === nextKey - 1) nextKey--;
+    }
+    deadEnd = false;
+    sfx('undo');
+    setStatus('Route rewound to that tile.');
+    updateHUD();
+  }
+  function restartLevel() {
+    if (gameOver) return;
+    setupLevel(levelIndex);
+    sfx('undo');
+  }
+  function winLevel() {
+    var stepBonus = Math.max(0, 200 - (path.length - 1) * 2);
+    score += 250 + stepBonus;
+    updateHUD();
+    sfx('win');
+    if (levelIndex + 1 >= LEVELS.length) {
+      endGame(true);
+    } else {
+      levelIndex++;
+      setStatus('Level complete! Efficiency bonus +' + stepBonus + '. On to ' + LEVELS[levelIndex].name + '.');
+      setupLevel(levelIndex);
+      setStatus('Level ' + (levelIndex + 1) + ': ' + LEVELS[levelIndex].name + ' — collect key 1 first.');
+    }
+  }
+  function endGame(won) {
+    playing = false; gameOver = true;
+    endTitle.textContent = won ? 'The Archive Is Yours!' : 'Expedition Ended';
+    endText.textContent = won
+      ? 'You charted all ' + LEVELS.length + ' vaults without retracing a single tile. Final score: ' + score + '.'
+      : 'Out of lives — the labyrinth keeps its secrets this time. Final score: ' + score + '.';
+    endSub.textContent = 'Press Play Again or the R key to start a fresh expedition.';
+    endScreen.classList.remove('hidden');
+    sfx(won ? 'win' : 'lose');
+  }
+  function startGame() {
+    ensureAudio();
+    levelIndex = 0; score = 0; lives = 3; gameOver = false; playing = true;
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    setupLevel(0);
+    setStatus('Level 1: ' + LEVELS[0].name + ' — plot your route to key 1.');
+    sfx('key');
+  }
+
+  // ---- Input: keyboard ----
+  var KEYMAP = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+    w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0], W: [0, -1], S: [0, 1], A: [-1, 0], D: [1, 0] };
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'r' || e.key === 'R') {
+      if (gameOver) { startGame(); return; }
+      ensureAudio(); restartLevel(); return;
+    }
+    if (e.key === 'z' || e.key === 'Z' || e.key === 'Backspace') { ensureAudio(); undoStep(); return; }
+    var d = KEYMAP[e.key];
+    if (d) {
+      e.preventDefault();
+      ensureAudio();
+      if (!playing) return;
+      var h = head();
+      tryStep(h.x + d[0], h.y + d[1]);
+    }
+  });
+
+  // ---- Input: mouse + touch on the canvas ----
+  function cellFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.clientX !== undefined) ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var cy = (e.clientY !== undefined) ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    var cellW = canvas.width / cols, cellH = canvas.height / rows;
+    var x = Math.floor((cx - rect.left) / rect.width * cols);
+    var y = Math.floor((cy - rect.top) / rect.height * rows);
+    return { x: x, y: y, cellW: cellW, cellH: cellH };
+  }
+  function handlePoint(e) {
+    ensureAudio();
+    if (!playing || gameOver) return;
+    var c = cellFromEvent(e);
+    if (c.x < 0 || c.y < 0 || c.x >= cols || c.y >= rows) return;
+    // Clicking a tile already on the path rewinds to it.
+    for (var i = 0; i < path.length; i++) {
+      if (path[i].x === c.x && path[i].y === c.y) { truncateTo(i); return; }
+    }
+    var h = head();
+    if (isAdjacent(h, c)) tryStep(c.x, c.y);
+    else setStatus('Tap a tile next to the path head (the glowing marker) to extend the route.');
+  }
+  canvas.addEventListener('click', handlePoint);
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); handlePoint(e); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('undoBtn').addEventListener('click', function () { ensureAudio(); undoStep(); });
+  document.getElementById('restartLevelBtn').addEventListener('click', function () { ensureAudio(); restartLevel(); });
+  document.getElementById('soundBtn').addEventListener('click', function (e) {
+    ensureAudio(); soundOn = !soundOn;
+    e.target.textContent = 'Sound: ' + (soundOn ? 'On' : 'Off');
+  });
+
+  // ---- Rendering ----
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    var cw = canvas.width / cols, ch = canvas.height / rows;
+    for (var y = 0; y < rows; y++) {
+      for (var x = 0; x < cols; x++) {
+        var px = x * cw, py = y * ch;
+        var c = grid[y][x];
+        if (c === '#') {
+          ctx.fillStyle = '#3a3120'; ctx.fillRect(px, py, cw, ch);
+          ctx.fillStyle = '#55482c'; ctx.fillRect(px + 3, py + 3, cw - 6, ch - 6);
+        } else {
+          ctx.fillStyle = ((x + y) % 2 === 0) ? '#262116' : '#221e15';
+          ctx.fillRect(px, py, cw, ch);
+        }
+      }
+    }
+    // Path ribbon
+    if (path.length > 1) {
+      ctx.strokeStyle = '#f2c14e'; ctx.lineWidth = Math.min(cw, ch) * 0.28;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      path.forEach(function (p, i) {
+        var cxp = p.x * cw + cw / 2, cyp = p.y * ch + ch / 2;
+        if (i === 0) ctx.moveTo(cxp, cyp); else ctx.lineTo(cxp, cyp);
+      });
+      ctx.stroke();
+    }
+    // Start, keys, exit
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    var fs = Math.min(cw, ch) * 0.52;
+    ctx.font = 'bold ' + fs + 'px Georgia, serif';
+    ctx.fillStyle = '#8fd6ff';
+    ctx.fillText('S', start.x * cw + cw / 2, start.y * ch + ch / 2);
+    keyCells.forEach(function (k) {
+      var cxp = k.x * cw + cw / 2, cyp = k.y * ch + ch / 2, r = Math.min(cw, ch) * 0.34;
+      var got = k.n < nextKey;
+      ctx.beginPath(); ctx.arc(cxp, cyp, r, 0, Math.PI * 2);
+      ctx.fillStyle = got ? '#4a3d1c' : '#f2c14e'; ctx.fill();
+      ctx.fillStyle = got ? '#8a7a4a' : '#241a00';
+      ctx.fillText(String(k.n), cxp, cyp);
+    });
+    ctx.fillStyle = '#3ddc84';
+    ctx.fillRect(exitCell.x * cw + 4, exitCell.y * ch + 4, cw - 8, ch - 8);
+    ctx.fillStyle = '#062b16'; ctx.font = 'bold ' + (fs * 0.8) + 'px Georgia, serif';
+    ctx.fillText('E', exitCell.x * cw + cw / 2, exitCell.y * ch + ch / 2);
+    // Head marker
+    var h = head();
+    ctx.beginPath(); ctx.arc(h.x * cw + cw / 2, h.y * ch + ch / 2, Math.min(cw, ch) * 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = deadEnd ? '#ff5a4e' : '#ffffff'; ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  // ---- Main loop ----
+  function loop() { draw(); requestAnimationFrame(loop); }
+  setupLevel(0);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

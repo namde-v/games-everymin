@@ -54,6 +54,16 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0348 | Samba Steps | Rhythm / Dance Timing | Arrow Keys or A/S/W/D hit lanes, mouse click pads, touch tap pads, R restart | [Play](./../games/game-0348.html) |
 | 0349 | Canyon Courier | Arcade / Delivery Dash | Arrow Keys / WASD steer, mouse move steer, touch drag steer, Space boost, P pause, R restart | [Play](./../games/game-0349.html) |
 | 0350 | Botanical Blueprint | Puzzle / Garden Layout | Arrow Keys move, Keys 1-5 pick plant, Enter/Space plant, mouse/touch tap plant then bed, R restart | [Play](./../games/game-0350.html) |
+| 0351 | Glacier Glider | Arcade / Ice Sliding | Arrow Keys / WASD slide, mouse/touch D-pad, R restart | [Play](./../games/game-0351.html) |
+| 0352 | Hex Haven | Puzzle / Hex Matching | Mouse/touch click place, Keys 1-6 pick color, Space rotate, R restart | [Play](./../games/game-0352.html) |
+| 0353 | Bazaar Baron | Strategy / Market Trading | Mouse/touch tap stalls and buttons, Keys 1-5 select good, B buy, S sell, R restart | [Play](./../games/game-0353.html) |
+| 0354 | Drumline Dash | Rhythm / Drum Timing | D/F/J/K drum lanes, mouse click pads, touch tap pads, R restart | [Play](./../games/game-0354.html) |
+| 0355 | Volcano Voyager | Arcade / Lava Platforming | Space / Up / W jump, mouse click, touch tap, R restart | [Play](./../games/game-0355.html) |
+| 0356 | Cipher Citadel | Puzzle / Word Cipher | Mouse/touch turn letter wheels and submit, Arrow Keys navigate, R restart | [Play](./../games/game-0356.html) |
+| 0357 | Railway Regent | Strategy / Train Scheduling | Mouse/touch click junctions to switch tracks, R restart | [Play](./../games/game-0357.html) |
+| 0358 | Waltz Waves | Rhythm / Waltz Timing | Space or click/tap and hold, R restart | [Play](./../games/game-0358.html) |
+| 0359 | Orchard Outlaw | Arcade / Fruit Catching | Arrow Keys / mouse move cart, touch drag, R restart | [Play](./../games/game-0359.html) |
+| 0360 | Labyrinth Ledger | Puzzle / Maze Path Planning | Arrow Keys / WASD plan path, mouse/touch tap, Space undo, R restart | [Play](./../games/game-0360.html) |
 
 ## Batch notes
 
@@ -67,3 +77,5 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 034: 10 games, produced in one cycle (0331–0340). Five worker titles duplicated earlier games and were renamed before cataloguing (Quarry Quake→Quarry Rumble, Hex Harvest→Hexfield Harvest, Drumline Dunes→Dune Drummers, Rune Relay→Glyph Relay, Ink Infiltrator→Shadow Scribe).
 
 - Batch 035: 10 games, produced in one cycle (0341–0350). Four initially proposed titles duplicated earlier games and were replaced before production (Mirror Maze→Kaleido Keys, Cipher Lock→Enigma Engine, Harbor Master→Dockside Dynamo, Beat Bounce→Pulse Pogo).
+
+- Batch 036: 10 games, produced in one cycle (0351–0360).
