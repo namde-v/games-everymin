@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Avalanche Courier</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0b1e33; color:#fff; font-family:Arial, Helvetica, sans-serif; display:flex; justify-content:center; align-items:center; min-height:100vh; overflow:hidden; }
+  #wrap { width:100%; max-width:520px; padding:10px; text-align:center; }
+  h1 { font-size:30px; letter-spacing:1px; text-shadow:2px 2px 0 #1d4e89; margin-bottom:4px; }
+  p.sub { color:#bfe3ff; font-size:14px; margin-bottom:10px; }
+  #hud { display:flex; justify-content:space-between; background:#123a5e; border:2px solid #7fc4ff; border-radius:10px; padding:8px 10px; font-weight:bold; font-size:15px; margin-bottom:10px; }
+  #hud span { min-width:70px; }
+  canvas { width:100%; height:480px; background:linear-gradient(#dff3ff,#ffffff); border:3px solid #7fc4ff; border-radius:12px; display:block; touch-action:none; }
+  .screen { position:relative; }
+  .overlay { position:absolute; inset:0; background:rgba(5,20,40,.88); border-radius:12px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; padding:22px; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { font-size:30px; }
+  .overlay p { color:#d7ecff; line-height:1.55; font-size:15px; max-width:420px; }
+  button { background:#ffcf3f; color:#12233a; border:0; border-radius:999px; padding:13px 28px; font-size:18px; font-weight:bold; cursor:pointer; box-shadow:0 4px 0 #b98a00; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b98a00; }
+  button.secondary { background:#eaf6ff; box-shadow:0 4px 0 #7aa7c7; }
+  .keys { background:#0f2a47; border:1px solid #4f87b8; border-radius:8px; padding:10px; font-size:13px; line-height:1.6; }
+  #controls { margin-top:10px; display:flex; gap:8px; justify-content:center; }
+  #controls button { padding:10px 18px; font-size:15px; }
+  .small { font-size:12px; color:#bfe3ff; margin-top:8px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>❄️ AVALANCHE COURIER ❄️</h1>
+  <p class="sub">Race the mountain. Deliver every package before the storm closes in!</p>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>📦 <b id="cargo">0</b>/3</span>
+    <span>❤️ <b id="lives">3</b></span>
+    <span>⏱ <b id="time">90</b>s</span>
+    <span>🏠 <b id="delivered">0</b>/6</span>
+  </div>
+  <div class="screen">
+    <canvas id="game" width="500" height="480"></canvas>
+    <div class="overlay" id="titleScreen">
+      <h2>🏔️ Avalanche Courier</h2>
+      <p><b>How to Play:</b> Steer your sled down the slope. Grab glowing packages, then reach a cabin to deliver them. Deliver all 6 packages before the 90-second timer runs out!</p>
+      <div class="keys">
+        ← → or A / D — steer &nbsp;|&nbsp; Mouse / touch — drag to steer<br>
+        ⬆ / Space — quick brake &nbsp;|&nbsp; Avoid rocks and trees!<br>
+        Carry up to 3 packages. A crash loses a life and your cargo.
+      </div>
+      <button id="startBtn">▶ START DELIVERY RUN</button>
+      <p class="small">Deliver 6 packages to win. Lose all 3 lives, or run out of time, and the run ends.</p>
+    </div>
+    <div class="overlay hidden" id="endScreen">
+      <h2 id="endTitle">GAME OVER</h2>
+      <p id="endText"></p>
+      <p id="finalScore"></p>
+      <button id="restartBtn">↻ RESTART INSTANTLY</button>
+    </div>
+  </div>
+  <div id="controls">
+    <button id="leftBtn">◀ LEFT</button>
+    <button id="brakeBtn">⏸ BRAKE</button>
+    <button id="rightBtn">RIGHT ▶</button>
+  </div>
+  <p class="small">Tip: cabins appear on the left and right edges — plan your line early. Deliveries are worth 150 points; packages are worth 25.</p>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var scoreEl = document.getElementById('score');
+  var cargoEl = document.getElementById('cargo');
+  var livesEl = document.getElementById('lives');
+  var timeEl = document.getElementById('time');
+  var deliveredEl = document.getElementById('delivered');
+  var running = false, over = false, lastTime = 0, elapsed = 0, timeLeft = 90;
+  var score = 0, lives = 3, cargo = 0, delivered = 0, distance = 0;
+  var keys = {};
+  var player = { x: W/2, y: H-90, w: 34, h: 46, vx: 0, speed: 0, tilt: 0, inv: 0 };
+  var obstacles = [], pickups = [], cabins = [], flakes = [], particles = [];
+  var audioCtx = null, muted = false;
+
+  function audio(){
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return null; } }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol){
+    var ac = audio(); if (!ac || muted) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.08, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+  function sfx(kind){
+    if (kind === 'pickup') { beep(660, .12, 'sine', .09); setTimeout(function(){ beep(880, .14, 'sine', .09); }, 70); }
+    if (kind === 'deliver') { beep(523, .12, 'triangle', .1); setTimeout(function(){ beep(659, .12, 'triangle', .1); }, 90); setTimeout(function(){ beep(784, .2, 'triangle', .1); }, 180); }
+    if (kind === 'crash') { beep(140, .3, 'sawtooth', .12); }
+    if (kind === 'win') { [523,659,784,1046].forEach(function(f,i){ setTimeout(function(){ beep(f,.22,'triangle',.1); }, i*130); }); }
+    if (kind === 'lose') { [392,330,262,196].forEach(function(f,i){ setTimeout(function(){ beep(f,.22,'sawtooth',.08); }, i*140); }); }
+  }
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function reset(){
+    score = 0; lives = 3; cargo = 0; delivered = 0; timeLeft = 90; elapsed = 0; distance = 0;
+    player.x = W/2; player.vx = 0; player.speed = 0; player.inv = 0; player.tilt = 0;
+    obstacles = []; pickups = []; cabins = []; particles = [];
+    for (var i=0;i<90;i++) flakes.push({ x: Math.random()*W, y: Math.random()*H, s: rand(1,3.5), d: rand(.2,.8) });
+    spawnRow(-40); spawnRow(-220); spawnRow(-400);
+    updateHUD();
+  }
+  function spawnRow(y){
+    var kind = Math.random();
+    if (kind < 0.42) {
+      pickups.push({ x: rand(50, W-50), y: y + rand(-20,20), r: 15, bob: Math.random()*6 });
+    } else if (kind < 0.72) {
+      cabins.push({ x: Math.random() < 0.5 ? 42 : W-42, y: y, w: 72, h: 56 });
+    }
+    var n = 2 + Math.floor(Math.random()*2);
+    for (var i=0;i<n;i++){
+      var ox = rand(45, W-45);
+      if (Math.abs(ox - (pickups[pickups.length-1] ? pickups[pickups.length-1].x : -999)) < 55) continue;
+      obstacles.push({ x: ox, y: y + rand(-25,25), r: rand(15,24), tree: Math.random() < 0.55 });
+    }
+  }
+  function updateHUD(){
+    scoreEl.textContent = score; cargoEl.textContent = cargo; livesEl.textContent = lives;
+    timeEl.textContent = Math.max(0, Math.ceil(timeLeft)); deliveredEl.textContent = delivered;
+  }
+  function burst(x,y,color){
+    for (var i=0;i<14;i++) particles.push({ x:x, y:y, vx: rand(-2.5,2.5), vy: rand(-3,1), life: 30, color: color });
+  }
+  function rectsOverlap(a,b){ return Math.abs(a.x-b.x) < (a.w/2+b.w/2) && Math.abs(a.y-b.y) < (a.h/2+b.h/2); }
+  function circleHit(o){
+    var dx = player.x - o.x, dy = player.y - o.y;
+    return Math.sqrt(dx*dx+dy*dy) < o.r + 16;
+  }
+  function update(dt){
+    elapsed += dt; timeLeft -= dt;
+    var targetSpeed = keys[' '] || keys['ArrowUp'] ? 90 : 210;
+    player.speed += (targetSpeed - player.speed) * Math.min(1, dt*2);
+    distance += player.speed * dt;
+    var steer = 0;
+    if (keys['ArrowLeft'] || keys['a'] || keys['A']) steer -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) steer += 1;
+    player.vx += steer * 900 * dt;
+    player.vx *= Math.pow(0.12, dt);
+    player.x += player.vx * dt;
+    if (player.x < 28) { player.x = 28; player.vx = 0; }
+    if (player.x > W-28) { player.x = W-28; player.vx = 0; }
+    player.tilt = player.vx / 320;
+    if (player.inv > 0) player.inv -= dt;
+    var scroll = player.speed * dt;
+    var needRow = -520;
+    obstacles.forEach(function(o){ o.y += scroll; });
+    pickups.forEach(function(o){ o.y += scroll; o.bob += dt*4; });
+    cabins.forEach(function(o){ o.y += scroll; });
+    obstacles = obstacles.filter(function(o){ return o.y < H+60; });
+    pickups = pickups.filter(function(o){ return o.y < H+60; });
+    cabins = cabins.filter(function(o){ return o.y < H+60; });
+    var lowest = Math.min.apply(null, obstacles.concat(pickups).concat(cabins).map(function(o){ return o.y; }));
+    if (isNaN(lowest) || lowest > needRow) spawnRow(lowest - 180);
+    flakes.forEach(function(f){ f.y += (f.s*22 + player.speed*0.15)*dt; f.x += Math.sin(elapsed+f.d*9)*0.4; if (f.y > H){ f.y = -5; f.x = Math.random()*W; } });
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+    // Pickups
+    for (var i=pickups.length-1;i>=0;i--){
+      var pk = pickups[i];
+      if (Math.abs(pk.x-player.x) < 32 && Math.abs(pk.y-player.y) < 36 && cargo < 3){
+        cargo++; score += 25; burst(pk.x, pk.y, '#ffcf3f'); sfx('pickup'); pickups.splice(i,1);
+      }
+    }
+    // Deliveries
+    for (var j=cabins.length-1;j>=0;j--){
+      var cb = cabins[j];
+      if (cargo > 0 && rectsOverlap({x:player.x,y:player.y,w:34,h:46}, {x:cb.x,y:cb.y,w:cb.w,h:cb.h})){
+        score += 150 * cargo; delivered += cargo; cargo = 0;
+        burst(cb.x, cb.y, '#53d769'); sfx('deliver'); cabins.splice(j,1); updateHUD();
+        if (delivered >= 6) return endGame(true);
+      }
+    }
+    // Crashes
+    if (player.inv <= 0){
+      for (var k=0;k<obstacles.length;k++){
+        if (circleHit(obstacles[k])){
+          lives--; cargo = 0; player.inv = 1.6; burst(player.x, player.y, '#ff5a4e'); sfx('crash');
+          obstacles.splice(k,1); updateHUD();
+          if (lives <= 0) return endGame(false);
+          break;
+        }
+      }
+    }
+    score += dt * 2;
+    updateHUD();
+    if (timeLeft <= 0) endGame(delivered >= 6);
+  }
+  function drawSled(){
+    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.tilt);
+    if (player.inv > 0 && Math.floor(elapsed*12) % 2 === 0) ctx.globalAlpha = 0.45;
+    ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.roundRect(-17,-23,34,46,10); ctx.fill();
+    ctx.fillStyle = '#8e2f24'; ctx.fillRect(-19,-12,4,34); ctx.fillRect(15,-12,4,34);
+    ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(0,-8,9,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#123a5e'; ctx.beginPath(); ctx.arc(0,-8,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffcf3f'; ctx.fillRect(-14,12,28,6);
+    ctx.restore();
+    if (cargo > 0){
+      ctx.fillStyle = '#b5651d'; ctx.fillRect(player.x-12, player.y-30, 24, 12);
+      ctx.fillStyle = '#ffcf3f'; ctx.fillRect(player.x-12, player.y-25, 24, 3);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('x'+cargo, player.x, player.y-34);
+    }
+  }
+  function draw(){
+    ctx.fillStyle = '#eaf7ff'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#ffffff';
+    for (var i=0;i<7;i++){ var ty = ((i*90 + distance*0.25) % (H+90)) - 45; ctx.beginPath(); ctx.ellipse(60+i*65, ty, 38, 10, 0, 0, Math.PI*2); ctx.fill(); }
+    ctx.fillStyle = '#bfe3ff'; ctx.fillRect(0,0,18,H); ctx.fillRect(W-18,0,18,H);
+    cabins.forEach(function(c){
+      ctx.fillStyle = '#7a4a22'; ctx.fillRect(c.x-c.w/2, c.y-c.h/2, c.w, c.h);
+      ctx.fillStyle = '#e8f4ff'; ctx.beginPath(); ctx.moveTo(c.x-c.w/2-6, c.y-c.h/2); ctx.lineTo(c.x, c.y-c.h/2-24); ctx.lineTo(c.x+c.w/2+6, c.y-c.h/2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffd94d'; ctx.fillRect(c.x-10, c.y-2, 20, 18);
+      ctx.fillStyle = '#123a5e'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText('CABIN', c.x, c.y-c.h/2-30);
+    });
+    pickups.forEach(function(p){
+      var bob = Math.sin(p.bob)*3;
+      ctx.fillStyle = '#ffcf3f'; ctx.strokeStyle = '#8a5a00'; ctx.lineWidth = 2;
+      ctx.strokeRect(p.x-13, p.y-11+bob, 26, 22); ctx.fillRect(p.x-13, p.y-11+bob, 26, 22);
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(p.x-13, p.y-1+bob, 26, 4);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.fillText('📦', p.x, p.y+5+bob);
+    });
+    obstacles.forEach(function(o){
+      if (o.tree){
+        ctx.fillStyle = '#1e7a46'; ctx.beginPath(); ctx.moveTo(o.x, o.y-o.r-12); ctx.lineTo(o.x-o.r, o.y+o.r); ctx.lineTo(o.x+o.r, o.y+o.r); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#7a4a22'; ctx.fillRect(o.x-3, o.y+o.r-4, 6, 12);
+      } else {
+        ctx.fillStyle = '#8d99ae'; ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#cbd5e1'; ctx.beginPath(); ctx.arc(o.x-5, o.y-6, o.r*0.45, 0, Math.PI*2); ctx.fill();
+      }
+    });
+    drawSled();
+    particles.forEach(function(p){ ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life/30); ctx.fillRect(p.x, p.y, 5, 5); ctx.globalAlpha = 1; });
+    ctx.fillStyle = '#ffffff';
+    flakes.forEach(function(f){ ctx.beginPath(); ctx.arc(f.x, f.y, f.s, 0, Math.PI*2); ctx.fill(); });
+    ctx.fillStyle = 'rgba(11,30,51,.78)'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Distance: ' + Math.floor(distance) + ' m', 26, 26);
+    if (cargo === 0) { ctx.textAlign = 'center'; ctx.fillText('Grab a package, then find a CABIN!', W/2, 52); }
+    if (!running && !over){
+      ctx.fillStyle = 'rgba(255,255,255,.65)'; ctx.font = 'bold 17px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Press START to begin your run', W/2, H/2);
+    }
+  }
+  function loop(ts){
+    if (!running) return;
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime)/1000); lastTime = ts;
+    update(dt); draw();
+    if (running) requestAnimationFrame(loop);
+  }
+  function startGame(){
+    audio(); reset(); running = true; over = false; lastTime = 0;
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    requestAnimationFrame(loop);
+  }
+  function endGame(win){
+    running = false; over = true;
+    var finalScore = Math.floor(score);
+    document.getElementById('endTitle').textContent = win ? '🏆 YOU WIN!' : '💥 GAME OVER';
+    document.getElementById('endText').textContent = win
+      ? 'All 6 packages delivered! The mountain cabins are stocked and the storm held off.'
+      : (timeLeft <= 0 ? 'Time ran out before all deliveries were made.' : 'Your sled took too many hits on the slope.');
+    document.getElementById('finalScore').textContent = 'Final score: ' + finalScore + '  •  Delivered: ' + delivered + '/6  •  Distance: ' + Math.floor(distance) + ' m';
+    endScreen.classList.remove('hidden');
+    if (win) sfx('win'); else sfx('lose');
+  }
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.getElementById('leftBtn').addEventListener('mousedown', function(){ keys['ArrowLeft'] = true; });
+  document.getElementById('leftBtn').addEventListener('mouseup', function(){ keys['ArrowLeft'] = false; });
+  document.getElementById('leftBtn').addEventListener('touchstart', function(e){ e.preventDefault(); keys['ArrowLeft'] = true; });
+  document.getElementById('leftBtn').addEventListener('touchend', function(){ keys['ArrowLeft'] = false; });
+  document.getElementById('rightBtn').addEventListener('mousedown', function(){ keys['ArrowRight'] = true; });
+  document.getElementById('rightBtn').addEventListener('mouseup', function(){ keys['ArrowRight'] = false; });
+  document.getElementById('rightBtn').addEventListener('touchstart', function(e){ e.preventDefault(); keys['ArrowRight'] = true; });
+  document.getElementById('rightBtn').addEventListener('touchend', function(){ keys['ArrowRight'] = false; });
+  document.getElementById('brakeBtn').addEventListener('mousedown', function(){ keys[' '] = true; });
+  document.getElementById('brakeBtn').addEventListener('mouseup', function(){ keys[' '] = false; });
+  document.getElementById('brakeBtn').addEventListener('touchstart', function(e){ e.preventDefault(); keys[' '] = true; });
+  document.getElementById('brakeBtn').addEventListener('touchend', function(){ keys[' '] = false; });
+  document.addEventListener('keydown', function(e){
+    keys[e.key] = true;
+    if (['ArrowLeft','ArrowRight','ArrowUp',' '].indexOf(e.key) >= 0) e.preventDefault();
+    if ((e.key === 'Enter' || e.key === ' ') && !running) startGame();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function(e){
+    var r = canvas.getBoundingClientRect();
+    var target = (e.clientX - r.left) / r.width * W;
+    player.x += (target - player.x) * 0.18;
+  });
+  canvas.addEventListener('mousedown', function(e){
+    audio();
+    var r = canvas.getBoundingClientRect();
+    var target = (e.clientX - r.left) / r.width * W;
+    player.x += (target - player.x) * 0.35;
+  });
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault(); audio();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    player.x = (t.clientX - r.left) / r.width * W;
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function(e){
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    player.x = (t.clientX - r.left) / r.width * W;
+  }, { passive: false });
+  reset(); draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Midnight Market Maze</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1026; color: #fff7e6; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px; overflow-x: hidden; }
+  h1 { font-size: 26px; letter-spacing: 1px; margin: 6px 0 2px; text-align: center; color: #ffd166; text-shadow: 0 0 14px rgba(255,209,102,.6); }
+  .sub { font-size: 13px; opacity: .85; margin-bottom: 8px; text-align: center; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 8px 0; font-weight: 700; font-size: 15px; }
+  #hud span { background: #1d2a5a; border: 1px solid #4456a8; border-radius: 999px; padding: 5px 12px; }
+  #hud .lives { color: #ff6b6b; }
+  #wrap { position: relative; width: min(92vw, 560px); aspect-ratio: 1 / 1; }
+  canvas { width: 100%; height: 100%; display: block; background: #141b3d; border: 3px solid #ffd166; border-radius: 14px; touch-action: none; }
+  .overlay { position: absolute; inset: 0; background: rgba(5,8,25,.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 22px; gap: 10px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffd166; font-size: 28px; }
+  .overlay p { font-size: 14px; line-height: 1.55; max-width: 420px; opacity: .95; }
+  .overlay .small { font-size: 12.5px; opacity: .8; }
+  button { cursor: pointer; border: 0; border-radius: 999px; padding: 12px 26px; font-size: 17px; font-weight: 800; background: #ffd166; color: #1a1430; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b8860b; }
+  button.secondary { background: #6c8cff; color: white; box-shadow: 0 4px 0 #3b4fa8; padding: 9px 18px; font-size: 14px; }
+  #controls { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  #controls button { padding: 10px 14px; font-size: 14px; }
+  #dpad { display: grid; grid-template-columns: repeat(3, 52px); gap: 5px; margin-top: 10px; }
+  #dpad button { padding: 0; height: 48px; font-size: 20px; }
+  #dpad .empty { visibility: hidden; }
+  #status { min-height: 20px; font-size: 14px; margin-top: 6px; color: #a8f0c6; font-weight: 700; }
+  @media (min-width: 700px) { #dpad { display: none; } }
+</style>
+</head>
+<body>
+<h1>🏮 Midnight Market Maze</h1>
+<p class="sub">Arcade / Ghost Market Chase — collect every lantern before the guards catch you!</p>
+<div id="hud">
+  <span>Score: <b id="score">0</b></span>
+  <span class="lives">Lives: <b id="lives">❤❤❤</b></span>
+  <span>Lanterns: <b id="left">0</b> left</span>
+  <span>Status: <b id="state">Ready</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="560" height="560"></canvas>
+  <div id="title" class="overlay">
+    <h2>Midnight Market Maze</h2>
+    <p><b>How to Play:</b> Guide the lantern thief through the night-market maze. Collect all the glowing lanterns to win. Avoid the patrolling guards — if one touches you, you lose a life.</p>
+    <p>Hide in a striped market stall (press <b>H</b>, <b>Space</b>, or tap Hide) and guards will walk right past you. Moving breaks your cover. Stalls only protect you while you stay still inside one.</p>
+    <p class="small">Move: Arrow keys / WASD • Mouse: click the maze to steer toward that spot • Touch: swipe or use the D-pad • Hide: H / Space / Hide button</p>
+    <button id="startBtn">▶ Start Game</button>
+  </div>
+  <div id="end" class="overlay hidden">
+    <h2 id="endTitle">Game Over</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">↻ Play Again</button>
+  </div>
+</div>
+<div id="status">Collect all lanterns to win. Watch the guards!</div>
+<div id="controls">
+  <button id="hideBtn" class="secondary">🛖 Hide / Unhide (H)</button>
+  <button id="soundBtn" class="secondary">🔊 Sound: On</button>
+</div>
+<div id="dpad">
+  <span class="empty"></span><button data-dir="up">▲</button><span class="empty"></span>
+  <button data-dir="left">◀</button><button data-dir="down">▼</button><button data-dir="right">▶</button>
+</div>
+<p class="small" style="margin-top:8px;opacity:.7;text-align:center">Tip: guards speed up as you collect more lanterns. Lure them away, then double back.</p>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const leftEl = document.getElementById('left');
+const stateEl = document.getElementById('state');
+const statusEl = document.getElementById('status');
+const titleEl = document.getElementById('title');
+const endEl = document.getElementById('end');
+const endTitle = document.getElementById('endTitle');
+const endText = document.getElementById('endText');
+
+// 15 x 15 maze: 1 = wall, 0 = path, 2 = stall (hiding spot), 3 = lantern start
+const MAP = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,1,0,0,0,1,0,0,0,2,0,1],
+  [1,0,1,0,1,0,1,0,1,0,1,1,1,0,1],
+  [1,0,1,0,0,0,1,0,0,0,0,0,1,0,1],
+  [1,0,1,1,1,0,1,1,1,1,1,0,1,0,1],
+  [1,0,0,0,0,0,0,0,2,0,0,0,0,0,1],
+  [1,1,1,0,1,1,1,0,1,0,1,1,1,0,1],
+  [1,0,0,0,1,0,0,0,1,0,0,0,1,0,1],
+  [1,0,1,1,1,0,1,1,1,0,1,0,1,0,1],
+  [1,0,0,0,0,0,1,2,0,0,1,0,0,0,1],
+  [1,1,1,1,1,0,1,1,1,1,1,0,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,2,0,1],
+  [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1],
+  [1,0,0,0,1,0,0,0,0,0,1,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+const ROWS = 15, COLS = 15, CELL = canvas.width / COLS;
+let player, guards, lanterns, score, lives, playing, hidden, soundOn, keys, targetX, targetY, lastTime, guardTimer, animFrame;
+let touchX = null, touchY = null;
+
+function resetGame() {
+  player = { col: 1, row: 1, x: 1.5 * CELL, y: 1.5 * CELL, dirX: 0, dirY: 0, speed: 150 };
+  guards = [
+    { col: 13, row: 13, x: 13.5 * CELL, y: 13.5 * CELL, dirX: -1, dirY: 0, speed: 82, color: '#ff5d5d' },
+    { col: 13, row: 1, x: 13.5 * CELL, y: 1.5 * CELL, dirX: 0, dirY: 1, speed: 72, color: '#ff9f43' },
+    { col: 1, row: 13, x: 1.5 * CELL, y: 13.5 * CELL, dirX: 1, dirY: 0, speed: 66, color: '#c56cf0' }
+  ];
+  lanterns = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (MAP[r][c] === 0 && !(c === 1 && r === 1) && !(c === 13 && r === 13) && Math.random() < 0.62) lanterns.push({ col: c, row: r });
+  }
+  if (lanterns.length < 14) lanterns.push({ col: 3, row: 1 }, { col: 7, row: 3 }, { col: 11, row: 7 });
+  score = 0; lives = 3; hidden = false; keys = {}; targetX = null; targetY = null; guardTimer = 0;
+  updateHUD('Playing'); statusEl.textContent = 'Collect all lanterns to win. Watch the guards!';
+}
+
+function isWall(c, r) { return c < 0 || r < 0 || c >= COLS || r >= ROWS || MAP[r][c] === 1; }
+function isStall(c, r) { return !isWall(c, r) && MAP[r][c] === 2; }
+function cellCenter(c, r) { return { x: (c + 0.5) * CELL, y: (r + 0.5) * CELL }; }
+
+let audioCtx = null;
+function beep(freq, dur, type) {
+  if (!soundOn || !audioCtx) return;
+  try {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + dur);
+  } catch (e) {}
+}
+function ensureAudio() {
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function updateHUD(state) {
+  scoreEl.textContent = score;
+  livesEl.textContent = '❤'.repeat(Math.max(0, lives));
+  leftEl.textContent = lanterns.length;
+  stateEl.textContent = state || (hidden ? 'Hidden!' : 'Playing');
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const x = c * CELL, y = r * CELL;
+    if (MAP[r][c] === 1) {
+      ctx.fillStyle = '#2a356e'; ctx.fillRect(x, y, CELL, CELL);
+      ctx.fillStyle = '#3d4f9e'; ctx.fillRect(x + 3, y + 3, CELL - 6, CELL - 6);
+    } else if (MAP[r][c] === 2) {
+      ctx.fillStyle = '#7a4a21'; ctx.fillRect(x, y, CELL, CELL);
+      ctx.fillStyle = '#e056fd'; ctx.fillRect(x, y, CELL, 9);
+      ctx.fillStyle = '#ffd166'; ctx.fillRect(x, y + 9, CELL, 4);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('🛖', x + CELL / 2, y + CELL - 8);
+    } else {
+      ctx.fillStyle = '#1a2148'; ctx.fillRect(x, y, CELL, CELL);
+      ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(x, y, CELL, 1);
+    }
+  }
+  const t = performance.now() / 300;
+  lanterns.forEach(l => {
+    const p = cellCenter(l.col, l.row), glow = 0.7 + 0.3 * Math.sin(t + l.col);
+    ctx.fillStyle = 'rgba(255,209,102,' + (0.25 * glow) + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('🏮', p.x, p.y + 7);
+  });
+  guards.forEach(g => {
+    ctx.fillStyle = g.color; ctx.beginPath(); ctx.arc(g.x, g.y, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0b1026'; ctx.beginPath(); ctx.arc(g.x - 5, g.y - 3, 3, 0, Math.PI * 2); ctx.arc(g.x + 5, g.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('👮', g.x, g.y + 20);
+  });
+  // Player
+  ctx.save();
+  if (hidden) ctx.globalAlpha = 0.45;
+  ctx.fillStyle = '#2ed573'; ctx.beginPath(); ctx.arc(player.x, player.y, 14, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(player.x - 5, player.y - 3, 3, 0, Math.PI * 2); ctx.arc(player.x + 5, player.y - 3, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = '#ffd166'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(hidden ? 'HIDDEN' : 'YOU', player.x, player.y - 20);
+}
+
+function moveEntity(e, dt, dirs) {
+  // Snap to tile centre when changing direction, then step if next cell is open.
+  const col = Math.floor(e.x / CELL), row = Math.floor(e.y / CELL);
+  const centre = cellCenter(col, row);
+  const nearCentre = Math.abs(e.x - centre.x) < 3 && Math.abs(e.y - centre.y) < 3;
+  if (nearCentre && (dirs.x !== e.dirX || dirs.y !== e.dirY)) {
+    const nc = col + dirs.x, nr = row + dirs.y;
+    if (!isWall(nc, nr)) { e.x = centre.x; e.y = centre.y; e.dirX = dirs.x; e.dirY = dirs.y; }
+  }
+  const nc = Math.floor((e.x + e.dirX * 2) / CELL), nr = Math.floor((e.y + e.dirY * 2) / CELL);
+  if (e.dirX !== 0 || e.dirY !== 0) {
+    const aheadCol = e.dirX !== 0 ? Math.floor((e.x + e.dirX * 20) / CELL) : col;
+    const aheadRow = e.dirY !== 0 ? Math.floor((e.y + e.dirY * 20) / CELL) : row;
+    if (!isWall(aheadCol, aheadRow)) { e.x += e.dirX * e.speed * dt; e.y += e.dirY * e.speed * dt; }
+    else { e.x = centre.x; e.y = centre.y; e.dirX = 0; e.dirY = 0; }
+  }
+  e.col = Math.floor(e.x / CELL); e.row = Math.floor(e.y / CELL);
+}
+
+function guardChoice(g) {
+  const options = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }].filter(d => !isWall(g.col + d.x, g.row + d.y) && !(d.x === -g.dirX && d.y === -g.dirY));
+  if (!options.length) { g.dirX *= -1; g.dirY *= -1; return; }
+  let best = options[0], bestScore = 999;
+  options.forEach(d => {
+    let s;
+    if (!hidden) {
+      const dc = (g.col + d.x) - player.col, dr = (g.row + d.y) - player.row;
+      s = Math.abs(dc) + Math.abs(dr) + Math.random() * 1.5;
+    } else s = Math.random() * 10;
+    if (s < bestScore) { bestScore = s; best = d; }
+  });
+  g.dirX = best.x; g.dirY = best.y;
+}
+
+function caught() {
+  lives--; beep(160, 0.35, 'sawtooth'); updateHUD();
+  if (lives <= 0) return endGame(false);
+  statusEl.textContent = 'Caught! A guard found you. Lives left: ' + lives;
+  player.x = 1.5 * CELL; player.y = 1.5 * CELL; player.dirX = 0; player.dirY = 0; hidden = false;
+  guards[0].x = 13.5 * CELL; guards[0].y = 13.5 * CELL;
+}
+
+function endGame(win) {
+  playing = false; cancelAnimationFrame(animFrame);
+  endTitle.textContent = win ? '🎉 You Win!' : '💀 Game Over';
+  endText.textContent = win ? ('You collected every lantern! Final score: ' + score + '. The market is yours tonight.') : ('The guards caught you. Final score: ' + score + '. Try sneaking through the stalls next time.');
+  endEl.classList.remove('hidden'); updateHUD(win ? 'Won!' : 'Game Over');
+  beep(win ? 880 : 220, 0.5, win ? 'triangle' : 'sawtooth');
+}
+
+function loop(now) {
+  if (!playing) return;
+  const dt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now;
+  let dx = 0, dy = 0;
+  if (keys.ArrowLeft || keys.a) dx = -1; else if (keys.ArrowRight || keys.d) dx = 1;
+  if (keys.ArrowUp || keys.w) dy = -1; else if (keys.ArrowDown || keys.s) dy = 1;
+  if (targetX !== null && targetY !== null) {
+    dx = Math.abs(targetX - player.x) > 8 ? Math.sign(targetX - player.x) : 0;
+    dy = dx === 0 && Math.abs(targetY - player.y) > 8 ? Math.sign(targetY - player.y) : 0;
+    if (dx === 0 && dy === 0) { targetX = null; targetY = null; }
+  }
+  if (dx !== 0 || dy !== 0) { hidden = false; moveEntity(player, dt, { x: dx, y: dy }); }
+  // Collect lanterns
+  const idx = lanterns.findIndex(l => l.col === player.col && l.row === player.row);
+  if (idx >= 0) {
+    lanterns.splice(idx, 1); score += 10; beep(660 + Math.random() * 220, 0.12, 'sine');
+    statusEl.textContent = lanterns.length ? 'Lantern collected! ' + lanterns.length + ' left.' : 'Last lantern! Head for safety!';
+    guards.forEach(g => g.speed = Math.min(125, g.speed + 2));
+    updateHUD();
+    if (!lanterns.length) return endGame(true);
+  }
+  guardTimer += dt;
+  guards.forEach(g => {
+    const centre = cellCenter(g.col, g.row);
+    if (Math.abs(g.x - centre.x) < 4 && Math.abs(g.y - centre.y) < 4 && guardTimer > 0.12) guardChoice(g);
+    moveEntity(g, dt, { x: g.dirX, y: g.dirY });
+    if (!hidden && Math.hypot(g.x - player.x, g.y - player.y) < 26) caught();
+  });
+  if (guardTimer > 0.12) guardTimer = 0;
+  draw();
+  animFrame = requestAnimationFrame(loop);
+}
+
+function startGame() {
+  ensureAudio(); soundOn = true;
+  resetGame(); playing = true;
+  titleEl.classList.add('hidden'); endEl.classList.add('hidden');
+  lastTime = performance.now(); draw();
+  animFrame = requestAnimationFrame(loop);
+  beep(520, 0.15, 'triangle');
+}
+
+function toggleHide() {
+  if (!playing) return;
+  if (isStall(player.col, player.row)) {
+    hidden = !hidden; updateHUD();
+    statusEl.textContent = hidden ? 'Hidden in a stall — guards cannot see you!' : 'You stepped out of cover. Move carefully!';
+    beep(hidden ? 440 : 330, 0.12, 'sine');
+  } else {
+    statusEl.textContent = 'No cover here! Stand inside a striped stall to hide.';
+  }
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+document.getElementById('hideBtn').addEventListener('click', function() { ensureAudio(); toggleHide(); });
+document.getElementById('soundBtn').addEventListener('click', function() {
+  ensureAudio(); soundOn = !soundOn; this.textContent = soundOn ? '🔊 Sound: On' : '🔇 Sound: Off';
+});
+document.querySelectorAll('#dpad button').forEach(function(b) {
+  b.addEventListener('click', function() {
+    const d = b.getAttribute('data-dir');
+    keys = {};
+    if (d === 'up') keys.ArrowUp = true; if (d === 'down') keys.ArrowDown = true;
+    if (d === 'left') keys.ArrowLeft = true; if (d === 'right') keys.ArrowRight = true;
+    hidden = false; ensureAudio();
+  });
+});
+document.addEventListener('keydown', function(e) {
+  const k = e.key.toLowerCase();
+  if (['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
+  keys[e.key] = true; keys[k] = true;
+  if (k === 'h' || k === ' ') { ensureAudio(); toggleHide(); }
+  if (k === 'enter' && !playing && titleEl.classList.contains('hidden') === false) startGame();
+});
+document.addEventListener('keyup', function(e) { keys[e.key] = false; keys[e.key.toLowerCase()] = false; });
+canvas.addEventListener('click', function(e) {
+  const r = canvas.getBoundingClientRect();
+  targetX = (e.clientX - r.left) * (canvas.width / r.width);
+  targetY = (e.clientY - r.top) * (canvas.height / r.height);
+  hidden = false; ensureAudio();
+});
+canvas.addEventListener('mousedown', function(e) { ensureAudio(); });
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault(); ensureAudio();
+  const t = e.changedTouches[0], r = canvas.getBoundingClientRect();
+  if (touchX === null) { touchX = t.clientX; touchY = t.clientY; return; }
+  const dx = t.clientX - touchX, dy = t.clientY - touchY;
+  keys = {};
+  if (Math.abs(dx) > Math.abs(dy)) keys[dx > 0 ? 'ArrowRight' : 'ArrowLeft'] = true;
+  else keys[dy > 0 ? 'ArrowDown' : 'ArrowUp'] = true;
+  hidden = false; touchX = null; touchY = null;
+}, { passive: false });
+canvas.addEventListener('touchend', function(e) { touchX = null; touchY = null; keys = {}; });
+resetGame(); draw();
+</script>
+</body>
+</html>

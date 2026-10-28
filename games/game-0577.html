@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Star Chart Cipher</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #050816; color: #eef2ff; font-family: Verdana, Geneva, sans-serif; overflow: hidden; }
+  #wrap { display: flex; flex-direction: column; align-items: center; height: 100vh; padding: 10px; }
+  h1 { font-size: 22px; letter-spacing: 2px; color: #ffd166; text-align: center; }
+  #hud { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin: 8px 0; font-size: 15px; font-weight: bold; }
+  #hud span { background: #141b3d; border: 1px solid #3a4a8c; border-radius: 8px; padding: 5px 10px; }
+  #lives { color: #ff6b81; } #score { color: #ffd166; } #status { color: #7df9c8; }
+  #clues { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; min-height: 38px; margin-bottom: 6px; }
+  .chip { display: flex; align-items: center; gap: 6px; background: #1a2350; border: 2px solid #4a5fc1; border-radius: 20px; padding: 5px 10px; font-size: 13px; }
+  .chip.done { background: #14532d; border-color: #34d399; opacity: 0.85; }
+  .chip.next { border-color: #ffd166; box-shadow: 0 0 10px #ffd166; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+  #canvasBox { position: relative; width: min(94vw, 720px); height: min(62vh, 520px); }
+  canvas { width: 100%; height: 100%; background: radial-gradient(circle at 50% 30%, #16204d, #050816 75%); border: 2px solid #3a4a8c; border-radius: 14px; display: block; touch-action: none; cursor: crosshair; }
+  #msg { height: 26px; margin-top: 7px; font-weight: bold; text-align: center; color: #7df9c8; }
+  #msg.bad { color: #ff6b81; }
+  #hint { font-size: 13px; text-align: center; color: #b8c2e8; max-width: 720px; line-height: 1.45; }
+  .overlay { position: absolute; inset: 0; background: rgba(3, 6, 22, 0.92); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { color: #ffd166; font-size: 30px; margin-bottom: 10px; }
+  .overlay p { max-width: 480px; line-height: 1.6; font-size: 15px; margin: 6px 0; }
+  .overlay .small { font-size: 13px; color: #b8c2e8; }
+  button { margin-top: 16px; background: #ffd166; color: #111827; border: none; border-radius: 10px; padding: 13px 26px; font-size: 17px; font-weight: bold; cursor: pointer; }
+  button:hover, button:focus { background: #ffe08a; outline: 3px solid #fff; }
+  #cursorNote { font-size: 12px; color: #8ea0d8; margin-top: 5px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>✦ STAR CHART CIPHER ✦</h1>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Lives: <b id="lives">♥♥♥</b></span>
+    <span>Chart: <b id="level">1 / 5</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="clues"></div>
+  <div id="canvasBox">
+    <canvas id="game" width="720" height="520"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>STAR CHART CIPHER</h2>
+      <p><b>Decode the constellation, one star at a time.</b></p>
+      <p>Each chart hides a secret sequence. The cipher chips above the sky show the exact colour and size of each star, in order. Find the star that matches the glowing chip — decoys share a colour <i>or</i> a size, but never both.</p>
+      <p class="small"><b>How to Play:</b> Click or tap stars in cipher order. Arrow keys move the glowing cursor, Enter / Space selects it. A correct link earns 100 points. A wrong link costs a life and breaks your current trail. Finish all 5 charts to win.</p>
+      <button id="startBtn" type="button">▶ START CHARTING</button>
+      <p class="small">Mouse, touch and keyboard supported. Sound starts only after you press Start.</p>
+    </div>
+    <div id="endScreen" class="overlay hidden">
+      <h2 id="endTitle">YOU WIN</h2>
+      <p id="endText"></p>
+      <p class="small">Press Restart to chart a brand-new sky.</p>
+      <button id="restartBtn" type="button">↻ RESTART</button>
+    </div>
+  </div>
+  <div id="msg">Press Start to reveal the first cipher.</div>
+  <p id="hint">Tip: check both colour AND size before you link. A near-match is a trap star.</p>
+  <div id="cursorNote">Keyboard: ← ↑ ↓ → to aim &nbsp;•&nbsp; Enter / Space to link &nbsp;•&nbsp; R to restart</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var levelEl = document.getElementById('level');
+  var statusEl = document.getElementById('status');
+  var cluesEl = document.getElementById('clues');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var COLORS = [
+    { name: 'Gold', css: '#ffd166' }, { name: 'Sky', css: '#7dd3fc' },
+    { name: 'Rose', css: '#fb7185' }, { name: 'Mint', css: '#6ee7b7' },
+    { name: 'Violet', css: '#c4b5fd' }, { name: 'Amber', css: '#fbbf24' }
+  ];
+  var SIZES = [{ name: 'Small', r: 7 }, { name: 'Medium', r: 11 }, { name: 'Large', r: 15 }];
+  var TOTAL_LEVELS = 5;
+  var score = 0, lives = 3, level = 1, playing = false, gameOver = false;
+  var stars = [], sequence = [], path = [], cursor = 0, shake = 0, time = 0;
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+    return audioCtx;
+  }
+  function tone(freq, dur, type) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.16, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + dur);
+  }
+  function goodSound() { tone(660, 0.14); setTimeout(function () { tone(880, 0.18); }, 90); }
+  function badSound() { tone(180, 0.25, 'sawtooth'); }
+  function winSound() { [523, 659, 784, 1046].forEach(function (f, i) { setTimeout(function () { tone(f, 0.22); }, i * 130); }); }
+
+  function rand(n) { return Math.floor(Math.random() * n); }
+  function pick(arr) { return arr[rand(arr.length)]; }
+  function comboKey(s) { return s.color + '-' + s.size; }
+
+  function buildLevel() {
+    path = []; shake = 0; cursor = 0;
+    var len = 4 + (level >= 3 ? 1 : 0) + (level >= 5 ? 1 : 0);
+    var starCount = 10 + (level >= 4 ? 2 : 0);
+    var used = {}, seqCombos = [];
+    // Choose a unique colour+size combo for each step in the secret sequence.
+    while (seqCombos.length < len) {
+      var c = rand(COLORS.length), s = rand(SIZES.length), key = c + '-' + s;
+      if (!used[key]) { used[key] = true; seqCombos.push({ color: c, size: s }); }
+    }
+    stars = [];
+    // Place target stars with good spacing.
+    seqCombos.forEach(function (combo) {
+      var placed = false, tries = 0, x = 0, y = 0;
+      while (!placed && tries < 80) {
+        tries++; x = 55 + Math.random() * 610; y = 50 + Math.random() * 420;
+        placed = stars.every(function (st) { return Math.hypot(st.x - x, st.y - y) > 95; });
+      }
+      stars.push({ x: x, y: y, color: combo.color, size: combo.size, phase: Math.random() * 6.28, target: true });
+    });
+    // Decoys: share colour OR size with a target, never both.
+    while (stars.length < starCount) {
+      var t = pick(seqCombos);
+      var decoy = Math.random() < 0.5 ? { color: t.color, size: rand(SIZES.length) } : { color: rand(COLORS.length), size: t.size };
+      if (comboKey(decoy) === comboKey(t) || used[comboKey(decoy)]) {
+        // A decoy that exactly copies any target combo is not allowed; shift its size.
+        decoy.size = (decoy.size + 1) % SIZES.length;
+        if (used[comboKey(decoy)]) continue;
+      }
+      var dx = 0, dy = 0, ok = false, dt = 0;
+      while (!ok && dt < 80) { dt++; dx = 55 + Math.random() * 610; dy = 50 + Math.random() * 420; ok = stars.every(function (st) { return Math.hypot(st.x - dx, st.y - dy) > 85; }); }
+      stars.push({ x: dx, y: dy, color: decoy.color, size: decoy.size, phase: Math.random() * 6.28, target: false });
+    }
+    // Secret sequence is the target stars in cipher order.
+    sequence = seqCombos.map(function (combo) {
+      return stars.filter(function (st) { return st.color === combo.color && st.size === combo.size; })[0];
+    });
+    renderClues(); updateHud(); setMsg('Chart ' + level + ': link the stars in cipher order.', false);
+    statusEl.textContent = 'Chart ' + level + ' in progress';
+  }
+
+  function renderClues() {
+    cluesEl.innerHTML = '';
+    sequence.forEach(function (st, i) {
+      var chip = document.createElement('div');
+      chip.className = 'chip' + (i < path.length ? ' done' : (i === path.length ? ' next' : ''));
+      var dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = COLORS[st.color].css;
+      chip.appendChild(dot);
+      chip.appendChild(document.createTextNode((i + 1) + '. ' + COLORS[st.color].name + ' ' + SIZES[st.size].name + (i < path.length ? ' ✓' : '')));
+      cluesEl.appendChild(chip);
+    });
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    livesEl.textContent = lives > 0 ? '♥'.repeat(lives) : '—';
+    levelEl.textContent = level + ' / ' + TOTAL_LEVELS;
+  }
+  function setMsg(text, bad) { msgEl.textContent = text; msgEl.className = bad ? 'bad' : ''; }
+
+  function selectStar(star) {
+    if (!playing || gameOver) return;
+    var expected = sequence[path.length];
+    if (star === expected) {
+      path.push(star); goodSound(); score += 100; updateHud(); renderClues();
+      if (path.length === sequence.length) {
+        setMsg('Constellation complete! +100 bonus.', false); score += 100; updateHud();
+        if (level >= TOTAL_LEVELS) { endGame(true); return; }
+        level++; setTimeout(buildLevel, 900);
+      } else {
+        setMsg('Correct link! Next: ' + COLORS[sequence[path.length].color].name + ' ' + SIZES[sequence[path.length].size].name + '.', false);
+      }
+    } else {
+      lives--; shake = 14; badSound(); path = []; renderClues(); updateHud();
+      if (lives <= 0) { endGame(false); return; }
+      setMsg('Wrong star! That was a trap — your trail broke. Lives left: ' + lives + '.', true);
+      statusEl.textContent = 'Wrong link — try again';
+    }
+  }
+
+  function endGame(won) {
+    playing = false; gameOver = true;
+    endTitle.textContent = won ? '★ YOU WIN ★' : 'GAME OVER';
+    endText.textContent = won
+      ? 'You decoded all 5 constellations! Final score: ' + score + '. The night sky is yours.'
+      : 'The cipher faded with your last life. Final score: ' + score + '. Try a new sky!';
+    statusEl.textContent = won ? 'Victory!' : 'Game Over';
+    if (won) winSound(); endScreen.classList.remove('hidden');
+  }
+
+  function startGame() {
+    score = 0; lives = 3; level = 1; gameOver = false; playing = true;
+    titleScreen.classList.add('hidden'); endScreen.classList.add('hidden');
+    audio(); tone(523, 0.15); buildLevel();
+  }
+
+  function starAt(x, y) {
+    var best = null, bestD = 34;
+    stars.forEach(function (st) {
+      var d = Math.hypot(st.x - x, st.y - y);
+      if (d < bestD) { bestD = d; best = st; }
+    });
+    return best;
+  }
+  function canvasPos(evt) {
+    var r = canvas.getBoundingClientRect();
+    var cx = (evt.touches ? evt.touches[0].clientX : evt.clientX) - r.left;
+    var cy = (evt.touches ? evt.touches[0].clientY : evt.clientY) - r.top;
+    return { x: cx * canvas.width / r.width, y: cy * canvas.height / r.height };
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    if (shake > 0) { ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); shake *= 0.85; }
+    // Faint background stars.
+    for (var i = 0; i < 60; i++) {
+      var bx = (i * 97) % canvas.width, by = (i * 53) % canvas.height;
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.15 + 0.15 * Math.sin(time + i)) + ')';
+      ctx.beginPath(); ctx.arc(bx, by, 1.3, 0, 6.283); ctx.fill();
+    }
+    // Trail lines.
+    if (path.length > 1) {
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3; ctx.beginPath();
+      ctx.moveTo(path[0].x, path[0].y);
+      for (var p = 1; p < path.length; p++) ctx.lineTo(path[p].x, path[p].y);
+      ctx.stroke();
+    }
+    // Stars.
+    stars.forEach(function (st, idx) {
+      var tw = 0.75 + 0.25 * Math.sin(time * 2 + st.phase);
+      var r = SIZES[st.size].r * tw;
+      ctx.fillStyle = COLORS[st.color].css;
+      ctx.beginPath(); ctx.arc(st.x, st.y, r, 0, 6.283); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1; ctx.stroke();
+      if (path.indexOf(st) >= 0) {
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(st.x, st.y, r + 6, 0, 6.283); ctx.stroke();
+      }
+      if (playing && idx === cursor) {
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.arc(st.x, st.y, r + 11, 0, 6.283); ctx.stroke(); ctx.setLineDash([]);
+      }
+    });
+    ctx.restore();
+  }
+
+  function loop(t) { time = t / 1000; draw(); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+
+  canvas.addEventListener('click', function (evt) {
+    var pos = canvasPos(evt); var st = starAt(pos.x, pos.y);
+    if (st) { cursor = stars.indexOf(st); selectStar(st); }
+  });
+  canvas.addEventListener('touchstart', function (evt) {
+    evt.preventDefault();
+    var pos = canvasPos(evt); var st = starAt(pos.x, pos.y);
+    if (st) { cursor = stars.indexOf(st); selectStar(st); }
+  }, { passive: false });
+  canvas.addEventListener('mousemove', function (evt) {
+    var pos = canvasPos(evt); var st = starAt(pos.x, pos.y);
+    if (st) cursor = stars.indexOf(st);
+  });
+  document.addEventListener('keydown', function (evt) {
+    if (!playing && (evt.key === 'Enter' || evt.key === ' ')) { startGame(); return; }
+    if (evt.key === 'r' || evt.key === 'R') { startGame(); return; }
+    if (!playing || !stars.length) return;
+    if (evt.key === 'ArrowRight' || evt.key === 'ArrowDown') { cursor = (cursor + 1) % stars.length; evt.preventDefault(); }
+    if (evt.key === 'ArrowLeft' || evt.key === 'ArrowUp') { cursor = (cursor - 1 + stars.length) % stars.length; evt.preventDefault(); }
+    if (evt.key === 'Enter' || evt.key === ' ') { selectStar(stars[cursor]); evt.preventDefault(); }
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  buildLevel(); playing = false; // Sky is previewed behind the title screen.
+  statusEl.textContent = 'Ready';
+})();
+</script>
+</body>
+</html>

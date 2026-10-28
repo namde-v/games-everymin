@@ -74,3 +74,13 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0568 | Windmill Village | Strategy / Village Energy Planning | Mouse/touch click grid to build, Arrow Keys select, Enter place | [Play](./../games/game-0568.html) |
 | 0569 | Rainforest Rumble | Rhythm / Call-and-Response Drums | Keys play drums, mouse click, touch tap drums | [Play](./../games/game-0569.html) |
 | 0570 | Magnet Marbles | Precision / Marble Flick Aim | Mouse/touch drag aim and release, Arrow Keys adjust, Space flick | [Play](./../games/game-0570.html) |
+| 0571 | Avalanche Courier | Arcade / Snow Sled Delivery | Arrow Keys/A/D steer, Up/Space brake, mouse/touch drag steer | [Play](./../games/game-0571.html) |
+| 0572 | Tidepool Tiles | Puzzle / Rotating Tile Logic | Arrow Keys select, Space/R rotate tiles, mouse click, touch tap | [Play](./../games/game-0572.html) |
+| 0573 | Desert Oasis Manager | Strategy / Oasis Resource Planning | 1-6 select actions, Space end day, mouse/touch tap | [Play](./../games/game-0573.html) |
+| 0574 | Volcano Beat Forge | Rhythm / Hammer Beat Timing | D/F/J/K hit lanes, mouse click, touch tap lanes | [Play](./../games/game-0574.html) |
+| 0575 | Nebula Navigator | Precision / Orbital Slingshot Aim | Mouse/touch drag aim and release, Arrow Keys adjust, Space launch | [Play](./../games/game-0575.html) |
+| 0576 | Midnight Market Maze | Arcade / Ghost Market Chase | Arrow Keys/WASD move, mouse click steer, touch swipe, H/Space hide | [Play](./../games/game-0576.html) |
+| 0577 | Star Chart Cipher | Puzzle / Constellation Logic | Arrow Keys move cursor, Enter/Space select, mouse/touch tap stars | [Play](./../games/game-0577.html) |
+| 0578 | Fog Lantern Relay | Strategy / Beacon Relay Planning | 1-4 choose tools, Arrow Keys move cursor, Enter place/rotate, mouse/touch click grid | [Play](./../games/game-0578.html) |
+| 0579 | Glacier Chime Choir | Rhythm / Chime Sequence Memory | 1-6 play chimes, mouse click, touch tap chimes | [Play](./../games/game-0579.html) |
+| 0580 | Bamboo Bounce | Precision / Ricochet Aim | Mouse aim click fire, touch drag tap fire, Arrow Keys aim, Space fire | [Play](./../games/game-0580.html) |

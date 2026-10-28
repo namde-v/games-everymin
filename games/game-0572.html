@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tidepool Tiles</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#062a3a;color:#eafcff;font-family:system-ui,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px}
+h1{font-size:28px;letter-spacing:1px;margin:6px 0 2px;text-shadow:0 2px 0 #0a5a78}
+p.tag{color:#9fd8e8;margin-bottom:10px}
+#hud{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+.pill{background:#0d4a63;border:2px solid #2bb3d8;border-radius:999px;padding:7px 14px;font-weight:700}
+.pill span{color:#ffe08a}
+#wrap{position:relative;width:min(92vw,480px)}
+canvas{width:100%;height:auto;display:block;background:#bfe8d8;border:4px solid #2bb3d8;border-radius:18px;box-shadow:0 10px 30px rgba(0,0,0,.45);touch-action:none;cursor:pointer}
+.overlay{position:absolute;inset:0;background:rgba(2,30,44,.92);border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px;gap:10px}
+.overlay.hidden{display:none}
+button{background:#ffcf3f;color:#123;border:0;border-radius:12px;padding:12px 20px;font-size:17px;font-weight:800;cursor:pointer;box-shadow:0 4px 0 #b8860b}
+button:hover{filter:brightness(1.08)} button:active{transform:translateY(2px);box-shadow:none}
+button.secondary{background:#2bb3d8;color:#fff;box-shadow:0 4px 0 #166b84}
+#howto{display:none;background:#0d4a63;border-radius:12px;padding:12px;text-align:left;line-height:1.55;font-size:15px}
+#howto.show{display:block}
+.controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.note{max-width:480px;text-align:center;color:#bfe3ef;font-size:14px;line-height:1.5;margin-top:8px}
+.big{font-size:34px}.sea{font-size:44px}
+</style>
+</head>
+<body>
+<h1>🌊 Tidepool Tiles 🐚</h1>
+<p class="tag">Rotate the tiles. Guide the spring water to the sea creatures.</p>
+<div id="hud">
+<div class="pill">Score: <span id="score">0</span></div>
+<div class="pill">Lives: <span id="lives">3</span></div>
+<div class="pill">Moves: <span id="moves">25</span></div>
+<div class="pill">Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+<canvas id="game" width="480" height="480"></canvas>
+<div id="titleScreen" class="overlay">
+<div class="sea">🐙 🦀 🐠</div>
+<div class="big">Tidepool Tiles</div>
+<p>Connect the spring on the left to the coral reef on the right. Every tile turn costs one move.</p>
+<button id="startBtn">▶ Start Game</button>
+<button id="howBtn" class="secondary">How to Play</button>
+<div id="howto">
+<b>How to Play</b><br>
+• Click, tap, or use arrow keys + Space / R to select and rotate a tile.<br>
+• Pipes must join end-to-end. Water flows only where both tiles point at each other.<br>
+• Connect the 💧 spring to the 🪸 reef before your moves run out.<br>
+• Out of moves? You lose a life and get a fresh tidepool. Lose all 3 lives and the tide goes out.
+</div>
+</div>
+<div id="endScreen" class="overlay hidden">
+<div id="endEmoji" class="sea">🏆</div>
+<div id="endTitle" class="big">You Win!</div>
+<p id="endText"></p>
+<button id="restartBtn">↻ Play Again</button>
+</div>
+</div>
+<div class="controls">
+<button id="hintBtn" class="secondary">💡 Hint (costs 2 moves)</button>
+<button id="newBtn" class="secondary">New Tidepool</button>
+</div>
+<p class="note">Goal: spring (left, middle row) to reef (right, middle row). Water only flows where two neighbouring pipes face each other.</p>
+<p class="note">Keyboard: Arrows move • Space / R rotates • H hints • Enter starts / restarts. Mouse and touch work on the tiles too.</p>
+<script>
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),movesEl=document.getElementById('moves'),statusEl=document.getElementById('status');
+const titleScreen=document.getElementById('titleScreen'),endScreen=document.getElementById('endScreen');
+const N=1,E=2,S=4,W=8,GRID=5,CELL=96,DIRS=[[0,-1,N,S],[1,0,E,W],[0,1,S,N],[-1,0,W,E]];
+let grid=[],selX=2,selY=2,playing=false,over=false,score=0,lives=3,moves=25,flow=[],time=0,hintCell=null,audioCtx=null;
+function rotMask(m,r){
+  // Rotate a pipe mask clockwise by r quarter-turns.
+  // Bits: N=1, E=2, S=4, W=8. A clockwise turn sends
+  // N to E, E to S, S to W, and W back to N.
+  for(let i=0;i<r;i++){
+    m=((m<<1)&15)|((m>>3)&1);
+  }
+  return m;
+}
+function eff(c){
+  return rotMask(c.base,c.rot);
+}
+function maskToDirs(m){
+  let a=[];
+  if(m&N)a.push([0,-1]);
+  if(m&E)a.push([1,0]);
+  if(m&S)a.push([0,1]);
+  if(m&W)a.push([-1,0]);
+  return a;
+}
+function makePath(){
+  for(let attempt=0;attempt<200;attempt++){
+    let visited=new Set(['0,2']),path=[[0,2]],x=0,y=2,ok=false;
+    while(path.length<25){
+      if(x===4&&y===2){ok=true;break;}
+      let opts=[[x+1,y],[x-1,y],[x,y+1],[x,y-1]].filter(p=>p[0]>=0&&p[0]<5&&p[1]>=0&&p[1]<5&&!visited.has(p.join(',')));
+      if(!opts.length)break;
+      let n=opts[Math.floor(Math.random()*opts.length)];visited.add(n.join(','));path.push(n);x=n[0];y=n[1];
+    }
+    if(ok&&path.length>=7)return path;
+  }
+  return [[0,2],[1,2],[1,1],[2,1],[2,2],[3,2],[3,3],[4,3],[4,2]];
+}
+function newPuzzle(){
+  let path=makePath(),onPath={};path.forEach(p=>onPath[p.join(',')]=true);
+  grid=[];
+  for(let y=0;y<GRID;y++){grid[y]=[];for(let x=0;x<GRID;x++){grid[y][x]={base:[N|S,E|W,N|E,E|S,S|W,W|N,N|E|S,E|S|W][Math.floor(Math.random()*8)],rot:Math.floor(Math.random()*4)};}}
+  for(let i=0;i<path.length;i++){
+    let [x,y]=path[i],m=0;
+    if(i>0){let [px,py]=path[i-1];if(px<x)m|=W;if(px>x)m|=E;if(py<y)m|=N;if(py>y)m|=S;}
+    if(i<path.length-1){let [nx,ny]=path[i+1];if(nx<x)m|=W;if(nx>x)m|=E;if(ny<y)m|=N;if(ny>y)m|=S;}
+    grid[y][x]={base:m,rot:(1+Math.floor(Math.random()*3))%4,path:true};
+  }
+  flow=computeFlow();hintCell=null;updateHUD('Water is waiting…');
+}
+function computeFlow(){
+  let seen=new Set(['0,2']),q=[[0,2]],order=[[0,2]];
+  while(q.length){
+    let [x,y]=q.shift(),m=eff(grid[y][x]);
+    for(let [dx,dy,need,opp] of DIRS){
+      if(!(m&need))continue;let nx=x+dx,ny=y+dy;if(nx<0||nx>=5||ny<0||ny>=5)continue;
+      if(!(eff(grid[ny][nx])&opp))continue;let k=nx+','+ny;if(!seen.has(k)){seen.add(k);q.push([nx,ny]);order.push([nx,ny]);}
+    }
+  }
+  return order;
+}
+function won(){
+  // Win only when flowing water reaches the reef cell.
+  let f=computeFlow();
+  return f.some(p=>p[0]===4&&p[1]===2);
+}
+function updateHUD(st){
+  // Keep the HUD in sync after every turn, hint, or life lost.
+  if(st)statusEl.textContent=st;
+  scoreEl.textContent=score;
+  livesEl.textContent=lives;
+  movesEl.textContent=moves;
+}
+function beep(f,d,type){
+  try{
+    if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended')audioCtx.resume();
+    let o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type||'sine';o.frequency.value=f;
+    g.gain.setValueAtTime(0.12,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
+    o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);
+  }catch(e){}
+}
+function rotateAt(x,y){
+  if(!playing||over)return;
+  grid[y][x].rot=(grid[y][x].rot+1)%4;moves--;hintCell=null;beep(420,0.08,'triangle');
+  flow=computeFlow();score=flow.length*25;
+  if(won()){playing=false;over=true;score+=moves*20+lives*100;updateHUD('Connected!');showEnd(true);}
+  else if(moves<=0){
+    lives--;updateHUD(lives>0?'One life lost — fresh tidepool!':'Game Over');
+    if(lives<=0){playing=false;over=true;beep(160,0.4,'sawtooth');showEnd(false);}
+    else{beep(220,0.25,'square');moves=25;newPuzzle();}
+  } else updateHUD(flow.length>=5?'Flowing nicely…':'Keep turning…');
+}
+function showEnd(win){
+  document.getElementById('endEmoji').textContent=win?'🏆':'🌵';
+  document.getElementById('endTitle').textContent=win?'You Win!':'Game Over';
+  document.getElementById('endText').textContent=win?('The reef is alive! Final score: '+score+' with '+moves+' moves left.'):'The tide went out. Final score: '+score+'. Try a new tidepool!';
+  if(win){beep(523,0.15);setTimeout(()=>beep(659,0.15),140);setTimeout(()=>beep(784,0.3),280);}
+  endScreen.classList.remove('hidden');
+}
+function startGame(){
+  beep(440,0.1);
+  titleScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+  lives=3;
+  moves=25;
+  score=0;
+  playing=true;
+  over=false;
+  newPuzzle();
+  updateHUD('Rotate a tile!');
+}
+function drawTile(x,y){
+  let c=grid[y][x],px=x*CELL,py=y*CELL,m=eff(c);
+  ctx.fillStyle=(x+y)%2?'#8fd0c0':'#a5ddd0';ctx.beginPath();ctx.roundRect(px+4,py+4,CELL-8,CELL-8,14);ctx.fill();
+  ctx.strokeStyle='#0d4a63';ctx.lineWidth=3;ctx.stroke();
+  ctx.strokeStyle='#1b7fa8';ctx.lineWidth=16;ctx.lineCap='round';ctx.beginPath();
+  maskToDirs(m).forEach(d=>{ctx.moveTo(px+48,py+48);ctx.lineTo(px+48+d[0]*38,py+48+d[1]*38);});ctx.stroke();
+  ctx.fillStyle='#eafcff';ctx.beginPath();ctx.arc(px+48,py+48,11,0,Math.PI*2);ctx.fill();
+  if(x===0&&y===2){ctx.font='30px serif';ctx.fillText('💧',px+28,py+58);}
+  if(x===4&&y===2){ctx.font='30px serif';ctx.fillText('🪸',px+28,py+58);}
+  if(x===selX&&y===selY&&playing){ctx.strokeStyle='#ffcf3f';ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(px+2,py+2,CELL-4,CELL-4,16);ctx.stroke();}
+  if(hintCell&&hintCell[0]===x&&hintCell[1]===y){ctx.strokeStyle='#ff5a7a';ctx.lineWidth=5;ctx.setLineDash([8,6]);ctx.beginPath();ctx.roundRect(px+6,py+6,CELL-12,CELL-12,12);ctx.stroke();ctx.setLineDash([]);}
+}
+function draw(){
+  ctx.clearRect(0,0,480,480);ctx.fillStyle='#5fbfae';ctx.fillRect(0,0,480,480);
+  for(let y=0;y<GRID;y++)for(let x=0;x<GRID;x++)drawTile(x,y);
+  if(playing&&flow.length>1){
+    ctx.fillStyle='#fff';let t=(time%900)/900,idx=Math.floor(t*(flow.length-1)),frac=t*(flow.length-1)-idx;
+    let a=flow[idx],b=flow[Math.min(idx+1,flow.length-1)];
+    let cx=(a[0]+(b[0]-a[0])*frac)*CELL+48,cy=(a[1]+(b[1]-a[1])*frac)*CELL+48;
+    ctx.beginPath();ctx.arc(cx,cy,10,0,Math.PI*2);ctx.fill();
+    ctx.font='18px serif';ctx.fillText('💦',cx-10,cy+6);
+  }
+}
+function loop(ts){
+  time=ts||0;
+  draw();
+  requestAnimationFrame(loop);
+}
+function cellFromEvent(e){
+  // Convert a pointer position to a grid cell, scaling for
+  // the displayed canvas size versus its internal 480px grid.
+  let r=canvas.getBoundingClientRect();
+  let cx=(e.clientX-r.left)*480/r.width;
+  let cy=(e.clientY-r.top)*480/r.height;
+  return [Math.floor(cx/CELL),Math.floor(cy/CELL)];
+}
+function giveHint(){
+  if(!playing||over||moves<=2)return;
+  let f=new Set(flow.map(p=>p.join(',')));
+  for(let y=0;y<GRID;y++)for(let x=0;x<GRID;x++){
+    let c=grid[y][x];if(c.path&&!f.has(x+','+y)){hintCell=[x,y];moves-=2;updateHUD('Hint: turn the pink tile!');beep(880,0.12);return;}
+  }
+  updateHUD('No hint needed — you are close!');
+}
+canvas.addEventListener('click',e=>{
+  let [x,y]=cellFromEvent(e);
+  if(x>=0&&x<5&&y>=0&&y<5){selX=x;selY=y;rotateAt(x,y);}
+});
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  let t=e.changedTouches[0];
+  let [x,y]=cellFromEvent(t);
+  if(x>=0&&x<5&&y>=0&&y<5){selX=x;selY=y;rotateAt(x,y);}
+},{passive:false});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&(!playing||over)){startGame();return;}
+  if(!playing||over)return;
+  if(e.key==='ArrowLeft')selX=Math.max(0,selX-1);else if(e.key==='ArrowRight')selX=Math.min(4,selX+1);
+  else if(e.key==='ArrowUp')selY=Math.max(0,selY-1);else if(e.key==='ArrowDown')selY=Math.min(4,selY+1);
+  else if(e.key===' '||e.key==='r'||e.key==='R'){e.preventDefault();rotateAt(selX,selY);}
+  else if(e.key==='h'||e.key==='H')giveHint();
+});
+document.getElementById('startBtn').addEventListener('click',startGame);
+document.getElementById('restartBtn').addEventListener('click',startGame);
+document.getElementById('howBtn').addEventListener('click',()=>document.getElementById('howto').classList.toggle('show'));
+document.getElementById('hintBtn').addEventListener('click',giveHint);
+document.getElementById('newBtn').addEventListener('click',()=>{if(playing){newPuzzle();moves=25;updateHUD('Fresh tidepool!');}});
+newPuzzle();playing=false;updateHUD('Press Start');requestAnimationFrame(loop);
+</script>
+</body>
+</html>

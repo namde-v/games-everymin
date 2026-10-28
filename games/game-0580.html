@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bamboo Bounce</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #12241a; color: #fff; font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
+  h1 { font-size: 26px; margin: 6px 0 2px; color: #b6f09a; letter-spacing: 1px; }
+  p.sub { color: #cfe8c2; font-size: 13px; margin-bottom: 8px; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; }
+  .pill { background: #1f3d2b; border: 1px solid #4c7a52; border-radius: 20px;
+    padding: 6px 12px; font-size: 14px; font-weight: bold; }
+  .pill span { color: #ffe066; }
+  #wrap { position: relative; width: 800px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#1b4a2e, #0f2f1d);
+    border: 3px solid #6fbf73; border-radius: 12px; touch-action: none; cursor: crosshair; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: rgba(6, 24, 14, 0.88); border-radius: 12px; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 34px; color: #ffe066; margin-bottom: 10px; }
+  .overlay p { max-width: 520px; line-height: 1.55; font-size: 15px; color: #e8f5e0; margin-bottom: 8px; }
+  .overlay .small { font-size: 13px; color: #bcd6ae; }
+  button { background: #ffb020; color: #231603; border: none; border-radius: 10px;
+    padding: 12px 26px; font-size: 18px; font-weight: bold; cursor: pointer; margin-top: 12px; }
+  button:hover { background: #ffc94d; }
+  button.secondary { background: #2e6b3f; color: #fff; font-size: 15px; padding: 9px 18px; }
+  #controls { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  #msg { min-height: 20px; margin-top: 8px; font-size: 14px; color: #ffe066; font-weight: bold; }
+  @media (max-width: 600px) { h1 { font-size: 22px; } .overlay h2 { font-size: 28px; } }
+</style>
+</head>
+<body>
+<h1>&#127979; Bamboo Bounce</h1>
+<p class="sub">A precision ricochet puzzle &mdash; plan every bounce, waste no shot.</p>
+<div id="hud">
+  <div class="pill">Score: <span id="score">0</span></div>
+  <div class="pill">Shots left: <span id="shots">10</span></div>
+  <div class="pill">Targets left: <span id="targets">8</span></div>
+  <div class="pill">Status: <span id="status">Aim</span></div>
+</div>
+<div id="wrap">
+  <canvas id="game" width="800" height="600"></canvas>
+  <div id="titleScreen" class="overlay">
+    <h2>Bamboo Bounce</h2>
+    <p><strong>How to Play:</strong> Aim from the launcher at the bottom, then fire.
+    Your ball ricochets off bamboo stalks. Use the angles to reach lanterns
+    hidden behind bamboo &mdash; a straight shot will not reach them all.</p>
+    <p class="small">Mouse: move to aim, click to fire &nbsp;|&nbsp; Touch: drag to aim, tap Fire &nbsp;|&nbsp;
+    Keyboard: Left / Right to aim, Space to fire, R to restart.</p>
+    <p class="small">You have 10 shots to knock down all 8 lanterns. Each bounce that
+    leads to a hit earns bonus points. Good planning beats fast firing.</p>
+    <button id="startBtn" type="button">Start Game</button>
+  </div>
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <p class="small">Press Restart or R to play again with a fresh set of lanterns.</p>
+    <button id="restartBtn" type="button">Restart</button>
+  </div>
+</div>
+<div id="controls">
+  <button id="fireBtn" class="secondary" type="button">Fire Ball</button>
+  <button id="resetBtn" class="secondary" type="button">Restart</button>
+</div>
+<div id="msg">Move to aim, then fire. Watch the dotted guide line.</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 800, H = 600;
+  var scoreEl = document.getElementById('score');
+  var shotsEl = document.getElementById('shots');
+  var targetsEl = document.getElementById('targets');
+  var statusEl = document.getElementById('status');
+  var msgEl = document.getElementById('msg');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  // Audio: created only after a user gesture.
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      o.type = type || 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) {}
+  }
+
+  // Bamboo stalks: angled line segments the ball reflects off.
+  var stalks = [
+    { x1: 170, y1: 380, x2: 290, y2: 260 },
+    { x1: 510, y1: 380, x2: 630, y2: 260 },
+    { x1: 320, y1: 180, x2: 480, y2: 270 },
+    { x1: 120, y1: 200, x2: 230, y2: 130 },
+    { x1: 570, y1: 200, x2: 680, y2: 130 },
+    { x1: 400, y1: 430, x2: 400, y2: 330 },
+    { x1: 240, y1: 470, x2: 360, y2: 400 },
+    { x1: 560, y1: 470, x2: 440, y2: 400 }
+  ];
+  var baseTargets = [
+    { x: 110, y: 90 }, { x: 260, y: 70 }, { x: 410, y: 110 }, { x: 560, y: 70 },
+    { x: 700, y: 90 }, { x: 190, y: 300 }, { x: 610, y: 300 }, { x: 400, y: 210 }
+  ];
+
+  var state = 'title'; // title | aim | fly | win | over
+  var angle = -Math.PI / 2; // straight up
+  var launcher = { x: 400, y: 560 };
+  var ball = { x: 400, y: 560, vx: 0, vy: 0, r: 11, active: false, bounces: 0 };
+  var score = 0, shots = 10, targets = [];
+  var lastTime = 0;
+
+  function resetGame() {
+    score = 0; shots = 10;
+    targets = baseTargets.map(function (t) { return { x: t.x, y: t.y, alive: true }; });
+    ball.active = false; ball.x = launcher.x; ball.y = launcher.y; ball.vx = 0; ball.vy = 0;
+    state = 'aim'; updateHud('Aim'); msgEl.textContent = 'Move to aim, then fire.';
+    endScreen.classList.add('hidden');
+  }
+  function updateHud(status) {
+    scoreEl.textContent = score;
+    shotsEl.textContent = shots;
+    targetsEl.textContent = targets.filter(function (t) { return t.alive; }).length;
+    statusEl.textContent = status;
+  }
+  function remainingTargets() { return targets.filter(function (t) { return t.alive; }).length; }
+
+  function showEnd(win) {
+    state = win ? 'win' : 'over';
+    endTitle.textContent = win ? 'You Win!' : 'Game Over';
+    endText.textContent = win
+      ? 'Every lantern is down! Final score: ' + score + ' with ' + shots + ' shot(s) to spare.'
+      : 'Out of shots with ' + remainingTargets() + ' lantern(s) still standing. Plan the ricochets and try again!';
+    endScreen.classList.remove('hidden');
+    updateHud(win ? 'Win!' : 'Game Over');
+    beep(win ? 880 : 180, 0.5, win ? 'triangle' : 'sawtooth', 0.15);
+  }
+
+  function fire() {
+    if (state !== 'aim') return;
+    if (shots <= 0) return;
+    ensureAudio();
+    shots -= 1;
+    ball.x = launcher.x; ball.y = launcher.y - 18;
+    var speed = 520;
+    ball.vx = Math.cos(angle) * speed;
+    ball.vy = Math.sin(angle) * speed;
+    ball.active = true; ball.bounces = 0;
+    state = 'fly'; updateHud('Ball flying'); beep(520, 0.12, 'square', 0.1);
+    msgEl.textContent = 'Ball away! Watch it bounce.';
+  }
+
+  function endShot() {
+    ball.active = false;
+    if (remainingTargets() === 0) { showEnd(true); return; }
+    if (shots <= 0) { showEnd(false); return; }
+    state = 'aim'; updateHud('Aim');
+    msgEl.textContent = 'Shot over. Aim carefully for the next one.';
+  }
+
+  // Reflect velocity around a segment normal.
+  function reflectOffSegment(seg) {
+    var dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
+    var len2 = dx * dx + dy * dy;
+    var t = ((ball.x - seg.x1) * dx + (ball.y - seg.y1) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    var cx = seg.x1 + t * dx, cy = seg.y1 + t * dy;
+    var ddx = ball.x - cx, ddy = ball.y - cy;
+    var dist = Math.sqrt(ddx * ddx + ddy * ddy) || 0.001;
+    if (dist > ball.r + 7) return false;
+    var nx = ddx / dist, ny = ddy / dist;
+    var dot = ball.vx * nx + ball.vy * ny;
+    if (dot >= 0) return false;
+    ball.vx -= 2 * dot * nx; ball.vy -= 2 * dot * ny;
+    ball.x = cx + nx * (ball.r + 8); ball.y = cy + ny * (ball.r + 8);
+    return true;
+  }
+
+  function update(dt) {
+    if (!ball.active) return;
+    ball.x += ball.vx * dt; ball.y += ball.vy * dt;
+    if (ball.x < ball.r) { ball.x = ball.r; ball.vx = Math.abs(ball.vx); beep(300, 0.06, 'sine', 0.08); }
+    if (ball.x > W - ball.r) { ball.x = W - ball.r; ball.vx = -Math.abs(ball.vx); beep(300, 0.06, 'sine', 0.08); }
+    if (ball.y < ball.r) { ball.y = ball.r; ball.vy = Math.abs(ball.vy); beep(300, 0.06, 'sine', 0.08); }
+    for (var i = 0; i < stalks.length; i++) {
+      if (reflectOffSegment(stalks[i])) {
+        ball.bounces += 1; beep(420 + ball.bounces * 40, 0.09, 'triangle', 0.12);
+        break;
+      }
+    }
+    for (var j = 0; j < targets.length; j++) {
+      var t = targets[j];
+      if (!t.alive) continue;
+      var dx = ball.x - t.x, dy = ball.y - t.y;
+      if (dx * dx + dy * dy < (ball.r + 20) * (ball.r + 20)) {
+        t.alive = false;
+        score += 100 + Math.min(ball.bounces, 5) * 20;
+        beep(760, 0.18, 'triangle', 0.15);
+        updateHud('Hit!');
+        if (remainingTargets() === 0) { ball.active = false; showEnd(true); return; }
+      }
+    }
+    if (ball.y > H + 20) { endShot(); }
+  }
+
+  function drawStalk(s) {
+    ctx.strokeStyle = '#7ed957'; ctx.lineWidth = 13; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    ctx.strokeStyle = '#3d8a3d'; ctx.lineWidth = 13;
+    ctx.setLineDash([10, 14]);
+    ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#2f6b2f';
+    ctx.beginPath(); ctx.arc(s.x1, s.y1, 6, 0, Math.PI * 2); ctx.arc(s.x2, s.y2, 6, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#173d26'; ctx.fillRect(0, 0, W, 40);
+    ctx.fillStyle = '#cfe8c2'; ctx.font = 'bold 14px Arial';
+    ctx.fillText('Bounce the ball off bamboo to reach every lantern.', 18, 26);
+    for (var i = 0; i < stalks.length; i++) drawStalk(stalks[i]);
+    for (var j = 0; j < targets.length; j++) {
+      var t = targets[j]; if (!t.alive) continue;
+      ctx.fillStyle = '#ff5a3c';
+      ctx.beginPath(); ctx.arc(t.x, t.y, 19, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffe066';
+      ctx.beginPath(); ctx.arc(t.x, t.y, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7a1a00'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('!', t.x, t.y + 5); ctx.textAlign = 'left';
+    }
+    // Launcher and dotted guide.
+    ctx.fillStyle = '#8a5a2b'; ctx.fillRect(launcher.x - 24, launcher.y - 6, 48, 16);
+    ctx.fillStyle = '#ffb020'; ctx.beginPath(); ctx.arc(launcher.x, launcher.y - 10, 14, 0, Math.PI * 2); ctx.fill();
+    if (state === 'aim') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.setLineDash([6, 10]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(launcher.x, launcher.y - 18);
+      ctx.lineTo(launcher.x + Math.cos(angle) * 110, launcher.y - 18 + Math.sin(angle) * 110);
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    if (ball.active || state === 'aim') {
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ff3366'; ctx.beginPath(); ctx.arc(ball.x, ball.y, 4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function loop(ts) {
+    if (!lastTime) lastTime = ts;
+    var dt = Math.min((ts - lastTime) / 1000, 0.033);
+    lastTime = ts;
+    if (state === 'fly') update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function aimFromEvent(clientX, clientY) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    var y = (clientY - rect.top) * (H / rect.height);
+    var a = Math.atan2(y - (launcher.y - 18), x - launcher.x);
+    // Only allow upward aims, from mostly-left to mostly-right.
+    if (a < -Math.PI + 0.25 && a > -Math.PI) a = -Math.PI + 0.25;
+    if (a > -0.25) a = -0.25;
+    if (a < -Math.PI + 0.25) a = -Math.PI + 0.25;
+    angle = a;
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function () {
+    ensureAudio(); titleScreen.classList.add('hidden'); resetGame(); beep(660, 0.15, 'triangle', 0.12);
+  });
+  document.getElementById('restartBtn').addEventListener('click', function () { ensureAudio(); resetGame(); });
+  document.getElementById('resetBtn').addEventListener('click', function () { ensureAudio(); resetGame(); });
+  document.getElementById('fireBtn').addEventListener('click', function () { fire(); });
+  document.getElementById('fireBtn').addEventListener('touchstart', function (e) { e.preventDefault(); fire(); }, { passive: false });
+
+  canvas.addEventListener('mousemove', function (e) { if (state === 'aim') aimFromEvent(e.clientX, e.clientY); });
+  canvas.addEventListener('mousedown', function (e) { if (state === 'aim') { aimFromEvent(e.clientX, e.clientY); fire(); } });
+  canvas.addEventListener('click', function (e) { if (state === 'title') return; });
+  canvas.addEventListener('touchmove', function (e) {
+    if (state === 'aim' && e.touches.length) { e.preventDefault(); aimFromEvent(e.touches[0].clientX, e.touches[0].clientY); }
+  }, { passive: false });
+  canvas.addEventListener('touchstart', function (e) {
+    if (state === 'aim' && e.touches.length) { e.preventDefault(); aimFromEvent(e.touches[0].clientX, e.touches[0].clientY); }
+  }, { passive: false });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') { angle = Math.max(-Math.PI + 0.25, angle - 0.06); }
+    if (e.key === 'ArrowRight') { angle = Math.min(-0.25, angle + 0.06); }
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (state === 'title') { ensureAudio(); titleScreen.classList.add('hidden'); resetGame(); } else { fire(); } }
+    if (e.key === 'r' || e.key === 'R') { if (state !== 'title') resetGame(); }
+  });
+  document.addEventListener('keyup', function (e) { if (e.key === ' ') e.preventDefault(); });
+
+  resetGame(); state = 'title'; updateHud('Ready');
+  titleScreen.classList.remove('hidden');
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
