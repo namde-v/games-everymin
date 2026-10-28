@@ -98,6 +98,17 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 | 0089 | Frost Flute | Rhythm / Melody Memory | 1-4 / A/S/D/F notes, mouse click, touch tap pads | [Play](./../games/game-0089.html) |
 | 0090 | Castle Cartographer | Strategy / Map Expansion | Click/tap tiles and grid, Arrow Keys, Enter/Space place, R rotate | [Play](./../games/game-0090.html) |
 
+| 0091 | Quarry Quake | Arcade / Rockslide Dodge | Arrow Keys / WASD dodge, mouse/touch move | [Play](./../games/game-0091.html) |
+| 0092 | Beam Bender | Puzzle / Beam Reflection Logic | Click/tap mirrors, Arrow Keys, Space/Enter rotate | [Play](./../games/game-0092.html) |
+| 0093 | Quay Commander | Strategy / Dock Logistics | Click/tap docks, Arrow Keys, mouse/touch assign | [Play](./../games/game-0093.html) |
+| 0094 | Tempo Tiller | Rhythm / Farming Beat | D/F/J/K, mouse click, touch tap lanes | [Play](./../games/game-0094.html) |
+| 0095 | Gravity Gauntlet | Precision / Orbital Slingshot | Mouse/touch drag aim and release, Arrow Keys | [Play](./../games/game-0095.html) |
+| 0096 | Zephyr Kite | Arcade / Wind Kite Riding | Arrow Keys / WASD steer, mouse/touch drag | [Play](./../games/game-0096.html) |
+| 0097 | Sigil Sleuth | Puzzle / Sigil Deduction | Click/tap sigils, 1-6 keys, Enter guess | [Play](./../games/game-0097.html) |
+| 0098 | Vineyard Vizier | Strategy / Vineyard Management | Click/tap plots, 1-4 plant, mouse/touch | [Play](./../games/game-0098.html) |
+| 0099 | Pulse Piper | Rhythm / Pipe Melody Timing | 1-5 / A/S/D/F/G pipes, mouse click, touch tap | [Play](./../games/game-0099.html) |
+| 0100 | Centennial Climb | Arcade / Milestone Ascent | Arrow Keys / WASD jump, mouse/touch steer | [Play](./../games/game-0100.html) |
+
 ## Batch notes
 
 - Batch 001: 10 games, produced in one cycle.
@@ -109,5 +120,6 @@ Fully offline, single-file HTML5 games. No external scripts, fonts, stylesheets,
 - Batch 007: 10 games, produced in one cycle.
 - Batch 008: 10 games, produced in one cycle.
 - Batch 009: 10 games, produced in one cycle.
+- Batch 010: 10 games, produced in one cycle. Volume 001 complete at 100 games.
 - All games validated: file size > 5 KB, 0 external URLs, Canvas present, game loop present, event listeners present, title screen with Start and How-to-Play, HUD, and Win / Game Over with Restart.
 - Next volume starts at game 0101 in `catalogs/readme-002.md`, after this volume reaches 100 entries.

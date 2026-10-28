@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tempo Tiller - Rhythm Farming Beat</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a2f1a; color: #fff8e1; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; }
+  #wrap { position: relative; width: 480px; max-width: 100%; }
+  canvas { display: block; width: 100%; height: 640px; background: #2e5a2e; border: 4px solid #8b5a2b; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; background: #3e2723; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; font-weight: bold; font-size: 14px; }
+  #hud span { background: #5d4037; padding: 4px 8px; border-radius: 6px; }
+  #barWrap { height: 12px; background: #222; border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+  #bar { height: 100%; width: 0%; background: linear-gradient(90deg, #ffeb3b, #76ff03); transition: width 0.2s; }
+  .overlay { position: absolute; left: 12px; right: 12px; top: 64px; background: rgba(20,35,18,0.96); border: 3px solid #ffca28; border-radius: 16px; padding: 20px; text-align: center; z-index: 5; }
+  .overlay h1 { font-size: 34px; color: #ffeb3b; margin-bottom: 6px; text-shadow: 2px 2px 0 #33691e; }
+  .overlay h2 { font-size: 28px; color: #ffeb3b; margin-bottom: 8px; }
+  .overlay p { font-size: 15px; line-height: 1.5; margin: 6px 0; }
+  .howto { text-align: left; background: #33691e; border-radius: 10px; padding: 12px; margin: 12px 0; font-size: 14px; line-height: 1.6; }
+  .howto b { color: #ffeb3b; }
+  button { background: #ffca28; color: #3e2723; border: none; border-radius: 10px; padding: 13px 26px; font-size: 19px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+  button:hover, button:active { background: #ffd54f; transform: scale(1.03); }
+  .keys { font-size: 13px; color: #c8e6c9; margin-top: 8px; }
+  .hidden { display: none; }
+  #flash { text-align: center; font-weight: bold; min-height: 22px; color: #ffeb3b; font-size: 18px; }
+  #lanesHint { display: flex; justify-content: space-around; font-size: 12px; margin-top: 4px; color: #dcedc8; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Harvest: <b id="harvest">0</b> / 200</span>
+    <span>Combo: <b id="combo">0</b></span>
+    <span>Time: <b id="time">90</b>s</span>
+    <span>Wilt: <b id="wilt">0</b> / 25</span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="barWrap"><div id="bar"></div></div>
+  <div id="flash"></div>
+  <canvas id="game" width="480" height="640"></canvas>
+  <div id="lanesHint"><span>D / Tap: Wheat</span><span>F: Carrot</span><span>J: Pumpkin</span><span>K: Berry</span></div>
+
+  <div id="titleScreen" class="overlay">
+    <h1>🌾 Tempo Tiller 🌾</h1>
+    <p><b>Rhythm / Farming Beat</b> — Plant to the beat, harvest to the rhythm!</p>
+    <div class="howto">
+      <b>How to Play:</b><br>
+      • Notes fall down 4 lanes toward the golden beat line.<br>
+      • Press <b>D, F, J, K</b> — or tap / click the matching lane — exactly as a note crosses the line.<br>
+      • <b>Perfect</b> timing plants 3 crops, <b>Good</b> timing plants 1 crop.<br>
+      • Missing a note wilts a crop. 25 wilts and the field fails.<br>
+      • <b>WIN:</b> Harvest 200 crops before the 90-second song ends!<br>
+      • Watch the beat: notes arrive on a steady groove. Keep your combo alive for bonus score.
+    </div>
+    <button id="startBtn">▶ Start Farming</button>
+    <p class="keys">Keyboard: D F J K &nbsp;|&nbsp; Mouse: click a lane &nbsp;|&nbsp; Touch: tap a lane</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">Harvest Complete!</h2>
+    <p id="endText"></p>
+    <p>Final Score: <b id="finalScore">0</b> &nbsp;|&nbsp; Harvest: <b id="finalHarvest">0</b> &nbsp;|&nbsp; Best Combo: <b id="finalCombo">0</b></p>
+    <button id="restartBtn">↻ Restart Instantly</button>
+  </div>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 480, H = 640;
+  var lanes = [
+    { key: 'd', name: 'Wheat', color: '#ffeb3b', emoji: '🌾', x: 60 },
+    { key: 'f', name: 'Carrot', color: '#ff7043', emoji: '🥕', x: 180 },
+    { key: 'j', name: 'Pumpkin', color: '#ff9800', emoji: '🎃', x: 300 },
+    { key: 'k', name: 'Berry', color: '#e040fb', emoji: '🫐', x: 420 }
+  ];
+  var beatY = 540;
+  var state = 'title';
+  var score = 0, harvest = 0, combo = 0, bestCombo = 0, wilt = 0;
+  var notes = [], particles = [], sprouts = [];
+  var spawnTimer = 0, elapsed = 0, lastTime = 0, songLength = 90;
+  var audioCtx = null, beatTimer = null, flashTimer = 0;
+  var laneFlash = [0, 0, 0, 0];
+
+  function el(id) { return document.getElementById(id); }
+  function setStatus(t) { el('status').textContent = t; }
+  function setFlash(t, color) {
+    el('flash').textContent = t;
+    el('flash').style.color = color || '#ffeb3b';
+    flashTimer = 1.2;
+  }
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.18, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function playHit(kind) {
+    if (kind === 'perfect') { tone(880, 0.18, 'triangle', 0.22); tone(1320, 0.12, 'sine', 0.14); }
+    else if (kind === 'good') { tone(660, 0.15, 'triangle', 0.18); }
+    else { tone(180, 0.25, 'sawtooth', 0.12); }
+  }
+  function startBeat() {
+    stopBeat();
+    var beat = 0;
+    beatTimer = setInterval(function () {
+      if (state !== 'playing') return;
+      beat++;
+      tone(beat % 4 === 0 ? 140 : 100, 0.12, 'sine', 0.16);
+      if (beat % 2 === 0) tone(220, 0.08, 'square', 0.05);
+    }, 500);
+  }
+  function stopBeat() { if (beatTimer) { clearInterval(beatTimer); beatTimer = null; } }
+
+  function resetGame() {
+    score = 0; harvest = 0; combo = 0; bestCombo = 0; wilt = 0;
+    notes = []; particles = []; sprouts = [];
+    spawnTimer = 0; elapsed = 0; lastTime = performance.now();
+    for (var i = 0; i < 24; i++) sprouts.push({ x: 20 + (i % 8) * 58, y: 580 + Math.floor(i / 8) * 18, grown: 0 });
+    updateHud();
+  }
+  function startGame() {
+    ensureAudio();
+    resetGame();
+    state = 'playing';
+    el('titleScreen').classList.add('hidden');
+    el('endScreen').classList.add('hidden');
+    setStatus('Playing');
+    setFlash('Plant to the beat!', '#76ff03');
+    startBeat();
+    tone(523, 0.2, 'triangle', 0.2);
+  }
+  function endGame(win) {
+    state = win ? 'win' : 'over';
+    stopBeat();
+    setStatus(win ? 'WIN!' : 'Game Over');
+    el('endTitle').textContent = win ? '🎉 Harvest Complete! You Win!' : '🥀 Crops Wilted — Game Over';
+    el('endText').textContent = win
+      ? 'You harvested 200 crops before the song ended. The whole field is singing!'
+      : 'Too many crops wilted before the harvest was done. Try again and stay on beat!';
+    el('finalScore').textContent = score;
+    el('finalHarvest').textContent = harvest;
+    el('finalCombo').textContent = bestCombo;
+    el('endScreen').classList.remove('hidden');
+    tone(win ? 784 : 220, 0.5, 'triangle', 0.22);
+  }
+  function updateHud() {
+    el('score').textContent = score;
+    el('harvest').textContent = harvest;
+    el('combo').textContent = combo;
+    el('wilt').textContent = wilt;
+    el('time').textContent = Math.max(0, Math.ceil(songLength - elapsed));
+    el('bar').style.width = Math.min(100, harvest / 200 * 100) + '%';
+  }
+  function spawnNote() {
+    var lane = Math.floor(Math.random() * 4);
+    if (Math.random() < 0.12 && notes.length) lane = notes[notes.length - 1].lane;
+    notes.push({ lane: lane, y: -30, speed: 2.6 + Math.min(1.8, elapsed * 0.02), hit: false });
+  }
+  function burst(x, y, color, text) {
+    for (var i = 0; i < 10; i++) {
+      particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 4, vy: -Math.random() * 3 - 1, life: 0.6, color: color });
+    }
+    if (text) particles.push({ x: x, y: y - 10, vx: 0, vy: -1, life: 0.9, color: '#ffffff', text: text });
+  }
+  function hitLane(lane) {
+    if (state !== 'playing') return;
+    laneFlash[lane] = 0.25;
+    var best = -1, bestDist = 999;
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].lane !== lane) continue;
+      var d = Math.abs(notes[i].y - beatY);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    var lx = lanes[lane].x;
+    if (best >= 0 && bestDist <= 78) {
+      var kind = bestDist <= 34 ? 'perfect' : 'good';
+      var gain = kind === 'perfect' ? 3 : 1;
+      notes.splice(best, 1);
+      combo++;
+      if (combo > bestCombo) bestCombo = combo;
+      harvest += gain;
+      score += kind === 'perfect' ? 100 + combo * 5 : 40 + combo * 2;
+      var s = sprouts[Math.floor(Math.random() * sprouts.length)];
+      if (s) s.grown = 1;
+      burst(lx, beatY, lanes[lane].color, kind === 'perfect' ? 'PERFECT +3' : 'GOOD +1');
+      setFlash(kind === 'perfect' ? 'PERFECT! +3 crops' : 'Good! +1 crop', lanes[lane].color);
+      playHit(kind);
+      if (harvest >= 200) { harvest = 200; updateHud(); endGame(true); return; }
+    } else {
+      combo = 0;
+      setFlash('Too early / late — keep the beat!', '#ff7043');
+      playHit('miss');
+    }
+    updateHud();
+  }
+  function laneFromX(clientX) {
+    var r = canvas.getBoundingClientRect();
+    var x = (clientX - r.left) / r.width * W;
+    if (x < 120) return 0;
+    if (x < 240) return 1;
+    if (x < 360) return 2;
+    return 3;
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toLowerCase();
+    if (state === 'title' && (k === 'enter' || k === ' ')) { e.preventDefault(); startGame(); return; }
+    if ((state === 'win' || state === 'over') && (k === 'enter' || k === ' ')) { e.preventDefault(); startGame(); return; }
+    for (var i = 0; i < lanes.length; i++) if (lanes[i].key === k) hitLane(i);
+  });
+  canvas.addEventListener('mousedown', function (e) { hitLane(laneFromX(e.clientX)); });
+  canvas.addEventListener('click', function (e) { if (state === 'playing') { /* mouse already handled, kept for accessibility */ } });
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault();
+    for (var i = 0; i < e.changedTouches.length; i++) hitLane(laneFromX(e.changedTouches[i].clientX));
+  }, { passive: false });
+
+  function draw() {
+    ctx.fillStyle = '#2e5a2e';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#388e3c';
+    for (var r = 0; r < 10; r++) { ctx.fillRect(0, 60 + r * 50, W, 2); }
+    for (var i = 0; i < 4; i++) {
+      var x = lanes[i].x;
+      ctx.fillStyle = laneFlash[i] > 0 ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.22)';
+      ctx.fillRect(x - 52, 0, 104, H);
+      ctx.fillStyle = lanes[i].color;
+      ctx.font = 'bold 15px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(lanes[i].name.toUpperCase(), x, 24);
+      ctx.font = '26px Arial';
+      ctx.fillText(lanes[i].emoji, x, 52);
+    }
+    ctx.fillStyle = '#ffca28';
+    ctx.fillRect(0, beatY - 4, W, 8);
+    ctx.fillStyle = '#fff8e1';
+    ctx.font = 'bold 13px Arial';
+    ctx.fillText('BEAT LINE  •  TAP AS NOTES CROSS', W / 2, beatY + 28);
+    for (var n = 0; n < notes.length; n++) {
+      var note = notes[n];
+      var nx = lanes[note.lane].x;
+      ctx.beginPath();
+      ctx.arc(nx, note.y, 26, 0, Math.PI * 2);
+      ctx.fillStyle = lanes[note.lane].color;
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.font = '24px Arial';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(lanes[note.lane].emoji, nx, note.y + 8);
+    }
+    ctx.fillStyle = '#5d4037';
+    ctx.fillRect(0, 568, W, 72);
+    for (var s = 0; s < sprouts.length; s++) {
+      var sp = sprouts[s];
+      ctx.font = '18px Arial';
+      ctx.fillText(sp.grown ? '🌱' : '🟫', sp.x, sp.y);
+    }
+    for (var p = 0; p < particles.length; p++) {
+      var pt = particles[p];
+      if (pt.text) { ctx.font = 'bold 15px Arial'; ctx.fillStyle = pt.color; ctx.fillText(pt.text, pt.x, pt.y); }
+      else { ctx.fillStyle = pt.color; ctx.fillRect(pt.x, pt.y, 6, 6); }
+    }
+    if (state === 'title') {
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 18px Arial';
+      ctx.fillText('Press Start and farm to the beat!', W / 2, 330);
+    }
+  }
+
+  function loop(now) {
+    var dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+    lastTime = now;
+    if (flashTimer > 0) { flashTimer -= dt; if (flashTimer <= 0) el('flash').textContent = ''; }
+    for (var i = 0; i < 4; i++) if (laneFlash[i] > 0) laneFlash[i] -= dt;
+    if (state === 'playing') {
+      elapsed += dt;
+      spawnTimer -= dt;
+      if (spawnTimer <= 0) { spawnNote(); spawnTimer = 0.48 + Math.random() * 0.22; }
+      for (var n = notes.length - 1; n >= 0; n--) {
+        notes[n].y += notes[n].speed * 60 * dt;
+        if (notes[n].y > beatY + 85) {
+          notes.splice(n, 1);
+          combo = 0; wilt++;
+          setFlash('Miss! A crop wilted.', '#ff7043');
+          playHit('miss');
+          if (wilt >= 25) { updateHud(); endGame(false); break; }
+        }
+      }
+      for (var p = particles.length - 1; p >= 0; p--) {
+        particles[p].x += particles[p].vx; particles[p].y += particles[p].vy; particles[p].life -= dt;
+        if (particles[p].life <= 0) particles.splice(p, 1);
+      }
+      if (elapsed >= songLength) {
+        if (harvest >= 200) endGame(true); else endGame(false);
+      }
+      updateHud();
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  resetGame();
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

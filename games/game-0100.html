@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Centennial Climb</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0b1026; color: #fff; font-family: Arial, Helvetica, sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 12px; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#1a2a6c, #4a90e2, #f7c873); border: 3px solid #ffd700; border-radius: 14px; touch-action: none; }
+  #hud { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; background: #141b3d; border: 2px solid #ffd700; border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; font-weight: bold; font-size: 14px; }
+  #hud span { background: #222c5e; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+  #hud #status { color: #ffd700; }
+  .overlay { position: absolute; left: 0; right: 0; top: 62px; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(8, 12, 38, 0.88); border-radius: 12px; padding: 22px 18px; z-index: 5; }
+  .overlay.hidden { display: none; }
+  .overlay h1 { font-size: 38px; color: #ffd700; text-shadow: 2px 2px 0 #b8860b; margin-bottom: 6px; line-height: 1.05; }
+  .overlay h2 { font-size: 32px; color: #ffd700; margin-bottom: 10px; }
+  .overlay p { font-size: 15px; line-height: 1.5; margin: 6px 0; color: #e8ecff; }
+  .badge { background: #ffd700; color: #1a1400; font-weight: bold; padding: 5px 12px; border-radius: 20px; margin: 8px 0; }
+  .howto { background: rgba(255,255,255,0.10); border: 1px solid #ffd700; border-radius: 10px; padding: 12px; margin: 12px 0; text-align: left; font-size: 14px; line-height: 1.6; width: 100%; }
+  .howto strong { color: #ffd700; }
+  button { cursor: pointer; font-size: 20px; font-weight: bold; background: #ffd700; color: #1a1400; border: none; border-radius: 10px; padding: 13px 30px; margin-top: 12px; box-shadow: 0 4px 0 #b8860b; }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button.secondary { background: #ffffff; box-shadow: 0 4px 0 #888; font-size: 15px; padding: 10px 18px; }
+  #hint { text-align: center; font-size: 13px; color: #cdd5ff; margin-top: 8px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Height: <b id="height">0</b> / 100</span>
+    <span>Stars: <b id="stars">0</b> / 100</span>
+    <span>Lives: <b id="lives">3</b></span>
+    <span id="status">Ready</span>
+  </div>
+  <canvas id="game" width="480" height="640"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div class="badge">GAME 100 - CENTENNIAL SPECIAL</div>
+    <h1>Centennial<br>Climb</h1>
+    <p>Climb 100 heights to the golden summit. Grab stars, ride moving ledges, and do not fall!</p>
+    <div class="howto">
+      <strong>How to Play</strong><br>
+      Move: Arrow keys / A D, or drag with mouse / finger.<br>
+      Jump: Space, Arrow Up, W, click, or tap.<br>
+      Land on platforms to keep climbing. Each platform is higher than the last.<br>
+      Collect stars for bonus points. Reach Height 100 to win.<br>
+      Falling below the screen costs a life. You have 3 lives.
+    </div>
+    <button id="startBtn" type="button">Start Climb</button>
+    <button id="howBtn" class="secondary" type="button">How to Play: Jump &amp; Climb</button>
+    <p id="howNote" style="display:none;">Tip: steer in mid-air. Moving gold platforms drift sideways - time your landing. The summit platform is wide and golden with a flag.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText">You reached the summit.</p>
+    <p>Final Score: <b id="finalScore">0</b> &nbsp;|&nbsp; Stars: <b id="finalStars">0</b> / 100</p>
+    <p>Height reached: <b id="finalHeight">0</b> / 100</p>
+    <button id="restartBtn" type="button">Restart Instantly</button>
+    <p style="font-size:13px;">Press Enter or tap Restart to play again right away.</p>
+  </div>
+</div>
+<p id="hint">Keyboard: Arrows / A D to move, Space to jump &nbsp;|&nbsp; Mouse: move to steer, click to jump &nbsp;|&nbsp; Touch: drag to steer, tap to jump</p>
+
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = 480, H = 640;
+  var scoreEl = document.getElementById('score');
+  var heightEl = document.getElementById('height');
+  var starsEl = document.getElementById('stars');
+  var livesEl = document.getElementById('lives');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title';
+  var player, platforms, stars, keys, mouseX, touchX, camY, lives, starCount, maxHeight, lastSafe, particles, frame;
+
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function tone(freq, dur, type, vol, when) {
+    if (!audioCtx) return;
+    var t = audioCtx.currentTime + (when || 0);
+    var o = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol || 0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function sfxJump() { tone(320, 0.14, 'square', 0.10); tone(520, 0.12, 'sine', 0.10, 0.03); }
+  function sfxStar() { tone(880, 0.12, 'sine', 0.16); tone(1320, 0.18, 'sine', 0.14, 0.07); }
+  function sfxFall() { tone(220, 0.35, 'sawtooth', 0.12); tone(110, 0.35, 'triangle', 0.12, 0.08); }
+  function sfxWin() { [523, 659, 784, 1046, 1318].forEach(function (f, i) { tone(f, 0.28, 'triangle', 0.16, i * 0.13); }); }
+  function sfxLose() { [330, 262, 196, 131].forEach(function (f, i) { tone(f, 0.30, 'sawtooth', 0.12, i * 0.16); }); }
+
+  function seededRand(seed) {
+    var s = seed;
+    return function () { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  }
+
+  function buildWorld() {
+    platforms = [];
+    stars = [];
+    var rnd = seededRand(100);
+    platforms.push({ x: 190, y: 0, w: 110, h: 16, moving: false, baseX: 190, phase: 0 });
+    var y = -68;
+    for (var i = 1; i <= 100; i++) {
+      var w = 62 + Math.floor(rnd() * 48);
+      var x = Math.floor(rnd() * (W - w - 16)) + 8;
+      var moving = (i % 4 === 0);
+      platforms.push({ x: x, y: y, w: w, h: 16, moving: moving, baseX: x, phase: rnd() * 6.28 });
+      if (i < 100) {
+        stars.push({ x: x + w / 2, y: y - 26, taken: false });
+      } else {
+        stars.push({ x: 240, y: y - 34, taken: false });
+      }
+      y -= 60;
+    }
+    // Summit platform: wide, golden, at height 100.
+    platforms.push({ x: 120, y: y + 60, w: 240, h: 20, moving: false, baseX: 120, phase: 0, summit: true });
+    // Guarantee exactly 100 stars, one per height step.
+    while (stars.length < 100) { stars.push({ x: 60 + stars.length * 3, y: -60 * stars.length, taken: false }); }
+    stars = stars.slice(0, 100);
+  }
+
+  function resetGame() {
+    buildWorld();
+    player = { x: 220, y: -40, w: 30, h: 34, vx: 0, vy: 0, onGround: false };
+    keys = {};
+    mouseX = null; touchX = null;
+    camY = -560;
+    lives = 3; starCount = 0; maxHeight = 0;
+    lastSafe = platforms[0];
+    particles = []; frame = 0;
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    statusEl.textContent = 'Climbing...';
+    updateHud();
+  }
+
+  function updateHud() {
+    var h = Math.max(0, Math.min(100, Math.floor(-player.y / 60)));
+    if (h > maxHeight) maxHeight = h;
+    var score = maxHeight * 10 + starCount * 50;
+    scoreEl.textContent = String(score);
+    heightEl.textContent = String(maxHeight);
+    starsEl.textContent = String(starCount);
+    livesEl.textContent = String(lives);
+    player.score = score;
+  }
+
+  function showEnd(won) {
+    state = won ? 'won' : 'over';
+    endScreen.classList.remove('hidden');
+    document.getElementById('finalScore').textContent = String(player.score || 0);
+    document.getElementById('finalStars').textContent = String(starCount);
+    document.getElementById('finalHeight').textContent = String(maxHeight);
+    if (won) {
+      endTitle.textContent = 'You Win! Summit Reached!';
+      endText.textContent = 'Centennial hero! You climbed all 100 heights and reached the golden summit.';
+      statusEl.textContent = 'You Win!';
+      sfxWin();
+    } else {
+      endTitle.textContent = 'Game Over';
+      endText.textContent = 'You fell 3 times. The mountain wins this time - try again!';
+      statusEl.textContent = 'Game Over';
+      sfxLose();
+    }
+  }
+
+  function loseLife() {
+    lives -= 1;
+    sfxFall();
+    if (lives <= 0) { updateHud(); showEnd(false); return; }
+    var p = lastSafe || platforms[0];
+    player.x = p.x + p.w / 2 - player.w / 2;
+    player.y = p.y - player.h - 2;
+    player.vx = 0; player.vy = 0;
+    statusEl.textContent = 'Ouch! Lives left: ' + lives;
+    updateHud();
+  }
+
+  function doJump() {
+    if (state !== 'playing') return;
+    ensureAudio();
+    if (player.onGround) {
+      player.vy = -13.5;
+      player.onGround = false;
+      sfxJump();
+    }
+  }
+
+  function update() {
+    frame++;
+    var speed = 4.6;
+    var move = 0;
+    if (keys.ArrowLeft || keys.KeyA) move -= 1;
+    if (keys.ArrowRight || keys.KeyD) move += 1;
+    if (mouseX !== null) {
+      var target = mouseX - player.w / 2;
+      if (target > player.x + 4) move = 1;
+      else if (target < player.x - 4) move = -1;
+    }
+    if (touchX !== null) {
+      var tTarget = touchX - player.w / 2;
+      if (tTarget > player.x + 4) move = 1;
+      else if (tTarget < player.x - 4) move = -1;
+    }
+    player.vx = move * speed;
+    player.x += player.vx;
+    if (player.x < 0) player.x = 0;
+    if (player.x + player.w > W) player.x = W - player.w;
+
+    player.vy += 0.55;
+    if (player.vy > 16) player.vy = 16;
+    var prevBottom = player.y + player.h;
+    player.y += player.vy;
+    player.onGround = false;
+
+    for (var i = 0; i < platforms.length; i++) {
+      var p = platforms[i];
+      if (p.moving) {
+        p.x = p.baseX + Math.sin(frame / 55 + p.phase) * 55;
+        if (p.x < 4) p.x = 4;
+        if (p.x + p.w > W - 4) p.x = W - 4 - p.w;
+      }
+      if (player.vy >= 0 && prevBottom <= p.y + 6 && player.y + player.h >= p.y && player.y + player.h <= p.y + 26) {
+        if (player.x + player.w > p.x && player.x < p.x + p.w) {
+          player.y = p.y - player.h;
+          player.vy = 0;
+          player.onGround = true;
+          lastSafe = p;
+          if (p.summit) { updateHud(); showEnd(true); return; }
+          break;
+        }
+      }
+    }
+
+    for (var j = 0; j < stars.length; j++) {
+      var s = stars[j];
+      if (!s.taken && Math.abs((player.x + player.w / 2) - s.x) < 30 && Math.abs((player.y + player.h / 2) - s.y) < 32) {
+        s.taken = true; starCount++;
+        sfxStar();
+        for (var k = 0; k < 8; k++) { particles.push({ x: s.x, y: s.y, vx: (k - 4) * 1.2, vy: -2 - (k % 3), life: 22 }); }
+      }
+    }
+    for (var q = particles.length - 1; q >= 0; q--) {
+      particles[q].x += particles[q].vx; particles[q].y += particles[q].vy; particles[q].life--;
+      if (particles[q].life <= 0) particles.splice(q, 1);
+    }
+
+    var desiredCam = player.y - 380;
+    if (desiredCam < camY) camY = desiredCam;
+    if (player.y - camY > H + 30) { loseLife(); return; }
+    updateHud();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#7ec8ff'); grad.addColorStop(0.55, '#cdeaff'); grad.addColorStop(1, '#ffe9a8');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    // Distant peaks and clouds, positioned by camera for parallax.
+    ctx.fillStyle = '#8fa8d8';
+    for (var m = 0; m < 4; m++) {
+      var peakY = 420 - ((camY * 0.25) % 500 + 500) % 500 + m * 140;
+      ctx.beginPath(); ctx.moveTo(m * 130 - 40, H); ctx.lineTo(m * 130 + 50, peakY); ctx.lineTo(m * 130 + 140, H); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    for (var c = 0; c < 3; c++) {
+      var cy = 60 + c * 150 - ((camY * 0.4) % 200 + 200) % 200;
+      ctx.beginPath(); ctx.ellipse(70 + c * 150, cy, 42, 16, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // Height markers every 10 heights.
+    ctx.fillStyle = '#334155'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'left';
+    for (var hgt = 0; hgt <= 100; hgt += 10) {
+      var wy = -hgt * 60 - camY;
+      if (wy > -20 && wy < H + 20) {
+        ctx.fillText('Height ' + hgt, 10, wy);
+        ctx.fillRect(0, wy + 4, W, 1);
+      }
+    }
+    // Stars.
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      if (s.taken) continue;
+      var sy = s.y - camY;
+      if (sy < -30 || sy > H + 30) continue;
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath(); ctx.arc(s.x, sy, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff7cc';
+      ctx.beginPath(); ctx.arc(s.x - 3, sy - 3, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7a5b00'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center'; ctx.fillText('*', s.x, sy + 4);
+    }
+    // Platforms.
+    for (var p = 0; p < platforms.length; p++) {
+      var pl = platforms[p];
+      var py = pl.y - camY;
+      if (py < -40 || py > H + 40) continue;
+      ctx.fillStyle = pl.summit ? '#ffd700' : (pl.moving ? '#f59e0b' : '#22a06b');
+      ctx.fillRect(pl.x, py, pl.w, pl.h);
+      ctx.fillStyle = pl.summit ? '#b8860b' : 'rgba(255,255,255,0.35)';
+      ctx.fillRect(pl.x, py, pl.w, 5);
+      if (pl.summit) {
+        ctx.fillStyle = '#b91c1c'; ctx.fillRect(pl.x + pl.w / 2 - 2, py - 44, 4, 44);
+        ctx.fillStyle = '#dc2626'; ctx.beginPath();
+        ctx.moveTo(pl.x + pl.w / 2 + 2, py - 44); ctx.lineTo(pl.x + pl.w / 2 + 44, py - 34); ctx.lineTo(pl.x + pl.w / 2 + 2, py - 24); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#1a1400'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center'; ctx.fillText('SUMMIT 100', pl.x + pl.w / 2, py - 52);
+      }
+    }
+    // Player: a cheerful climber.
+    var px = player.x, py2 = player.y - camY;
+    ctx.fillStyle = '#1e3a8a'; ctx.fillRect(px + 4, py2 + 14, 22, 20);
+    ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(px + 15, py2 + 9, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#dc2626'; ctx.fillRect(px + 5, py2 - 2, 20, 6);
+    ctx.fillStyle = '#111827'; ctx.fillRect(px + 8, py2 + 8, 4, 3); ctx.fillRect(px + 18, py2 + 8, 4, 3);
+    for (var r = 0; r < particles.length; r++) {
+      ctx.fillStyle = '#ffd700'; ctx.fillRect(particles[r].x - 2, particles[r].y - camY - 2, 4, 4);
+    }
+    ctx.fillStyle = '#334155'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Centennial Climb - Height ' + maxHeight + ' / 100', W / 2, 20);
+  }
+
+  function loop() {
+    if (state === 'playing') update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function () { ensureAudio(); resetGame(); });
+  document.getElementById('restartBtn').addEventListener('click', function () { ensureAudio(); resetGame(); });
+  document.getElementById('howBtn').addEventListener('click', function () {
+    var n = document.getElementById('howNote');
+    n.style.display = (n.style.display === 'none') ? 'block' : 'none';
+  });
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.code] = true;
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); doJump(); }
+    if (e.code === 'Enter') {
+      if (state === 'title') { ensureAudio(); resetGame(); }
+      else if (state === 'won' || state === 'over') { ensureAudio(); resetGame(); }
+    }
+  });
+  document.addEventListener('keyup', function (e) { keys[e.code] = false; });
+
+  canvas.addEventListener('mousemove', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) * (W / rect.width);
+  });
+  canvas.addEventListener('mousedown', function (e) { e.preventDefault(); ensureAudio(); doJump(); });
+  canvas.addEventListener('mouseleave', function () { mouseX = null; });
+
+  canvas.addEventListener('touchstart', function (e) {
+    e.preventDefault(); ensureAudio();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    touchX = (t.clientX - rect.left) * (W / rect.width);
+    doJump();
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var t = e.touches[0];
+    touchX = (t.clientX - rect.left) * (W / rect.width);
+  }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); touchX = null; }, { passive: false });
+
+  buildWorld();
+  player = { x: 220, y: -40, w: 30, h: 34, vx: 0, vy: 0, onGround: false, score: 0 };
+  camY = -560; lives = 3; starCount = 0; maxHeight = 0; lastSafe = platforms[0]; particles = []; frame = 0; keys = {};
+  updateHud();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

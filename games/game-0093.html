@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Quay Commander</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0b1d2a;color:#eaf6ff;font-family:Arial,Helvetica,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:10px}
+h1{font-size:28px;letter-spacing:1px;margin:6px 0 2px;text-align:center}
+p.sub{color:#9fd8ff;font-size:14px;margin-bottom:8px;text-align:center}
+#hud{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:860px;margin:6px 0}
+#hud div{background:#14324a;border:1px solid #2b6a8f;border-radius:10px;padding:7px 11px;font-size:14px;font-weight:bold;min-width:105px;text-align:center}
+#hud span{color:#ffd75e}
+#wrap{position:relative;width:100%;max-width:860px}
+canvas{width:100%;height:auto;background:#0e4a6b;border:3px solid #ffd75e;border-radius:14px;display:block;touch-action:none}
+.overlay{position:absolute;inset:0;background:rgba(3,20,32,.92);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;gap:10px}
+.overlay h2{font-size:32px;color:#ffd75e}
+.overlay p{max-width:620px;line-height:1.5;font-size:15px;color:#d8efff}
+.how{background:#12324a;border:1px solid #2b6a8f;border-radius:10px;padding:12px 16px;text-align:left;font-size:14px;line-height:1.6}
+button{background:#ffd75e;color:#10202e;border:0;border-radius:10px;padding:12px 22px;font-size:17px;font-weight:bold;cursor:pointer}
+button:hover{background:#ffe58a}
+button.small{padding:8px 14px;font-size:14px;background:#39c2ff}
+.hint{font-size:13px;color:#bfe3ff}
+.hidden{display:none!important}
+#msg{font-weight:bold;color:#ffd75e;min-height:20px;text-align:center}
+.controls{font-size:13px;color:#cfeeff;text-align:center;max-width:860px;line-height:1.5}
+</style>
+</head>
+<body>
+<h1>⚓ QUAY COMMANDER</h1>
+<p class="sub">Strategy / Dock Logistics — Run the harbour, serve every ship, earn 1000 coins in 5 days.</p>
+<div id="hud">
+<div>🪙 Coins: <span id="coins">0</span></div>
+<div>📅 Day: <span id="day">1</span> / 5</div>
+<div>⏱️ Day Time: <span id="time">45</span>s</div>
+<div>✅ Served: <span id="served">0</span></div>
+<div>❌ Missed: <span id="missed">0</span> / 5</div>
+<div>Status: <span id="status">Ready</span></div>
+</div>
+<div id="wrap">
+<canvas id="game" width="860" height="520"></canvas>
+<div id="titleScreen" class="overlay">
+<h2>⚓ QUAY COMMANDER</h2>
+<p>Ships are arriving at your quay! Assign each ship to a dock big enough for its cargo before its deadline runs out. Loaded ships pay coins. Miss too many, and the harbour closes.</p>
+<div class="how"><strong>How to Play</strong><br>
+• <strong>Mouse / Touch:</strong> Tap a ship in the sea, then tap an empty dock to assign it.<br>
+• <strong>Keyboard:</strong> Press 1–5 to select a ship, A / S / D to send it to Dock 1 / 2 / 3, U to upgrade the selected dock.<br>
+• Tap <strong>Upgrade</strong> under a dock (50 coins) to raise its capacity by 2.<br>
+• A dock cannot take cargo larger than its capacity. Bigger ships pay more!<br>
+• <strong>WIN:</strong> Earn 1000 coins within 5 days. <strong>LOSE:</strong> 5 ships depart unserved, or Day 5 ends under 1000 coins.</div>
+<button id="startBtn">▶ Start Game</button>
+<p class="hint">Sound starts only after you press Start. Works fully offline.</p>
+</div>
+<div id="endScreen" class="overlay hidden">
+<h2 id="endTitle">Game Over</h2>
+<p id="endText"></p>
+<button id="restartBtn">↻ Play Again — Instant Restart</button>
+<p class="hint">Press R or Enter to restart instantly.</p>
+</div>
+</div>
+<p id="msg">Select a ship, then select a dock.</p>
+<p class="controls">Controls: Mouse click • Touch tap • Keys 1–5 select ship, A/S/D assign dock, U upgrade, R restart, Enter start.</p>
+<script>
+(function(){
+var cv=document.getElementById('game'),ctx=cv.getContext('2d');
+var coinsEl=document.getElementById('coins'),dayEl=document.getElementById('day'),timeEl=document.getElementById('time');
+var servedEl=document.getElementById('served'),missedEl=document.getElementById('missed'),statusEl=document.getElementById('status');
+var msgEl=document.getElementById('msg'),titleEl=document.getElementById('titleScreen'),endEl=document.getElementById('endScreen');
+var endTitle=document.getElementById('endTitle'),endText=document.getElementById('endText');
+var state='title',coins=0,day=1,dayTime=45,served=0,missed=0,selected=-1,spawnT=0,last=0,shipId=0,flash=0;
+var audioCtx=null;
+function beep(f,d,t){try{if(!audioCtx)return;var o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='square';o.frequency.value=f;g.gain.value=0.08;g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);}catch(e){}}
+function initAudio(){try{if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume();}catch(e){}}
+var docks=[
+ {x:70,y:360,w:230,h:95,cap:4,ship:null,progress:0,label:'DOCK 1'},
+ {x:315,y:360,w:230,h:95,cap:6,ship:null,progress:0,label:'DOCK 2'},
+ {x:560,y:360,w:230,h:95,cap:9,ship:null,progress:0,label:'DOCK 3'}
+];
+var ships=[];
+var names=['Aurora','Beacon','Coral','Tempest','Harbor','Neptune','Zephyr','Marlin','Osprey','Vela','Tidal','Ember'];
+function rand(a,b){return Math.floor(Math.random()*(b-a+1))+a;}
+function spawnShip(){
+ if(ships.length>=5)return;
+ var cargo=rand(2,9), pay=cargo*22+rand(0,30);
+ var n=names[rand(0,names.length-1)];
+ ships.push({id:++shipId,name:n,cargo:cargo,pay:pay,deadline:26+rand(0,8),x:30+ships.length*165,y:70,colour:['#ff8a5c','#39c2ff','#ffd75e','#7dff8a','#ff6eb4'][rand(0,4)]});
+}
+function resetGame(){
+ coins=0;day=1;dayTime=45;served=0;missed=0;selected=-1;ships=[];spawnT=0;state='playing';
+ docks.forEach(function(d,i){d.cap=[4,6,9][i];d.ship=null;d.progress=0;});
+ for(var i=0;i<3;i++)spawnShip();
+ statusEl.textContent='Day 1 — Ships arriving';
+ titleEl.classList.add('hidden');endEl.classList.add('hidden');
+}
+function endGame(win){
+ state=win?'win':'over';
+ endTitle.textContent=win?'🏆 YOU WIN! HARBOUR MASTER!':'💥 GAME OVER';
+ endText.textContent=win?('You earned '+coins+' coins in '+day+' days and served '+served+' ships. The quay is yours!'):('Coins: '+coins+' | Served: '+served+' | Missed: '+missed+'. The harbour authority has closed your quay.');
+ endEl.classList.remove('hidden');
+ statusEl.textContent=win?'WINNER!':'GAME OVER';
+ beep(win?880:160,0.4);
+}
+function updateHUD(){
+ coinsEl.textContent=coins;dayEl.textContent=day;timeEl.textContent=Math.max(0,Math.ceil(dayTime));
+ servedEl.textContent=served;missedEl.textContent=missed;
+}
+function tryAssign(shipIdx,dockIdx){
+ var s=ships[shipIdx],d=docks[dockIdx];
+ if(!s||!d)return;
+ if(d.ship){msgEl.textContent=d.label+' is busy! Choose an empty dock.';beep(140,0.15);return;}
+ if(s.cargo>d.cap){msgEl.textContent=s.name+' needs capacity '+s.cargo+' — '+d.label+' only holds '+d.cap+'. Upgrade it!';beep(140,0.2);flash=1;return;}
+ d.ship=s;d.progress=0;ships.splice(shipIdx,1);selected=-1;
+ msgEl.textContent=s.name+' docked at '+d.label+' — loading '+s.cargo+' cargo for '+s.pay+' coins.';
+ statusEl.textContent='Loading '+s.name;beep(520,0.15);
+}
+function upgradeDock(i){
+ var d=docks[i];
+ if(coins<50){msgEl.textContent='Need 50 coins to upgrade '+d.label+'.';beep(140,0.15);return;}
+ coins-=50;d.cap+=2;msgEl.textContent=d.label+' upgraded to capacity '+d.cap+'!';beep(700,0.2);
+}
+function pickAt(x,y){
+ var r=cv.getBoundingClientRect(),sx=(x-r.left)*cv.width/r.width,sy=(y-r.top)*cv.height/r.height;
+ for(var i=0;i<ships.length;i++){var s=ships[i];if(sx>=s.x&&sx<=s.x+150&&sy>=s.y&&sy<=s.y+75){selected=i;msgEl.textContent='Selected '+s.name+' (cargo '+s.cargo+', pays '+s.pay+', deadline '+Math.ceil(s.deadline)+'s). Now tap a dock.';beep(440,0.1);return;}}
+ for(var j=0;j<docks.length;j++){var d=docks[j];
+  if(sx>=d.x&&sx<=d.x+d.w&&sy>=d.y+58&&sy<=d.y+88){upgradeDock(j);return;}
+  if(sx>=d.x&&sx<=d.x+d.w&&sy>=d.y&&sy<=d.y+58){if(selected>=0)tryAssign(selected,j);else msgEl.textContent=d.label+' empty (capacity '+d.cap+'). Select a ship first.';return;}
+ }
+}
+function draw(){
+ ctx.clearRect(0,0,860,520);
+ ctx.fillStyle='#0e4a6b';ctx.fillRect(0,0,860,300);
+ ctx.fillStyle='#0a3550';for(var w=0;w<860;w+=60)ctx.fillRect(w,250+Math.sin(w/40)*4,40,6);
+ ctx.fillStyle='#c9a86a';ctx.fillRect(0,300,860,30);ctx.fillStyle='#e8d9a8';ctx.fillRect(0,300,860,6);
+ ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.fillText('🌊 INCOMING SHIPS — tap a ship, then tap a dock',20,28);
+ ships.forEach(function(s,i){
+  ctx.fillStyle=i===selected?'#ffe58a':s.colour;ctx.fillRect(s.x,s.y,150,75);
+  ctx.fillStyle='#10202e';ctx.font='bold 15px Arial';ctx.fillText(s.name, s.x+10, s.y+22);
+  ctx.font='13px Arial';ctx.fillText('Cargo '+s.cargo+' • '+s.pay+' coins',s.x+10,s.y+42);
+  ctx.fillStyle=s.deadline<8?'#ff4444':'#10202e';ctx.fillText('⏳ '+Math.ceil(s.deadline)+'s left',s.x+10,s.y+62);
+  if(i===selected){ctx.strokeStyle='#fff';ctx.lineWidth=4;ctx.strokeRect(s.x-3,s.y-3,156,81);}
+ });
+ ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.fillText('🏗️ DOCKS — capacity matters! Tap Upgrade to grow a dock (50 coins)',20,330);
+ docks.forEach(function(d){
+  ctx.fillStyle=d.ship?'#2b6a8f':'#14324a';ctx.fillRect(d.x,d.y,230,58);
+  ctx.strokeStyle='#ffd75e';ctx.lineWidth=2;ctx.strokeRect(d.x,d.y,230,58);
+  ctx.fillStyle='#fff';ctx.font='bold 14px Arial';ctx.fillText(d.label+'  •  Cap '+d.cap,d.x+10,d.y+22);
+  if(d.ship){ctx.font='13px Arial';ctx.fillText(d.ship.name+' loading… '+Math.floor(d.progress)+'%',d.x+10,d.y+44);ctx.fillStyle='#ffd75e';ctx.fillRect(d.x+10,d.y+48,210*(d.progress/100),5);}
+  else{ctx.font='13px Arial';ctx.fillText('EMPTY — ready for a ship',d.x+10,d.y+44);}
+  ctx.fillStyle='#39c2ff';ctx.fillRect(d.x+35,d.y+62,160,26);ctx.fillStyle='#10202e';ctx.font='bold 13px Arial';ctx.fillText('⬆ Upgrade (50c)',d.x+48,d.y+80);
+ });
+ ctx.fillStyle='#d8efff';ctx.font='13px Arial';ctx.fillText('Goal: 1000 coins by end of Day 5  •  Missed ships: '+missed+'/5  •  Ships served: '+served,20,500);
+ if(flash>0){ctx.fillStyle='rgba(255,60,60,0.25)';ctx.fillRect(0,0,860,520);flash-=0.02;}
+}
+function loop(ts){
+ requestAnimationFrame(loop);
+ if(!last)last=ts;var dt=Math.min(0.05,(ts-last)/1000);last=ts;
+ if(state==='playing'){
+  dayTime-=dt;spawnT-=dt;
+  if(spawnT<=0){spawnShip();spawnT=3.5;}
+  ships.forEach(function(s){s.deadline-=dt;});
+  for(var i=ships.length-1;i>=0;i--){if(ships[i].deadline<=0){msgEl.textContent=ships[i].name+' departed unserved!';missed++;ships.splice(i,1);if(selected>=i)selected=-1;beep(180,0.3);}}
+  docks.forEach(function(d){if(d.ship){d.progress+=dt*(100/(4+d.ship.cargo*0.7));if(d.progress>=100){coins+=d.ship.pay;served++;msgEl.textContent=d.ship.name+' loaded! +'+d.ship.pay+' coins. Total: '+coins;beep(880,0.2);d.ship=null;d.progress=0;}}});
+  if(coins>=1000){updateHUD();endGame(true);return;}
+  if(missed>=5){updateHUD();endGame(false);return;}
+  if(dayTime<=0){
+   if(day>=5){updateHUD();endGame(false);return;}
+   day++;dayTime=45;statusEl.textContent='Day '+day+' — new ships arriving';msgEl.textContent='🌅 Day '+day+' begins! Keep serving ships.';for(var k=0;k<2;k++)spawnShip();beep(660,0.2);
+  }
+ }
+ updateHUD();draw();
+}
+document.getElementById('startBtn').addEventListener('click',function(){initAudio();beep(660,0.15);resetGame();});
+document.getElementById('restartBtn').addEventListener('click',function(){initAudio();resetGame();});
+cv.addEventListener('mousedown',function(e){initAudio();if(state==='playing')pickAt(e.clientX,e.clientY);});
+cv.addEventListener('touchstart',function(e){e.preventDefault();initAudio();if(state==='playing'&&e.touches[0])pickAt(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+cv.addEventListener('click',function(e){if(state==='playing')pickAt(e.clientX,e.clientY);});
+document.addEventListener('keydown',function(e){
+ var k=e.key.toLowerCase();
+ if(state==='title'&&(k==='enter'||k===' ')){initAudio();resetGame();return;}
+ if((state==='win'||state==='over')&&(k==='r'||k==='enter')){initAudio();resetGame();return;}
+ if(state!=='playing')return;
+ if(k>='1'&&k<='5'){var idx=parseInt(k,10)-1;if(ships[idx]){selected=idx;msgEl.textContent='Selected '+ships[idx].name+'. Press A, S or D for a dock.';beep(440,0.1);}}
+ if(k==='a'&&selected>=0)tryAssign(selected,0);
+ if(k==='s'&&selected>=0)tryAssign(selected,1);
+ if(k==='d'&&selected>=0)tryAssign(selected,2);
+ if(k==='u'){var di=selected>=0?0:0;upgradeDock(di);}
+ if(k==='r')resetGame();
+});
+updateHUD();draw();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -4,8 +4,8 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 ## Dashboard
 
-- **Total games:** 90
-- **Latest game:** 0090 — Castle Cartographer
+- **Total games:** 100
+- **Latest game:** 0100 — Centennial Climb
 - **Current volume:** 001 (Games 0001 to 0100)
 - **Production cycle:** 10 new games every 5 minutes, in distinct genres
 
@@ -13,7 +13,7 @@ A continuously growing collection of fully offline, single-file HTML5 games. Eve
 
 | Volume | Games | Catalog |
 |--------|-------|---------|
-| 001 | 0001–0090 (90 so far, up to 0100) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
+| 001 | 0001–0100 (100, complete) | [catalogs/readme-001.md](./catalogs/readme-001.md) |
 
 Next volumes are created every 100 games: Volume 002 covers 0101–0200, Volume 003 covers 0201–0300, and so on.
 
@@ -27,20 +27,20 @@ games-everymin/
 └── README.md               # This dashboard
 ```
 
-## Latest batch — Batch 009
+## Latest batch — Batch 010
 
 | # | Game Title | Genre | Play |
 |---|------------|-------|------|
-| 0081 | Ashen Aviator | Arcade / Smoke-Ring Flight | [Play](./games/game-0081.html) |
-| 0082 | Sundial Sleuth | Puzzle / Shadow Deduction | [Play](./games/game-0082.html) |
-| 0083 | Hive Herald | Strategy / Bee Colony Routing | [Play](./games/game-0083.html) |
-| 0084 | Cymbal Storm | Rhythm / Percussion Timing | [Play](./games/game-0084.html) |
-| 0085 | Anchor Aim | Precision / Anchor Toss | [Play](./games/game-0085.html) |
-| 0086 | Tidepool Tumble | Arcade / Crab Pearl Catch | [Play](./games/game-0086.html) |
-| 0087 | Span Solver | Puzzle / Bridge Logic | [Play](./games/game-0087.html) |
-| 0088 | Windmill Warden | Simulation / Wind Farm Management | [Play](./games/game-0088.html) |
-| 0089 | Frost Flute | Rhythm / Melody Memory | [Play](./games/game-0089.html) |
-| 0090 | Castle Cartographer | Strategy / Map Expansion | [Play](./games/game-0090.html) |
+| 0091 | Quarry Quake | Arcade / Rockslide Dodge | [Play](./games/game-0091.html) |
+| 0092 | Beam Bender | Puzzle / Beam Reflection Logic | [Play](./games/game-0092.html) |
+| 0093 | Quay Commander | Strategy / Dock Logistics | [Play](./games/game-0093.html) |
+| 0094 | Tempo Tiller | Rhythm / Farming Beat | [Play](./games/game-0094.html) |
+| 0095 | Gravity Gauntlet | Precision / Orbital Slingshot | [Play](./games/game-0095.html) |
+| 0096 | Zephyr Kite | Arcade / Wind Kite Riding | [Play](./games/game-0096.html) |
+| 0097 | Sigil Sleuth | Puzzle / Sigil Deduction | [Play](./games/game-0097.html) |
+| 0098 | Vineyard Vizier | Strategy / Vineyard Management | [Play](./games/game-0098.html) |
+| 0099 | Pulse Piper | Rhythm / Pipe Melody Timing | [Play](./games/game-0099.html) |
+| 0100 | Centennial Climb | Arcade / Milestone Ascent | [Play](./games/game-0100.html) |
 
 ## Quality standard
 

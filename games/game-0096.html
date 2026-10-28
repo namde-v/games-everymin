@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Zephyr Kite - Wind Kite Riding</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0b1026; color:#fff; font-family:system-ui, Arial, sans-serif; overflow:hidden;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; }
+  #wrap { position:relative; width:min(96vw, 900px); }
+  #hud { display:flex; justify-content:space-between; gap:8px; padding:8px 4px; font-weight:700; font-size:15px; flex-wrap:wrap; }
+  #hud span { background:#1b2452; border:1px solid #3b4a9e; border-radius:10px; padding:5px 10px; }
+  #status { color:#ffd166; }
+  canvas { display:block; width:100%; height:540px; background:linear-gradient(#7ec8f7,#bfe9ff 55%,#ffe9a8); border:3px solid #ffd166; border-radius:14px; touch-action:none; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:12px; text-align:center; background:rgba(8,12,38,.78); border-radius:14px; padding:22px; }
+  .overlay.hidden { display:none; }
+  h1 { font-size:42px; letter-spacing:1px; text-shadow:0 3px 0 #1b2452; }
+  h2 { font-size:34px; }
+  p, li { font-size:16px; line-height:1.55; color:#e8ecff; }
+  ul { text-align:left; max-width:520px; margin:0 auto; }
+  button { cursor:pointer; font-size:20px; font-weight:800; color:#14204d; background:#ffd166;
+    border:0; border-radius:12px; padding:13px 30px; box-shadow:0 4px 0 #b8860b; }
+  button:active { transform:translateY(3px); box-shadow:0 1px 0 #b8860b; }
+  .small { font-size:14px; color:#cbd5ff; }
+  .badge { background:#ff6b6b; padding:2px 10px; border-radius:20px; font-size:13px; }
+  @media (max-width:600px){ canvas{height:440px;} h1{font-size:32px;} #hud{font-size:13px;} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Lives: <b id="lives">3</b></span>
+    <span>Lanterns: <b id="lanterns">0</b> / 40</span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <canvas id="game" width="900" height="540"></canvas>
+
+  <div id="titleScreen" class="overlay">
+    <div><span class="badge">ARCADE / WIND KITE RIDING</span></div>
+    <h1>&#129kite; Zephyr Kite</h1>
+    <p>Ride the wind! Catch sky lanterns, surf the updrafts, and dodge storm clouds and birds.</p>
+    <button id="startBtn">Start Flying</button>
+    <div>
+      <h3>How to Play</h3>
+      <ul>
+        <li><b>Move:</b> Arrow keys / WASD, or drag with mouse / touch. The kite follows your pointer.</li>
+        <li><b>Collect:</b> Golden sky lanterns give 10 points. Collect <b>40 lanterns to win</b>.</li>
+        <li><b>Ride:</b> Pale blue updraft columns lift you gently and give bonus points while inside.</li>
+        <li><b>Dodge:</b> Storm clouds and birds cost 1 life. <b>3 crashes = Game Over.</b></li>
+        <li><b>Wind:</b> Gusts push you sideways — fight them, or let them carry you to a lantern.</li>
+      </ul>
+    </div>
+    <p class="small">Sound starts only after you press Start. No downloads needed — fully offline.</p>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h2 id="endTitle">You Win!</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">Restart</button>
+    <p class="small">Press R or tap Restart to fly again.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  var cv = document.getElementById('game');
+  var ctx = cv.getContext('2d');
+  var W = cv.width, H = cv.height;
+  var scoreEl = document.getElementById('score');
+  var livesEl = document.getElementById('lives');
+  var lanternEl = document.getElementById('lanterns');
+  var statusEl = document.getElementById('status');
+  var titleScreen = document.getElementById('titleScreen');
+  var endScreen = document.getElementById('endScreen');
+  var endTitle = document.getElementById('endTitle');
+  var endText = document.getElementById('endText');
+
+  var state = 'title'; // title | playing | won | over
+  var score = 0, lives = 3, lanterns = 0, time = 0, frame = 0;
+  var wind = 0, windTimer = 0, gustText = '';
+  var keys = {};
+  var pointer = { x: null, y: null, active: false };
+  var invuln = 0, flash = 0;
+
+  var kite = { x: 150, y: 270, vx: 0, vy: 0, angle: 0 };
+  var items = [];   // lanterns + updrafts are separate
+  var clouds = [];
+  var birds = [];
+  var updrafts = [];
+  var particles = [];
+  var stars = [];
+  for (var i = 0; i < 40; i++) stars.push({ x: Math.random()*W, y: Math.random()*H*0.6, r: Math.random()*1.8+0.5 });
+
+  // ---- Audio: procedural only, created after user interaction ----
+  var actx = null;
+  function audio(){
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (actx && actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function beep(freq, dur, type, vol){
+    var a = audio(); if (!a) return;
+    var o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + dur);
+    o.connect(g); g.connect(a.destination);
+    o.start(); o.stop(a.currentTime + dur);
+  }
+  function sndPick(){ beep(880, 0.12, 'sine', 0.14); setTimeout(function(){ beep(1320, 0.16, 'sine', 0.12); }, 70); }
+  function sndCrash(){ beep(160, 0.3, 'sawtooth', 0.18); setTimeout(function(){ beep(90, 0.35, 'square', 0.12); }, 80); }
+  function sndWin(){ [523,659,784,1047].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, 'triangle', 0.15); }, i*140); }); }
+
+  function reset(){
+    score = 0; lives = 3; lanterns = 0; time = 0; frame = 0;
+    wind = 0; windTimer = 0; invuln = 0;
+    kite.x = 150; kite.y = 270; kite.vx = 0; kite.vy = 0;
+    items = []; clouds = []; birds = []; updrafts = []; particles = [];
+    for (var i = 0; i < 5; i++) spawnLantern(W + i * 160);
+    for (var j = 0; j < 3; j++) spawnCloud(W + j * 280);
+    for (var k = 0; k < 2; k++) spawnBird(W + k * 340);
+    for (var u = 0; u < 2; u++) spawnUpdraft(W + u * 420);
+    updateHud('Flying!');
+  }
+  function updateHud(s){
+    scoreEl.textContent = score; livesEl.textContent = lives;
+    lanternEl.textContent = lanterns; if (s) statusEl.textContent = s;
+  }
+  function rand(a, b){ return a + Math.random() * (b - a); }
+  function spawnLantern(x){ items.push({ x: x, y: rand(60, H-60), r: 16, bob: rand(0, 6.28), taken: false }); }
+  function spawnCloud(x){ clouds.push({ x: x, y: rand(50, H-70), w: rand(90, 130), h: rand(55, 75), speed: rand(1.6, 2.6), drift: rand(0, 6.28) }); }
+  function spawnBird(x){ birds.push({ x: x, y: rand(60, H-60), speed: rand(2.4, 3.6), flap: rand(0, 6.28), dir: 1 }); }
+  function spawnUpdraft(x){ updrafts.push({ x: x, w: rand(70, 110), speed: 1.2 }); }
+  function burst(x, y, color, n){
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: rand(-2.5, 2.5), vy: rand(-3, 1), life: rand(20, 45), color: color });
+  }
+
+  function startGame(){
+    audio();
+    reset();
+    state = 'playing';
+    titleScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    updateHud('Flying!');
+  }
+  function endGame(won){
+    state = won ? 'won' : 'over';
+    endScreen.classList.remove('hidden');
+    if (won){
+      endTitle.textContent = 'You Win! Sky Master!';
+      endText.textContent = 'You collected all 40 sky lanterns! Final score: ' + score + '.';
+      sndWin(); updateHud('You Win!');
+    } else {
+      endTitle.textContent = 'Game Over';
+      endText.textContent = 'The storm got your kite after 3 crashes. Lanterns: ' + lanterns + ' / 40. Score: ' + score + '.';
+      updateHud('Game Over');
+    }
+  }
+  function crash(){
+    if (invuln > 0 || state !== 'playing') return;
+    lives--; invuln = 120; flash = 12; sndCrash();
+    burst(kite.x, kite.y, '#ff6b6b', 24);
+    kite.x = 150; kite.y = 270; kite.vx = 0; kite.vy = 0;
+    updateHud(lives > 0 ? 'Crash! ' + lives + ' lives left' : 'Game Over');
+    if (lives <= 0) { setTimeout(function(){ endGame(false); }, 500); }
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  document.addEventListener('keydown', function(e){
+    keys[e.key.toLowerCase()] = true;
+    if ((e.key === 'r' || e.key === 'R') && (state === 'won' || state === 'over')) startGame();
+    if ((e.key === 'Enter' || e.key === ' ') && state === 'title') startGame();
+    if (['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(e.key.toLowerCase()) >= 0) e.preventDefault();
+  });
+  document.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+
+  function pointerPos(e){
+    var r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+  }
+  cv.addEventListener('mousemove', function(e){ if (e.buttons) { var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true; } });
+  cv.addEventListener('mousedown', function(e){ var p = pointerPos(e); pointer.x = p.x; pointer.y = p.y; pointer.active = true; });
+  cv.addEventListener('mouseup', function(){ pointer.active = false; });
+  cv.addEventListener('mouseleave', function(){ pointer.active = false; });
+  cv.addEventListener('touchstart', function(e){ e.preventDefault(); var t = e.touches[0]; var p = pointerPos(t); pointer.x = p.x; pointer.y = p.y; pointer.active = true; }, { passive: false });
+  cv.addEventListener('touchmove', function(e){ e.preventDefault(); var t = e.touches[0]; var p = pointerPos(t); pointer.x = p.x; pointer.y = p.y; pointer.active = true; }, { passive: false });
+  cv.addEventListener('touchend', function(e){ e.preventDefault(); pointer.active = false; }, { passive: false });
+
+  function update(){
+    frame++; time += 1/60;
+    if (invuln > 0) invuln--;
+    if (flash > 0) flash--;
+
+    // Wind model: gusts change every few seconds
+    windTimer--;
+    if (windTimer <= 0){
+      wind = rand(-1.4, 1.4); windTimer = rand(120, 260);
+      gustText = wind > 0.6 ? 'Strong tailwind!' : (wind < -0.6 ? 'Headwind!' : 'Calm breeze');
+      updateHud(gustText);
+    }
+
+    // Steering: keyboard velocity + pointer follow
+    var ax = 0, ay = 0;
+    if (keys['arrowleft'] || keys['a']) ax -= 1;
+    if (keys['arrowright'] || keys['d']) ax += 1;
+    if (keys['arrowup'] || keys['w']) ay -= 1;
+    if (keys['arrowdown'] || keys['s']) ay += 1;
+    kite.vx += ax * 0.45; kite.vy += ay * 0.45;
+    if (pointer.active && pointer.x !== null){
+      kite.vx += (pointer.x - kite.x) * 0.02;
+      kite.vy += (pointer.y - kite.y) * 0.02;
+    }
+    kite.vx += wind * 0.03;
+    kite.vx *= 0.94; kite.vy *= 0.94;
+    kite.x += kite.vx; kite.y += kite.vy;
+    kite.x = Math.max(30, Math.min(W - 30, kite.x));
+    kite.y = Math.max(30, Math.min(H - 30, kite.y));
+    kite.angle = kite.vx * 0.04;
+
+    // Updraft bonus: gentle lift + points while inside
+    var inUp = false;
+    updrafts.forEach(function(u){
+      if (kite.x > u.x && kite.x < u.x + u.w){ inUp = true; kite.vy -= 0.12; if (frame % 30 === 0) score += 1; }
+    });
+    if (inUp) updateHud('Riding an updraft!');
+
+    // Move world left, recycle
+    items.forEach(function(it){ it.x -= 1.8; it.bob += 0.05; });
+    items = items.filter(function(it){ return it.x > -40 && !it.taken; });
+    while (items.length < 6) spawnLantern(W + rand(40, 300));
+    clouds.forEach(function(c){ c.x -= c.speed; c.drift += 0.02; c.y += Math.sin(c.drift) * 0.5; });
+    clouds = clouds.filter(function(c){ return c.x > -160; });
+    while (clouds.length < 3) spawnCloud(W + rand(100, 400));
+    birds.forEach(function(b){ b.x -= b.speed; b.flap += 0.25; b.y += Math.sin(b.flap) * 0.8; });
+    birds = birds.filter(function(b){ return b.x > -60; });
+    while (birds.length < 2) spawnBird(W + rand(100, 400));
+    updrafts.forEach(function(u){ u.x -= u.speed; });
+    updrafts = updrafts.filter(function(u){ return u.x + u.w > 0; });
+    while (updrafts.length < 2) spawnUpdraft(W + rand(100, 400));
+    particles.forEach(function(p){ p.x += p.vx; p.y += p.vy; p.life--; });
+    particles = particles.filter(function(p){ return p.life > 0; });
+
+    // Collisions: lantern pickup
+    items.forEach(function(it){
+      var dx = kite.x - it.x, dy = kite.y - (it.y + Math.sin(it.bob) * 8);
+      if (Math.sqrt(dx*dx + dy*dy) < 42){
+        it.taken = true; lanterns++; score += 10; sndPick();
+        burst(it.x, it.y, '#ffd166', 14);
+        updateHud('Lantern! ' + lanterns + ' / 40');
+        if (lanterns >= 40){ setTimeout(function(){ endGame(true); }, 400); }
+      }
+    });
+    // Collisions: clouds and birds (skip while invulnerable)
+    if (invuln <= 0){
+      var hit = false;
+      clouds.forEach(function(c){
+        if (Math.abs(kite.x - (c.x + c.w/2)) < c.w/2 + 14 && Math.abs(kite.y - c.y) < c.h/2 + 12) hit = true;
+      });
+      birds.forEach(function(b){
+        var dx = kite.x - b.x, dy = kite.y - b.y;
+        if (Math.sqrt(dx*dx + dy*dy) < 34) hit = true;
+      });
+      if (hit) crash();
+    }
+    updateHud();
+  }
+
+  function drawKite(){
+    ctx.save();
+    ctx.translate(kite.x, kite.y);
+    ctx.rotate(kite.angle);
+    if (invuln > 0 && Math.floor(frame / 6) % 2 === 0) ctx.globalAlpha = 0.4;
+    // String
+    ctx.strokeStyle = '#5b3a1e'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, 14); ctx.quadraticCurveTo(-40, 70, -90, 120); ctx.stroke();
+    // Tail bows
+    ctx.fillStyle = '#ff6b6b';
+    for (var i = 1; i <= 3; i++){ ctx.beginPath(); ctx.arc(-18*i, 14 + 28*i, 5, 0, 6.29); ctx.fill(); }
+    // Diamond kite
+    ctx.fillStyle = '#ff4757';
+    ctx.beginPath(); ctx.moveTo(0, -26); ctx.lineTo(24, 0); ctx.lineTo(0, 26); ctx.lineTo(-24, 0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.moveTo(0, -26); ctx.lineTo(24, 0); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, -26); ctx.lineTo(0, 26); ctx.moveTo(-24, 0); ctx.lineTo(24, 0); ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw(){
+    // Sky
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#6ec1f5'); g.addColorStop(0.55, '#bfe9ff'); g.addColorStop(1, '#ffe9a8');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // Sun
+    ctx.fillStyle = '#fff3a0'; ctx.beginPath(); ctx.arc(800, 70, 42, 0, 6.29); ctx.fill();
+    ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(800, 70, 30, 0, 6.29); ctx.fill();
+    // Distant hills
+    ctx.fillStyle = '#7ec850'; ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, H-60);
+    ctx.quadraticCurveTo(200, H-130, 450, H-60); ctx.quadraticCurveTo(650, H-110, 900, H-50); ctx.lineTo(900, H); ctx.closePath(); ctx.fill();
+    // Updrafts
+    updrafts.forEach(function(u){
+      ctx.fillStyle = 'rgba(180,230,255,0.45)';
+      ctx.fillRect(u.x, 0, u.w, H);
+      ctx.fillStyle = '#3aa7e0'; ctx.font = 'bold 14px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('UPDRAFT', u.x + u.w/2, 30);
+      for (var i = 0; i < 4; i++){
+        var yy = (frame * 2 + i * 130) % H;
+        ctx.beginPath(); ctx.moveTo(u.x + 14 + i*20, yy); ctx.lineTo(u.x + 24 + i*20, yy - 18); ctx.lineTo(u.x + 34 + i*20, yy); ctx.strokeStyle = '#fff'; ctx.stroke();
+      }
+    });
+    // Wind streaks
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2;
+    for (var s = 0; s < 6; s++){
+      var sy = (s * 90 + frame * (1 + Math.abs(wind))) % H;
+      ctx.beginPath(); ctx.moveTo((frame * 3 + s * 130) % W - 80, sy); ctx.lineTo((frame * 3 + s * 130) % W, sy); ctx.stroke();
+    }
+    // Lanterns
+    items.forEach(function(it){
+      var ly = it.y + Math.sin(it.bob) * 8;
+      ctx.fillStyle = '#ff9f1c'; ctx.beginPath(); ctx.ellipse(it.x, ly, 14, 18, 0, 0, 6.29); ctx.fill();
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.ellipse(it.x, ly, 8, 12, 0, 0, 6.29); ctx.fill();
+      ctx.fillStyle = '#ff6b35'; ctx.fillRect(it.x - 7, ly - 22, 14, 5);
+      ctx.fillStyle = 'rgba(255,209,102,0.35)'; ctx.beginPath(); ctx.arc(it.x, ly, 26, 0, 6.29); ctx.fill();
+    });
+    // Storm clouds with lightning
+    clouds.forEach(function(c){
+      ctx.fillStyle = '#4a4a6e';
+      ctx.beginPath(); ctx.arc(c.x + 25, c.y, 28, 0, 6.29); ctx.arc(c.x + 55, c.y - 12, 34, 0, 6.29); ctx.arc(c.x + 85, c.y, 28, 0, 6.29); ctx.fill();
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.moveTo(c.x + 55, c.y + 25); ctx.lineTo(c.x + 45, c.y + 48); ctx.lineTo(c.x + 58, c.y + 48); ctx.lineTo(c.x + 48, c.y + 70); ctx.lineTo(c.x + 70, c.y + 38); ctx.lineTo(c.x + 57, c.y + 38); ctx.closePath(); ctx.fill();
+    });
+    // Birds
+    birds.forEach(function(b){
+      var flap = Math.sin(b.flap) * 10;
+      ctx.strokeStyle = '#2d3436'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(b.x - 18, b.y - flap); ctx.quadraticCurveTo(b.x, b.y + 4, b.x + 18, b.y - flap); ctx.stroke();
+      ctx.fillStyle = '#2d3436'; ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, 6.29); ctx.fill();
+    });
+    // Particles
+    particles.forEach(function(p){ ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(0, p.life / 40); ctx.fillRect(p.x, p.y, 5, 5); ctx.globalAlpha = 1; });
+    drawKite();
+    if (flash > 0){ ctx.fillStyle = 'rgba(255,60,60,0.25)'; ctx.fillRect(0, 0, W, H); }
+    // Wind indicator
+    ctx.fillStyle = '#14204d'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('Wind: ' + (wind >= 0 ? '+' : '') + wind.toFixed(1) + '  |  ' + gustText, 14, 26);
+  }
+
+  function loop(){
+    if (state === 'playing') update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  reset();
+  state = 'title';
+  updateHud('Ready - press Start');
+  loop();
+})();
+</script>
+</body>
+</html>

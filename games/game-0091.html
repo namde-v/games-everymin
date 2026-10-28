@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Quarry Quake</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a120b; color: #f5e9d3; font-family: "Trebuchet MS", Verdana, sans-serif;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 12px;
+    -webkit-user-select: none; user-select: none; touch-action: none; }
+  h1 { font-size: 30px; letter-spacing: 2px; color: #ffb347; text-shadow: 2px 2px 0 #000; margin: 6px 0 2px; }
+  .tagline { color: #cbb89a; font-size: 13px; margin-bottom: 10px; }
+  #hud { display: flex; gap: 18px; justify-content: center; width: 480px; max-width: 96vw;
+    background: #2c1f14; border: 2px solid #6b4a2a; border-radius: 8px; padding: 7px 10px;
+    font-weight: bold; font-size: 15px; margin-bottom: 8px; }
+  #hud span b { color: #ffd166; }
+  #wrap { position: relative; width: 480px; max-width: 96vw; }
+  canvas { display: block; width: 100%; height: auto; background: linear-gradient(#3a2a1a, #241a10);
+    border: 3px solid #6b4a2a; border-radius: 10px; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 10px; text-align: center; background: rgba(20,12,6,0.88);
+    border-radius: 10px; padding: 20px; }
+  .screen h2 { font-size: 30px; color: #ffb347; }
+  .screen p { font-size: 15px; line-height: 1.5; max-width: 380px; color: #eee0c8; }
+  .howto { background: #3a2a1a; border: 1px solid #6b4a2a; border-radius: 8px; padding: 10px 14px;
+    font-size: 13px; line-height: 1.6; text-align: left; }
+  .howto b { color: #ffd166; }
+  button { background: #ff8c2b; color: #1a120b; border: none; border-radius: 8px;
+    font-size: 20px; font-weight: bold; padding: 12px 34px; cursor: pointer;
+    box-shadow: 0 4px 0 #a3540f; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #a3540f; }
+  .hidden { display: none !important; }
+  #hint { margin-top: 8px; color: #cbb89a; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>&#9978; QUARRY QUAKE</h1>
+<p class="tagline">The mountain is coming down. Grab the gems. Stay alive.</p>
+<div id="hud">
+  <span>Score: <b id="score">0</b> / 500</span>
+  <span>Lives: <b id="lives">&#10084;&#10084;&#10084;</b></span>
+  <span>Status: <b id="status">Ready</b></span>
+</div>
+<div id="wrap">
+  <canvas id="game" width="480" height="560"></canvas>
+  <div id="titleScreen" class="screen">
+    <h2>QUARRY QUAKE</h2>
+    <p>Rocks are tumbling down the quarry walls! Dodge the boulders, collect sparkling gems, and reach <b>500 points</b> to win.</p>
+    <div class="howto">
+      <b>How to Play</b><br>
+      &#8592; &#8594; or A / D &mdash; move left and right<br>
+      Mouse / finger &mdash; drag to move the miner<br>
+      &#9670; Gem = +25 points &nbsp;|&nbsp; &#11042; Rock hit = lose 1 life<br>
+      You have 3 lives. The quake speeds up as you score!
+    </div>
+    <button id="startBtn">START DIGGING</button>
+  </div>
+  <div id="endScreen" class="screen hidden">
+    <h2 id="endTitle">GAME OVER</h2>
+    <p id="endText"></p>
+    <button id="restartBtn">PLAY AGAIN</button>
+  </div>
+</div>
+<p id="hint">Arrow keys / A D to move &bull; mouse or touch drag works too &bull; press P to pause</p>
+<script>
+(function () {
+  var cv = document.getElementById("game");
+  var ctx = cv.getContext("2d");
+  var W = 480, H = 560;
+  var scoreEl = document.getElementById("score");
+  var livesEl = document.getElementById("lives");
+  var statusEl = document.getElementById("status");
+  var titleScreen = document.getElementById("titleScreen");
+  var endScreen = document.getElementById("endScreen");
+  var endTitle = document.getElementById("endTitle");
+  var endText = document.getElementById("endText");
+
+  var state = "title"; // title | playing | paused | win | over
+  var player = { x: 220, y: 490, w: 40, h: 46, speed: 6 };
+  var keys = {};
+  var rocks = [], gems = [], particles = [], dust = [];
+  var score = 0, lives = 3, spawnT = 0, gemT = 0, shake = 0, frame = 0;
+  var audioCtx = null;
+
+  function audio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol) {
+    var ac = audio(); if (!ac) return;
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || "square"; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.08, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + dur);
+  }
+  function sfx(kind) {
+    if (kind === "gem") { beep(880, 0.12, "sine", 0.12); setTimeout(function(){ beep(1320, 0.14, "sine", 0.10); }, 60); }
+    else if (kind === "hit") { beep(120, 0.30, "sawtooth", 0.14); }
+    else if (kind === "win") { [523, 659, 784, 1046].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, "triangle", 0.12); }, i * 140); }); }
+    else if (kind === "over") { [400, 300, 200, 120].forEach(function(f, i){ setTimeout(function(){ beep(f, 0.25, "sawtooth", 0.10); }, i * 160); }); }
+  }
+
+  function hearts(n) { var s = ""; for (var i = 0; i < 3; i++) s += (i < n) ? "\u2764" : "\u2661"; return s; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    livesEl.textContent = hearts(lives);
+    statusEl.textContent = state === "playing" ? "Quaking!" : state === "paused" ? "Paused" :
+      state === "win" ? "You Win!" : state === "over" ? "Game Over" : "Ready";
+  }
+  function speed() { return 2.2 + Math.min(score / 500, 1) * 2.8; }
+  function spawnRock() {
+    var big = Math.random() < 0.25;
+    var r = big ? 26 + Math.random() * 10 : 14 + Math.random() * 10;
+    rocks.push({ x: Math.random() * (W - r * 2) + r, y: -r, r: r, vy: speed() * (0.8 + Math.random() * 0.6),
+      rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 0.08, big: big });
+  }
+  function spawnGem() {
+    gems.push({ x: 20 + Math.random() * (W - 40), y: -20, vy: speed() * 0.9, bob: Math.random() * 6.28 });
+  }
+  function burst(x, y, color, n) {
+    for (var i = 0; i < n; i++) particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.5) * 6 - 1, life: 22 + Math.random() * 12, color: color });
+  }
+  function hitTest(ax, ay, aw, ah, bx, by, br) {
+    var cx = Math.max(ax, Math.min(bx, ax + aw)), cy = Math.max(ay, Math.min(by, ay + ah));
+    var dx = bx - cx, dy = by - cy; return dx * dx + dy * dy < br * br;
+  }
+  function startGame() {
+    audio(); score = 0; lives = 3; rocks = []; gems = []; particles = []; dust = [];
+    player.x = 220; spawnT = 0; gemT = 0; shake = 0;
+    state = "playing";
+    titleScreen.classList.add("hidden"); endScreen.classList.add("hidden");
+    updateHUD();
+  }
+  function endGame(win) {
+    state = win ? "win" : "over";
+    endTitle.textContent = win ? "YOU WIN!" : "GAME OVER";
+    endText.textContent = win ? "You escaped the quarry with " + score + " points and " + lives + " life(s) to spare! Legendary miner!"
+      : "The quarry got you at " + score + " points. Dust yourself off and dig again!";
+    endScreen.classList.remove("hidden");
+    sfx(win ? "win" : "over");
+    updateHUD();
+  }
+  function moveTo(clientX) {
+    var rect = cv.getBoundingClientRect();
+    var x = (clientX - rect.left) * (W / rect.width);
+    player.x = Math.max(0, Math.min(W - player.w, x - player.w / 2));
+  }
+
+  document.getElementById("startBtn").addEventListener("click", startGame);
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+  document.addEventListener("keydown", function (e) {
+    keys[e.key] = true;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") e.preventDefault();
+    if ((e.key === "p" || e.key === "P") && state === "playing") { state = "paused"; updateHUD(); }
+    else if ((e.key === "p" || e.key === "P") && state === "paused") { state = "playing"; updateHUD(); }
+    if (e.key === "Enter" && (state === "title" || state === "win" || state === "over")) startGame();
+  });
+  document.addEventListener("keyup", function (e) { keys[e.key] = false; });
+  cv.addEventListener("mousemove", function (e) { if (state === "playing") moveTo(e.clientX); });
+  cv.addEventListener("mousedown", function (e) { audio(); if (state === "playing") moveTo(e.clientX); });
+  cv.addEventListener("touchstart", function (e) { e.preventDefault(); audio(); if (state === "playing") moveTo(e.touches[0].clientX); }, { passive: false });
+  cv.addEventListener("touchmove", function (e) { e.preventDefault(); if (state === "playing") moveTo(e.touches[0].clientX); }, { passive: false });
+
+  function drawBackground() {
+    ctx.fillStyle = "#3a2a1a"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#2c2013";
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(90, 0); ctx.lineTo(50, H); ctx.lineTo(0, H); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W, 0); ctx.lineTo(W - 90, 0); ctx.lineTo(W - 50, H); ctx.lineTo(W, H); ctx.fill();
+    ctx.fillStyle = "#54402a";
+    for (var i = 0; i < 6; i++) { ctx.fillRect(20 + i * 78, 60 + (i % 3) * 150, 34, 10); }
+    ctx.fillStyle = "#6b5636"; ctx.fillRect(0, H - 14, W, 14);
+  }
+  function drawPlayer() {
+    var x = player.x, y = player.y;
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    ctx.fillStyle = "#2f6fb3"; ctx.fillRect(x + 6, y + 22, 28, 22); // overalls
+    ctx.fillStyle = "#f2c79b"; ctx.fillRect(x + 10, y + 8, 20, 16); // face
+    ctx.fillStyle = "#ffcc00"; ctx.beginPath(); ctx.arc(x + 20, y + 8, 13, Math.PI, 0); ctx.fill(); // helmet
+    ctx.fillStyle = "#fff8b0"; ctx.beginPath(); ctx.arc(x + 20, y + 1, 4, 0, 6.29); ctx.fill(); // lamp
+    ctx.fillStyle = "#222"; ctx.fillRect(x + 4, y + 40, 12, 5); ctx.fillRect(x + 24, y + 40, 12, 5);
+    ctx.restore();
+  }
+  function drawRock(r) {
+    ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.rot);
+    ctx.fillStyle = r.big ? "#5a5a62" : "#7a7a85"; ctx.beginPath();
+    for (var i = 0; i < 8; i++) { var a = i * 0.785, rr = r.r * (0.85 + ((i * 37) % 10) / 50);
+      var px = Math.cos(a) * rr, py = Math.sin(a) * rr; i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#3f3f46"; ctx.beginPath(); ctx.arc(-r.r * 0.3, -r.r * 0.2, r.r * 0.25, 0, 6.29); ctx.fill();
+    ctx.restore();
+  }
+  function drawGem(g) {
+    ctx.save(); ctx.translate(g.x, g.y + Math.sin(g.bob) * 3); ctx.rotate(Math.sin(g.bob * 0.5) * 0.3);
+    ctx.fillStyle = "#35e0c8"; ctx.beginPath();
+    ctx.moveTo(0, -13); ctx.lineTo(11, -3); ctx.lineTo(0, 13); ctx.lineTo(-11, -3); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#b8fff4"; ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(6, -3); ctx.lineTo(-6, -3); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function update() {
+    if (state !== "playing") return;
+    frame++;
+    if (keys["ArrowLeft"] || keys["a"] || keys["A"]) player.x -= player.speed;
+    if (keys["ArrowRight"] || keys["d"] || keys["D"]) player.x += player.speed;
+    player.x = Math.max(0, Math.min(W - player.w, player.x));
+    spawnT++; gemT++;
+    if (spawnT > Math.max(22, 52 - score / 18)) { spawnT = 0; spawnRock(); if (Math.random() < 0.3) spawnRock(); }
+    if (gemT > 95) { gemT = 0; spawnGem(); }
+    if (frame % 14 === 0) dust.push({ x: Math.random() * W, y: 0, life: 30 });
+    rocks.forEach(function (r) { r.y += r.vy; r.rot += r.vr; });
+    gems.forEach(function (g) { g.y += g.vy; g.bob += 0.12; });
+    particles.forEach(function (p) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; });
+    dust = dust.filter(function (d) { d.life--; return d.life > 0; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    // Collisions: gems first, then rocks
+    gems = gems.filter(function (g) {
+      if (hitTest(player.x, player.y, player.w, player.h, g.x, g.y, 14)) {
+        score += 25; burst(g.x, g.y, "#35e0c8", 14); sfx("gem");
+        if (score >= 500) { updateHUD(); endGame(true); return false; }
+        updateHUD(); return false;
+      }
+      return g.y < H + 20;
+    });
+    if (state !== "playing") return;
+    var hit = false;
+    rocks = rocks.filter(function (r) {
+      if (!hit && hitTest(player.x, player.y, player.w, player.h, r.x, r.y, r.r * 0.85)) {
+        hit = true; return false;
+      }
+      return r.y < H + 40;
+    });
+    if (hit) {
+      lives--; shake = 12; burst(player.x + 20, player.y + 20, "#ff6b35", 20); sfx("hit");
+      rocks = []; // brief mercy: clear the field after a hit
+      updateHUD();
+      if (lives <= 0) endGame(false);
+    }
+    if (shake > 0) shake -= 0.6;
+  }
+  function render() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    drawBackground();
+    dust.forEach(function (d) { ctx.fillStyle = "rgba(200,180,150,0.25)"; ctx.beginPath(); ctx.arc(d.x, d.y + (30 - d.life), 3, 0, 6.29); ctx.fill(); });
+    gems.forEach(drawGem); rocks.forEach(drawRock); drawPlayer();
+    particles.forEach(function (p) { ctx.fillStyle = p.color; ctx.globalAlpha = Math.max(p.life / 30, 0); ctx.fillRect(p.x, p.y, 4, 4); ctx.globalAlpha = 1; });
+    ctx.fillStyle = "#ffd166"; ctx.font = "bold 14px Verdana";
+    ctx.fillText("Goal: 500 pts", 10, 22);
+    ctx.restore();
+    if (state === "paused") {
+      ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 28px Verdana"; ctx.textAlign = "center";
+      ctx.fillText("PAUSED", W / 2, H / 2); ctx.textAlign = "left";
+    }
+  }
+  function loop() { update(); render(); requestAnimationFrame(loop); }
+  updateHUD(); loop();
+})();
+</script>
+</body>
+</html>

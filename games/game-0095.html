@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Gravity Gauntlet</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #050816; color: #eaf2ff; font-family: Arial, Helvetica, sans-serif; overflow: hidden; touch-action: none; }
+  #wrap { display: flex; flex-direction: column; align-items: center; padding: 8px; height: 100vh; }
+  h1 { font-size: 26px; letter-spacing: 2px; margin: 4px 0 2px; color: #ffd166; text-shadow: 0 0 14px #ff9f1c; }
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; font-weight: bold; font-size: 15px; margin: 4px 0; }
+  #hud span { background: #131f3d; border: 1px solid #2d4a7a; border-radius: 8px; padding: 5px 10px; }
+  #hud b { color: #7df9ff; }
+  #gamebox { position: relative; width: min(94vw, 800px); height: min(62vh, 520px); }
+  canvas { width: 100%; height: 100%; display: block; background: radial-gradient(circle at 50% 40%, #16224a 0%, #050816 70%); border: 2px solid #2d4a7a; border-radius: 12px; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; background: rgba(3, 6, 20, 0.88); border-radius: 12px; padding: 18px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 30px; color: #ffd166; }
+  .overlay p { max-width: 520px; line-height: 1.5; font-size: 15px; color: #dbe7ff; }
+  .howto { background: #0f1a33; border: 1px solid #2d4a7a; border-radius: 10px; padding: 10px 14px; text-align: left; font-size: 14px; line-height: 1.6; }
+  .howto strong { color: #7df9ff; }
+  button { background: #ffd166; color: #111; border: 0; border-radius: 10px; padding: 12px 26px; font-size: 18px; font-weight: bold; cursor: pointer; }
+  button:hover { background: #ffe08a; }
+  button.secondary { background: #2d4a7a; color: #fff; padding: 9px 18px; font-size: 15px; }
+  #hint { font-size: 13px; color: #aebfdd; margin-top: 6px; text-align: center; }
+  #aimbar { width: min(94vw, 800px); height: 10px; background: #131f3d; border-radius: 6px; margin-top: 6px; overflow: hidden; }
+  #aimfill { height: 100%; width: 0%; background: linear-gradient(90deg, #7df9ff, #ffd166, #ff5d8f); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>🪐 GRAVITY GAUNTLET</h1>
+  <div id="hud">
+    <span>Score: <b id="score">0</b></span>
+    <span>Level: <b id="level">1 / 5</b></span>
+    <span>Probes: <b id="probes">4</b></span>
+    <span>Status: <b id="status">Ready</b></span>
+  </div>
+  <div id="gamebox">
+    <canvas id="c" width="800" height="520"></canvas>
+    <div id="titleScreen" class="overlay">
+      <h2>Gravity Gauntlet</h2>
+      <p>Slingshot a probe around gravity wells and strike the golden target. Bend your path, beat all 5 levels, and do not waste a probe.</p>
+      <div class="howto">
+        <strong>How to Play:</strong><br>
+        • Drag from the launch pad to aim — pull back like a slingshot, release to fire.<br>
+        • Gravity wells bend your flight. Use them to curve around obstacles.<br>
+        • Hit the gold target to clear the level. Miss, fly off-screen, or stall and you lose a probe.<br>
+        • Keyboard: Arrow keys adjust aim, Space fires, R restarts. Mouse and touch dragging also work.
+      </div>
+      <button id="startBtn">▶ Start Mission</button>
+      <p>Precision / Orbital Slingshot — 5 levels, limited probes, fully offline.</p>
+    </div>
+    <div id="winScreen" class="overlay hidden">
+      <h2>🏆 GAUNTLET CLEARED!</h2>
+      <p id="winText">You mastered gravity itself.</p>
+      <button id="winRestart">↻ Play Again</button>
+    </div>
+    <div id="overScreen" class="overlay hidden">
+      <h2>💥 GAME OVER</h2>
+      <p id="overText">Your probes ran out in deep space.</p>
+      <button id="overRestart">↻ Restart</button>
+    </div>
+  </div>
+  <div id="aimbar"><div id="aimfill"></div></div>
+  <div id="hint">Drag from the green launch pad to aim • Release to launch • R = Restart • Space = Fire at current aim</div>
+  <button id="restartBtn" class="secondary" style="margin-top:8px">Restart Level</button>
+</div>
+<script>
+(function () {
+  var canvas = document.getElementById('c');
+  var ctx = canvas.getContext('2d');
+  var W = 800, H = 520;
+  var scoreEl = document.getElementById('score');
+  var levelEl = document.getElementById('level');
+  var probesEl = document.getElementById('probes');
+  var statusEl = document.getElementById('status');
+  var aimFill = document.getElementById('aimfill');
+  var titleScreen = document.getElementById('titleScreen');
+  var winScreen = document.getElementById('winScreen');
+  var overScreen = document.getElementById('overScreen');
+
+  var LEVELS = [
+    { launch: {x: 90, y: 420}, target: {x: 700, y: 120}, wells: [{x: 400, y: 260, r: 34, s: 2600}], probes: 4 },
+    { launch: {x: 90, y: 110}, target: {x: 700, y: 420}, wells: [{x: 350, y: 160, r: 36, s: 3200}, {x: 480, y: 360, r: 30, s: 2400}], probes: 4 },
+    { launch: {x: 90, y: 420}, target: {x: 680, y: 90}, wells: [{x: 300, y: 260, r: 38, s: 3600}, {x: 560, y: 300, r: 32, s: 3000}], probes: 3 },
+    { launch: {x: 400, y: 460}, target: {x: 400, y: 70}, wells: [{x: 220, y: 260, r: 34, s: 3400}, {x: 580, y: 260, r: 34, s: 3400}], probes: 3 },
+    { launch: {x: 80, y: 260}, target: {x: 720, y: 260}, wells: [{x: 280, y: 140, r: 36, s: 3800}, {x: 520, y: 380, r: 36, s: 3800}, {x: 400, y: 260, r: 26, s: 2000}], probes: 3 }
+  ];
+
+  var state = 'title'; // title, aiming, flying, win, over
+  var levelIdx = 0, score = 0, probesLeft = 4;
+  var probe = null, dragging = false, dragX = 0, dragY = 0;
+  var aimAngle = -0.6, aimPower = 0.6;
+  var particles = [], stars = [], message = '', messageT = 0, flightT = 0, trail = [];
+
+  for (var i = 0; i < 90; i++) {
+    stars.push({x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.8 + 0.4, tw: Math.random() * 6});
+  }
+
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume(); }
+  }
+  function beep(freq, dur, type, vol) {
+    if (!audioCtx) return;
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }
+  function burst(x, y, color) {
+    for (var k = 0; k < 26; k++) {
+      particles.push({x: x, y: y, vx: (Math.random() - 0.5) * 260, vy: (Math.random() - 0.5) * 260, life: 0.7 + Math.random() * 0.5, color: color});
+    }
+  }
+
+  function cur() { return LEVELS[levelIdx]; }
+  function updateHUD() {
+    scoreEl.textContent = score;
+    levelEl.textContent = (levelIdx + 1) + ' / 5';
+    probesEl.textContent = probesLeft;
+    statusEl.textContent = state === 'title' ? 'Ready' : state === 'aiming' ? 'Aim and release' : state === 'flying' ? 'Probe in flight' : state === 'win' ? 'Victory!' : 'Out of probes';
+  }
+  function setStatus(t) { message = t; messageT = 1.8; }
+  function resetProbe() {
+    var L = cur();
+    probe = { x: L.launch.x, y: L.launch.y, vx: 0, vy: 0 };
+    trail = []; flightT = 0; dragging = false;
+    aimAngle = Math.atan2(L.target.y - L.launch.y, L.target.x - L.launch.x);
+    aimPower = 0.65;
+  }
+  function startGame() {
+    ensureAudio();
+    levelIdx = 0; score = 0; probesLeft = cur().probes;
+    titleScreen.classList.add('hidden'); winScreen.classList.add('hidden'); overScreen.classList.add('hidden');
+    state = 'aiming'; resetProbe(); updateHUD(); setStatus('Level 1 — drag to aim!');
+    beep(440, 0.15, 'triangle', 0.15); beep(660, 0.2, 'triangle', 0.12);
+  }
+  function nextLevel() {
+    levelIdx++;
+    if (levelIdx >= LEVELS.length) {
+      state = 'win'; score += 500;
+      document.getElementById('winText').textContent = 'All 5 levels cleared! Final score: ' + score + '.';
+      winScreen.classList.remove('hidden'); updateHUD();
+      beep(523, 0.2, 'sine', 0.15); beep(659, 0.2, 'sine', 0.15); beep(784, 0.4, 'sine', 0.15);
+      return;
+    }
+    probesLeft = cur().probes; state = 'aiming'; resetProbe(); updateHUD();
+    setStatus('Level ' + (levelIdx + 1) + ' — new wells ahead!');
+  }
+  function loseProbe(reason) {
+    probesLeft--; updateHUD(); beep(180, 0.35, 'sawtooth', 0.12);
+    if (probesLeft <= 0) {
+      state = 'over';
+      document.getElementById('overText').textContent = 'Out of probes on level ' + (levelIdx + 1) + '. Final score: ' + score + '.';
+      overScreen.classList.remove('hidden'); updateHUD(); return;
+    }
+    state = 'aiming'; resetProbe(); updateHUD(); setStatus(reason + ' Probe lost. ' + probesLeft + ' left.');
+  }
+  function fire() {
+    if (state !== 'aiming') return;
+    ensureAudio();
+    var speed = 260 + aimPower * 420;
+    probe.vx = Math.cos(aimAngle) * speed;
+    probe.vy = Math.sin(aimAngle) * speed;
+    state = 'flying'; flightT = 0; trail = [];
+    beep(300, 0.25, 'sine', 0.15); setStatus('Probe away!');
+    updateHUD();
+  }
+  function posFromEvent(e) {
+    var rect = canvas.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var cy = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+    return { x: (cx - rect.left) * (W / rect.width), y: (cy - rect.top) * (H / rect.height) };
+  }
+  function onDown(e) {
+    ensureAudio();
+    if (state !== 'aiming') return;
+    var p = posFromEvent(e);
+    var L = cur();
+    if (Math.hypot(p.x - L.launch.x, p.y - L.launch.y) < 110) {
+      dragging = true; dragX = p.x; dragY = p.y; e.preventDefault();
+    }
+  }
+  function onMove(e) {
+    if (!dragging || state !== 'aiming') return;
+    var p = posFromEvent(e);
+    var L = cur();
+    var dx = L.launch.x - p.x, dy = L.launch.y - p.y;
+    var dist = Math.hypot(dx, dy);
+    aimPower = Math.min(1, dist / 180);
+    if (dist > 10) aimAngle = Math.atan2(dy, dx);
+    dragX = p.x; dragY = p.y;
+    aimFill.style.width = Math.round(aimPower * 100) + '%';
+    if (e.cancelable) e.preventDefault();
+  }
+  function onUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    if (aimPower > 0.15) fire(); else setStatus('Pull further for more power.');
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+  document.addEventListener('keydown', function (e) {
+    ensureAudio();
+    if (e.key === 'ArrowLeft') aimAngle -= 0.08;
+    if (e.key === 'ArrowRight') aimAngle += 0.08;
+    if (e.key === 'ArrowUp') aimPower = Math.min(1, aimPower + 0.08);
+    if (e.key === 'ArrowDown') aimPower = Math.max(0.1, aimPower - 0.08);
+    if (e.key === ' ') { e.preventDefault(); if (state === 'aiming') fire(); }
+    if (e.key === 'r' || e.key === 'R') startGame();
+    if (e.key === 'Enter' && state === 'title') startGame();
+    aimFill.style.width = Math.round(aimPower * 100) + '%';
+  });
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('winRestart').addEventListener('click', startGame);
+  document.getElementById('overRestart').addEventListener('click', startGame);
+  document.getElementById('restartBtn').addEventListener('click', startGame);
+
+  function step(dt) {
+    if (state === 'flying' && probe) {
+      flightT += dt;
+      var L = cur();
+      L.wells.forEach(function (w) {
+        var dx = w.x - probe.x, dy = w.y - probe.y;
+        var d2 = dx * dx + dy * dy + 400;
+        var d = Math.sqrt(d2);
+        var f = w.s / d2;
+        probe.vx += (dx / d) * f * dt * 60;
+        probe.vy += (dy / d) * f * dt * 60;
+        if (Math.hypot(dx, dy) < w.r + 6) { probe.vx *= -0.4; probe.vy *= -0.4; }
+      });
+      probe.x += probe.vx * dt; probe.y += probe.vy * dt;
+      trail.push({x: probe.x, y: probe.y});
+      if (trail.length > 60) trail.shift();
+      var speed = Math.hypot(probe.vx, probe.vy);
+      var tx = L.target.x, ty = L.target.y;
+      if (Math.hypot(probe.x - tx, probe.y - ty) < 30) {
+        var bonus = Math.max(100, Math.round(600 - flightT * 40)) + probesLeft * 50;
+        score += bonus; burst(tx, ty, '#ffd166');
+        beep(880, 0.3, 'sine', 0.18); setStatus('Target hit! +' + bonus);
+        updateHUD(); nextLevel(); return;
+      }
+      if (probe.x < -40 || probe.x > W + 40 || probe.y < -40 || probe.y > H + 40) {
+        loseProbe('Probe lost in space.'); return;
+      }
+      if ((speed < 18 && flightT > 1.2) || flightT > 12) {
+        loseProbe('Probe stalled.'); return;
+      }
+    }
+    particles.forEach(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    if (messageT > 0) messageT -= dt;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    stars.forEach(function (s, i) {
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(i + Date.now() / 900));
+      ctx.fillStyle = '#cfe6ff'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    var L = cur();
+    L.wells.forEach(function (w) {
+      var g = ctx.createRadialGradient(w.x, w.y, 4, w.x, w.y, w.r * 2.4);
+      g.addColorStop(0, '#7b2ff7'); g.addColorStop(0.5, '#3b1d7a'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(w.x, w.y, w.r * 2.4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#1a0f3d'; ctx.strokeStyle = '#b388ff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(w.x, w.y, w.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 13px Arial'; ctx.textAlign = 'center'; ctx.fillText('◉', w.x, w.y + 5);
+    });
+    ctx.strokeStyle = '#ffd166'; ctx.fillStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(L.target.x, L.target.y, 24, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(L.target.x, L.target.y, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.font = 'bold 14px Arial'; ctx.fillText('★', L.target.x, L.target.y + 5);
+    ctx.fillStyle = '#2ee06f'; ctx.beginPath(); ctx.arc(L.launch.x, L.launch.y, 18, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center'; ctx.fillText('LAUNCH', L.launch.x, L.launch.y + 34);
+    if (state === 'aiming') {
+      var speed = 260 + aimPower * 420;
+      var px = L.launch.x, py = L.launch.y, vx = Math.cos(aimAngle) * speed, vy = Math.sin(aimAngle) * speed;
+      ctx.fillStyle = 'rgba(125,249,255,0.85)';
+      for (var s = 0; s < 26; s++) {
+        L.wells.forEach(function (w) {
+          var dx = w.x - px, dy = w.y - py, d2 = dx * dx + dy * dy + 400, d = Math.sqrt(d2);
+          vx += (dx / d) * (w.s / d2) * 0.016 * 60; vy += (dy / d) * (w.s / d2) * 0.016 * 60;
+        });
+        px += vx * 0.016; py += vy * 0.016;
+        if (s % 2 === 0) { ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill(); }
+      }
+      if (dragging) {
+        ctx.strokeStyle = '#ff5d8f'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(L.launch.x, L.launch.y); ctx.lineTo(dragX, dragY); ctx.stroke();
+      }
+    }
+    if (probe && state !== 'title') {
+      ctx.strokeStyle = 'rgba(125,249,255,0.5)'; ctx.lineWidth = 2; ctx.beginPath();
+      trail.forEach(function (t, i) { if (i === 0) ctx.moveTo(t.x, t.y); else ctx.lineTo(t.x, t.y); });
+      ctx.stroke();
+      ctx.fillStyle = '#7df9ff'; ctx.beginPath(); ctx.arc(probe.x, probe.y, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(probe.x - 2, probe.y - 2, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    particles.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (message && messageT > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(180, 12, 440, 30);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Arial'; ctx.fillText(message, 400, 33);
+    }
+  }
+
+  var last = performance.now();
+  function loop(now) {
+    var dt = Math.min(0.033, (now - last) / 1000); last = now;
+    step(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  resetProbe(); updateHUD();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
